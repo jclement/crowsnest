@@ -36,6 +36,8 @@ type jobRefs struct {
 	// notify tells Jeff something (the log, and the --notify-url POST when set); the poker's
 	// draft alert goes through it too.
 	notify func(text string)
+	// projects are the projects and their leads (DESIGN.md 21); nil in tests that need none.
+	projects *projectWiring
 }
 
 // newJobService builds the jobs service. refs is filled in by serve once the orchestrator and
@@ -61,7 +63,12 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 		notify(text)
 	}
 	claudeDir := claudeConfigDir(cfg)
+	var projectSource jobs.ProjectSource
+	if refs.projects != nil {
+		projectSource = refs.projects.source()
+	}
 	return jobs.New(jobs.Options{
+		Projects: projectSource,
 		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
 		Attachments: files, Spend: meter,
 		Launch: jobs.LaunchOptions{

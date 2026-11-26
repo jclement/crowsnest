@@ -474,3 +474,23 @@ func fromRecord(r store.ProjectRecord) Project {
 	}
 	return project
 }
+
+// Counts are a project's job counts for the board's switcher and the Projects view.
+type Counts struct {
+	NeedsYou int `json:"needs_you"`
+	Running  int `json:"running"`
+	Total    int `json:"total"`
+}
+
+// JobCounts returns job counts per project id (0 is Unfiled).
+func (s *Service) JobCounts(ctx context.Context) (map[int64]Counts, error) {
+	raw, err := s.opts.Store.CountJobsByProject(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]Counts, len(raw))
+	for id, c := range raw {
+		out[id] = Counts{NeedsYou: c.NeedsYou, Running: c.Running, Total: c.Total}
+	}
+	return out, nil
+}

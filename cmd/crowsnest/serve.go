@@ -30,6 +30,7 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/web"
@@ -165,7 +166,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
 	journalLog := journal.New(db, events, logger, nil)
-	refs := &jobRefs{}
+	refs := &jobRefs{projects: newProjectWiring(cfg, db, events)}
 	files, err := newAttachments(cfg, db, events, refs, logger)
 	if err != nil {
 		return err
@@ -191,6 +192,15 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	}
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
+	leads := refs.projects.startLeads(ctx, leadDeps{
+		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, logger: logger,
+		onStatus: func(project projects.Project, status orch.Status) {
+			if status.PaneID != "" {
+				go func() { _ = conversations.Pin(ctx, status.Name) }()
+			}
+			events.Publish(hub.Event{Type: "lead", Data: projects.LeadStatus{Status: status, ProjectID: project.ID, Slug: project.Slug, Running: true}})
+		},
+	})
 	startJobs(ctx, jobService, client, logger)
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
@@ -198,7 +208,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	tender := newTender(cfg, client, db, journalLog, orchestrator, conversations, logger)
 	poker := startPoker(ctx, cfg, db, events, pokeServices{
 		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
-		tasks: scheduleTasks{service: scheduleService}, tender: tender,
+		tasks: scheduleTasks{service: scheduleService}, tender: tender, leads: leads,
 	}, client, logger)
 	pokerRef.Store(poker)
 
@@ -209,7 +219,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
 		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
-		Names: db,
+		Names: db, Projects: refs.projects.service, Leads: leads,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

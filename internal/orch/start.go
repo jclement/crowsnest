@@ -468,12 +468,26 @@ func writePrivate(path string, body []byte) error {
 
 // Instructions renders the embedded CROWSNEST.md template for this session.
 func (o *Orchestrator) Instructions() (string, error) {
+	return RenderInstructions(InstructionData{Session: o.opts.Session, Dir: o.opts.Dir, Version: o.opts.Version})
+}
+
+// InstructionData fills the CROWSNEST.md template. Project is empty for the orchestrator; a
+// project's lead gets the same file with its project named (DESIGN.md 21.2), so the SAY contract,
+// the pokes and the job protocol are word for word the orchestrator's.
+type InstructionData struct {
+	Session, Dir, Version string
+	Project               string // the project's short name ("" for the orchestrator)
+	ProjectName           string
+	Description           string
+}
+
+// RenderInstructions renders CROWSNEST.md for a standing agent.
+func RenderInstructions(data InstructionData) (string, error) {
 	tmpl, err := template.ParseFS(templates, "templates/"+InstructionsFile)
 	if err != nil {
 		return "", fmt.Errorf("parsing the instructions template: %w", err)
 	}
 	var out strings.Builder
-	data := map[string]string{"Session": o.opts.Session, "Dir": o.opts.Dir, "Version": o.opts.Version}
 	if err := tmpl.Execute(&out, data); err != nil {
 		return "", fmt.Errorf("rendering the instructions: %w", err)
 	}

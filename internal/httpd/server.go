@@ -27,6 +27,7 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
@@ -95,6 +96,9 @@ type Deps struct {
 	Poker *orch.Poker
 	// Push serves the /push routes (Web Push, 8.5). Nil: they answer 503.
 	Push *push.Service
+	// Projects serves /projects and Leads the lead actions (DESIGN.md 21). Nil: 503.
+	Projects *projects.Service
+	Leads    *projects.Leads
 	// Schedule serves /schedule (scheduled tasks, 7.8). Nil: those routes answer 503.
 	Schedule *schedule.Service
 	// Spend serves /spend and /spend/summary (7.11). Nil: they answer 503.
@@ -200,6 +204,7 @@ func (s *Server) routes() http.Handler {
 	s.registerJobRoutes(mux)
 	s.registerJournalRoutes(mux)
 	s.registerScheduleRoutes(mux)
+	s.registerProjectRoutes(mux)
 	s.registerVoiceRoutes(mux)
 	s.registerPushRoutes(mux)
 	s.registerSpendRoutes(mux)
