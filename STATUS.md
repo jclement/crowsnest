@@ -63,7 +63,7 @@ Codex's closing judgement in R3, before the last fixes: the never-stop promise w
 - A job can still end up stopped with nobody told when: no browser is open and `--notify-url` is not set (Web Push is not built); the agent declares itself `blocked` (a resting state by design); a usage limit lasts for days; herdr itself is unreachable.
 - Two open review findings: poke reasons can be lost in a narrow window after an event-stream overflow; the token sweeper can miss a pane id herdr reused.
 - Agents in one session run as one user and are not isolated from each other: an agent that reads another's token file can act as it. The token scheme stops accidents, not a hostile agent.
-- The Terminal view is herdr's own TUI, so it shows every machine in your herdr config (on quark: `bedev`). Anyone who can sign in to crowsnest reaches those too.
+- The Terminal view is herdr's own TUI, so it shows every machine in your herdr config. Anyone who can sign in to crowsnest reaches those too.
 - Not built: budgets, review gates, Web Push (planned as M12), scheduled tasks, passkeys.
 
 ## Decisions waiting for you
