@@ -116,7 +116,22 @@ func (c *Client) Get(ctx context.Context, id string, wait time.Duration) (questi
 	}
 	var out questions.Question
 	err := c.do(ctx, http.MethodGet, path, nil, &out)
+	if err == nil && out.Status != questions.StatusOpen && out.Status != "" {
+		c.acknowledge(ctx, id)
+	}
 	return out, err
+}
+
+// ackTimeout bounds the acknowledgement of a read answer; it must not hold up the reader.
+const ackTimeout = 5 * time.Second
+
+// acknowledge tells crowsnest the settled answer was read (R1b-C06), so it is not also typed
+// into the pane. It is best effort: if it is lost, the answer may be typed as well, which says
+// the same thing twice rather than losing it.
+func (c *Client) acknowledge(ctx context.Context, id string) {
+	ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ackTimeout)
+	defer cancel()
+	_ = c.do(ackCtx, http.MethodPost, "/api/v1/questions/"+url.PathEscape(id)+"/collected", nil, nil)
 }
 
 // WaitSettled long-polls until the question is no longer open or ctx ends. A poll that fails
@@ -210,7 +225,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 func decodeResponse(response *http.Response, out any) error {
 	payload, err := io.ReadAll(io.LimitReader(response.Body, questions.MaxRequestBytes))
 	if err != nil {
-		return fmt.Errorf("reading crowsnest's answer: %w", err)
+		// The connection broke mid-answer: a transport failure, retried like one (R1b-C06).
+		return &ServerDownError{Path: "the agent socket", Err: err}
 	}
 	if response.StatusCode >= 300 {
 		var envelope struct {

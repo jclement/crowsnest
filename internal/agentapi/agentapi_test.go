@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -599,5 +601,53 @@ func TestJobCreateIsRateLimited(t *testing.T) {
 		if i == createBurst && (!errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests) {
 			t.Fatalf("past the burst: %v", err)
 		}
+	}
+}
+
+// R1b-C06: an answer written to the socket is not yet delivered; the asker's acknowledgement
+// makes it so. The client acknowledges every settled answer it decodes.
+func TestPollAnswerCountsOnlyOnceAcknowledged(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	token := f.token(t, "w1:p1", "")
+	client := NewClient(f.socket, token)
+	read := func(waitAsk bool) questions.Question {
+		t.Helper()
+		question, err := client.Ask(ctx, questions.AskInput{Title: "Ship?", Kind: questions.KindAck, Wait: waitAsk})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Answer(ctx, question.ID, questions.AnswerInput{}); err != nil {
+			t.Fatal(err)
+		}
+		return question
+	}
+	// A raw read that is never acknowledged (the tool call was cancelled as the answer arrived).
+	lost := read(true)
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://crowsnest/api/v1/questions/"+lost.ID, nil)
+	request.Header.Set(agentid.HeaderToken, token)
+	response, err := unixHTTP(f.socket).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if got, _ := f.service.Get(ctx, lost.ID); got.Delivery != questions.DeliveryPoll || got.DeliveredAt != nil {
+		t.Fatalf("an unacknowledged read counted as delivered: %+v", got)
+	}
+	// The client reads and acknowledges.
+	if _, err := client.Get(ctx, lost.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := f.service.Get(ctx, lost.ID); got.DeliveredAt == nil {
+		t.Fatalf("an acknowledged read is not delivered: %+v", got)
+	}
+}
+
+// A body cut off mid-answer is a transport failure, so WaitSettled retries it.
+func TestBrokenBodyIsRetryable(t *testing.T) {
+	response := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF))}
+	err := decodeResponse(response, &questions.Question{})
+	if !retryable(err) {
+		t.Fatalf("a broken body is not retryable: %v", err)
 	}
 }

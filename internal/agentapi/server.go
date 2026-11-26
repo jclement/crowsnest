@@ -13,6 +13,7 @@
 //	GET    /api/v1/questions/{id}?wait=N  read; with wait, long-poll up to N seconds for the answer
 //	GET    /api/v1/questions?status=      list
 //	DELETE /api/v1/questions/{id}         withdraw
+//	POST   /api/v1/questions/{id}/collected  the asker read the settled answer (R1b-C06)
 //	POST   /api/v1/say                    speak a sentence in talk mode (M11 voices it)
 //	GET    /api/v1/health                 liveness, for the CLI's "is crowsnest running" check
 //	…/api/v1/jobs…, /api/v1/hooks/{event}  the job protocol and the hooks (jobs.go, M7)
@@ -157,6 +158,7 @@ func NewServer(opts ServerOptions) *Server {
 	mux.HandleFunc("GET /api/v1/questions", server.handleList)
 	mux.HandleFunc("GET /api/v1/questions/{id}", server.handleGet)
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", server.handleCancel)
+	mux.HandleFunc("POST /api/v1/questions/{id}/collected", server.handleCollected)
 	mux.HandleFunc("POST /api/v1/say", server.handleSay)
 	server.registerJobRoutes(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -307,10 +309,26 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		s.writeQuestionError(w, r, err)
 		return
 	}
-	// The answer counts as collected only once it is out of the door (R1b-C06).
-	if writeDataChecked(w, http.StatusOK, question) == nil && question.Status != questions.StatusOpen {
+	// Writing the answer is not delivering it (R1b-C06): the response can reach the socket and
+	// still never be read, if the asker's tool call is cancelled in that moment. The client
+	// acknowledges a settled answer it has decoded (POST …/collected); until then the sweeper
+	// may switch it to typing.
+	writeData(w, http.StatusOK, question)
+}
+
+// handleCollected is the asker's acknowledgement that it read a settled answer: only then is a
+// poll delivery confirmed. Anyone else's acknowledgement changes nothing.
+func (s *Server) handleCollected(w http.ResponseWriter, r *http.Request) {
+	caller := s.callerOf(r)
+	question, err := s.questions.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeQuestionError(w, r, err)
+		return
+	}
+	if question.Status != questions.StatusOpen {
 		s.questions.Collected(context.WithoutCancel(r.Context()), question, caller)
 	}
+	writeData(w, http.StatusOK, map[string]bool{"acknowledged": true})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -449,12 +467,6 @@ func decodeBody(w http.ResponseWriter, r *http.Request, limit int64, into any) b
 
 func writeData(w http.ResponseWriter, status int, data any) {
 	_ = writeJSON(w, status, map[string]any{"data": data})
-}
-
-// writeDataChecked writes the envelope, flushes it, and reports whether that worked: a
-// long-poll's answer counts as collected only once it reached the socket (R1b-C06).
-func writeDataChecked(w http.ResponseWriter, status int, data any) error {
-	return writeJSON(w, status, map[string]any{"data": data})
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
