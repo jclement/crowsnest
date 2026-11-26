@@ -218,6 +218,10 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 		// The id passed to Claude is the truth, not herdr's report: that can still be the
 		// previous conversation's, or missing, right after a launch (R1-C02).
 		o.remember(ctx, paneID, sessionID)
+		o.update(func(s *Status) { s.RemoteControl, s.RemoteControlNote = o.opts.RemoteControlName, "" })
+		o.mu.Lock()
+		o.rcCheckUntil = o.opts.Now().Add(remoteControlCheck)
+		o.mu.Unlock()
 		return o.followLaunch(agent, sessionID, prior), nil
 	case errors.Is(err, herdr.ErrAgentNotReady):
 		o.remember(ctx, paneID, sessionID)
@@ -349,6 +353,10 @@ func (o *Orchestrator) startArgs(sessionID string, resume bool, files startFiles
 	}
 	if o.opts.Model != "" {
 		args = append(args, "--model", o.opts.Model)
+	}
+	if o.opts.RemoteControlName != "" {
+		// One argv entry for the name: herdr passes args without a shell, so spaces are safe.
+		args = append(args, "--remote-control", o.opts.RemoteControlName)
 	}
 	args = append(args, "--append-system-prompt-file", files.instructions, "--settings", files.settings)
 	if files.mcpConfig != "" {

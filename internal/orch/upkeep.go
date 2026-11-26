@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/herdr"
@@ -32,6 +33,7 @@ func (o *Orchestrator) Watch(ctx context.Context) {
 		if status.SessionID != previous {
 			o.remember(ctx, "", status.SessionID) // /clear or a resume moved the conversation
 		}
+		o.checkRemoteControl(ctx, agent.PaneID)
 		return
 	}
 	if o.Status().State == StateFailed {
@@ -150,4 +152,47 @@ func (o *Orchestrator) stop(ctx context.Context, agent herdr.Agent) error {
 		return fmt.Errorf("stopping the orchestrator: Claude did not exit; open its terminal: %w", err)
 	}
 	return nil
+}
+
+// ---- Remote Control ----------------------------------------------------------------------
+
+const (
+	// remoteControlCheck is how long after a start the watch looks for Remote Control's banner.
+	remoteControlCheck = 45 * time.Second
+	// remoteControlBanner is what Claude Code 2.1.332 prints when Remote Control connected
+	// (verified by remote_control_integration_test.go).
+	remoteControlBanner = "remote-control is active"
+	// RemoteControlActive and RemoteControlUnconfirmed are the notes the status carries.
+	RemoteControlActive      = "active"
+	RemoteControlUnconfirmed = "Claude did not report Remote Control active. It turns it off by itself when the login cannot use it " +
+		"(an API key, a plan without it, or an organisation policy); the orchestrator runs without it."
+)
+
+// checkRemoteControl reads the orchestrator's recent text after a start for Remote Control's
+// banner, until it is seen or the check window passes. It never stops or restarts anything:
+// Claude starts without Remote Control when it cannot have it, so this only reports.
+func (o *Orchestrator) checkRemoteControl(ctx context.Context, paneID string) {
+	o.mu.Lock()
+	until, requested, noted := o.rcCheckUntil, o.status.RemoteControl != "", o.status.RemoteControlNote != ""
+	o.mu.Unlock()
+	if !requested || noted || until.IsZero() || paneID == "" {
+		return
+	}
+	readCtx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
+	read, err := o.opts.Client.PaneRead(readCtx, paneID, herdr.ReadOptions{Source: herdr.SourceRecent, Lines: 200})
+	cancel()
+	note := ""
+	switch {
+	case err == nil && strings.Contains(strings.ToLower(read.Text), remoteControlBanner):
+		note = RemoteControlActive
+	case o.opts.Now().After(until):
+		note = RemoteControlUnconfirmed
+	default:
+		return
+	}
+	o.mu.Lock()
+	o.rcCheckUntil = time.Time{}
+	o.mu.Unlock()
+	o.update(func(s *Status) { s.RemoteControlNote = note })
+	o.opts.Logger.Info("orchestrator remote control", "name", o.opts.RemoteControlName, "note", note)
 }
