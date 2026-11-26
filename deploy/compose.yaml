@@ -1,9 +1,21 @@
 # The crowsnest devbox (DESIGN.md section 16). From the repo root:
 #
-#   cp deploy/crowsnest.env.sample deploy/crowsnest.env   # set CROWSNEST_USERNAME
-#   (umask 077; printf '%s\n' 'your password' > deploy/crowsnest_password)   # mode 0600
+#   cp deploy/crowsnest.env.sample deploy/crowsnest.env
 #   docker compose -f deploy/compose.yaml up -d
-#   open http://127.0.0.1:2769             # log in, open Terminal, run `claude` once to sign in
+#   docker compose -f deploy/compose.yaml logs crowsnest | grep 'setup#token'
+#
+# On first start crowsnest has no login, so it starts locked and serves only a setup page; the
+# log holds the link to it, with a one-time token (new at every start until setup is done).
+# Open the link (it says localhost:2769, the port published below), choose a username and
+# password, and you are signed in. Then open Terminal and run `claude` once to sign Claude in.
+# The login is stored in the volume; `docker compose exec crowsnest crowsnest reset-password`
+# sets a new one. Anyone who can read this container's logs can complete setup before you, which
+# is why the port is loopback-only and the token is never in a response or a URL a proxy logs.
+#
+# Unattended installs (no browser step): set CROWSNEST_USERNAME in crowsnest.env, write the
+# password to deploy/crowsnest_password (mode 0600, owned by uid 1000) and uncomment the
+# `environment:` and `secrets:` lines below and the top-level `secrets:` block. A login given
+# this way wins over a stored one, and the Account sheet shows it read-only.
 #
 # Blast radius, plainly: whoever logs in has a shell as `crow` in this container, and so does
 # every agent running in it. They reach exactly what is mounted (the /home/crow volume, plus
@@ -13,8 +25,8 @@
 # on an `internal: true` network behind a proxy you control.
 #
 # Secrets, plainly (R1b N1): agents run as the same user as crowsnest, so anything in the
-# crowsnest container's environment is readable by them (/proc/1/environ). Hence the password is
-# a mounted file, not a variable, and each sidecar keeps its token in its own env file: a token
+# crowsnest container's environment is readable by them (/proc/1/environ). Hence a configured
+# password is a mounted file, not a variable (a login chosen at setup is in neither), and each sidecar keeps its token in its own env file: a token
 # in crowsnest.env would hand the tunnel (and with it the login page's traffic) or the tailnet to
 # any prompt-injected agent. A same-user file is readable by agents too; the only hard boundary
 # would be a separate uid for crowsnest, which this image does not have (DESIGN.md section 4).
@@ -24,9 +36,10 @@ services:
     image: ghcr.io/jclement/crowsnest:latest
     # build: { context: .., dockerfile: deploy/Dockerfile }   # or build it from this checkout
     env_file: crowsnest.env
-    environment:
-      CROWSNEST_PASSWORD_FILE: /run/secrets/crowsnest_password
-    secrets: [crowsnest_password]
+    # Unattended installs only (see the top of this file):
+    # environment:
+    #   CROWSNEST_PASSWORD_FILE: /run/secrets/crowsnest_password
+    # secrets: [crowsnest_password]
     volumes:
       # Everything that should survive an image upgrade: Claude's login, mise's tools, herdr's
       # sessions, crowsnest's database, and your projects (clone them under /home/crow).
@@ -83,10 +96,11 @@ services:
   #   cap_add: [net_admin]
   #   restart: unless-stopped
 
-secrets:
-  crowsnest_password:
-    # Owned by uid 1000 (crow) and mode 0600: crowsnest refuses a password file others can read.
-    file: ./crowsnest_password
+# Unattended installs only:
+# secrets:
+#   crowsnest_password:
+#     # Owned by uid 1000 (crow) and mode 0600: crowsnest refuses a password file others can read.
+#     file: ./crowsnest_password
 
 volumes:
   crowsnest-home:
