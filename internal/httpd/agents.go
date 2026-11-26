@@ -249,17 +249,20 @@ func (s *Server) sendKeys(ctx context.Context, target screenTarget, keys []strin
 }
 
 // herdrError maps a herdr failure to a response: a vanished target is 404, a rejected request
-// (an unknown key name) is 400, anything else means herdr is unwell.
+// (an unknown key name) is 400, anything else means herdr is unwell. herdr's own message is
+// logged, never sent: it can carry paths and internals, and the response says what to do
+// rather than what the code hit (R1 I2).
 func (s *Server) herdrError(w http.ResponseWriter, r *http.Request, doing string, err error) {
 	var herdrErr *herdr.Error
 	switch {
 	case herdr.IsNotFound(err):
 		writeError(w, http.StatusNotFound, codeNotFound, "That agent or pane is gone.")
 	case errors.As(err, &herdrErr) && herdrErr.Code == herdr.CodeInvalidRequest:
-		writeError(w, http.StatusBadRequest, codeValidation, "herdr rejected the request: "+herdrErr.Message)
+		s.deps.Logger.Warn("herdr rejected a request", "doing", doing, "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusBadRequest, codeValidation, "herdr did not accept that request; the server log says why.")
 	case errors.As(err, &herdrErr):
 		s.deps.Logger.Warn("herdr call failed", "doing", doing, "path", r.URL.Path, "err", err)
-		writeError(w, http.StatusBadGateway, codeUnavailable, "herdr refused: "+herdrErr.Message)
+		writeError(w, http.StatusBadGateway, codeUnavailable, "herdr refused to do that; the server log says why. Open the terminal to see the pane.")
 	default:
 		s.deps.Logger.Warn("herdr call failed", "doing", doing, "path", r.URL.Path, "err", err)
 		writeHerdrUnavailable(w)

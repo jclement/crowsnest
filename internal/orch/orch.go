@@ -409,11 +409,29 @@ func (o *Orchestrator) publish(status Status) {
 	}
 }
 
-// fail records a failure and returns it.
+// fail records a failure and returns it. The status (which GET /orchestrator and the
+// `orchestrator` event carry to the browser) gets a sentence chosen by the kind of failure;
+// the error itself, which can hold herdr's messages and file paths, goes only to the log
+// (R1 I2).
 func (o *Orchestrator) fail(err error) (Status, error) {
 	o.opts.Logger.Warn("orchestrator failed", "err", err)
-	status := o.update(func(s *Status) { s.State, s.Detail = StateFailed, err.Error() })
+	status := o.update(func(s *Status) { s.State, s.Detail = StateFailed, failureDetail(err) })
 	return status, err
+}
+
+// failureDetail says what went wrong in words for the person, without the error's own text.
+func failureDetail(err error) string {
+	var herdrErr *herdr.Error
+	switch {
+	case errors.Is(err, errNoShell):
+		return "No pane at a shell prompt could be found or made for Claude. Open the session's terminal to see why, then use Restart."
+	case errors.As(err, &herdrErr):
+		return fmt.Sprintf("herdr refused to start Claude (%s). Open the session's terminal to see why, then use Restart; the server log has the detail.", herdrErr.Code)
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, herdr.ErrNoResponse):
+		return "herdr is not answering; check that the session's server is running, then use Restart."
+	default:
+		return "Claude could not be started. The server log has the detail; use Restart to try again."
+	}
 }
 
 func (o *Orchestrator) restartsInLastHourLocked() int {

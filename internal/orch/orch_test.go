@@ -296,7 +296,8 @@ func TestStartFailureIsReported(t *testing.T) {
 	f.FailNext("agent.start", &herdr.Error{Code: "pane_busy", Message: "pane is busy"})
 	rig := newRig(t, f)
 	status, err := rig.orch.Ensure(context.Background())
-	if err == nil || status.State != StateFailed || !strings.Contains(status.Detail, "pane is busy") {
+	// The status names herdr's code and what to do, but not herdr's own message (R1 I2).
+	if err == nil || status.State != StateFailed || !strings.Contains(status.Detail, "pane_busy") || strings.Contains(status.Detail, "pane is busy") {
 		t.Fatalf("status = %+v, err %v", status, err)
 	}
 }

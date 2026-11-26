@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,6 +124,25 @@ func keysBody(t *testing.T, keys []string, hash string) string {
 		t.Fatal(err)
 	}
 	return string(body)
+}
+
+// TestHerdrErrorTextStaysInTheLog is R1 I2: herdr's own message (which can name paths) goes to
+// the server log, and the client gets a sentence that says what to do.
+func TestHerdrErrorTextStaysInTheLog(t *testing.T) {
+	for _, failure := range []*herdr.Error{
+		{Code: herdr.CodeInvalidRequest, Message: "bad key in /Users/someone/secret/thing"},
+		{Code: "agent_exploded", Message: "socket /Users/someone/.config/herdr/x failed"},
+	} {
+		h, f, _ := herdrHarness(t)
+		f.FailNext("agent.send_keys", failure)
+		response := h.do(request(http.MethodPost, "/api/v1/agents/builder/keys", keysBody(t, []string{"esc"}, "")))
+		if response.Code < 400 || strings.Contains(response.Body.String(), "/Users/someone") {
+			t.Fatalf("%s: %d %s", failure.Code, response.Code, response.Body)
+		}
+		if !strings.Contains(h.logs.String(), "/Users/someone") {
+			t.Fatalf("%s: the detail was not logged: %s", failure.Code, h.logs.String())
+		}
+	}
 }
 
 func TestKeysBoundToScreenHash(t *testing.T) {

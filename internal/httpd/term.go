@@ -238,7 +238,7 @@ func (t *termSession) resize(cols, rows int) {
 		first = true
 		if err := t.bridge.Start(cols, rows); err != nil {
 			t.server.deps.Logger.Warn("terminal did not start", "terminal", t.what, "err", err)
-			t.exit("could not start: " + err.Error())
+			t.exit("could not start the terminal; the server log has the detail") // logged above (R1 I2)
 			return
 		}
 		t.server.deps.Logger.Info("terminal started", "terminal", t.what, "cols", cols, "rows", rows)
