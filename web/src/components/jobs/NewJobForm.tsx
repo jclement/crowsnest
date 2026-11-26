@@ -2,7 +2,8 @@
 // role, done-when and engine sit behind one disclosure. With no directory the job goes to the
 // orchestrator. Cmd/Ctrl+Enter gives the job from the keyboard.
 import { ChevronDown, ChevronRight, Send } from "lucide-react";
-import { useId, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { onJobDraft, takeJobDraft } from "../../lib/jobDraft";
 import { useCreateJob, useDirs, useRoles } from "../../lib/queries";
 import type { Job } from "../../lib/jobs";
 import { Button } from "../ui/Button";
@@ -26,6 +27,25 @@ export function NewJobForm({ onCreated }: NewJobFormProps) {
   const create = useCreateJob();
   const toast = useToast();
   const ids = useId();
+  const briefRef = useRef<HTMLTextAreaElement>(null);
+
+  // A draft from the command palette ("Open the full form"): fill the box, open the options, focus.
+  useEffect(() => {
+    const take = () => {
+      const draft = takeJobDraft();
+      if (!draft) return;
+      setBrief(draft.brief);
+      setOpen(true);
+      requestAnimationFrame(() => {
+        const box = briefRef.current;
+        if (!box) return;
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
+      });
+    };
+    take();
+    return onJobDraft(take);
+  }, []);
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
@@ -54,6 +74,7 @@ export function NewJobForm({ onCreated }: NewJobFormProps) {
         What needs doing?
       </label>
       <textarea
+        ref={briefRef}
         id={`${ids}-brief`}
         value={brief}
         onChange={(event) => setBrief(event.target.value)}

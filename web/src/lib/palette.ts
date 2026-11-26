@@ -24,7 +24,7 @@ export type PaletteCommand =
   | { kind: "navigate"; to: ViewPath; search?: Record<string, string> }
   | { kind: "giveJob"; brief: string; open: boolean }
   | { kind: "jobForm"; brief: string }
-  | { kind: "ask"; text: string }
+  | { kind: "ask"; text: string; open?: boolean }
   | { kind: "jobAction"; id: string; action: "nudge" | "resume" | "cancel" }
   | { kind: "jobMessage"; id: string; text: string }
   | { kind: "answer"; questionId: string; value?: string; label: string }
@@ -125,6 +125,8 @@ export interface PaletteItem {
   /** A word for what Enter does ("Open", "Give"), shown on the selected row. */
   verb: string;
   actions?: PaletteAction[];
+  /** ⌘Enter (Ctrl+Enter): the obvious second thing. Without one, ⌘Enter opens the actions. */
+  alt?: PaletteAction;
 }
 
 export interface PaletteSources {
@@ -275,6 +277,7 @@ function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
       command: agent.has_transcript ? conversation : terminal,
       verb: agent.has_transcript ? "Conversation" : "Terminal",
       actions,
+      alt: agent.has_transcript ? actions[1] : undefined,
     });
   }
   for (const workspace of fleet.workspaces)
@@ -396,6 +399,8 @@ export function doItems(parsed: ParsedQuery): PaletteItem[] {
   const text = parsed.text;
   if (!text) return [];
   const short = text.length > 80 ? `${text.slice(0, 79)}…` : text;
+  const form: PaletteAction = { id: "form", label: "Open the full form (directory, role, done when)…", command: { kind: "jobForm", brief: text } };
+  const askAndOpen: PaletteAction = { id: "chat", label: "Send and open Chat", command: { kind: "ask", text, open: true } };
   const items: PaletteItem[] = [
     {
       id: "do:job",
@@ -405,10 +410,8 @@ export function doItems(parsed: ParsedQuery): PaletteItem[] {
       icon: "send",
       command: { kind: "giveJob", brief: text, open: false },
       verb: "Give",
-      actions: [
-        { id: "form", label: "Open the full form (directory, role, done when)…", command: { kind: "jobForm", brief: text } },
-        { id: "open", label: "Give job and open it", command: { kind: "giveJob", brief: text, open: true } },
-      ],
+      actions: [form, { id: "open", label: "Give job and open it", command: { kind: "giveJob", brief: text, open: true } }],
+      alt: form,
     },
   ];
   if (parsed.mode === "all") {
@@ -420,7 +423,8 @@ export function doItems(parsed: ParsedQuery): PaletteItem[] {
       icon: "chat",
       command: { kind: "ask", text },
       verb: "Send",
-      actions: [{ id: "chat", label: "Send and open Chat", command: { kind: "ask", text } }],
+      actions: [askAndOpen],
+      alt: askAndOpen,
     });
   }
   return items;

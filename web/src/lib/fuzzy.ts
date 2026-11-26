@@ -99,7 +99,7 @@ export function fuzzyMatch(rawPattern: string, rawText: string): FuzzyMatch | nu
     let gapFrom = -1;
     for (let j = first + i; j <= last; j++) {
       if (i > 0 && j >= 2) {
-        const candidate = score[(i - 1) * width + (j - 2)];
+        const candidate = score[(i - 1) * width + (j - 2)] ?? NONE;
         const extended = gapBest + GAP_EXTENSION;
         const opened = candidate === NONE ? NONE : candidate + GAP_START;
         if (opened >= extended) {
@@ -110,7 +110,7 @@ export function fuzzyMatch(rawPattern: string, rawText: string): FuzzyMatch | nu
         }
       }
       if (lower[j] !== ch) continue;
-      const bonus = bonuses[j];
+      const bonus = bonuses[j] ?? 0;
       const cell = i * width + j;
       if (i === 0) {
         score[cell] = SCORE_MATCH + bonus * BONUS_FIRST_CHAR_MULTIPLIER;
@@ -120,9 +120,9 @@ export function fuzzyMatch(rawPattern: string, rawText: string): FuzzyMatch | nu
       let best = NONE;
       let bestFrom = -1;
       let bestRun = 0;
-      const diagonal = j >= 1 ? score[(i - 1) * width + (j - 1)] : NONE;
+      const diagonal = j >= 1 ? (score[(i - 1) * width + (j - 1)] ?? NONE) : NONE;
       if (diagonal !== NONE) {
-        const carried = Math.max(run[(i - 1) * width + (j - 1)], bonus, BONUS_CONSECUTIVE);
+        const carried = Math.max(run[(i - 1) * width + (j - 1)] ?? 0, bonus, BONUS_CONSECUTIVE);
         best = diagonal + SCORE_MATCH + carried;
         bestFrom = j - 1;
         bestRun = carried;
@@ -145,7 +145,7 @@ export function fuzzyMatch(rawPattern: string, rawText: string): FuzzyMatch | nu
   let end = -1;
   let top = NONE;
   for (let j = first + m - 1; j <= last; j++) {
-    const value = score[(m - 1) * width + j];
+    const value = score[(m - 1) * width + j] ?? NONE;
     if (value > top) {
       top = value;
       end = j;
@@ -155,7 +155,7 @@ export function fuzzyMatch(rawPattern: string, rawText: string): FuzzyMatch | nu
   const positions = new Array<number>(m);
   for (let i = m - 1, j = end; i >= 0; i--) {
     positions[i] = j;
-    j = from[i * width + j];
+    j = from[i * width + j] ?? -1;
   }
   return { score: top, positions };
 }

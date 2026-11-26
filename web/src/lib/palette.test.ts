@@ -67,6 +67,9 @@ describe("doItems", () => {
     expect(items[0]?.command).toEqual({ kind: "giveJob", brief: "tidy the readme", open: false });
     expect(items[0]?.actions?.[0]?.command).toEqual({ kind: "jobForm", brief: "tidy the readme" });
     expect(items[1]?.command).toEqual({ kind: "ask", text: "tidy the readme" });
+    // ⌘Enter: the full form for a job, Send and open Chat for a prompt.
+    expect(items[0]?.alt?.command).toEqual({ kind: "jobForm", brief: "tidy the readme" });
+    expect(items[1]?.alt?.command).toEqual({ kind: "ask", text: "tidy the readme", open: true });
   });
 
   it("offers only Give job in job mode, with the prefix removed from the brief", () => {
@@ -90,6 +93,8 @@ describe("buildItems", () => {
     expect(job?.chip).toEqual({ label: "Stuck", tone: "warning" });
     expect(job?.command).toEqual({ kind: "navigate", to: "/", search: { job: "j_3" } });
     expect(job?.actions?.map((action) => action.id)).toEqual(["open", "resume", "nudge", "message", "cancel"]);
+    // ⌘Enter never does something risky by default: no alt on a job (it opens the actions instead).
+    expect(job?.alt).toBeUndefined();
     const cancel = job?.actions?.find((action) => action.id === "cancel");
     expect(cancel?.command).toMatchObject({ kind: "confirm", confirm: { title: "Cancel j_3?", confirmLabel: "Cancel the job", command: { kind: "jobAction", id: "j_3", action: "cancel" } } });
     // A finished job only opens.
@@ -119,6 +124,7 @@ describe("buildItems", () => {
     const agentItem = items.find((item) => item.id === `agent:${withTranscript?.pane_id}`);
     expect(agentItem?.command).toEqual({ kind: "navigate", to: "/fleet", search: { agent: withTranscript?.pane_id, view: "conversation" } });
     expect(agentItem?.actions?.map((action) => action.id)).toEqual(["conversation", "terminal"]);
+    expect(agentItem?.alt?.id).toBe("terminal");
     expect(items.some((item) => item.id.startsWith("pane:"))).toBe(true);
   });
 
