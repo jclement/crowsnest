@@ -6,6 +6,7 @@ package orch
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -285,7 +286,7 @@ func TestDisabled(t *testing.T) {
 	if err != nil || status.State != StateDisabled || len(f.Starts()) != 0 {
 		t.Fatalf("disabled ensure: %+v, %v", status, err)
 	}
-	if _, err := rig.orch.Restart(context.Background()); err != ErrDisabled {
+	if _, err := rig.orch.Restart(context.Background()); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("disabled restart: %v", err)
 	}
 }

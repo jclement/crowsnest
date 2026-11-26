@@ -38,7 +38,7 @@ func ConfigDir(getenv func(string) string) (string, error) {
 func ProjectDirName(cwd string) string {
 	out := []byte(cwd)
 	for i, c := range out {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+		if !isASCIIAlphanumeric(c) {
 			out[i] = '-'
 		}
 	}
@@ -74,4 +74,8 @@ func Locate(configDir, cwd, sessionID string) (string, error) {
 		}
 	}
 	return "", ErrNotFound
+}
+
+func isASCIIAlphanumeric(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }

@@ -52,7 +52,9 @@ type DraftError struct {
 	Draft fleet.Draft
 }
 
-func (e *DraftError) Error() string { return "the agent's input box holds a draft typed at the terminal" }
+func (e *DraftError) Error() string {
+	return "the agent's input box holds a draft typed at the terminal"
+}
 
 // BlockedError refuses a send because a dialog is up. Nothing was typed.
 type BlockedError struct {

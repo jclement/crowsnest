@@ -81,7 +81,7 @@ func (d *Demo) writerFor(paneID string) (*transcriptWriter, error) {
 func projectDirName(cwd string) string {
 	out := []byte(cwd)
 	for i, c := range out {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+		if !isASCIIAlphanumeric(c) {
 			out[i] = '-'
 		}
 	}
@@ -212,17 +212,21 @@ type cannedReply struct {
 var cannedReplies = []cannedReply{
 	{
 		tool: "Bash", input: map[string]any{"command": "git log --oneline -5", "description": "Recent commits"},
-		result: "a26b6f1 Merge branch 'wip/m2-herdr'\n4252245 M2: README and DESIGN\n8e1218b STATUS: M1 and M3 merged",
+		result:   "a26b6f1 Merge branch 'wip/m2-herdr'\n4252245 M2: README and DESIGN\n8e1218b STATUS: M1 and M3 merged",
 		markdown: "On **{{prompt}}**: here is where things stand.\n\n- M1 and M3 are merged; M2 merged an hour ago.\n- The builder is on the fleet SSE event.\n- Nothing is waiting on you except the docs writer's dialog.\n\nWant me to start the next milestone?",
 	},
 	{
 		tool: "Read", input: map[string]any{"file_path": "DESIGN.md"},
-		result: "## 7. The orchestrator\n\nThe orchestrator is the session's standing lead…",
+		result:   "## 7. The orchestrator\n\nThe orchestrator is the session's standing lead…",
 		markdown: "I checked `DESIGN.md` for that. Short answer: **yes**, with one caveat.\n\n```go\n// the send path refuses to type over a draft\nif draft.Present && !force {\n\treturn &DraftError{Draft: draft}\n}\n```\n\nThe caveat: a draft is only detected when the input box is visible.",
 	},
 	{
 		tool: "Grep", input: map[string]any{"pattern": "TODO", "path": "internal"},
-		result: "internal/fleet/cache.go:142: // TODO: name the debounce\ninternal/httpd/sse.go:61: // TODO: replay",
+		result:   "internal/fleet/cache.go:142: // TODO: name the debounce\ninternal/httpd/sse.go:61: // TODO: replay",
 		markdown: "Two TODOs left in `internal/`:\n\n| File | Line | Note |\n|---|---|---|\n| `fleet/cache.go` | 142 | name the debounce |\n| `httpd/sse.go` | 61 | replay |\n\nNeither blocks **{{prompt}}**.",
 	},
+}
+
+func isASCIIAlphanumeric(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }

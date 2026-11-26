@@ -109,7 +109,7 @@ func TestMessagesFallbackAndErrors(t *testing.T) {
 		t.Fatalf("fallback = %+v", page)
 	}
 	for path, want := range map[string]int{
-		"/api/v1/agents/nobody/messages":              http.StatusNotFound,
+		"/api/v1/agents/nobody/messages":               http.StatusNotFound,
 		"/api/v1/agents/orchestrator/messages?limit=0": http.StatusBadRequest,
 		"/api/v1/agents/orchestrator/messages?limit=x": http.StatusBadRequest,
 		"/api/v1/agents/bad%20target/messages":         http.StatusBadRequest,

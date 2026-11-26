@@ -87,7 +87,7 @@ func (o *Orchestrator) shellPaneIn(ctx context.Context, workspaceID string) stri
 // createPane makes the orchestrator a pane: a tab in its workspace when that exists (and has no
 // free shell), otherwise the workspace itself. Either way the pane gets the crowsnest env.
 func (o *Orchestrator) createPane(ctx context.Context, workspaceID string) (string, error) {
-	if err := os.MkdirAll(o.opts.Dir, 0o755); err != nil {
+	if err := os.MkdirAll(o.opts.Dir, 0o750); err != nil {
 		return "", fmt.Errorf("creating the orchestrator directory %s: %w", o.opts.Dir, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
