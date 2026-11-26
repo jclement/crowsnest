@@ -118,6 +118,8 @@ type Server struct {
 	logger    *slog.Logger
 	version   string
 	handler   http.Handler
+	// sessionContext is ServerOptions.SessionContext.
+	sessionContext func(ctx context.Context, paneID, source string) string
 
 	asks    *ratelimit.Limiter
 	says    *ratelimit.Limiter
@@ -137,6 +139,10 @@ type ServerOptions struct {
 	Logger  *slog.Logger
 	Version string
 	Now     func() time.Time // for the quotas; nil means time.Now
+	// SessionContext, when set, adds to a SessionStart hook's output for a caller that holds no
+	// job token (the orchestrator): its standing context (DESIGN.md 7.9). It returns "" for a
+	// pane that is not the orchestrator's.
+	SessionContext func(ctx context.Context, paneID, source string) string
 }
 
 // NewServer wires the routes.
@@ -146,7 +152,7 @@ func NewServer(opts ServerOptions) *Server {
 	}
 	server := &Server{
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
-		logger: opts.Logger, version: opts.Version,
+		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext,
 		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
 		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
 		creates: ratelimit.New(createBurst, createRefill, opts.Now),

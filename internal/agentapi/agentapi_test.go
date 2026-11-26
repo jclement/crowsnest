@@ -58,7 +58,7 @@ func (f *socketFixture) token(t *testing.T, pane, job string) string {
 }
 
 // startSocket serves a fresh agent API on a socket in a short temp dir.
-func startSocket(t *testing.T) *socketFixture {
+func startSocket(t *testing.T, adjust ...func(*ServerOptions)) *socketFixture {
 	t.Helper()
 	db, err := store.OpenMemory(context.Background())
 	if err != nil {
@@ -77,7 +77,11 @@ func startSocket(t *testing.T) *socketFixture {
 	}
 	done := make(chan struct{})
 	go func() {
-		_ = NewServer(ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Version: "test"}).Serve(ctx, listener)
+		options := ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Version: "test"}
+		for _, change := range adjust {
+			change(&options)
+		}
+		_ = NewServer(options).Serve(ctx, listener)
 		close(done)
 	}()
 	t.Cleanup(func() { cancel(); <-done })
