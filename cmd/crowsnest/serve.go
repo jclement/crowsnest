@@ -109,7 +109,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	fleetCache := fleet.New(fleet.Options{Client: client, Hub: events, Session: cfg.Session, Logger: logger})
 	go fleetCache.Run(ctx)
-	questionService, agentSocket, err := startQuestions(ctx, cfg, client, db, events, logger)
+	questionService, agentSocket, stopQuestions, err := startQuestions(ctx, cfg, client, db, events, logger)
+	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err
 	}

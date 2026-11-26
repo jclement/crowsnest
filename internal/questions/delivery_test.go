@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -162,6 +163,55 @@ func TestDeliveryUnknownOutcomeIsNotRetried(t *testing.T) {
 	stored, _ := f.service.Get(context.Background(), question.ID)
 	if !strings.Contains(stored.DeliveryError, "connection reset") {
 		t.Fatalf("failure not recorded: %+v", stored)
+	}
+}
+
+// TestUncertainSendIsRecordedNotDelivered is R1b-C05, through the real adapter: herdr took the
+// line and its answer was lost. That is neither delivered nor retryable.
+func TestUncertainSendIsRecordedNotDelivered(t *testing.T) {
+	d := newDeliveryFixture(t, herdr.StatusIdle)
+	d.deliverer = NewDeliverer(DelivererOptions{Store: d.store, Prompt: HerdrPrompter(lostAnswerClient{d.herdr}), Now: d.clock.Now, Interval: time.Millisecond})
+	question := d.askAndAnswer(t, "Ship?")
+	d.deliverer.DeliverPending(context.Background())
+	stored, _ := d.service.Get(context.Background(), question.ID)
+	if stored.DeliveredAt != nil || !strings.Contains(stored.DeliveryError, "uncertain") {
+		t.Fatalf("an uncertain send was recorded as %+v", stored)
+	}
+	d.clock.Advance(time.Hour)
+	d.deliverer.DeliverPending(context.Background())
+	if len(d.prompts()) != 1 {
+		t.Fatalf("an uncertain send was retried: %v", d.prompts())
+	}
+}
+
+// lostAnswerClient types the prompt and then loses herdr's answer, as the socket client reports
+// a deadline passing after the request was written.
+type lostAnswerClient struct{ *fake.Fake }
+
+func (c lostAnswerClient) AgentPrompt(ctx context.Context, target, text string, wait *herdr.PromptWait) (herdr.Agent, error) {
+	_, _ = c.Fake.AgentPrompt(ctx, target, text, wait)
+	return herdr.Agent{}, fmt.Errorf("%w: reading response: %w", herdr.ErrNoResponse, context.DeadlineExceeded)
+}
+
+// TestHeldDeliveryIsReleasedDuringShutdown is R1b-C08: shutdown cancels an attempt that typed
+// nothing. Its claim must still be released, or the next start abandons a retryable answer.
+func TestHeldDeliveryIsReleasedDuringShutdown(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	deliverer := NewDeliverer(DelivererOptions{Store: f.store, Now: f.clock.Now, Prompt: func(context.Context, string, string) error {
+		cancel() // shutdown arrives while the agent's screen is being read
+		return fmt.Errorf("%w: reading the screen: %w", ErrHold, context.Canceled)
+	}})
+	question := f.ask(t, confirm("Ship?"))
+	_, _ = f.service.Answer(context.Background(), question.ID, AnswerInput{Value: json.RawMessage(`"yes"`)})
+	deliverer.DeliverPending(ctx)
+	numeric, _ := ParseID(question.ID)
+	record, err := f.store.GetQuestion(context.Background(), numeric)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.DeliveryClaimedAt.IsZero() {
+		t.Fatal("a claim for an attempt that typed nothing survived shutdown; the next start would abandon it")
 	}
 }
 

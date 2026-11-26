@@ -28,6 +28,11 @@ import (
 // agent is at a dialog, has a draft, or is not there right now.
 var ErrHold = errors.New("nothing typed; try again later")
 
+// ErrUncertain is what a Prompter returns when the text was handed to the terminal but whether it
+// was typed is unknown (herdr's answer was lost). Like any other unknown outcome it is recorded
+// and never retried; it has its own wording so the Inbox says what to check.
+var ErrUncertain = errors.New("delivery uncertain: crowsnest lost herdr's answer after handing it the line; check the agent's terminal before saying it again")
+
 // Prompter types text into the agent in paneID. It returns nil when the text was typed (whether
 // or not a turn visibly started), an error wrapping ErrHold when nothing was typed, and any other
 // error when the outcome is unknown.
@@ -44,6 +49,10 @@ const (
 	holdGiveUp = 7 * 24 * time.Hour
 	// deliveryTimeout bounds one attempt (agent.prompt waits up to 30 s for the turn).
 	deliveryTimeout = 45 * time.Second
+	// cleanupTimeout bounds the store writes that close an attempt. They run detached from the
+	// attempt's context: shutdown cancelling an attempt that provably typed nothing must still
+	// release its claim, or the next start would abandon a retryable answer (R1b-C08).
+	cleanupTimeout = 5 * time.Second
 )
 
 // DelivererOptions configure a Deliverer. Store and Prompt are required.
@@ -156,6 +165,9 @@ func (d *Deliverer) deliver(ctx context.Context, record store.QuestionRecord) {
 		d.finish(ctx, record.ID, "")
 	case errors.Is(err, ErrHold):
 		d.hold(ctx, record, err)
+	case errors.Is(err, ErrUncertain):
+		d.opts.Logger.Warn("typing an answer back may or may not have worked; not retried", "question", FormatID(record.ID), "pane", record.SourcePane)
+		d.finish(ctx, record.ID, err.Error())
 	default:
 		d.opts.Logger.Warn("typing an answer back failed; not retried", "question", FormatID(record.ID), "pane", record.SourcePane, "err", err)
 		d.finish(ctx, record.ID, "typing failed: "+err.Error())
@@ -168,7 +180,9 @@ func (d *Deliverer) hold(ctx context.Context, record store.QuestionRecord, reaso
 		d.finish(ctx, record.ID, "gave up: "+reason.Error())
 		return
 	}
-	if err := d.opts.Store.ReleaseDelivery(ctx, record.ID); err != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	if err := d.opts.Store.ReleaseDelivery(cleanupCtx, record.ID); err != nil {
 		d.opts.Logger.Warn("releasing a held answer delivery", "question", FormatID(record.ID), "err", err)
 		return
 	}
@@ -185,7 +199,9 @@ func (d *Deliverer) finish(ctx context.Context, id int64, errText string) {
 	d.mu.Lock()
 	delete(d.backoff, id)
 	d.mu.Unlock()
-	if err := d.opts.Store.FinishDelivery(context.WithoutCancel(ctx), id, d.opts.Now(), errText); err != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	if err := d.opts.Store.FinishDelivery(cleanupCtx, id, d.opts.Now(), errText); err != nil {
 		d.opts.Logger.Warn("recording an answer delivery", "question", FormatID(id), "err", err)
 		return
 	}

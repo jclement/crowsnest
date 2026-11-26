@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
 	"github.com/jclement/crowsnest/internal/config"
@@ -21,8 +22,11 @@ import (
 )
 
 // startQuestions builds the question service, starts its background work and the agent socket,
-// and returns the service and the socket path. Everything stops when ctx ends.
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, logger *slog.Logger) (*questions.Service, string, error) {
+// and returns the service, the socket path, and a stop function. Everything stops when ctx ends
+// or stop is called; stop returns once the deliverer and the sweeper have finished, and serve
+// calls it before the database closes, so an attempt cut short by shutdown can still record its
+// outcome (R1b-C08).
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, logger *slog.Logger) (*questions.Service, string, func(), error) {
 	var deliverer *questions.Deliverer
 	options := questions.Options{
 		Store: db, Hub: events, Logger: logger,
@@ -42,13 +46,16 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 			}
 		},
 	})
-	go deliverer.Run(ctx)
-	go service.RunSweeper(ctx, 0)
+	ctx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	stop := func() { cancel(); workers.Wait() }
+	workers.Go(func() { deliverer.Run(ctx) })
+	workers.Go(func() { service.RunSweeper(ctx, 0) })
 
 	socket := agentapi.SocketPath(os.Getenv("XDG_RUNTIME_DIR"), cfg.StateDir, cfg.Session)
 	listener, err := agentapi.Listen(ctx, socket)
 	if err != nil {
-		return nil, "", err
+		return nil, "", stop, err
 	}
 	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Hub: events, Logger: logger, Version: version})
 	go func() {
@@ -60,10 +67,10 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 
 	if demo, ok := client.(*fake.Demo); ok {
 		if err := startDemoQuestions(ctx, service, demo, logger); err != nil {
-			return nil, "", err
+			return nil, "", stop, err
 		}
 	}
-	return service, socket, nil
+	return service, socket, stop, nil
 }
 
 // startDemoQuestions seeds the demo inbox and keeps asking.
