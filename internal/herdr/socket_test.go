@@ -379,6 +379,55 @@ func TestSocketClientEventStream(t *testing.T) {
 	close(push)
 }
 
+// TestSubscribeSurvivesALateWatcher is R1-C03: the acknowledgement's cancellation watcher may
+// not be scheduled until after the acknowledgement is read. Subscribe then cancels its
+// acknowledgement context; a watcher that wakes to find both its cases ready must not close the
+// live subscription.
+func TestSubscribeSurvivesALateWatcher(t *testing.T) {
+	previous := watcherStarting
+	watcherStarting = func() { time.Sleep(20 * time.Millisecond) }
+	t.Cleanup(func() { watcherStarting = previous })
+	path := filepath.Join(shortSocketDir(t), "h.sock")
+	var pushes []chan string
+	var mu sync.Mutex
+	startScripted(t, path, func(req scriptedRequest) ([]string, <-chan string) {
+		push := make(chan string, 1)
+		mu.Lock()
+		pushes = append(pushes, push)
+		mu.Unlock()
+		return []string{result(req.ID, `{"type":"subscription_started"}`)}, push
+	})
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, push := range pushes {
+			close(push)
+		}
+	})
+	client := NewSocketClient(path)
+	// Each run has an even chance of losing the stream without the fix; 16 runs make a pass
+	// by luck one in 65536.
+	for run := range 16 {
+		stream, err := client.Subscribe(context.Background(), []Subscription{{Type: "tab.created"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(40 * time.Millisecond) // let a stray watcher do its damage
+		mu.Lock()
+		pushes[run] <- `{"event":"tab_created","data":{"tab":{"tab_id":"w1:t2","workspace_id":"w1"}}}`
+		mu.Unlock()
+		select {
+		case _, ok := <-stream.Events():
+			if !ok {
+				t.Fatalf("run %d: the subscription was closed after it was acknowledged: %v", run, stream.Err())
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("run %d: no event", run)
+		}
+		_ = stream.Close()
+	}
+}
+
 func TestSocketClientSubscribeRefused(t *testing.T) {
 	path := filepath.Join(shortSocketDir(t), "h.sock")
 	startScripted(t, path, func(req scriptedRequest) ([]string, <-chan string) {

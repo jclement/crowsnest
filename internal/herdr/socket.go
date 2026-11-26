@@ -115,18 +115,31 @@ func (c *SocketClient) dial(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
+// watcherStarting runs as the closeOnDone watcher begins. Tests replace it to delay the
+// watcher; it is a no-op otherwise.
+var watcherStarting = func() {}
+
 // closeOnDone closes conn when ctx ends, unblocking any read or write. The returned func stops
-// the watcher once the call is finished.
+// the watcher and waits for it to exit, so once it returns the watcher can no longer close
+// conn. That matters for Subscribe, which hands the connection on after the acknowledgement and
+// then cancels its acknowledgement context: a watcher still running at that moment would see
+// both cases ready and could close the live subscription (R1-C03).
 func closeOnDone(ctx context.Context, conn net.Conn) func() {
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
+		watcherStarting()
 		select {
 		case <-ctx.Done():
 			_ = conn.Close()
 		case <-done:
 		}
 	}()
-	return func() { close(done) }
+	return func() {
+		close(done)
+		<-exited
+	}
 }
 
 func writeLine(w io.Writer, value any) error {
