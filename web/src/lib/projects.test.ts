@@ -107,3 +107,14 @@ describe("a new project's name from its directory", () => {
     expect(suggestName("")).toBe("");
   });
 });
+
+describe("Chat's default target", () => {
+  it("is the orchestrator, else (with --no-orchestrator) the first running lead", async () => {
+    const { defaultChatTarget } = await import("./projects");
+    const lead = (slug: string, running: boolean) => ({ slug, lead: { state: running ? "idle" : "off", running } }) as never;
+    expect(defaultChatTarget({ state: "idle" }, [lead("a", true)])).toBe("orchestrator");
+    expect(defaultChatTarget({ state: "disabled" }, [lead("a", false), lead("b", true)])).toBe("lead-b");
+    expect(defaultChatTarget({ state: "disabled" }, [lead("a", false)])).toBe("lead-a");
+    expect(defaultChatTarget({ state: "disabled" }, [])).toBe("orchestrator");
+  });
+});

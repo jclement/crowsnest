@@ -2,35 +2,8 @@
 // each with how many of its jobs need you and how many run. One row of buttons that scrolls
 // sideways inside itself on a phone (the page never does). The choice is in the URL
 // (?project=<slug>) and remembered per browser (lib/projects.ts), through useProjectFilter.
-import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useState } from "react";
 import { cn } from "../../lib/cn";
-import {
-  filterToParam,
-  loadProjectFilter,
-  resolveProjectFilter,
-  saveProjectFilter,
-  type ProjectCounts,
-  type ProjectFilter,
-  type ProjectList,
-} from "../../lib/projects";
-
-/** The board's project filter: the URL's, else the remembered one; setting it does both. */
-export function useProjectFilter(list: ProjectList | undefined): [ProjectFilter, (filter: ProjectFilter) => void] {
-  const search = useSearch({ strict: false }) as { project?: string; job?: string };
-  const navigate = useNavigate();
-  const [remembered, setRemembered] = useState(loadProjectFilter);
-  const filter = resolveProjectFilter(search.project, remembered, list?.projects);
-  const set = useCallback(
-    (next: ProjectFilter) => {
-      saveProjectFilter(next);
-      setRemembered(next);
-      void navigate({ to: "/", search: (previous: Record<string, unknown>) => ({ ...previous, project: filterToParam(next) || undefined }) } as never);
-    },
-    [navigate],
-  );
-  return [filter, set];
-}
+import { filterToParam, type ProjectCounts, type ProjectFilter, type ProjectList } from "../../lib/projects";
 
 function sum(counts: ProjectCounts[]): ProjectCounts {
   return counts.reduce((total, next) => ({ needs_you: total.needs_you + next.needs_you, running: total.running + next.running, total: total.total + next.total }), {

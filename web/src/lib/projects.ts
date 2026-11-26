@@ -272,3 +272,15 @@ export function leadConfirmations(name: string): Record<"restart" | "new" | "sto
     },
   };
 }
+
+// ---- Chat's target ------------------------------------------------------------------------------------
+
+/** The orchestrator's Chat target (and API target: the server resolves the name to its pane). */
+export const CHAT_ORCHESTRATOR = "orchestrator";
+
+/** Who Chat talks to when the URL does not say: the orchestrator, else the first running lead. */
+export function defaultChatTarget(orchestrator: { state: string } | undefined, projects: ProjectView[]): string {
+  if (orchestrator && orchestrator.state !== "disabled") return CHAT_ORCHESTRATOR;
+  const running = projects.find((project) => leadRunning(project.lead)) ?? projects[0];
+  return running ? leadAgentName(running.slug) : CHAT_ORCHESTRATOR;
+}

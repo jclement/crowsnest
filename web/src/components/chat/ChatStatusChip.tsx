@@ -16,10 +16,11 @@ const chatStates: Record<ChatState, { label: string; tone: ChipTone; dot?: Agent
   unknown: { label: "Unknown", tone: "neutral", dot: "unknown", hint: "The state is not known yet" },
 };
 
-export function ChatStatusChip({ state }: { state: ChatState }) {
+/** `hint` replaces the state's own tooltip (a lead that is off was not started with a flag). */
+export function ChatStatusChip({ state, hint }: { state: ChatState; hint?: string }) {
   const meta = chatStates[state];
   return (
-    <Chip tone={meta.tone} title={meta.hint}>
+    <Chip tone={meta.tone} title={hint ?? meta.hint}>
       {meta.dot && <StatusDot status={meta.dot} className="scale-75" />}
       <span data-testid="chat-state">{meta.label}</span>
     </Chip>
