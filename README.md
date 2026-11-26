@@ -4,14 +4,15 @@ One Go binary that starts a [herdr](https://herdr.dev) session and a Claude Code
 it, and serves a mobile-friendly web app for running that session from a browser: chat with the
 orchestrator, answer questions from agents, drive a terminal, and see every agent in the fleet.
 
-> **Status: M6 (questions and the agent API), M5 (terminals) and M4 (orchestrator and Chat).**
+> **Status: M11 (talk mode), M6 (questions and the agent API), M5 (terminals) and M4 (orchestrator and Chat).**
 > crowsnest serves the login, the API, the event stream and the web app; it connects to (or
 > starts) its herdr session and serves the fleet, agent screens, dialog key presses, and live
 > terminals. It keeps the session's orchestrator running and serves the Chat view and every Claude
 > agent's conversation, read live from Claude's transcripts. Agents ask the human questions over a
 > unix socket (`crowsnest ask`, or the `ask` MCP tool the orchestrator is started with); the Inbox
-> shows them beside terminal dialogs, and an answer is typed back into the asker's pane. Jobs,
-> pokes and talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
+> shows them beside terminal dialogs, and an answer is typed back into the asker's pane. With an
+> ElevenLabs key, Chat has talk mode: push to talk, and the orchestrator's replies spoken. Jobs
+> and pokes arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
 > [STATUS.md](STATUS.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
@@ -86,11 +87,25 @@ turns it off. Fixtures mode exists only in development builds; it is compiled ou
 `mise run build`.
 
 On a phone over Tailscale, bind the tailnet address, or keep localhost and use `tailscale serve`,
-which also gives the HTTPS secure context the microphone needs later:
+which also gives the HTTPS secure context the microphone needs for talk mode:
 
 ```sh
 ./bin/crowsnest --bind tailnet --username jeff --password-file ~/.config/crowsnest/password
 ```
+
+**Talk mode.** Start crowsnest with an ElevenLabs API key (`ELEVENLABS_API_KEY`; prefer the
+environment to the flag, which `ps` shows) and Chat gets a **Talk** toggle. While it is on in a
+tab, a large push-to-talk button sits above the composer: hold it (or hold Space on a desktop)
+and speak, or tap it to lock recording on and tap again to stop; a recording stops by itself at
+60 s. What you said is transcribed by ElevenLabs, shown for 1.5 s with Cancel, then sent to the
+orchestrator under a `[crowsnest voice: …] talk=on` header. The orchestrator is told (in its
+`CROWSNEST.md`) to begin each final reply with `SAY: <one sentence>` while talk mode is on; that
+sentence is spoken, as is anything an agent says with `crowsnest say`. A reply with no SAY line
+plays a short chime; `SAY: -` and `noop` are silent. In the Inbox, a question can be read aloud
+and its note dictated. The key never leaves the server: the browser can only ask to hear texts
+the server holds (by id), never arbitrary text. The microphone needs a secure context
+(`https://` or `localhost`); over plain HTTP on a tailnet address the page says so and spoken
+replies still work. Without a key every `/voice` route is a 404 and nothing changes.
 
 ## Container (devbox)
 
@@ -184,7 +199,7 @@ they fail with exit 1 and say so.
 |---|---|
 | `crowsnest ask --file q.json\|- [--wait] [--timeout 12h]` | Post a question (DESIGN.md 8.1 shape: `title`, `body_md`, `kind` confirm/choice/ack/manual/notice, `multi`, `options`, `recommend`, `context`, `urgency`, `expires_in_hours`, `files`). Without `--wait` it prints the id (`q_7`) and returns; the answer is typed into the pane later as `[crowsnest answer q_7] <title> → <answer> (note: …)`. With `--wait` it blocks and prints `{id, status, answer_value, answer_note}`: exit `0` answered, `3` expired or cancelled, `1` error |
 | `crowsnest notify "text" [--urgency low\|normal\|blocking]` | A notice (no answer needed); the first line is its title. Prints the id |
-| `crowsnest say "sentence"` | Ask for one sentence to be spoken in talk mode (M11 speaks it; now it is published as a `say` event) |
+| `crowsnest say "sentence"` | Speak one sentence in every browser with talk mode on; a no-op when talk mode is off |
 | `crowsnest mcp` | A stdio MCP server exposing `ask` and `say` (M7 adds the job tools), proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes |
 
 The socket is `$XDG_RUNTIME_DIR/crowsnest/<session>.sock` when `XDG_RUNTIME_DIR` is set, else
@@ -220,7 +235,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--tls-cert` | `CROWSNEST_TLS_CERT` | none | PEM certificate: serve HTTPS directly |
 | `--tls-key` | `CROWSNEST_TLS_KEY` | none | PEM key for `--tls-cert` |
 | `--elevenlabs-api-key` | `ELEVENLABS_API_KEY` | none | Enables talk mode |
-| `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id | Voice for spoken replies |
+| `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id (`21m00Tcm4TlvDq8ikWAM`) | Voice for spoken replies |
 | `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs API base URL (tests point it at a fake) |
 | `--notify-url` | `CROWSNEST_NOTIFY_URL` | none | POST a one-line notice here when something needs you (ntfy-style) |
 | `--demo` | `CROWSNEST_DEMO` | `false` | In-memory fake herdr and scripted orchestrator |
@@ -234,8 +249,8 @@ served by Vite, so the binary does not require embedded web assets.
 
 `--session`, `--allow-default-session`, `--demo`, `--dir`, `--model`, `--permission-mode`,
 `--no-orchestrator` and `--notify-url` (one plain-text line, the question's id and scrubbed title,
-POSTed for each `blocking` question) take effect now. `--poke-interval` (M8) and talk mode are
-parsed and validated now and take effect in their milestones.
+POSTed for each `blocking` question) and the ElevenLabs settings (talk mode, M11) take effect now. `--poke-interval` (M8) is parsed
+and validated now and takes effect in its milestone.
 
 ### Startup refusals
 
@@ -263,12 +278,12 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
 | `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version}}` |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (`{text, pane_id, at}`); later `job`, … |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (talk mode on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`; off: `{text, pane_id, at}`, which nothing plays); later `job`, … |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
 | `GET /agents/{target}/messages?after=&limit=` | session | A page of the agent's conversation from its Claude transcript: `{source, session_id, cursor, reset, earlier, more, messages}`. Without `after` (or with a stale cursor) the newest `limit` (200) messages and `reset: true`; with it, only what changed since. No transcript: one `pane` message with the pane's recent text |
-| `POST /agents/{target}/prompt` | session | `{text, force_over_draft}` → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
+| `POST /agents/{target}/prompt` | session | `{text, force_over_draft, voice}` (`voice: true` adds the voice header and talk flag; 404 when talk mode is off) → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
 | `GET /orchestrator` | session | `{state, pane_id, session_id, dir, detail, restarts}`; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed` or `disabled` |
 | `POST /orchestrator/restart`, `POST /orchestrator/new` | session | Restart Claude on the same conversation (`--resume`), or with a fresh one |
 | `GET /questions?status=` | session | Questions with a status (`open`, `answered`, `expired`, `cancelled`, a comma-separated list, or `all`), open first; file contents left out (`file_count` says how many) |
@@ -276,6 +291,10 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /questions/{id}/answer` | session | `{answer_value, answer_note}`: a key, an array of keys for a multi-select, nothing for ack/notice; a `manual` answer is the note. `409 CONFLICT` once settled |
 | `DELETE /questions/{id}` | session | Cancel an open question; the asker is told |
 | `GET /inbox/summary` | session | `{open, blocking}` for the Inbox badge |
+| `POST /voice/stt` | session | Talk mode. The body is one recording as MediaRecorder made it (`audio/webm`, `audio/mp4`, `audio/ogg`, …; at most 2 MB) → `{text}`. 12 a minute per session (`429` with `Retry-After`); ElevenLabs failures are `502`/`503`/`422` with code `VOICE_UPSTREAM` and never its own error text |
+| `GET /voice/tts?text_id=` | session | The speech of a server-held text (a `say`, a SAY line, a read-aloud), streamed (`audio/mpeg`). `404` for an unknown or expired id (texts live an hour). 30 a minute per session; a replay comes from a cache |
+| `POST /voice/talk` | session | `{client_id, on}`: this tab's talk-mode heartbeat (every 15 s; gone after 45 s) → `{talk, heartbeat_seconds, max_recording_seconds}`. Talk mode is on for the orchestrator while any tab beats |
+| `POST /voice/read` | session | `{question_id}` → `{text_id}`: the question's title and options, to play through `/voice/tts` |
 | `GET /term/tui` (WebSocket) | session | The herdr TUI in a PTY. Binary frames are terminal bytes both ways; text frames are JSON control: the browser sends `{"type":"resize","cols","rows"}` first (the process starts on it), the server ends with `{"type":"exit","reason"}` |
 | `GET /term/pane/{pane_id}` (WebSocket) | session | One pane through `herdr terminal session control --takeover`, same protocol. `404` unless the pane is in the fleet |
 
@@ -297,6 +316,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run screenshots:inbox` | Builds, then Playwright against `./bin/crowsnest --demo`: the Inbox list and a question (mermaid and a diff) at 375×812 and 1440×900, light and dark, a multi-select, the 375 px checks, and an answer round trip |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
+| `mise run e2e:voice` | Builds, then Playwright against `./bin/crowsnest --demo` with talk mode on and a fake ElevenLabs (`web/e2e/support/fake-elevenlabs.mjs`, never the real API), Chromium's fake microphone: hold to talk, the transcript is sent, the SAY reply is fetched from `/voice/tts` and played; Cancel sends nothing; screenshots of Chat with talk mode at 375×812 and 1440×900 |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives and `checksums.txt`, nothing published |
 | `mise run image` | Build the devbox image (`deploy/Dockerfile`) for this machine's architecture as `crowsnest:dev`. Needs Docker |
 | `mise run publish` | Build the devbox image for amd64 and arm64 and push `ghcr.io/jclement/crowsnest:<version>` and `:latest`. Jeff's step |
