@@ -827,6 +827,12 @@ The client sends a resize first; the server starts the process on that first res
   holds a lock across a PTY write or resize, and closes the PTY once the client is reaped; the
   close wakes the blocked write with an error. Resizes go through `SyscallConn`, since
   `pty.Setsize` calls `Fd` and would make the descriptor blocking again.
+- herdr's first-run screen: a machine whose herdr TUI was never opened (a CI runner, a fresh
+  devbox volume) shows an onboarding screen over the whole TUI, and it takes every key, ctrl+b q
+  included, until its "continue" (Enter) and the settings page that follows (Esc) are
+  dismissed; herdr then writes `onboarding = false` to its config. In the devbox the first
+  browser TUI is where the user meets it. The pane bridge is not affected. The TUI integration
+  test dismisses it when it is up (found running the suite on Linux, 2026-11-26).
 
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
