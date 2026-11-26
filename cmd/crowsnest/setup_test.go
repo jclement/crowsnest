@@ -112,7 +112,13 @@ func TestLoginDecisionTable(t *testing.T) {
 				t.Setenv(tc.env[i], tc.env[i+1])
 			}
 			cfg := loadServeConfig(t, tc.args...)
-			db := openDB(t, cfg)
+			// In memory: a fresh file database per row hit SQLite IOERR_LOCK (3850) now and then
+			// when every package's tests ran at once (never alone); the table needs no file.
+			db, err := store.OpenMemory(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
 			if tc.stored {
 				storeOwner(t, db)
 			}
