@@ -57,4 +57,18 @@ echo "first start: answer Claude's folder-trust prompt for .dev/orchestrator in 
 # Ctrl+C (or either process exiting) stops both: the whole process group goes.
 trap 'kill 0' EXIT INT TERM
 go run ./cmd/crowsnest serve --web-dev --bind localhost &
+server=$!
+
+# Vite must not come up before the API does: `go run` compiles first (tens of seconds after a
+# pull), and a browser tab left open on :5173 would meanwhile fill the log with proxy
+# ECONNREFUSED errors that look like a broken server.
+echo "building and starting the Go server (the first build after a pull takes a while)..."
+until curl -fsS -o /dev/null "http://127.0.0.1:$port/api/v1/health" 2>/dev/null; do
+  if ! kill -0 "$server" 2>/dev/null; then
+    echo "the Go server exited before it started listening; its error is above" >&2
+    exit 1
+  fi
+  sleep 0.5
+done
+echo "API is up; starting Vite"
 npm --prefix web run dev
