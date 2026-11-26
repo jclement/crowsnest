@@ -156,7 +156,9 @@ func NewPoker(opts PokerOptions) *Poker {
 
 // Run checks every CheckInterval, and at once when a reason arrives, until ctx ends.
 func (p *Poker) Run(ctx context.Context) {
+	p.mu.Lock()
 	p.lastTimer = p.opts.Now()
+	p.mu.Unlock()
 	ticker := time.NewTicker(p.opts.CheckInterval)
 	defer ticker.Stop()
 	for {
