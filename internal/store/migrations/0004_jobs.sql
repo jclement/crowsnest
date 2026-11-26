@@ -1,4 +1,4 @@
--- 0003: jobs and their timelines (DESIGN.md sections 6.1 and 11).
+-- 0004: jobs and their timelines (DESIGN.md sections 6.1 and 11).
 --
 -- A job is a piece of work with one assignee, a declared state and a result. The supervisor's
 -- bookkeeping (stuck/cause, nudges, restarts, the pending retry) lives on the row so a restarted

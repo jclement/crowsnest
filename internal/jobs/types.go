@@ -89,6 +89,7 @@ const (
 	CauseIdle         Cause = "idle"         // stuck: no activity 10 min and not working (hook missing?)
 	CauseExited       Cause = "exited"       // the agent process left; restarting
 	CauseLaunch       Cause = "launch"       // the agent could not be started
+	CauseConfig       Cause = "config"       // needs_you: Claude refused the request (model, request)
 )
 
 // Describe is the cause in words, for the card and notices.
@@ -116,6 +117,8 @@ func (c Cause) Describe() string {
 		return "The agent exited"
 	case CauseLaunch:
 		return "The agent could not be started"
+	case CauseConfig:
+		return "Claude refused the request (model or settings)"
 	}
 	return ""
 }
@@ -165,6 +168,9 @@ type Job struct {
 	RetryAt        *time.Time `json:"retry_at"`
 	RetryCount     int        `json:"retry_count"`
 	OpenQuestions  int        `json:"open_questions"`
+	Isolate        bool       `json:"isolate"`
+
+	isolate bool // the job asked for a worktree (Isolated)
 }
 
 // Event is one timeline entry.

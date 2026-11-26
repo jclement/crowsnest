@@ -84,12 +84,17 @@ type Options struct {
 	Notify func(text string)
 	// Roles are the role prompts (embedded plus overrides). Nil: the embedded set.
 	Roles *Roles
+	// Synchronous runs launches and restarts inline instead of in goroutines (tests).
+	Synchronous bool
 }
 
 // Service holds the jobs.
 type Service struct {
 	opts Options
 	mu   sync.Mutex
+
+	busyMu sync.Mutex
+	busy   map[string]bool // jobs with a launch or restart running in the background
 }
 
 // New returns a Service.
@@ -342,6 +347,7 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 		LastActivityAt: timePtr(r.LastActivityAt), Nudges: r.Nudges, Restarts: r.Restarts,
 		RetryAt: timePtr(r.RetryAt), RetryCount: r.RetryCount, OpenQuestions: open,
 		Verified: decodeList(r.VerifiedJSON), NotVerified: decodeList(r.NotVerifiedJSON),
+		Isolate: r.Isolate, isolate: r.Isolate,
 	}
 	if r.ParentID > 0 {
 		job.ParentID = FormatID(r.ParentID)

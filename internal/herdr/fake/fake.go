@@ -88,7 +88,7 @@ type Fake struct {
 
 	starts        []herdr.AgentStartParams // every agent.start accepted, in order
 	worktrees     []herdr.WorktreeCreateParams
-	startNotReady bool                     // the next agent.start stops at a dialog
+	startNotReady bool // the next agent.start stops at a dialog
 	// startSession, when set, is the session the next agent.start's agent reports instead of
 	// the one in its args ("" for none): herdr's detection can lag or be stale (DESIGN.md 7.6).
 	startSession *string

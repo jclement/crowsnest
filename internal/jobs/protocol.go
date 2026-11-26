@@ -65,7 +65,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput, parentID string
 	if parentID != "" {
 		_ = s.Journal(ctx, parentID, EventChild, "Delegated "+job.ID+": "+job.Title, map[string]any{"child": job.ID})
 	}
-	go s.launch(context.WithoutCancel(ctx), job.ID)
+	s.goBackground(ctx, job.ID, func(ctx context.Context) { s.launch(ctx, job.ID) })
 	return job, nil
 }
 
@@ -244,6 +244,10 @@ func (s *Service) markProgressLocked(r *store.JobRecord) {
 	now := s.opts.Now()
 	r.LastProgressAt, r.LastActivityAt = now, now
 	r.NudgeStreak = 0
+	if State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseDialog {
+		// Work after a dialog means someone answered it.
+		r.State, r.Cause, r.CauseDetail = string(StateRunning), "", ""
+	}
 	if r.Stuck {
 		switch Cause(r.Cause) {
 		case CauseUnresponsive, CauseLimit, CauseServerError, CauseSilent, CauseIdle, CauseExited:
