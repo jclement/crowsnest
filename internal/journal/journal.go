@@ -31,10 +31,12 @@ const (
 	KindRestart  Kind = "restart"  // the orchestrator was restarted (automatically or by hand)
 	KindAlert    Kind = "alert"    // something needs the human: a supervisor notice, a held poke
 	KindBackstop Kind = "backstop" // the herdr-side backstop nudged an agent without hooks
+	KindTask     Kind = "task"     // a scheduled task started its job (7.8)
+	KindUpkeep   Kind = "upkeep"   // the orchestrator was compacted or handed over to a new conversation (7.9)
 )
 
 // Kinds lists every kind, for validating a filter.
-var Kinds = []Kind{KindPoke, KindSkip, KindSend, KindAnswer, KindRestart, KindAlert, KindBackstop}
+var Kinds = []Kind{KindPoke, KindSkip, KindSend, KindAnswer, KindRestart, KindAlert, KindBackstop, KindTask, KindUpkeep}
 
 // Valid reports whether k is a known kind.
 func (k Kind) Valid() bool {
