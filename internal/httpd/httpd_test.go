@@ -29,6 +29,7 @@ import (
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/schedule"
+	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
@@ -113,6 +114,8 @@ type harnessOptions struct {
 	// Scheduled tasks and upkeep (schedule_test.go); nil: those routes answer 503
 	schedule *schedule.Service
 	tender   *orch.Tender
+	// Spend (spend_test.go); nil: the /spend routes answer 503
+	spend *spend.Meter
 	// R2-L2: --trusted-proxy
 	trustedProxies     []netip.Prefix
 	trustedProxyHeader string // default x-forwarded-for
@@ -182,6 +185,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Orchestrator:  opts.orchestrator,
 		Questions:     opts.questions,
 		Jobs:          opts.jobs,
+		Spend:         opts.spend,
 		Voice:         opts.voice,
 		Journal:       opts.journal,
 		Poker:         opts.poker,
