@@ -61,10 +61,10 @@ func (f *fakeBackstop) BackstopJobs(context.Context) ([]BackstopJob, error) {
 	return slices.Clone(f.jobs), nil
 }
 
-func (f *fakeBackstop) NudgeIfDue(_ context.Context, id string) (bool, error) {
+func (f *fakeBackstop) NudgeIfDue(_ context.Context, job BackstopJob) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nudged = append(f.nudged, id)
+	f.nudged = append(f.nudged, job.ID)
 	return true, nil
 }
 

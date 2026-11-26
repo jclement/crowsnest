@@ -214,6 +214,10 @@ type UpdateInput struct {
 }
 
 // Update is job_update: a heartbeat with a "doing now" line, and optionally a declared state.
+// It counts as progress (resetting the nudge budget) only when it changes something: a new
+// progress line, a different state or blocked reason, or a different waiting value. Repeating
+// what already holds is not progress (R2-C01): an agent answering every nudge with the same
+// job_update must still run out of nudges.
 func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Job, error) {
 	progress := oneLine(input.Progress, maxProgressRunes)
 	if progress == "" && input.State == "" && input.Waiting == nil {
@@ -223,32 +227,31 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Job
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s; there is nothing to update", FormatID(r.ID), r.State)
 		}
-		if input.Waiting != nil && *input.Waiting {
-			open, _, err := s.questionState(ctx, r.ID)
-			if err != nil {
-				return err
-			}
-			if open == 0 {
-				// Found by the stop test: an agent told to wait answered every nudge with
-				// waiting=true, which reset the budget forever. Waiting needs a question.
-				return invalid("you have no open questions, so there is nothing to wait on. If you need the human, call ask (it does not block) and then declare waiting; if you are finished, call done; if something else blocks you, set state blocked with the reason")
-			}
+		if input.Waiting != nil && *input.Waiting && c.questions.Open == 0 {
+			// Found by the stop test: an agent told to wait answered every nudge with
+			// waiting=true, which reset the budget forever. Waiting needs a question.
+			return invalid("you have no open questions, so there is nothing to wait on. If you need the human, call ask (it does not block) and then declare waiting; if you are finished, call done; if something else blocks you, set state blocked with the reason")
 		}
-		// A repeated, unchanged line is not progress: it must not reset the nudge budget.
-		if progress != r.Progress || input.State != "" || input.Waiting != nil {
-			s.markProgressLocked(r)
-		}
+		before := *r
 		if progress != "" && progress != r.Progress {
 			r.Progress = progress
 			c.event(EventProgress, progress, nil)
 		}
-		if input.Waiting != nil {
+		if input.Waiting != nil && r.Waiting != *input.Waiting {
 			r.Waiting = *input.Waiting
 			if r.Waiting {
 				c.event(EventProgress, "Declared: nothing left that the open questions do not block", nil)
 			}
 		}
-		return applyDeclaredState(r, c, input)
+		if err := applyDeclaredState(r, c, input); err != nil {
+			return err
+		}
+		if r.Progress != before.Progress || r.Waiting != before.Waiting || r.State != before.State || r.BlockedReason != before.BlockedReason {
+			s.markProgressLocked(r)
+		} else {
+			r.LastActivityAt = s.opts.Now() // a heartbeat, not progress
+		}
+		return nil
 	})
 }
 
@@ -346,10 +349,18 @@ func (s *Service) Fail(ctx context.Context, id, reason string) (Job, error) {
 }
 
 // RecordToolUse is the PostToolUse hook: progress (the nudge budget resets) and the "doing now"
-// fallback.
-func (s *Service) RecordToolUse(ctx context.Context, id, summary string) (Job, error) {
+// fallback. crowsnest's own bookkeeping tools (job_update, ask, job_get… through MCP or the CLI)
+// are only a heartbeat: they decide for themselves whether they changed anything, and counting
+// the tool call as well would let a no-op job_update reset the budget after all (R2-C01).
+func (s *Service) RecordToolUse(ctx context.Context, id, toolName string, toolInput json.RawMessage) (Job, error) {
+	bookkeeping := isBookkeepingTool(toolName, toolInput)
+	summary := toolSummary(toolName, toolInput)
 	return s.mutate(ctx, id, func(r *store.JobRecord, _ *change) error {
 		if State(r.State).Terminal() {
+			return nil
+		}
+		if bookkeeping {
+			r.LastActivityAt = s.opts.Now()
 			return nil
 		}
 		s.markProgressLocked(r)
@@ -359,6 +370,29 @@ func (s *Service) RecordToolUse(ctx context.Context, id, summary string) (Job, e
 		}
 		return nil
 	})
+}
+
+// isBookkeepingTool reports whether a tool call is one of crowsnest's own: an MCP tool of the
+// crowsnest server, or a shell command that runs the crowsnest CLI.
+func isBookkeepingTool(name string, input json.RawMessage) bool {
+	if strings.HasPrefix(name, "mcp__crowsnest__") {
+		return true
+	}
+	if name != "Bash" {
+		return false
+	}
+	var fields struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(input, &fields) != nil {
+		return false
+	}
+	command := strings.TrimSpace(fields.Command)
+	if strings.ContainsAny(command, ";&|\n`$(") {
+		return false // more than one command: something else ran too
+	}
+	first, _, _ := strings.Cut(command, " ")
+	return filepath.Base(first) == "crowsnest"
 }
 
 // GetForAgent is job_get: the job, its questions and their answers, as text an agent reads after

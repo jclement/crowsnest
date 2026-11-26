@@ -468,9 +468,3 @@ func (s *Service) ReconcileApprovals(ctx context.Context) {
 		}
 	}
 }
-
-// held reports a job waiting for the human's approval: the launcher and the orchestrator
-// dispatch leave it alone.
-func held(record store.JobRecord) bool {
-	return State(record.State) == StateQueued && Cause(record.Cause) == CauseApproval
-}

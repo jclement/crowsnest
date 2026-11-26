@@ -45,8 +45,10 @@ type BackstopJob struct {
 type Backstop interface {
 	// BackstopJobs lists the running, non-waiting jobs whose agent has a pane.
 	BackstopJobs(ctx context.Context) ([]BackstopJob, error)
-	// NudgeIfDue applies the disposition rule and budget and, when due, types the nudge.
-	NudgeIfDue(ctx context.Context, id string) (bool, error)
+	// NudgeIfDue applies the disposition rule and budget and, when due, types the nudge. job is
+	// as BackstopJobs returned it: its LastStopAt is the Stop hook's mark the backstop judged by,
+	// and a newer one means a hook handled the stop meanwhile (nothing is typed).
+	NudgeIfDue(ctx context.Context, job BackstopJob) (bool, error)
 }
 
 // BackstopDue says whether a job's agent should be looked at now (pure): it is idle or done,
@@ -98,7 +100,7 @@ func (p *Poker) backstopOne(ctx context.Context, job BackstopJob, agent AgentSee
 	if err != nil || screen.dialog.Present || screen.draft.Present || agent.Status == herdr.StatusBlocked {
 		return // a dialog is the Inbox's; a draft is someone at the terminal
 	}
-	nudged, err := p.opts.Backstop.NudgeIfDue(ctx, job.ID)
+	nudged, err := p.opts.Backstop.NudgeIfDue(ctx, job)
 	if err != nil {
 		p.opts.Logger.Warn("backstop nudge failed", "job", job.ID, "err", err)
 		return

@@ -18,6 +18,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -66,36 +67,41 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// Tick runs one pass of the supervisor over every live job.
+// Tick runs one pass of the supervisor over every live job (all of them, a page at a time).
 func (s *Service) Tick(ctx context.Context) {
 	if s.opts.Herdr == nil {
 		return
 	}
 	s.DispatchOrchestrator(ctx)
-	records, err := s.opts.Store.ListJobs(ctx, []string{string(StateQueued), string(StateRunning), string(StateNeedsYou), string(StateBlocked)}, listLimit)
-	if err != nil {
+	if err := s.eachLive(ctx, liveStates, func(record store.JobRecord) { s.tickJob(ctx, record) }); err != nil && ctx.Err() == nil {
 		s.opts.Logger.Warn("supervisor: listing jobs", "err", err)
-		return
-	}
-	for _, record := range records {
-		if ctx.Err() != nil {
-			return
-		}
-		s.tickJob(ctx, record)
 	}
 }
 
+// tickJob looks at one live job. Every intermediate state a launch, a restart or a crash can
+// leave behind is handled here (R2-C02): a stale claim is settled first; a queued job with a pane
+// is an interrupted launch, treated like any job whose agent is gone or whose brief is unsent.
 func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 	id := FormatID(r.ID)
-	if s.inflight(id) {
+	if s.inflight(id) || s.claimLive(r) {
 		return
 	}
+	if r.LifecycleOp != "" {
+		record, ok := s.settleStale(ctx, id)
+		if !ok {
+			return
+		}
+		r = record
+	}
+	if record, ok := s.reconcileQuestions(ctx, r); ok {
+		r = record
+	}
 	now := s.opts.Now()
-	if State(r.State) == StateQueued {
-		if r.Dir != "" && r.PaneID == "" && now.Sub(r.CreatedAt) > relaunchAfter {
+	if State(r.State) == StateQueued && r.PaneID == "" {
+		if r.Dir != "" && now.Sub(r.CreatedAt) > relaunchAfter {
 			s.goBackground(ctx, id, func(ctx context.Context) { s.launch(ctx, id) })
 		}
-		return
+		return // a no-directory job waits for DispatchOrchestrator
 	}
 	if r.PaneID == "" {
 		return
@@ -105,19 +111,16 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		s.checkActivity(ctx, r, now) // the orchestrator's own lifecycle is internal/orch's
 		return
 	}
-	agent, alive := s.agentAlive(ctx, r.PaneID)
+	agent, seen := s.observeAgent(ctx, r.PaneID)
 	switch {
+	case seen == livenessUnknown:
+		// herdr could not be asked: look again next tick, change nothing (R2-C07).
+	case seen == livenessGone:
+		s.restart(ctx, r, false)
 	case !r.BriefSent:
-		if alive && agent.InteractiveReady && agent.AgentStatus != herdr.StatusBlocked && !s.hasDialog(ctx, r.PaneID) {
-			job := s.toJob(r, 0)
-			s.goBackground(ctx, id, func(ctx context.Context) {
-				if err := s.sendBrief(ctx, job); err != nil {
-					s.opts.Logger.Warn("sending a held brief", "job", id, "err", err)
-				}
-			})
+		if agent.InteractiveReady && agent.AgentStatus != herdr.StatusBlocked && !s.hasDialog(ctx, r.PaneID) {
+			s.sendHeldBrief(ctx, id)
 		}
-	case !alive:
-		s.restart(ctx, r)
 	case State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseDialog:
 		if agent.AgentStatus != herdr.StatusBlocked && !s.hasDialog(ctx, r.PaneID) {
 			_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
@@ -135,62 +138,150 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 	}
 }
 
-// ---- Restart -------------------------------------------------------------------------------
-
-// restart starts a job's agent again in its pane, within the hourly budget.
-func (s *Service) restart(ctx context.Context, r store.JobRecord) {
-	id := FormatID(r.ID)
-	now := s.opts.Now()
-	recent := recentRestarts(r.RestartTimes, now)
-	if len(recent) >= maxRestartsPerHour {
-		_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
-			rec.State, rec.FailReason = string(StateFailed), fmt.Sprintf("The agent exited %d times within an hour; crowsnest stopped restarting it.", maxRestartsPerHour)
-			rec.Stuck, rec.Cause = false, ""
-			c.event(EventFail, rec.FailReason, nil)
-			c.notify = fmt.Sprintf("crowsnest: job %s failed: its agent kept exiting: %s", id, oneLine(rec.Title, 80))
-			return nil
-		})
-		return
+// settleStale resolves a claim left by a dead crowsnest process (or abandoned by this one) and
+// returns the row after it. ok is false when the job is gone, finished, or claimed afresh.
+func (s *Service) settleStale(ctx context.Context, id string) (store.JobRecord, bool) {
+	if _, err := s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
+		if s.claimLive(*rec) {
+			return errBusy
+		}
+		if rec.LifecycleOp != "" {
+			s.resolveStaleLocked(rec, c)
+		}
+		return nil
+	}); err != nil {
+		return store.JobRecord{}, false
 	}
-	job, err := s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
-		rec.Restarts++
-		rec.RestartTimes = joinTimes(append(recent, now))
-		rec.Stuck, rec.Cause, rec.CauseDetail = true, string(CauseExited), "Restarting the agent"
-		c.event(EventRestart, fmt.Sprintf("The agent is gone; restarting it (%d of %d this hour)", len(recent)+1, maxRestartsPerHour), nil)
+	record, err := s.opts.Store.GetJob(ctx, mustParse(id))
+	if err != nil {
+		return store.JobRecord{}, false
+	}
+	return record, !State(record.State).Terminal()
+}
+
+// reconcileQuestions re-derives a job's question-dependent state on every pass, not only when
+// something mutates the job (R2-C03): a question settled while crowsnest was down, or whose
+// settle callback never ran, must still bring its job back from needs_you. It writes only when
+// the derived state differs, and reports the row after the write.
+func (s *Service) reconcileQuestions(ctx context.Context, r store.JobRecord) (store.JobRecord, bool) {
+	summary, err := s.opts.Store.SummarizeJobQuestions(ctx, FormatID(r.ID))
+	if err != nil {
+		return r, false
+	}
+	probe := r
+	if !deriveFromQuestions(&probe, summary) {
+		return r, false
+	}
+	var out store.JobRecord
+	if _, err := s.mutate(ctx, FormatID(r.ID), func(rec *store.JobRecord, c *change) error {
+		if deriveFromQuestions(rec, c.questions) {
+			c.event(EventQuestion, "Questions re-checked by the supervisor: the job's state follows them", nil)
+		}
+		out = *rec
+		return nil
+	}); err != nil {
+		return r, false
+	}
+	return out, true
+}
+
+// sendHeldBrief types a brief that was held back (a start-up dialog, an interrupted launch).
+func (s *Service) sendHeldBrief(ctx context.Context, id string) {
+	cl, err := s.claimStep(ctx, id, opBrief, func(r *store.JobRecord, _ *change) error {
+		if r.BriefSent || r.PaneID == "" {
+			return errSkip
+		}
 		return nil
 	})
 	if err != nil {
 		return
 	}
-	resume := job.Engine == EngineClaude && job.SessionID != "" && s.transcriptExists(job)
-	if !resume && job.Engine == EngineClaude {
-		job.SessionID = s.newSession(ctx, id)
-	}
-	s.goBackground(ctx, id, func(ctx context.Context) {
-		if err := s.startInPane(ctx, job, resume); err != nil {
-			s.opts.Logger.Warn("restarting a job agent", "job", id, "err", err)
-			_ = s.Journal(ctx, id, EventRestart, "Restart failed: "+oneLine(err.Error(), 200), nil)
-			return
+	ran := s.goBackground(ctx, id, func(ctx context.Context) {
+		detail, err := s.Get(ctx, id)
+		if err == nil {
+			err = s.sendBrief(ctx, cl, detail.Job)
 		}
-		_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
-			if Cause(rec.Cause) == CauseExited {
-				rec.Stuck, rec.Cause, rec.CauseDetail = false, "", ""
-			}
-			return nil
-		})
+		if err != nil && !errors.Is(err, errClaimLost) {
+			s.opts.Logger.Warn("sending a held brief", "job", id, "err", err)
+			s.finishQuietly(ctx, cl, func(_ *store.JobRecord, c *change) {
+				c.event(EventLaunch, "The brief could not be sent: "+oneLine(err.Error(), 200), nil)
+			})
+		}
 	})
+	if !ran {
+		s.finishQuietly(ctx, cl, nil)
+	}
 }
 
-// newSession gives a job a fresh Claude session id (no transcript to resume).
-func (s *Service) newSession(ctx context.Context, id string) string {
-	session := ""
-	_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, _ *change) error {
-		rec.ClaudeSessionID = newUUID()
-		rec.BriefSent = false
-		session = rec.ClaudeSessionID
+// ---- Restart -------------------------------------------------------------------------------
+
+// restart starts a job's agent again in its pane, within the hourly budget. The caller has seen
+// the agent gone; the budget, the new session and the claim are taken together under the lock,
+// on the current row, so a job cancelled or finished meanwhile is never restarted (R2-C08).
+// manual clears the hourly budget (the human's Resume).
+func (s *Service) restart(ctx context.Context, observed store.JobRecord, manual bool) {
+	id := FormatID(observed.ID)
+	now := s.opts.Now()
+	var resume, overBudget bool
+	cl, err := s.claimStep(ctx, id, opStart, func(rec *store.JobRecord, c *change) error {
+		if rec.PaneID == "" || rec.PaneID != observed.PaneID {
+			return errSkip // the job moved since the look
+		}
+		if manual {
+			rec.RestartTimes = ""
+		}
+		recent := recentRestarts(rec.RestartTimes, now)
+		if len(recent) >= maxRestartsPerHour {
+			overBudget = true
+			return errSkip
+		}
+		rec.Restarts++
+		rec.RestartTimes = joinTimes(append(recent, now))
+		rec.Stuck, rec.Cause, rec.CauseDetail = true, string(CauseExited), "Restarting the agent"
+		c.event(EventRestart, fmt.Sprintf("The agent is gone; restarting it (%d of %d this hour)", len(recent)+1, maxRestartsPerHour), nil)
+		resume = rec.Engine == EngineClaude && rec.ClaudeSessionID != "" && s.transcriptExists(s.toJob(*rec, 0))
+		if !resume && rec.Engine == EngineClaude {
+			rec.ClaudeSessionID = newUUID()
+			rec.BriefSent = false
+		}
 		return nil
 	})
-	return session
+	if overBudget {
+		s.failRestarts(ctx, id)
+		return
+	}
+	if err != nil {
+		return
+	}
+	ran := s.goBackground(ctx, id, func(ctx context.Context) {
+		detail, err := s.Get(ctx, id)
+		if err == nil {
+			err = s.startInPane(ctx, cl, detail.Job, resume)
+		}
+		if err != nil && !errors.Is(err, errClaimLost) {
+			s.opts.Logger.Warn("restarting a job agent", "job", id, "err", err)
+			s.finishQuietly(ctx, cl, func(_ *store.JobRecord, c *change) {
+				c.event(EventRestart, "Restart failed: "+oneLine(err.Error(), 200), nil)
+			})
+		}
+	})
+	if !ran {
+		s.finishQuietly(ctx, cl, nil) // the bookkeeping stays: the attempt counts, the start did not run
+	}
+}
+
+// failRestarts fails a job whose agent kept exiting, and tells Jeff.
+func (s *Service) failRestarts(ctx context.Context, id string) {
+	_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
+		if State(rec.State).Terminal() || s.claimLive(*rec) {
+			return errSkip
+		}
+		rec.State, rec.FailReason = string(StateFailed), fmt.Sprintf("The agent exited %d times within an hour; crowsnest stopped restarting it.", maxRestartsPerHour)
+		rec.Stuck, rec.Cause = false, ""
+		c.event(EventFail, rec.FailReason, nil)
+		c.notify = fmt.Sprintf("crowsnest: job %s failed: its agent kept exiting: %s", id, oneLine(rec.Title, 80))
+		return nil
+	})
 }
 
 func (s *Service) transcriptExists(job Job) bool {
@@ -226,11 +317,15 @@ func joinTimes(times []time.Time) string {
 // ---- Retries -------------------------------------------------------------------------------
 
 // retry acts on a limit or API error: when due and the agent is idle, it types "continue".
-// An agent that is working again has recovered by itself.
+// An agent that is working again has recovered by itself, but only the error that was observed
+// is cleared: a newer hook outcome (an auth failure, say) recorded since stays (R2-C11).
 func (s *Service) retry(ctx context.Context, r store.JobRecord, agent herdr.Agent, now time.Time) {
 	id := FormatID(r.ID)
 	if agent.AgentStatus == herdr.StatusWorking {
 		_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
+			if !rec.Stuck || rec.Cause != r.Cause || !rec.RetryAt.Equal(r.RetryAt) || rec.RetryCount != r.RetryCount || rec.State != r.State {
+				return errSkip
+			}
 			rec.Stuck, rec.Cause, rec.CauseDetail, rec.RetryAt = false, "", "", zeroTime
 			c.event(EventRetry, "Working again; the "+r.Cause+" has cleared", nil)
 			return nil
@@ -240,25 +335,47 @@ func (s *Service) retry(ctx context.Context, r store.JobRecord, agent herdr.Agen
 	if r.RetryAt.IsZero() || now.Before(r.RetryAt) || !agent.AgentStatus.Ready() {
 		return
 	}
-	s.RetryNow(ctx, id)
+	s.retryStep(ctx, id, true)
 }
 
 // RetryNow types "continue" into a job stuck on a limit or API error and schedules the next
-// attempt. It is the tick's action when a retry is due and the card's "Retry now".
+// attempt: the card's "Retry now" (whether or not the retry is due).
 func (s *Service) RetryNow(ctx context.Context, id string) {
-	detail, err := s.Get(ctx, id)
-	if err != nil || detail.PaneID == "" {
+	s.retryStep(ctx, id, false)
+}
+
+// retryStep claims a retry (the job must still be stuck on a limit or API error, and, for the
+// tick, the retry still due), types "continue", and records it. A send that provably typed
+// nothing is not counted.
+func (s *Service) retryStep(ctx context.Context, id string, onlyIfDue bool) {
+	cl, err := s.claimStep(ctx, id, opRetry, func(rec *store.JobRecord, _ *change) error {
+		recovering := rec.Stuck && (Cause(rec.Cause) == CauseLimit || Cause(rec.Cause) == CauseServerError)
+		if !recovering || rec.PaneID == "" || (onlyIfDue && (rec.RetryAt.IsZero() || s.opts.Now().Before(rec.RetryAt))) {
+			return errSkip
+		}
+		return nil
+	})
+	if err != nil {
 		return
 	}
-	_, sendErr := orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: continueText})
-	_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
+	detail, err := s.Get(ctx, id)
+	if err != nil {
+		s.finishQuietly(ctx, cl, nil)
+		return
+	}
+	if err := s.holds(ctx, cl); err != nil {
+		return
+	}
+	result, sendErr := orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: continueText})
+	outcome := typedOutcome(result, sendErr)
+	s.finishQuietly(ctx, cl, func(rec *store.JobRecord, c *change) {
+		if outcome == typedNo {
+			c.event(EventRetry, "Retry could not type yet: "+oneLine(sendErr.Error(), 160), nil)
+			return
+		}
 		now := s.opts.Now()
 		rec.RetryCount++
-		if sendErr != nil {
-			c.event(EventRetry, "Retry could not type: "+oneLine(sendErr.Error(), 160), nil)
-		} else {
-			c.event(EventRetry, fmt.Sprintf("Retry %d: typed \"continue\"", rec.RetryCount), nil)
-		}
+		c.event(EventRetry, fmt.Sprintf("Retry %d: typed \"continue\"", rec.RetryCount), nil)
 		switch Cause(rec.Cause) {
 		case CauseLimit:
 			rec.RetryAt = now.Add(retryDelay(limitRetries, limitEvery, rec.RetryCount))
@@ -272,7 +389,6 @@ func (s *Service) RetryNow(ctx context.Context, id string) {
 		default:
 			rec.RetryAt = zeroTime
 		}
-		return nil
 	})
 }
 
@@ -288,7 +404,10 @@ func (s *Service) checkActivity(ctx context.Context, r store.JobRecord, now time
 	if s.opts.Activity != nil {
 		lastAppend, lastTool = s.opts.Activity(ctx, s.toJob(r, 0))
 	}
-	agent, _ := s.agentGet(ctx, r.PaneID)
+	agent, err := s.agentGet(ctx, r.PaneID)
+	if err != nil && !herdr.IsNotFound(err) {
+		return // herdr could not be asked: no verdict on silent or idle this pass
+	}
 	working := agent.AgentStatus == herdr.StatusWorking
 	_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
 		if State(rec.State) != StateRunning {
@@ -316,6 +435,8 @@ func (s *Service) checkActivity(ctx context.Context, r store.JobRecord, now time
 			rec.Stuck, rec.Cause = true, string(CauseIdle)
 			rec.CauseDetail = fmt.Sprintf("Not working and nothing declared for %d minutes", int(quiet.Minutes()))
 			c.event(EventStuck, "Stuck: idle with nothing declared", nil)
+			// Recovery has run out (the hook and the backstop did not get it moving): tell Jeff.
+			c.notify = fmt.Sprintf("crowsnest: job %s has sat idle for %d minutes with nothing declared: %s", id, int(quiet.Minutes()), oneLine(rec.Title, 80))
 		}
 		return nil
 	})
@@ -368,15 +489,16 @@ func (s *Service) inflight(id string) bool {
 	return s.busy[id]
 }
 
-// goBackground runs fn for job id unless something already runs for it.
-func (s *Service) goBackground(ctx context.Context, id string, fn func(context.Context)) {
+// goBackground runs fn for job id unless something already runs for it, and reports whether it
+// took it (a caller holding a claim releases it when not).
+func (s *Service) goBackground(ctx context.Context, id string, fn func(context.Context)) bool {
 	s.busyMu.Lock()
 	if s.busy == nil {
 		s.busy = map[string]bool{}
 	}
 	if s.busy[id] {
 		s.busyMu.Unlock()
-		return
+		return false
 	}
 	s.busy[id] = true
 	s.busyMu.Unlock()
@@ -390,7 +512,8 @@ func (s *Service) goBackground(ctx context.Context, id string, fn func(context.C
 	}
 	if s.opts.Synchronous {
 		run()
-		return
+		return true
 	}
 	go run()
+	return true
 }

@@ -177,7 +177,8 @@ type Job struct {
 	// Origin is who created it: "" the human, "agent" a job agent, "orchestrator" (R2-H1).
 	Origin string `json:"origin"`
 
-	isolate bool // the job asked for a worktree (Isolated)
+	isolate   bool // the job asked for a worktree (Isolated)
+	briefSent bool // the brief reached the agent (a restart resumes rather than briefs again)
 }
 
 // Event is one timeline entry.

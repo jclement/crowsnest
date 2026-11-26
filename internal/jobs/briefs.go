@@ -97,6 +97,6 @@ func briefLine(job Job, path string) string {
 // orchestratorLine is the one line that hands the orchestrator a job with no directory.
 func orchestratorLine(job Job, path string) string {
 	return fmt.Sprintf("[crowsnest job %s] You hold job %s (role %s). Its brief is in %s (job_get with job_id %q returns it too); read it and begin. "+
-		"Pass job_id %q to job_update, done, fail and job_get. The turn may only end once the job is declared (done, fail, blocked, or waiting on questions).",
+		"Pass job_id %q to job_update, done, fail, ask and job_get. The turn may only end once the job is declared (done, fail, blocked, or waiting on questions).",
 		job.ID, job.ID, termtext.Clean(job.Role), termtext.Clean(path), job.ID, job.ID)
 }

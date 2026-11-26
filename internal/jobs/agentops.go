@@ -34,20 +34,10 @@ const (
 // shellNames are the processes that count as "a bare shell" in a pane.
 var shellNames = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": true, "dash": true, "ksh": true, "tcsh": true, "csh": true, "nu": true}
 
-// atShell reports whether a pane's foreground holds only a shell.
+// atShell reports whether a pane's foreground holds only a shell (false when herdr cannot say).
 func (s *Service) atShell(ctx context.Context, paneID string) bool {
-	ctx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
-	defer cancel()
-	info, err := s.opts.Herdr.PaneProcessInfo(ctx, paneID)
-	if err != nil {
-		return false
-	}
-	for _, process := range info.ForegroundProcesses {
-		if !shellNames[strings.TrimPrefix(filepath.Base(process.Name), "-")] {
-			return false
-		}
-	}
-	return true
+	shell, err := s.foregroundIsShell(ctx, paneID)
+	return err == nil && shell
 }
 
 // waitForShell polls until the pane is at a bare shell, for up to ShellWait.
@@ -145,17 +135,55 @@ func (s *Service) agentGet(ctx context.Context, target string) (herdr.Agent, err
 	return s.opts.Herdr.AgentGet(ctx, target)
 }
 
-// agentAlive returns the agent in paneID and whether it is really running: herdr can keep a
-// record after the agent exits, so a pane back at a bare shell counts as gone.
-func (s *Service) agentAlive(ctx context.Context, paneID string) (herdr.Agent, bool) {
+// liveness is what one look at a job's agent established.
+type liveness int
+
+const (
+	livenessUnknown liveness = iota // herdr could not be asked (timeout, outage): change nothing
+	livenessAlive                   // the agent is there
+	livenessGone                    // confirmed: no agent in the pane, or the pane is back at a shell
+)
+
+// observeAgent looks at the agent in paneID. Only a positive observation of absence counts as
+// gone: herdr reporting no such agent or pane, or the pane's foreground back at a bare shell. A
+// failed lookup is unknown, never death (R2-C07), so an outage spends no restart budget and
+// replaces no credentials of an agent that is still running.
+func (s *Service) observeAgent(ctx context.Context, paneID string) (herdr.Agent, liveness) {
 	agent, err := s.agentGet(ctx, paneID)
+	switch {
+	case herdr.IsNotFound(err):
+		return herdr.Agent{}, livenessGone
+	case err != nil:
+		return herdr.Agent{}, livenessUnknown
+	case agent.LaunchPending:
+		return agent, livenessAlive
+	}
+	shell, err := s.foregroundIsShell(ctx, paneID)
+	switch {
+	case herdr.IsNotFound(err):
+		return agent, livenessGone
+	case err != nil:
+		return agent, livenessUnknown
+	case shell:
+		return agent, livenessGone
+	}
+	return agent, livenessAlive
+}
+
+// foregroundIsShell reports whether a pane's foreground holds only a shell, with herdr's error.
+func (s *Service) foregroundIsShell(ctx context.Context, paneID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
+	defer cancel()
+	info, err := s.opts.Herdr.PaneProcessInfo(ctx, paneID)
 	if err != nil {
-		return herdr.Agent{}, false
+		return false, err
 	}
-	if !agent.LaunchPending && s.atShell(ctx, paneID) {
-		return agent, false
+	for _, process := range info.ForegroundProcesses {
+		if !shellNames[strings.TrimPrefix(filepath.Base(process.Name), "-")] {
+			return false, nil
+		}
 	}
-	return agent, true
+	return true, nil
 }
 
 func sleep(ctx context.Context, wait time.Duration) error {

@@ -353,11 +353,14 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
   after its last progress, lets the turn end (Claude queues the typed answer and it starts the next
   turn; without this the agent was nudged while its answer was on the way). A job already marked
   unresponsive with no progress since is let rest rather than nudged again.
-- **What counts as progress** (resets the budget): a tool call (PostToolUse), a `job_update` that
-  changes something, an ask, `done`, and a message or nudge from the human. Two refinements from
-  the stop test: `job_update(waiting=true)` is refused when the job has no open question (an agent
+- **What counts as progress** (resets the budget): a tool call (PostToolUse) that is not one of
+  crowsnest's own, a `job_update` that changes something, an ask, `done`, and a message or nudge
+  from the human. Two refinements from the stop test: `job_update(waiting=true)` is refused when the job has no open question (an agent
   told to "wait" answered every nudge with it, which reset the budget forever; it now has to
-  `ask`, which is the right thing), and repeating the same progress line is not progress.
+  `ask`, which is the right thing), and repeating the same progress line is not progress. Since
+  R2 (6.9) "changes something" is compared before and after: a `state` or `waiting` that already
+  held is a heartbeat, not progress, and the PostToolUse of a crowsnest tool (`mcp__crowsnest__*`,
+  or a lone `crowsnest …` shell command) is not progress either.
 - **Launch.** A builder with a git directory: `worktree.create` (branch `job/<n>-<slug>`, label
   `job-<n>`, optional `path` under `LaunchOptions.WorktreeRoot`), then `tab.create` with the
   job's env in the new workspace, because **worktree.create takes no pane env** (protocol 22). Any
@@ -373,7 +376,9 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
   code under review fixes was not touched.
 - **The orchestrator** takes jobs with no directory one at a time (an agent holds at most one
   running job): the oldest queued one is sent when it is idle or working and holds no running job,
-  with a header telling it to pass `job_id` (its MCP server has no `CROWSNEST_JOB`).
+  with a header telling it to pass `job_id` (its MCP server has no `CROWSNEST_JOB`). Since R2 the
+  job is reserved for it (pane, agent name and a dispatch claim) before the brief is typed, and
+  its `ask(job_id=…)` attaches the question to that job (6.9).
 - **Recovery** (`Service.Tick`, every 10 s, clock injected): held briefs, dialogs that cleared,
   restarts (`--resume` when the transcript exists, else a fresh session and the brief again; 3 an
   hour, then `failed`), retries ("continue" when idle: a limit at 5, 15, 30 minutes then hourly; an
@@ -390,6 +395,63 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
 - **`--demo`** seeds ten jobs (running in a worktree, nudged, stuck on a limit with a retry
   countdown, waiting on a question, at a dialog, unresponsive, blocked, done with evidence, failed,
   queued) and keeps them moving; the supervisor does not run there.
+
+### 6.9 As fixed in R2: lifecycle steps, and what the supervisor guarantees
+
+The R2 review (`reviews/R2-codex.md`, C01 to C12 and C16) found ways for both halves of the
+promise to break: a job could silently stop (a crash between two writes left a state no tick
+picked up), or loop (no-op updates reset the nudge budget). Most were one disease: acting on a
+row read before a call to herdr that takes seconds. The fixes, in `internal/jobs`:
+
+- **Lifecycle steps** (`lifecycle.go`, migration `0006_job_lifecycle.sql`). Every step that acts
+  outside crowsnest (launch, start or restart, typing a brief, dispatching to the orchestrator, a
+  retry's "continue", a nudge) first **claims** the job under the jobs lock: it rechecks what it
+  depends on on the fresh row and records `lifecycle_op`, `lifecycle_owner` (this process),
+  `lifecycle_at` and a bumped `lifecycle_gen`. Right before each external effect it checks the
+  claim still **holds**; it **finishes** (commits the outcome and clears the claim) only if it
+  still holds. A terminal transition clears the claim and bumps the generation, so a job cancelled
+  or finished meanwhile is never restarted, briefed, retried or nudged after the check (C05, C08).
+  Cancel now records `cancelled` first and sends Esc after.
+- **Stale claims** (an owner that is another, dead, process, or older than 10 minutes) are settled
+  by the tick by what the step was: a brief or a dispatch may have been typed, so it counts as
+  sent and is **never typed twice** (at most once, like answer delivery; the SessionStart hook
+  re-injects the brief, and the Stop hook and the backstop keep the agent going); a launch or
+  start leaves the pane for the tick to look at; a retry or nudge is dropped.
+- **No absorbing states** (C02). The tick sees every live job, a page at a time, never the board's
+  newest 300 (C16): a queued job with a pane is an interrupted launch (brief sent if the agent is
+  up, agent started if not); an agent confirmed gone is restarted whether or not its brief was
+  sent, within the hourly budget, so a start that keeps failing ends in `failed` with a notice.
+- **Liveness is three-valued** (C07): gone only on positive evidence (herdr says no such agent or
+  pane, or the pane is back at a bare shell); a failed lookup is unknown and changes nothing, so an
+  outage spends no restart budget and mints no token for an agent still running.
+- **Questions are reconciled on every pass** (C03), not only when something mutates the job: a
+  question settled while crowsnest was down still brings its job back from `needs_you`. All of it
+  reads one aggregate per job (`SummarizeJobQuestions`: open, blocking, and when an answer was last
+  typed back) and never the attachments (C12); a mutation reads it once and the Stop check uses
+  that same read.
+- **"Answer incoming" means delivered or genuinely pending** (C04): a typed answer's delivery
+  time, or for one not yet delivered and not failed, when it was claimed or settled. A failed or
+  abandoned delivery counts for nothing. A stop let through only for an incoming answer does not
+  stamp `last_stop_at`, so the backstop looks again when the two-minute grace runs out. A job that
+  goes idle for 10 minutes now also tells Jeff.
+- **Progress is real work** (C01, see 6.8).
+- **The orchestrator's assignment** (C05) is chosen and reserved in one critical section (the
+  orchestrator's held jobs and the oldest unassigned job are asked of the store directly), so two
+  dispatchers cannot pick one job twice or give it two; the pane binding exists before the brief
+  is typed, so its first `job_update` and its hooks find the job. A brief provably not typed puts
+  the job back in the queue.
+- **`ask(job_id)`** (C06) is sent to the server (`AskInput.job_id`) and checked against the token:
+  a job agent may name only its own job; the orchestrator only a live job whose pane is its pane.
+  Anything else is a 403.
+- **The backstop** (C09, C10) leaves a job on its retry schedule, or being restarted, to that
+  recovery (`Decide` has a `recovering` rule, and `BackstopJobs` skips them). `NudgeIfDue` takes
+  the job as the backstop saw it and does nothing if a Stop hook has run since (`last_stop_at`
+  changed); the nudge is claimed, and counted against the budget only once typed (or uncertain); a
+  send refused by a dialog or a draft spends nothing. A Stop hook that runs while crowsnest is
+  typing into the agent (a nudge, brief or retry: `input_incoming`) lets the turn end, since that
+  text starts the next one.
+- **A stale observation never clears a newer cause** (C11): "working again" clears a limit or API
+  error only if the row still carries the very error that was observed.
 
 ## 7. The orchestrator
 
@@ -820,6 +882,19 @@ The client sends a resize first; the server starts the process on that first res
 - macOS detail found while building: a killed client with unread output on its PTY blocks in
   exit until that output drains (`ps` state `E`), so the TUI bridge keeps reading (and
   discarding) after Close until the PTY reports EIO.
+- Linux detail found by CI: a write to the PTY master that is blocked because the client stopped
+  reading is not woken when the client dies (macOS fails it with EIO), and `creack/pty` hands
+  back a blocking descriptor, which closing the file cannot wake either. So the TUI bridge
+  re-opens the master as a non-blocking, poller-owned file (a close-on-exec duplicate), never
+  holds a lock across a PTY write or resize, and closes the PTY once the client is reaped; the
+  close wakes the blocked write with an error. Resizes go through `SyscallConn`, since
+  `pty.Setsize` calls `Fd` and would make the descriptor blocking again.
+- herdr's first-run screen: a machine whose herdr TUI was never opened (a CI runner, a fresh
+  devbox volume) shows an onboarding screen over the whole TUI, and it takes every key, ctrl+b q
+  included, until its "continue" (Enter) and the settings page that follows (Esc) are
+  dismissed; herdr then writes `onboarding = false` to its config. In the devbox the first
+  browser TUI is where the user meets it. The pane bridge is not affected. The TUI integration
+  test dismisses it when it is up (found running the suite on Linux, 2026-11-26).
 
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
@@ -829,6 +904,7 @@ The client sends a resize first; the server starts the process on that first res
 - `job_events(id, job_id, at, kind, summary, detail_json)`: state change, progress, nudge, hook, restart, question, message: the job's timeline. Kinds as built: `created`, `launch`, `state`, `progress`, `nudge`, `hook`, `stuck`, `retry`, `restart`, `question`, `message`, `notify`, `done`, `fail`, `child`, `session`
 - `questions.job_id`, `questions.wait` (was the asker blocking), `questions.delivered_at` (answer typed back). As built (migration `0002_questions.sql`): `id` is an integer shown as `q_<id>`; `expires_at` is always set; delivery bookkeeping is `delivery` (`type`, `poll` or `none`, decided at settling), `delivery_claimed_at` (the write-ahead mark), `delivered_at` and `delivery_error` (8.4)
 - `journal(id, at, kind, summary, detail_json)`: poke, skip, send, answer, restart, alert, backstop (migration `0005_journal.sql`, which also adds `jobs.last_stop_at`, the Stop hook's stamp the backstop reads)
+- `jobs.lifecycle_op`, `lifecycle_owner`, `lifecycle_at`, `lifecycle_gen` (migration `0006_job_lifecycle.sql`): the lifecycle claim (6.9); the same migration indexes `jobs(agent_name, state)`, `jobs(pane_id, state)` and `questions(job_id, status)`
 - `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), settings
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -1148,6 +1224,15 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 36. **The backstop shares the poker's loop and the jobs service's budget** (M8). Both watch agents
     settle and read the same screens; the nudge rule stays in one place (`Decide`), reached through
     an interface because `internal/jobs` imports `internal/orch`.
+37. **A step that acts outside crowsnest claims the job first** (R2, 6.9). Holding the jobs lock
+    across a herdr call would stall every hook (a start takes up to a minute, and a hook gives up
+    after 5 s), so the lock is held only to claim, to check the claim, and to commit. The claim is
+    persisted, so a crash leaves a record of what was in flight, and settled by what it was.
+38. **A brief whose typing is uncertain is not typed again** (R2). Typing it twice can double the
+    work; not typing it at all is covered by the SessionStart re-injection and the nudges. Same
+    rule as answers (8.4).
+39. **Only positive evidence of absence is a death** (R2-C07). A restart revokes the old start
+    token and spends budget; doing either on a lookup timeout harms a live agent.
 
 ## 18. Milestones
 
@@ -1195,6 +1280,9 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - The supervisor depends on Claude Code hook behaviour (Stop, SessionStart, StopFailure, Notification) as documented and probed on 2.1.332. Stop, SessionStart and PostToolUse are exercised by the stop test; StopFailure, Notification, PermissionDenied and SessionEnd follow the hooks reference and are covered by unit tests only.
 - A job agent in a folder Claude has not been told to trust stops at the trust prompt; the job shows `needs_you` and waits for someone to answer it in the terminal. A new worktree is a new folder.
 - The orchestrator holds one running job at a time; further jobs without a directory wait queued.
+- After a crash in the middle of typing a brief, the brief counts as sent and is not typed again (6.9). If it did not arrive, a Claude agent still has it from the SessionStart hook; an agent without hooks (Codex) is only nudged, and reads it with `crowsnest job get`.
+- A launch interrupted by a crash while herdr was creating the worktree can leave that worktree behind; the relaunch makes a new one (or fails on the branch name and shows `needs_you`/launch).
+- A restart mints a new start token, which revokes the agent's previous one. It now happens only once the old agent is confirmed gone (R2-C07); replacing tokens atomically per pane is R2-C15, in `internal/agentid`.
 - Codex jobs are launched but have no hooks: they are covered by the herdr-side backstop (M8 calls `NudgeIfDue`), not the Stop hook.
 - Pokes (M8): the agent-settled trigger is herdr's `done`/`blocked`; an agent that goes `idle` without passing through `done` is not reported. The timer reports a change in the standing list, not elapsed time, so a stuck job that stays stuck is pushed once (at its event) and then only when the list changes. Scheduled tasks (`tasks/*.md`) are not built; the precheck takes them as another reason source. A poke whose delivery was uncertain is not resent.
 - The backstop's "stop handled by a hook" test is time-based (a Stop hook stamp within 15 s before the agent was seen to settle). An agent whose hook works on one turn and fails on the very next within that window would miss one backstop nudge; the next idle minute catches it.

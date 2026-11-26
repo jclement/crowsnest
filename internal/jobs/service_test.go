@@ -16,6 +16,7 @@ import (
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
+	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -121,6 +122,16 @@ func argValue(args []string, flag string) string {
 		}
 	}
 	return ""
+}
+
+// backstopJob is a job as the backstop sees it now (its pane and Stop-hook mark).
+func (r *rig) backstopJob(id string) orch.BackstopJob {
+	r.t.Helper()
+	record, err := r.db.GetJob(context.Background(), mustParse(id))
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return orch.BackstopJob{ID: id, PaneID: record.PaneID, LastStopAt: record.LastStopAt}
 }
 
 func hasEvent(d Detail, kind, contains string) bool {
@@ -805,12 +816,12 @@ func TestNudgeIfDueUsesTheSameBudget(t *testing.T) {
 	for i := range 3 {
 		_ = r.fake.SetStatus(job.PaneID, herdr.StatusIdle)
 		r.clock.Advance(time.Minute)
-		nudged, err := r.svc.NudgeIfDue(ctx, job.ID)
+		nudged, err := r.svc.NudgeIfDue(ctx, r.backstopJob(job.ID))
 		if err != nil || !nudged {
 			t.Fatalf("backstop nudge %d: %v %v", i+1, nudged, err)
 		}
 	}
-	nudged, _ := r.svc.NudgeIfDue(ctx, job.ID)
+	nudged, _ := r.svc.NudgeIfDue(ctx, r.backstopJob(job.ID))
 	if d := r.get(job.ID); nudged || d.Cause != CauseUnresponsive {
 		t.Fatalf("fourth: nudged=%v %+v", nudged, d.Job)
 	}

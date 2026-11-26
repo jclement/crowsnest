@@ -284,7 +284,7 @@ func TestModelNamesAreStrict(t *testing.T) {
 	}
 }
 
-// The store keeps the origin (migration 0006).
+// The store keeps the origin (migration 0007).
 func TestOriginIsStored(t *testing.T) {
 	d := newDelegateRig(t, DelegationLimits{})
 	parent, caller := d.parent(CreateInput{Role: "lead"})

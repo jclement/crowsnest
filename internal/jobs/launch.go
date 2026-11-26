@@ -8,9 +8,9 @@
 //   - Either way: wait for the shell, write prompt.md, settings.json and mcp.json under
 //     <state>/jobs/<id>/, agent.start (name job-<n>), then write brief.md there and type one
 //     line naming it (briefs.go: a brief is never typed, R2-M1).
-//   - Without a directory: the orchestrator holds the job. It is sent the line naming the brief
-//     under a `[crowsnest job j_N]` header when it holds no other running job; otherwise the job
-//     waits queued and the supervisor tick dispatches it later.
+//   - Without a directory: the orchestrator holds the job. It is sent the brief under a
+//     `[crowsnest job j_N]` header when it holds no other running job; otherwise the job waits
+//     queued and the supervisor tick dispatches it later.
 //
 // An agent that stops at a start-up dialog (folder trust) puts the job in needs_you with cause
 // dialog; crowsnest never answers it. The tick sends the brief once someone has.
@@ -83,40 +83,52 @@ var zeroTime time.Time
 
 func newUUID() string { return uuid.NewString() }
 
-// launch gives a newly created job its agent. It runs in the background.
+// launch gives a newly created job its agent. It runs in the background. A job with no
+// directory goes to the orchestrator; one with a directory is claimed (opLaunch) for the whole
+// launch, so the tick, a second launch or a cancel cannot interleave with it.
 func (s *Service) launch(ctx context.Context, id string) {
 	if s.opts.Herdr == nil {
 		return
 	}
 	detail, err := s.Get(ctx, id)
 	if err != nil || detail.State != StateQueued || detail.Cause == CauseApproval {
-		return // a job held for the human's approval starts only once allowed (delegate.go)
+		// A job held for the human's approval starts only once allowed (delegate.go).
+		return
 	}
 	if detail.Dir == "" {
 		s.DispatchOrchestrator(ctx)
 		return
 	}
-	if err := s.startJobAgent(ctx, detail.Job); err != nil {
-		s.launchFailed(ctx, id, err)
+	cl, err := s.claimStep(ctx, id, opLaunch, func(r *store.JobRecord, _ *change) error {
+		if State(r.State) != StateQueued || r.PaneID != "" {
+			return errSkip // launched already; an interrupted launch with a pane is the tick's
+		}
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	if err := s.startJobAgent(ctx, cl, detail.Job); err != nil {
+		s.launchFailed(ctx, cl, err)
 	}
 }
 
-// launchFailed marks a job whose agent could not be started: needs_you, so Jeff sees it.
-func (s *Service) launchFailed(ctx context.Context, id string, err error) {
-	s.opts.Logger.Warn("launching a job agent", "job", id, "err", err)
-	_, _ = s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
-		if State(r.State).Terminal() {
-			return nil
-		}
+// launchFailed marks a job whose agent could not be started: needs_you, so Jeff sees it. A launch
+// that lost its claim (the job was cancelled meanwhile) records nothing.
+func (s *Service) launchFailed(ctx context.Context, cl claim, err error) {
+	if errors.Is(err, errClaimLost) {
+		return
+	}
+	s.opts.Logger.Warn("launching a job agent", "job", cl.id, "err", err)
+	s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
 		r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseLaunch), oneLine(err.Error(), 500)
 		c.event(EventLaunch, "Could not start the agent: "+oneLine(err.Error(), 200), nil)
 		c.notify = fmt.Sprintf("crowsnest: job %s could not start: %s", FormatID(r.ID), oneLine(err.Error(), 120))
-		return nil
 	})
 }
 
-// startJobAgent prepares a pane, starts the agent in it and sends the brief.
-func (s *Service) startJobAgent(ctx context.Context, job Job) error {
+// startJobAgent prepares a pane, starts the agent in it and sends the brief, under cl.
+func (s *Service) startJobAgent(ctx context.Context, cl claim, job Job) error {
 	pane, err := s.preparePane(ctx, job)
 	if err != nil {
 		return err
@@ -125,33 +137,40 @@ func (s *Service) startJobAgent(ctx context.Context, job Job) error {
 	if job.Engine == EngineClaude {
 		sessionID = uuid.NewString()
 	}
-	if _, err := s.mutate(ctx, job.ID, func(r *store.JobRecord, c *change) error {
+	if err := s.update(ctx, cl, func(r *store.JobRecord, c *change) {
 		r.PaneID, r.WorkDir, r.WorktreeBranch, r.AgentName, r.ClaudeSessionID = pane.paneID, pane.workDir, pane.branch, AgentName(job.ID), sessionID
 		summary := "Opened pane " + pane.paneID + " in " + pane.workDir
 		if pane.branch != "" {
 			summary += " (worktree, branch " + pane.branch + ")"
 		}
 		c.event(EventLaunch, summary, map[string]any{"pane": pane.paneID, "dir": pane.workDir, "branch": pane.branch})
-		return nil
 	}); err != nil {
 		return err
 	}
 	job.PaneID, job.WorkDir, job.SessionID = pane.paneID, pane.workDir, sessionID
-	return s.startInPane(ctx, job, false)
+	return s.startInPane(ctx, cl, job, false)
 }
 
-// startInPane writes the job's files and starts its agent in job.PaneID (a bare shell). resume
-// restarts Claude on job.SessionID with --resume. On success the brief (or, on resume, a nudge)
-// is sent.
-func (s *Service) startInPane(ctx context.Context, job Job, resume bool) error {
+// startInPane writes the job's files and starts its agent in job.PaneID (a bare shell), under
+// cl. resume restarts Claude on job.SessionID with --resume. Once it is up, the brief is typed
+// (or, on a resume of an agent that had its brief, a restart nudge), and the claim is finished.
+func (s *Service) startInPane(ctx context.Context, cl claim, job Job, resume bool) error {
+	if err := s.holds(ctx, cl); err != nil {
+		return err
+	}
 	files, err := s.writeJobFiles(ctx, job)
 	if err != nil {
+		return err
+	}
+	if err := s.holds(ctx, cl); err != nil {
 		return err
 	}
 	params := herdr.AgentStartParams{Name: AgentName(job.ID), Kind: job.Engine, PaneID: job.PaneID, Args: s.agentArgs(job, files, resume), TimeoutMS: startTimeoutMS}
 	agent, err := s.startAgent(ctx, params)
 	if errors.Is(err, herdr.ErrAgentNotReady) {
-		s.markDialog(ctx, job.ID, "The agent stopped at a start-up prompt (folder trust or login). Open its terminal and answer it; crowsnest sends the brief after that.")
+		s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
+			markDialogLocked(r, c, "The agent stopped at a start-up prompt (folder trust or login). Open its terminal and answer it; crowsnest sends the brief after that.")
+		})
 		return nil
 	}
 	if err != nil {
@@ -160,59 +179,84 @@ func (s *Service) startInPane(ctx context.Context, job Job, resume bool) error {
 	if session := sessionOf(agent); session != "" && job.Engine == EngineClaude && !resume {
 		job.SessionID = session
 	}
-	if resume {
-		return s.sendText(ctx, job.PaneID, AgentName(job.ID), "[crowsnest restart] You were restarted. "+NudgeText(job.ID))
-	}
-	return s.sendBrief(ctx, job)
-}
-
-// markDialog puts a job in needs_you because of a terminal dialog.
-func (s *Service) markDialog(ctx context.Context, id, detail string) {
-	_, _ = s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
-		if State(r.State).Terminal() || (State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseDialog) {
-			return nil
+	if resume && job.briefSent {
+		if err := s.holds(ctx, cl); err != nil {
+			return err
 		}
-		r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseDialog), detail
-		c.event(EventStuck, "Needs you: a dialog in the terminal", map[string]any{"pane": r.PaneID})
-		c.notify = fmt.Sprintf("crowsnest: job %s needs you at a terminal dialog", FormatID(r.ID))
+		sendErr := s.sendText(ctx, job.PaneID, AgentName(job.ID), "[crowsnest restart] You were restarted. "+NudgeText(job.ID))
+		s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
+			if sendErr != nil {
+				c.event(EventRestart, "Restarted; the restart note could not be typed: "+oneLine(sendErr.Error(), 160), nil)
+			}
+			if Cause(r.Cause) == CauseExited {
+				r.Stuck, r.Cause, r.CauseDetail = false, "", ""
+			}
+		})
 		return nil
-	})
+	}
+	return s.sendBrief(ctx, cl, job)
 }
 
-// sendBrief writes the job's brief file, types the one line that names it, and marks the job
-// running.
-func (s *Service) sendBrief(ctx context.Context, job Job) error {
+// markDialogLocked puts a job in needs_you because of a terminal dialog.
+func markDialogLocked(r *store.JobRecord, c *change, detail string) {
+	if State(r.State).Terminal() || (State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseDialog) {
+		return
+	}
+	r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseDialog), detail
+	c.event(EventStuck, "Needs you: a dialog in the terminal", map[string]any{"pane": r.PaneID})
+	c.notify = fmt.Sprintf("crowsnest: job %s needs you at a terminal dialog", FormatID(r.ID))
+}
+
+// sendBrief writes the job's brief file and types the one line that names it (briefs.go: a
+// brief is never typed, R2-M1), and marks the job running, under cl (moved to opBrief first, so
+// a crash while typing is known to be one: at most once). A typing that provably did nothing
+// leaves the brief unsent for the tick to try again.
+func (s *Service) sendBrief(ctx context.Context, cl claim, job Job) error {
 	path, err := s.writeBrief(job)
 	if err != nil {
 		return err
 	}
-	result, err := orch.Prompt(ctx, s.opts.Herdr, job.PaneID, orch.PromptRequest{Text: briefLine(job, path), ForceOverDraft: true, ExpectAgent: AgentName(job.ID)})
+	text := briefLine(job, path)
+	if cl.op != opBrief {
+		if cl, err = s.advance(ctx, cl, opBrief); err != nil {
+			return err
+		}
+	}
+	if err := s.holds(ctx, cl); err != nil {
+		return err
+	}
+	result, err := orch.Prompt(ctx, s.opts.Herdr, job.PaneID, orch.PromptRequest{Text: text, ForceOverDraft: true, ExpectAgent: AgentName(job.ID)})
+	outcome := typedOutcome(result, err)
 	var blocked *orch.BlockedError
-	if errors.As(err, &blocked) {
-		s.markDialog(ctx, job.ID, "A dialog is up in the agent's terminal, so the brief was not sent. Answer it in the terminal.")
+	switch {
+	case errors.As(err, &blocked):
+		s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
+			markDialogLocked(r, c, "A dialog is up in the agent's terminal, so the brief was not sent. Answer it in the terminal.")
+		})
+		return nil
+	case outcome == typedNo:
+		s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
+			c.event(EventLaunch, "The brief could not be typed yet: "+oneLine(err.Error(), 160), nil)
+		})
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("sending the brief: %w", err)
-	}
-	_, err = s.mutate(ctx, job.ID, func(r *store.JobRecord, c *change) error {
-		if State(r.State).Terminal() {
-			return nil
-		}
+	_, err = s.finish(ctx, cl, func(r *store.JobRecord, c *change) {
 		now := s.opts.Now()
 		r.BriefSent, r.StartedAt, r.LastActivityAt = true, now, now
 		r.State, r.Stuck, r.Cause, r.CauseDetail = string(StateRunning), false, "", ""
 		summary := "Brief sent to " + r.AgentName
-		if !result.Started {
+		switch {
+		case outcome == typedMaybe:
+			summary += " (crowsnest lost track of the send; it is not typed again)"
+		case !result.Started:
 			summary += " (typed; the turn had not visibly started yet)"
 		}
 		c.event(EventLaunch, summary, nil)
-		return nil
 	})
 	return err
 }
 
-// sendText types a message into a job's agent, provided its pane still holds agent.
+// sendText types a message into a job's agent, provided its pane still holds agent (R2-I5).
 func (s *Service) sendText(ctx context.Context, paneID, agent, text string) error {
 	_, err := orch.Prompt(ctx, s.opts.Herdr, paneID, orch.PromptRequest{Text: text, ForceOverDraft: true, ExpectAgent: agent})
 	return err
@@ -464,6 +508,12 @@ func sessionOf(agent herdr.Agent) string {
 
 // DispatchOrchestrator gives the oldest queued no-directory job to the orchestrator, when it is
 // ready and holds no other running job (an agent holds at most one running job, 6.1).
+//
+// The choice and the reservation happen in one critical section (R2-C05): the job gets the
+// orchestrator's pane and a dispatch claim before anything is typed, so two dispatchers cannot
+// pick the same job (or two jobs), and the orchestrator's first job_update already finds its job.
+// A brief that provably was not typed releases the job back to the queue; one whose typing is
+// uncertain counts as sent (at most once).
 func (s *Service) DispatchOrchestrator(ctx context.Context) {
 	if s.opts.Orchestrator == nil || s.opts.Herdr == nil {
 		return
@@ -472,38 +522,68 @@ func (s *Service) DispatchOrchestrator(ctx context.Context) {
 	if info.PaneID == "" || !info.Ready {
 		return
 	}
-	queued, err := s.opts.Store.ListJobs(ctx, []string{string(StateQueued), string(StateRunning)}, listLimit)
-	if err != nil {
+	cl, job, ok := s.reserveForOrchestrator(ctx, info.PaneID)
+	if !ok {
 		return
 	}
-	var next *store.JobRecord
-	for i := range queued {
-		record := queued[i]
-		if record.AgentName == OrchestratorName && State(record.State) == StateRunning {
-			return // it is busy with one
-		}
-		if record.Dir == "" && State(record.State) == StateQueued && record.AgentName == "" && !held(record) {
-			next = &queued[i] // ListJobs is newest first, so the last match is the oldest
-		}
-	}
-	if next == nil {
-		return
-	}
-	job := s.toJob(*next, 0)
 	path, err := s.writeBrief(job)
 	if err != nil {
 		s.opts.Logger.Warn("writing a brief for the orchestrator", "job", job.ID, "err", err)
+		s.finishQuietly(ctx, cl, func(r *store.JobRecord, _ *change) {
+			r.PaneID, r.AgentName = "", "" // back in the queue, untouched
+		})
 		return
 	}
-	if _, err := orch.Prompt(ctx, s.opts.Herdr, info.PaneID, orch.PromptRequest{Text: orchestratorLine(job, path), ExpectAgent: OrchestratorName}); err != nil {
+	if err := s.holds(ctx, cl); err != nil {
+		return
+	}
+	result, err := orch.Prompt(ctx, s.opts.Herdr, info.PaneID, orch.PromptRequest{Text: orchestratorLine(job, path), ExpectAgent: OrchestratorName})
+	outcome := typedOutcome(result, err)
+	if outcome == typedNo {
 		s.opts.Logger.Info("the orchestrator could not take a job yet", "job", job.ID, "err", err)
+		s.finishQuietly(ctx, cl, func(r *store.JobRecord, _ *change) {
+			r.PaneID, r.AgentName = "", "" // back in the queue, untouched
+		})
 		return
 	}
-	_, _ = s.mutate(ctx, job.ID, func(r *store.JobRecord, c *change) error {
+	s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
 		now := s.opts.Now()
-		r.PaneID, r.AgentName, r.BriefSent, r.StartedAt, r.LastActivityAt = info.PaneID, OrchestratorName, true, now, now
+		r.BriefSent, r.StartedAt, r.LastActivityAt = true, now, now
 		r.State = string(StateRunning)
-		c.event(EventLaunch, "Assigned to the orchestrator", map[string]any{"pane": info.PaneID})
-		return nil
+		summary := "Assigned to the orchestrator"
+		if outcome == typedMaybe {
+			summary += " (crowsnest lost track of the send; it is not typed again)"
+		}
+		c.event(EventLaunch, summary, map[string]any{"pane": r.PaneID})
 	})
+}
+
+// reserveForOrchestrator picks the oldest unassigned no-directory job and reserves it for the
+// orchestrator in paneID, unless the orchestrator already holds a running (or reserved) job. It
+// reads the store directly, not a page of the board (R2-C16).
+func (s *Service) reserveForOrchestrator(ctx context.Context, paneID string) (claim, Job, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held, err := s.opts.Store.CountJobsHeldBy(ctx, OrchestratorName, []string{string(StateQueued), string(StateRunning)})
+	if err != nil || held > 0 {
+		return claim{}, Job{}, false
+	}
+	next, ok, err := s.opts.Store.OldestUnassignedQueued(ctx)
+	if err != nil || !ok {
+		return claim{}, Job{}, false
+	}
+	var cl claim
+	job, err := s.mutateLocked(ctx, FormatID(next.ID), func(r *store.JobRecord, c *change) error {
+		return s.claimLocked(r, c, opDispatch, func(r *store.JobRecord, _ *change) error {
+			if State(r.State) != StateQueued || r.Dir != "" || r.AgentName != "" {
+				return errSkip
+			}
+			r.PaneID, r.AgentName = paneID, OrchestratorName
+			return nil
+		}, &cl)
+	})
+	if err != nil {
+		return claim{}, Job{}, false
+	}
+	return cl, job, true
 }

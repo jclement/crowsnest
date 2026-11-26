@@ -249,12 +249,42 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		writeQuota(w, time.Minute, message)
 		return
 	}
+	caller, ok := s.askAboutJob(w, r, caller, input.JobID)
+	if !ok {
+		return
+	}
 	question, err := s.questions.Ask(r.Context(), input, caller)
 	if err != nil {
 		s.writeQuestionError(w, r, err)
 		return
 	}
 	writeData(w, http.StatusCreated, question)
+}
+
+// askAboutJob attaches a question to the job it names (R2-C06). A job agent's token already names
+// its job, and it may name no other. The orchestrator's token names only its pane: it may name a
+// live job it holds (the job's pane is its pane), and the question then belongs to that job, so
+// the job's needs_you, its Stop check and its answer callback all see it. ok is false when a
+// refusal was written.
+func (s *Server) askAboutJob(w http.ResponseWriter, r *http.Request, caller questions.Caller, jobID string) (questions.Caller, bool) {
+	jobID = strings.TrimSpace(jobID)
+	switch {
+	case jobID == "" || jobID == caller.JobID:
+		return caller, true
+	case caller.JobID != "":
+		writeError(w, http.StatusForbidden, codeForbidden, fmt.Sprintf("You hold job %s; a question can only be about your own job. Leave job_id empty.", caller.JobID))
+		return caller, false
+	case caller.PaneID == "" || s.jobs == nil:
+		writeError(w, http.StatusForbidden, codeForbidden, "Only the agent holding a job can ask about it (no valid CROWSNEST_TOKEN came with this request). Leave job_id empty.")
+		return caller, false
+	}
+	job, err := s.jobs.Get(r.Context(), jobID)
+	if err != nil || job.PaneID != caller.PaneID || job.State.Terminal() {
+		writeError(w, http.StatusForbidden, codeForbidden, fmt.Sprintf("You do not hold a live job %s, so the question cannot be about it. Check the id in your [crowsnest job …] header, or leave job_id empty.", jobID))
+		return caller, false
+	}
+	caller.JobID = job.ID
+	return caller, true
 }
 
 // openQuota returns a refusal when the caller, or the inbox as a whole, has too many open

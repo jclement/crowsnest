@@ -39,10 +39,15 @@ type NudgeHistory struct {
 	Streak         int       // consecutive nudges with no progress between them
 	LastNudgeAt    time.Time // zero: never nudged
 	LastProgressAt time.Time // last tool call or job_update
-	// AnswerSettledAt is when one of the job's questions last settled with its outcome typed
-	// back into the agent (zero: never). An answer typed while the turn is ending is queued by
-	// Claude and starts the next turn, so a stop just after it is not an undeclared stop.
-	AnswerSettledAt time.Time
+	// AnswerIncomingAt is when an outcome of one of the job's questions was last typed back into
+	// the agent, or, for one still genuinely on its way, when it was settled (zero: none).
+	// Deliveries that failed count for nothing (R2-C04). An answer typed while the turn is ending
+	// is queued by Claude and starts the next turn, so a stop just after it is not an undeclared
+	// stop.
+	AnswerIncomingAt time.Time
+	// InputIncoming is true while crowsnest itself is typing into the agent (a brief, a retry or
+	// a nudge): that text starts the next turn, so this stop needs no nudge of its own (R2-C10).
+	InputIncoming bool
 }
 
 // answerGrace is how long after an answer was settled a stop is let through for it.
@@ -58,6 +63,8 @@ const (
 	RuleDeclared       Rule = "declared"        // blocked, needs_you, in_review or queued
 	RuleWaiting        Rule = "waiting"         // open questions, and nothing else workable
 	RuleAnswerIncoming Rule = "answer_incoming" // an answer is being typed in; it starts the next turn
+	RuleInputIncoming  Rule = "input_incoming"  // crowsnest is typing into the agent right now
+	RuleRecovering     Rule = "recovering"      // a limit, an API error or an exit has its own recovery
 	RuleAlreadyStuck   Rule = "already_stuck"   // already marked unresponsive; no new progress
 	RuleBudgetSpent    Rule = "budget_spent"    // MaxNudges with no progress: allow, escalate
 	RuleNudge          Rule = "nudge"           // refused: nothing declared
@@ -90,7 +97,18 @@ func Decide(job *Job, openQuestions int, input StopInput, history NudgeHistory, 
 	if openQuestions > 0 && job.Waiting {
 		return Decision{Allow: true, Rule: RuleWaiting, Streak: history.Streak}
 	}
-	if !history.AnswerSettledAt.IsZero() && now.Sub(history.AnswerSettledAt) < answerGrace && history.AnswerSettledAt.After(history.LastProgressAt) {
+	if job.Stuck && (job.Cause == CauseLimit || job.Cause == CauseServerError || job.Cause == CauseExited) {
+		// The retry schedule (or the restart) owns this job; a nudge would bypass its back-off,
+		// and a retry exhausted has already told Jeff (R2-C09).
+		return Decision{Allow: true, Rule: RuleRecovering, Streak: history.Streak}
+	}
+	if history.InputIncoming {
+		return Decision{Allow: true, Rule: RuleInputIncoming, Streak: history.Streak}
+	}
+	// Times are whole seconds in the store, so an answer in the same second as the last progress
+	// (the stop test's job_update(waiting) and its answer, often) counts as after it; the grace
+	// is short, and the backstop looks again when it runs out (R2-C04).
+	if !history.AnswerIncomingAt.IsZero() && now.Sub(history.AnswerIncomingAt) < answerGrace && !history.AnswerIncomingAt.Before(history.LastProgressAt) {
 		return Decision{Allow: true, Rule: RuleAnswerIncoming, Streak: history.Streak}
 	}
 	progress := !history.LastProgressAt.IsZero() && history.LastProgressAt.After(history.LastNudgeAt)
