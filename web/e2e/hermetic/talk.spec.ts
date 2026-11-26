@@ -45,7 +45,10 @@ const test = base.extend<{ fakeURL: string }>({
 
 test.use({
   permissions: ["microphone"],
-  launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=user-gesture-required"] },
+  // Chromium switches. WebKit on macOS ignores unknown arguments, but on Linux (CI) it refuses to
+  // start with "Unknown option", which failed every WebKit test in this file there.
+  launchOptions: async ({ browserName }, use) =>
+    use(browserName === "chromium" ? { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=user-gesture-required"] } : {}),
 });
 // The fake microphone is a Chromium switch; WebKit (Playwright's build) has a mock capture device
 // of its own. Mobile Chromium adds nothing here, so only desktop Chromium and WebKit run.
