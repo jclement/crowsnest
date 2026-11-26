@@ -230,7 +230,7 @@ func waitForServer(ctx context.Context, opts SessionOptions, exited <-chan error
 				exited = nil // exited cleanly: it may have daemonised, so keep probing the socket
 				continue
 			}
-			return nil, fmt.Errorf("herdr server for session %q exited during start-up (%v); see %s", opts.Name, err, logPath)
+			return nil, fmt.Errorf("herdr server for session %q exited during start-up; see %s: %w", opts.Name, logPath, err)
 		case <-deadline.C:
 			return nil, fmt.Errorf("herdr server for session %q did not answer within %s; see %s", opts.Name, opts.StartTimeout, logPath)
 		case <-ticker.C:

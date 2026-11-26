@@ -583,8 +583,8 @@ type eventIDs struct {
 // A frame that does not decode is skipped (empty Kind) rather than killing the stream.
 func parseEventLine(line []byte) (Event, error) {
 	var frame eventFrame
-	if err := json.Unmarshal(line, &frame); err != nil {
-		return Event{}, nil
+	if decoded := json.Unmarshal(line, &frame) == nil; !decoded {
+		return Event{}, nil // skipped, not fatal: see the doc comment
 	}
 	if frame.Error != nil {
 		return Event{}, &Error{Code: frame.Error.Code, Message: frame.Error.Message, Method: "events.subscribe"}

@@ -141,13 +141,23 @@ All **(verified)** unless noted.
 - **Addressing**: a named session's socket is `~/.config/herdr/sessions/<name>/herdr.sock` (respect `HERDR_CONFIG_PATH`'s directory if set; otherwise ask `herdr session list --json`, which returns `socket_path` per session).
 - **Starting**: if the socket does not answer `ping`, run `herdr --session <name> server` detached (own session/process group, stdio to a log file) and wait up to 10 s for `ping`. Crowsnest never calls `server.stop` or `session stop`.
 - **Wire protocol**: newline-delimited JSON. Request `{"id":"1","method":"ping","params":{}}`, response `{"id":"1","result":{...}}` or `{"id":"1","error":{"code","message"}}`. One short-lived connection per call; one long-lived connection for events. `herdr api schema --json` is the authority for parameter shapes (protocol 22).
-- **Methods used**: `ping`, `session.snapshot`, `workspace.create|list`, `tab.create|list`, `pane.list|get|read|process_info|run|send_keys`, `agent.start|get|list|prompt|read|send_keys|wait|rename`, `events.subscribe`.
+- **Methods used**: `ping`, `session.snapshot`, `workspace.create|list`, `tab.create|list`, `pane.list|get|read|process_info|send_input|send_keys`, `agent.start|get|list|prompt|read|send_keys|wait|rename`, `events.subscribe`. (There is no `pane.run` on the socket; `herdr pane run` is a CLI convenience. The client's `PaneRun` is `pane.send_input {pane_id, text, keys:["Enter"]}`, verified in M2.)
 - **Events**: `events.subscribe` with `{"subscriptions":[{"type":"pane.created"},…]}`. `pane.agent_status_changed`, `pane.output_matched` and `pane.scroll_changed` require a `pane_id`; the lifecycle types do not. Events are treated as invalidations: on any event, debounce 150 ms and refetch `session.snapshot`. A second subscription carries `pane.agent_status_changed` for every known pane and is rebuilt when the pane set changes. A 3 s snapshot poll is the fallback, and the recovery path after `events_lost` or a dropped connection.
 - **Agent states**: `idle`, `done` (both ready for input), `working`, `blocked` (a dialog), `unknown`. herdr sometimes reports a dialog as idle/done, so a dialog is also detected from the screen (section 8).
 - **Starting an agent**: `agent.start {name, kind:"claude", pane_id, args:[…], timeout_ms}` in a pane at a bare shell prompt (check `pane.process_info` foreground processes are only a shell; wait ~2 s after creating a workspace). The response carries `agent_session.value`, Claude's session id.
 - **Sending**: `agent.prompt {target, text, wait:{until:["working","blocked"], timeout_ms:30000}}`. Submission alone does not prove a turn started. `agent_blocked` means a dialog is up and nothing was sent. `agent.prompt` appends to whatever is already in the input box.
 - **Dialog answers**: one digit through `agent.send_keys`, no Enter.
 - **The Go package** `internal/herdr` defines a `Client` interface with two implementations: `socket` (real) and `fake` (in memory, scriptable; backs `--demo` and unit tests).
+
+**5.1 Wire details confirmed while building M2** (herdr 0.9.5, protocol 22):
+
+- Events arrive on the subscription connection as `{"event":"pane_created","data":{…}}` with no `id`, after a `{"id":…,"result":{"type":"subscription_started"}}` acknowledgement. Lifecycle event names use underscores (`workspace_created`, `pane_updated`); the per-pane ones keep dots (`pane.agent_status_changed`). Ids sit at the top of per-pane payloads and inside the described object (`data.pane.pane_id`) for lifecycle ones.
+- `events_lost` is an error frame on the subscription connection (`{"error":{"code":"events_lost",…}}`, "event subscription fell behind retained history; resubscribe and resync with session.snapshot"); the stream then ends.
+- Read sources on the socket are `visible`, `recent`, `recent_unwrapped`, `detection` (the CLI spells the third `recent-unwrapped`). `format: "ansi"` with `strip_ansi: false` keeps escapes.
+- Key names: `esc` (canonical; `escape` accepted), `ctrl+c`, digits, `Enter`. herdr validates every key before writing any.
+- Errors seen: `agent_not_found`, `pane_not_found`, `invalid_request` (also for an unknown method), plus the `agent_*` codes above. The client maps every error answer to a typed `*herdr.Error` matched by code.
+- The socket path comes from `herdr session list --json` (`socket_path`); a never-started session falls back to `~/.config/herdr/sessions/<name>/herdr.sock`, and the path is re-read once the server is up. A server that exits 0 during start-up is treated as possibly daemonised and the socket keeps being probed until the timeout.
+- The fleet cache coalesces events (the first event starts a 150 ms timer; later events in that window ride along) rather than resetting the timer on every event, so continuous pane output cannot starve the refetch. The 3 s poll runs always, not only while the streams are down; it is a few local socket calls.
 
 ## 6. Jobs: the unit of work, and why they do not stop
 
@@ -335,7 +345,10 @@ golden-file tests from real transcripts. If no transcript can be found, the view
 working; the UI labels it "queued"). When `blocked`, the composer is replaced by the dialog card
 (section 8). Before a send, the pane's input box is checked for a draft typed at the terminal
 (visible screen in ANSI, the `❯` line, dim ghost text ignored); if there is one the UI says so and
-asks before appending.
+asks before appending. As built in M2 (`fleet.DetectDraft`): the input line is the last `❯` (or
+`>` in the older bordered box) directly under a horizontal rule; its text and continuation lines
+down to the next rule are the draft, except cells drawn faint (SGR 2) or grey (SGR 90, a 256-colour
+grey, a mid-grey truecolour), and a lone reverse-video cell (the drawn cursor).
 
 **7.4 Pokes.** Triggers: the timer; another agent settling into `done` or `blocked` (held 45 s, or
 10 s for blocked, at most one push per 120 s, each state once); a question being answered or
@@ -386,8 +399,14 @@ option line exists), appears in the inbox as a dialog card: the screen text verb
 numbered option that sends that digit, and "open terminal". The human is reading the real screen,
 so the front door's refuse and deny lists are not needed for delivery; they are kept as a
 **warning badge** on options that match ("always allow", "don't ask again", force-push, `rm -rf`,
-…). A press is bound to the screen hash it was rendered from: if the screen changed, the press is
-rejected and the card refreshes. Multi-question forms get "open terminal" only.
+…), and the same phrases anywhere in the dialog body become dialog-level warnings. A press is bound
+to the screen hash it was rendered from: if the screen changed, the press is rejected (`409
+CONFLICT`) and the card refreshes. Multi-question forms (a `☐ … ✔ Submit` tab strip) and
+multi-select lists (`[ ]` options, where a digit toggles) are flagged `form` and get "open
+terminal" only. One more guard, added in M2: options with a live input line (the `❯` prompt under
+a rule) below them are an agent's numbered reply, not a dialog, because Claude hides the input
+box while a dialog is up. The options are the last run numbered 1, 2, 3…; the screen hash is
+SHA-256 over the ANSI-stripped visible screen with trailing spaces and blank lines removed.
 
 **8.3 Telling Jeff.** The tab title and nav badge show the open count; the page uses the browser
 Notification API when permitted; `--notify-url` gets a one-line POST for `blocking` items. Web Push
@@ -423,13 +442,13 @@ browser reconnects, gets `hello`, and refetches.
 | Route | Purpose |
 |---|---|
 | `GET /health` | Unauthenticated: `{status, version, update_available:false}` |
-| `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name) |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `say` events. On connect the client refetches state, so no replay |
-| `GET /fleet` | Snapshot: workspaces → tabs → panes, agents with status, cwd, title, has-dialog, has-transcript |
+| `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `say` events. On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed |
+| `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=` | Normalised conversation (orchestrator is target `orchestrator`) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft}` |
-| `POST /agents/{target}/keys` | `{keys:[…], screen_hash}` for dialogs and Esc/Ctrl+C |
-| `GET /agents/{target}/screen` | Current screen text, dialog parse, draft state, hash |
+| `POST /agents/{target}/keys` | `{keys:[…], screen_hash}` for dialogs and Esc/Ctrl+C. The screen is re-read and the keys are sent only if its hash still matches, else `409 CONFLICT` and nothing is sent. Only `esc`/`escape`/`ctrl+c` may omit the hash (an interrupt is for a screen that is changing). 1–16 keys of at most 32 characters |
+| `GET /agents/{target}/screen` | `{target, pane_id, name, kind, status, text, ansi, screen_hash, revision, dialog:{present, options:[{key, label, selected, warning?}], form, warnings}, draft:{input_found, present, text}}` from one ANSI read. `{target}` is an agent name or a pane id; a plain pane (no agent) works too |
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, budget?}`); detail with timeline (state changes, nudges, questions, restarts) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent, stop it, push it, retry after a failure, raise a cap |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
@@ -516,7 +535,7 @@ mise.toml  .goreleaser.yml  .github/workflows/{ci,release}.yml
 ```
 
 Go 1.27, `CGO_ENABLED=0`, `modernc.org/sqlite`, `github.com/coder/websocket`, `github.com/creack/pty`, `log/slog`.
-mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `lint`, `fmt`, `check`, `e2e`, `e2e:real`, `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
+mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`), `lint`, `fmt`, `check`, `e2e`, `e2e:real`, `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
 
 ## 15. Test strategy
 
@@ -524,7 +543,7 @@ mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`
 |---|---|---|
 | Go unit | Config precedence and refusals, auth and rate limit, host/origin middleware, transcript normaliser (golden files from real transcripts), dialog and draft detection (captured screens), poke precheck and gate, question lifecycle and long-poll, terminal frame codec, herdr client against a scripted NDJSON server. Table-driven, `-race` | `mise run test`, CI |
 | Supervisor unit | The disposition check as a pure function over (job state, open questions, hook input, nudge history): every row of the table in section 6.4, the three-nudge budget, progress resetting it, fail-open when the server is down, recovery schedules with a fake clock | `mise run test`, CI |
-| Go integration (`-tags integration`) | Real herdr in a session named `crowsnest-test-<random>`: start headless, snapshot, create workspace, run a command, events, pane control bridge, PTY bridge. Skipped with a clear message when herdr is absent | Local; CI if herdr installs cleanly on the runner |
+| Go integration (`-tags integration`) | Real herdr in a session named `crowsnest-test-<random>`: start headless, snapshot, create workspace, run a command, events, pane control bridge, PTY bridge. Skipped with a clear message when herdr is absent. M2 covers the client half (`internal/herdr/integration_test.go`); the bridges come with M5 | Local (`mise run test:integration`); CI if herdr installs cleanly on the runner |
 | Web unit | Vitest + Testing Library for the composer, question cards (single, multi, note), dialog card, markdown/mermaid safety | `mise run test`, CI |
 | E2E hermetic | Playwright against `crowsnest --demo`: login and lockout, chat send and live update, inbox answer flows, fleet navigation, theme, 375 px and desktop projects, no horizontal scroll, basic axe checks | `mise run e2e`, CI |
 | E2E real herdr | Playwright against a real instance on a throwaway session, no Claude: terminal WebSocket types a command and sees its output, pane view, fleet reflects a created tab, cross-origin WebSocket and POST are rejected, unauthenticated WebSocket is rejected | `mise run e2e:real`, local |

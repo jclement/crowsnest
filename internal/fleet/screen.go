@@ -17,6 +17,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -165,12 +166,7 @@ func lastOptionRun(lines []string) ([]DialogOption, int) {
 	return append([]DialogOption{}, run...), last
 }
 
-func itoa(n int) string {
-	if n < 10 {
-		return string(rune('0' + n))
-	}
-	return string(rune('0'+n/10)) + string(rune('0'+n%10))
-}
+func itoa(n int) string { return strconv.Itoa(n) }
 
 func isForm(lines []string) bool {
 	for _, line := range lines {
