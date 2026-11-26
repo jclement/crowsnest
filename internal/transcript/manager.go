@@ -191,6 +191,11 @@ func (m *Manager) poll(ctx context.Context, w *watcher, notify bool) {
 
 // follow points the watcher at the right transcript, resetting the conversation when the file
 // changes. It reports whether the conversation was reset.
+//
+// A new session id whose transcript does not exist yet (Claude writes it on the first prompt, so
+// a fresh conversation has none) drops the old transcript and goes back to the pane fallback, so
+// "New conversation" does not keep showing the old one. The same session's file vanishing keeps
+// what was read.
 func (m *Manager) follow(w *watcher) bool {
 	path := ""
 	if w.origin.SessionID != "" {
@@ -199,9 +204,12 @@ func (m *Manager) follow(w *watcher) bool {
 	switch {
 	case path == "" && w.tailer == nil:
 		return false
-	case path == "":
-		// The transcript vanished; keep showing what was read rather than flipping to pane text.
+	case path == "" && w.tailer.sessionID == w.origin.SessionID:
 		return false
+	case path == "":
+		w.tailer, w.paneText = nil, ""
+		w.conv.Reset(SourcePane, w.origin.SessionID)
+		return true
 	case w.tailer != nil && w.tailer.Path() == path:
 		return false
 	}

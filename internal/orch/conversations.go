@@ -31,7 +31,10 @@ func TranscriptLookup(client herdr.Client, o *Orchestrator) transcript.LookupFun
 		}
 		origin := transcript.Origin{PaneID: agent.PaneID, Cwd: firstNonEmpty(agent.Cwd, agent.ForegroundCwd), SessionID: sessionOf(agent, "")}
 		if o != nil {
-			if status := o.Status(); status.PaneID == agent.PaneID && origin.SessionID == "" {
+			// For its own pane the orchestrator's session id wins: it is what Claude was started
+			// with, and the watch takes herdr's value whenever that really changes (/clear),
+			// while right after a restart herdr can still be reporting the previous session.
+			if status := o.Status(); status.PaneID == agent.PaneID && status.SessionID != "" {
 				origin.SessionID = status.SessionID
 			}
 		}

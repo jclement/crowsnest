@@ -248,6 +248,18 @@ func TestManagerFollowsSessionChanges(t *testing.T) {
 		t.Fatalf("after session change = %+v", next)
 	}
 
+	// New conversation: a fresh session id with no transcript yet must not keep showing the
+	// old one.
+	origins.set("orchestrator", Origin{PaneID: "w1:p1", Cwd: cwd, SessionID: "third"})
+	empty, _ := manager.Messages(ctx, "orchestrator", next.Cursor, 0)
+	if !empty.Reset || empty.SessionID != "third" || len(empty.Messages) != 0 {
+		t.Fatalf("after a session change with no transcript yet = %+v", empty)
+	}
+	appendFile(t, Path(config, cwd, "third"), userLine("4", "first of the third"))
+	if third, _ := manager.Messages(ctx, "orchestrator", empty.Cursor, 0); !third.Reset || texts(third.Messages) != "first of the third" {
+		t.Fatalf("once the transcript appears = %+v", third)
+	}
+
 	if _, err := manager.Messages(ctx, "nobody", "", 0); !errors.Is(err, ErrNoAgent) {
 		t.Fatalf("unknown agent: %v", err)
 	}

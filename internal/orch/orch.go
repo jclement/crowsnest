@@ -197,12 +197,12 @@ func (o *Orchestrator) Ensure(ctx context.Context) (Status, error) {
 // ensureLocked is Ensure with the lifecycle lock held. resume chooses --resume over a fresh
 // session when a stored conversation exists.
 func (o *Orchestrator) ensureLocked(ctx context.Context, resume bool) (Status, error) {
-	agent, err := o.getAgent(ctx)
-	if err == nil {
-		return o.adopt(ctx, agent), nil
-	}
-	if !herdr.IsNotFound(err) {
+	agent, alive, err := o.liveAgent(ctx)
+	if err != nil {
 		return o.fail(fmt.Errorf("looking for the orchestrator agent: %w", err))
+	}
+	if alive {
+		return o.adopt(ctx, agent), nil
 	}
 	o.update(func(s *Status) { s.State, s.Detail = StateStarting, "" })
 	paneID, err := o.findShellPane(ctx)
@@ -222,7 +222,8 @@ func (o *Orchestrator) adopt(ctx context.Context, agent herdr.Agent) Status {
 func (o *Orchestrator) follow(agent herdr.Agent) Status {
 	return o.update(func(s *Status) {
 		s.PaneID = agent.PaneID
-		if session := sessionOf(agent, ""); session != "" {
+		// While Claude is launching, herdr may still report the previous session's id.
+		if session := sessionOf(agent, ""); session != "" && !agent.LaunchPending {
 			s.SessionID = session
 		}
 		s.State, s.Detail = stateOf(agent, s.State), ""
@@ -326,6 +327,23 @@ func (o *Orchestrator) restartsInLastHourLocked() int {
 	}
 	o.restarts = kept
 	return len(kept)
+}
+
+// liveAgent finds the orchestrator and says whether Claude is really running. herdr can keep
+// answering agent.get for a named agent after Claude has exited (seen in M4 right after /exit),
+// so an agent whose pane shows only a bare shell, and is not mid-launch, counts as gone.
+func (o *Orchestrator) liveAgent(ctx context.Context) (herdr.Agent, bool, error) {
+	agent, err := o.getAgent(ctx)
+	if herdr.IsNotFound(err) {
+		return herdr.Agent{}, false, nil
+	}
+	if err != nil {
+		return herdr.Agent{}, false, err
+	}
+	if !agent.LaunchPending && o.atShell(ctx, agent.PaneID) {
+		return agent, false, nil
+	}
+	return agent, true, nil
 }
 
 // getAgent is AgentGet for the orchestrator with the ordinary call timeout.

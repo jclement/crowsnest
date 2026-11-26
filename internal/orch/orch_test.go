@@ -299,3 +299,24 @@ func TestStartFailureIsReported(t *testing.T) {
 		t.Fatalf("status = %+v, err %v", status, err)
 	}
 }
+
+// TestLingeringAgentRecordCountsAsGone pins a real-herdr behaviour found in M4: right after /exit,
+// agent.get can still answer for the name while the pane is back at its shell.
+func TestLingeringAgentRecordCountsAsGone(t *testing.T) {
+	f := fake.New()
+	rig := newRig(t, f)
+	ctx := context.Background()
+	first, _ := rig.orch.Ensure(ctx)
+
+	_ = f.LingerAgent(first.PaneID)
+	rig.orch.Watch(ctx)
+	if status := rig.orch.Status(); status.State != StateIdle || len(f.Starts()) != 2 || status.Restarts != 1 {
+		t.Fatalf("watch did not restart a lingering record: %+v, starts %d", status, len(f.Starts()))
+	}
+
+	_ = f.LingerAgent(first.PaneID)
+	fresh, err := rig.orch.NewConversation(ctx)
+	if err != nil || fresh.SessionID == "" || fresh.SessionID == first.SessionID || len(f.Starts()) != 3 {
+		t.Fatalf("new conversation over a lingering record: %+v, %v, starts %d", fresh, err, len(f.Starts()))
+	}
+}

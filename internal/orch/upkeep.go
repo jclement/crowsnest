@@ -20,17 +20,17 @@ func (o *Orchestrator) Watch(ctx context.Context) {
 		return
 	}
 	defer o.lifecycle.Unlock()
-	agent, err := o.getAgent(ctx)
-	if err == nil {
+	agent, alive, err := o.liveAgent(ctx)
+	if err != nil {
+		o.opts.Logger.Debug("orchestrator watch: herdr not answering", "err", err)
+		return
+	}
+	if alive {
 		previous := o.Status().SessionID
 		status := o.follow(agent)
 		if status.SessionID != previous {
 			o.remember(ctx, "", status.SessionID) // /clear or a resume moved the conversation
 		}
-		return
-	}
-	if !herdr.IsNotFound(err) {
-		o.opts.Logger.Debug("orchestrator watch: herdr not answering", "err", err)
 		return
 	}
 	if o.Status().State == StateFailed {
@@ -88,7 +88,7 @@ func (o *Orchestrator) relaunch(ctx context.Context, resume bool) (Status, error
 	o.restarts = nil
 	o.mu.Unlock()
 	o.update(func(s *Status) { s.State, s.Detail = StateRestarting, "" })
-	if agent, err := o.getAgent(ctx); err == nil {
+	if agent, alive, err := o.liveAgent(ctx); err == nil && alive {
 		if err := o.stop(ctx, agent); err != nil {
 			return o.fail(err)
 		}

@@ -166,11 +166,7 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 	sessionID, resuming := o.chooseSession(ctx, resume)
 	args := o.startArgs(sessionID, resuming, instructions, settings)
 	o.opts.Logger.Info("starting the orchestrator", "pane", paneID, "session", sessionID, "resume", resuming)
-	startCtx, cancel := context.WithTimeout(ctx, startTimeoutMS*time.Millisecond+10*time.Second)
-	defer cancel()
-	agent, err := o.opts.Client.AgentStart(startCtx, herdr.AgentStartParams{
-		Name: Name, Kind: "claude", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS,
-	})
+	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: Name, Kind: "claude", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
 	if err == nil {
 		agent, err = o.waitForLaunch(ctx, agent)
 	}
@@ -185,6 +181,48 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 		}), nil
 	default:
 		return o.fail(fmt.Errorf("starting Claude in pane %s: %w", paneID, err))
+	}
+}
+
+// codeAgentNameTaken is herdr's answer to agent.start when another agent record holds the name.
+const codeAgentNameTaken = "agent_name_taken"
+
+// nameReleaseWait bounds how long a start waits for herdr to let go of a dead agent's name.
+const nameReleaseWait = 15 * time.Second
+
+// agentStart calls agent.start, coping with a stale name. herdr keeps a named agent's record for
+// a while after Claude exits (found in M4: a restart right after /exit was refused with
+// agent_name_taken), so the dead record's name is cleared and the start retried until herdr lets
+// go of it or nameReleaseWait passes. Only a record whose pane is at a bare shell is touched.
+func (o *Orchestrator) agentStart(ctx context.Context, params herdr.AgentStartParams) (herdr.Agent, error) {
+	deadline := o.opts.Now().Add(nameReleaseWait)
+	for {
+		startCtx, cancel := context.WithTimeout(ctx, startTimeoutMS*time.Millisecond+10*time.Second)
+		agent, err := o.opts.Client.AgentStart(startCtx, params)
+		cancel()
+		var herdrErr *herdr.Error
+		if !errors.As(err, &herdrErr) || herdrErr.Code != codeAgentNameTaken || o.opts.Now().After(deadline) {
+			return agent, err
+		}
+		o.releaseStaleName(ctx)
+		select {
+		case <-ctx.Done():
+			return agent, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// releaseStaleName clears the orchestrator name from a record whose Claude has exited.
+func (o *Orchestrator) releaseStaleName(ctx context.Context) {
+	stale, alive, err := o.liveAgent(ctx)
+	if err != nil || alive || stale.PaneID == "" {
+		return
+	}
+	renameCtx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
+	defer cancel()
+	if _, err := o.opts.Client.AgentRename(renameCtx, stale.PaneID, ""); err != nil {
+		o.opts.Logger.Debug("clearing a stale orchestrator name", "pane", stale.PaneID, "err", err)
 	}
 }
 

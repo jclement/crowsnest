@@ -231,9 +231,55 @@ func TestIntegrationClaudeOrchestrator(t *testing.T) {
 	}
 	t.Logf("assistant reply arrived %s after the prompt: %q", time.Since(sent).Round(time.Millisecond), reply)
 
+	// Restart resumes the same conversation; New conversation starts a fresh one. Neither sends
+	// a prompt, so neither costs tokens.
+	waitIdle(t, ts, o)
+	var restarted orch.Status
+	began := time.Now()
+	if code := call(t, ts, http.MethodPost, "/api/v1/orchestrator/restart", nil, &restarted); code != http.StatusOK {
+		t.Fatalf("POST restart = %d", code)
+	}
+	t.Logf("restart took %s: %+v", time.Since(began).Round(time.Millisecond), restarted)
+	if restarted.SessionID != status.SessionID || restarted.State == orch.StateFailed {
+		t.Fatalf("restart did not resume %s: %+v", status.SessionID, restarted)
+	}
+	var fresh orch.Status
+	began = time.Now()
+	if code := call(t, ts, http.MethodPost, "/api/v1/orchestrator/new", nil, &fresh); code != http.StatusOK {
+		t.Fatalf("POST new = %d", code)
+	}
+	t.Logf("new conversation took %s: %+v", time.Since(began).Round(time.Millisecond), fresh)
+	if fresh.SessionID == status.SessionID || fresh.SessionID == "" || fresh.PaneID != status.PaneID {
+		t.Fatalf("new conversation = %+v", fresh)
+	}
+	var page transcript.Page
+	call(t, ts, http.MethodGet, "/api/v1/agents/orchestrator/messages", nil, &page)
+	t.Logf("after new conversation: source=%s session=%s messages=%d", page.Source, page.SessionID, len(page.Messages))
+	for _, message := range page.Messages {
+		if strings.Contains(message.Text, "pineapple") {
+			t.Fatalf("the new conversation still shows the old one: %+v", page)
+		}
+	}
+
 	var final orch.Status
 	call(t, ts, http.MethodGet, "/api/v1/orchestrator", nil, &final)
 	fmt.Fprintf(os.Stderr, "final orchestrator status: %+v\n", final)
+}
+
+// waitIdle waits for the orchestrator's turn to end, so a restart does not interrupt it.
+func waitIdle(t *testing.T, ts *httptest.Server, o *orch.Orchestrator) {
+	t.Helper()
+	deadline := time.Now().Add(time.Minute)
+	for time.Now().Before(deadline) {
+		o.Watch(context.Background()) // serve runs this on a timer; the test has no Run loop
+		var status orch.Status
+		call(t, ts, http.MethodGet, "/api/v1/orchestrator", nil, &status)
+		if status.State == orch.StateIdle {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	t.Fatal("the orchestrator did not go idle")
 }
 
 func truncate(s string, n int) string {

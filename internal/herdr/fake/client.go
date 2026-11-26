@@ -277,9 +277,15 @@ func (f *Fake) AgentStart(_ context.Context, params herdr.AgentStartParams) (her
 		f.mu.Unlock()
 		return herdr.Agent{}, err
 	}
-	if p.agent != nil {
+	if !onlyShell(p.processes) {
 		f.mu.Unlock()
 		return herdr.Agent{}, &herdr.Error{Code: "pane_busy", Message: "pane is not at a shell prompt"}
+	}
+	for _, other := range f.panes {
+		if other.agent != nil && params.Name != "" && other.agent.Name == params.Name {
+			f.mu.Unlock()
+			return herdr.Agent{}, &herdr.Error{Code: "agent_name_taken", Message: "agent name " + params.Name + " is already used", Method: "agent.start"}
+		}
 	}
 	f.starts = append(f.starts, params)
 	session := sessionFromArgs(params.Args, fmt.Sprintf("fake-session-%s", strings.ReplaceAll(p.info.ID, ":", "-")))

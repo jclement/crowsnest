@@ -8,6 +8,8 @@
 package fake
 
 import (
+	"strings"
+
 	"github.com/jclement/crowsnest/internal/herdr"
 )
 
@@ -54,6 +56,35 @@ func (f *Fake) ExitAgent(paneID string) error {
 	f.mu.Unlock()
 	f.emit(herdr.Event{Kind: "pane_updated", PaneID: paneID, WorkspaceID: p.info.WorkspaceID})
 	return nil
+}
+
+// LingerAgent ends the agent in a pane the way real herdr sometimes shows it right after /exit:
+// the pane is back at its shell, but agent.get still answers for the name, with no session and
+// an unknown state.
+func (f *Fake) LingerAgent(paneID string) error {
+	f.mu.Lock()
+	p, err := f.paneLocked(paneID)
+	if err != nil || p.agent == nil {
+		f.mu.Unlock()
+		return herdr.ErrAgentNotFound
+	}
+	p.agent.AgentStatus, p.agent.AgentSession = herdr.StatusUnknown, nil
+	p.info.AgentStatus, p.info.AgentSession = herdr.StatusUnknown, nil
+	p.processes = []herdr.Process{{PID: 3000 + len(f.panes), Name: "zsh", Argv: []string{"-zsh"}, Cwd: p.info.Cwd}}
+	p.screen, p.ansi = shellPrompt(p.info.Cwd), ""
+	f.bumpLocked(p)
+	f.mu.Unlock()
+	return nil
+}
+
+// onlyShell reports whether a pane's foreground holds nothing but a shell.
+func onlyShell(processes []herdr.Process) bool {
+	for _, process := range processes {
+		if strings.TrimPrefix(process.Name, "-") != "zsh" && process.Name != "bash" && process.Name != "sh" {
+			return false
+		}
+	}
+	return true
 }
 
 // Starts returns every accepted agent.start, in order.
