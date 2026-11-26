@@ -13,6 +13,7 @@ import { listenForNavigation, registerServiceWorker } from "../lib/push";
 import { useLiveQueries } from "../lib/live";
 import { useFleet, useInboxSummary, useMe } from "../lib/queries";
 import type { StreamStatus } from "../lib/sse";
+import { useNoStrayFileDrops } from "./attach/useAttachments";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Footer } from "./Footer";
 import { navItems } from "./nav";
@@ -24,6 +25,7 @@ import { NowPlaying, SpeakToggle } from "./voice/SpeakMode";
 import { useSyncPlaybackRate } from "../lib/voice/settings";
 
 export function AppFrame() {
+  useNoStrayFileDrops();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });

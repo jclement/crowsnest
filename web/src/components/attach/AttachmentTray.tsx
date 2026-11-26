@@ -47,11 +47,11 @@ function ChipItem({ chip, onRemove, onRetry }: { chip: AttachmentChip; onRemove:
         </span>
       </span>
       {failed && (
-        <button type="button" onClick={onRetry} aria-label={`Retry ${chip.name}`} className="flex h-11 w-9 shrink-0 items-center justify-center rounded text-muted hover:bg-hover hover:text-heading md:h-7 md:w-7">
+        <button type="button" onClick={onRetry} aria-label={`Retry ${chip.name}`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted hover:bg-hover hover:text-heading md:h-7 md:w-7">
           <RotateCw className="h-4 w-4" aria-hidden />
         </button>
       )}
-      <button type="button" onClick={onRemove} aria-label={`Remove ${chip.name}`} className="flex h-11 w-9 shrink-0 items-center justify-center rounded text-muted hover:bg-hover hover:text-heading md:h-7 md:w-7">
+      <button type="button" onClick={onRemove} aria-label={`Remove ${chip.name}`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted hover:bg-hover hover:text-heading md:h-7 md:w-7">
         <X className="h-4 w-4" aria-hidden />
       </button>
       {chip.status === "uploading" && (

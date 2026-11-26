@@ -307,3 +307,21 @@ export function useFileDrop(target: RefObject<HTMLElement | null>, onFiles: (fil
   }, [target, enabled]);
   return over;
 }
+
+/**
+ * Stops a file dropped anywhere else in the app from making the browser leave the page to show
+ * it (its default for a drop nobody handled). Drop targets handle their own drops first.
+ */
+export function useNoStrayFileDrops() {
+  useEffect(() => {
+    const stop = (event: DragEvent) => {
+      if (carriesFiles(event) && !event.defaultPrevented) event.preventDefault();
+    };
+    window.addEventListener("dragover", stop);
+    window.addEventListener("drop", stop);
+    return () => {
+      window.removeEventListener("dragover", stop);
+      window.removeEventListener("drop", stop);
+    };
+  }, []);
+}

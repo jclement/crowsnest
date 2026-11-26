@@ -87,6 +87,9 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 		if err := startDemoQuestions(ctx, service, demo, logger); err != nil {
 			return nil, stop, err
 		}
+		if err := seedDemoAttachments(ctx, files, service, cfg.StateDir); err != nil {
+			logger.Warn("seeding the demo attachments", "err", err)
+		}
 	}
 	return service, stop, nil
 }
