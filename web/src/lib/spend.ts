@@ -257,3 +257,36 @@ export function bucketTurns(turns: SpendTurn[], maxBars = MAX_BARS): TurnBar[] {
   }
   return bars;
 }
+
+/**
+ * A by-job report narrowed to some of its rows (the Spend sheet's project filter), with the
+ * total summed again from what is left. The server groups by job, model or day only, so a
+ * project filter can narrow the by-job rows alone; cache-hit share is recomputed from the sums.
+ */
+export function filterReport(report: SpendReport, keep: (row: SpendRow) => boolean): SpendReport {
+  const rows = report.rows.filter(keep);
+  const add = (pick: (row: SpendRow) => number) => rows.reduce((sum, row) => sum + pick(row), 0);
+  const priced = rows.filter((row) => row.cost_usd !== null);
+  const input = add((row) => row.input_tokens);
+  const cacheRead = add((row) => row.cache_read_tokens);
+  const cacheWrite = add((row) => row.cache_write_tokens);
+  const promptTokens = input + cacheRead + cacheWrite;
+  const total: SpendRow = {
+    ...report.total,
+    measured: rows.some((row) => row.measured),
+    input_tokens: input,
+    output_tokens: add((row) => row.output_tokens),
+    cache_write_tokens: cacheWrite,
+    cache_read_tokens: cacheRead,
+    total_tokens: add((row) => row.total_tokens),
+    turns: add((row) => row.turns),
+    tool_calls: add((row) => row.tool_calls),
+    wall_seconds: add((row) => row.wall_seconds),
+    cost_usd: priced.length === 0 ? (rows.length === 0 ? 0 : null) : priced.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0),
+    cost_partial: rows.some((row) => row.cost_partial) || (priced.length > 0 && priced.length < rows.length),
+    unpriced_tokens: add((row) => row.unpriced_tokens),
+    cache_hit_share: promptTokens > 0 ? cacheRead / promptTokens : 0,
+    models: [...new Set(rows.flatMap((row) => row.models))],
+  };
+  return { ...report, rows, total };
+}

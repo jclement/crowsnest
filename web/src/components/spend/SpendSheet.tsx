@@ -3,12 +3,17 @@
 // and the header button that opens it showing today's and this week's totals. Every figure is
 // marked an estimate, with the price table's date and the note that subscriptions are not billed
 // per token. Reached from the Jobs view, the Chat menu and the command palette.
+//
+// A project filter (DESIGN.md 21.1) narrows the by-job breakdown to one project's jobs (or the
+// unfiled ones), from the job list's project ids; the server groups by job, model or day only,
+// so while a project is chosen the breakdown is by job.
 import { ArrowDown, ArrowUp, Coins, Download, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/cn";
-import { useSpendReport, useSpendSummary } from "../../lib/queries";
+import { useJobs, useProjects, useSpendReport, useSpendSummary } from "../../lib/queries";
 import {
   costText,
+  filterReport,
   formatTokens,
   formatUSD,
   rangeDates,
@@ -47,10 +52,10 @@ export function SpendButton({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-export function SpendSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function SpendSheet({ open, onClose, projectId }: { open: boolean; onClose: () => void; projectId?: number }) {
   return (
     <Sheet open={open} onClose={onClose} title="Spend (estimated)">
-      {open && <SpendPanel />}
+      {open && <SpendPanel projectId={projectId} />}
     </Sheet>
   );
 }
@@ -58,22 +63,59 @@ export function SpendSheet({ open, onClose }: { open: boolean; onClose: () => vo
 const rangeLabels: Record<SpendRange, string> = { today: "Today", week: "This week", "30d": "30 days" };
 const groupLabels: Record<SpendGroup, string> = { job: "By job", model: "By model", day: "By day" };
 
-export function SpendPanel() {
+/** "" every project, "0" unfiled, else a project id. */
+type ProjectChoice = string;
+
+export function SpendPanel({ projectId }: { projectId?: number } = {}) {
   const [range, setRange] = useState<SpendRange>("week");
-  const [group, setGroup] = useState<SpendGroup>("job");
+  const [chosenGroup, setGroup] = useState<SpendGroup>("job");
+  const [project, setProject] = useState<ProjectChoice>(projectId === undefined ? "" : String(projectId));
+  const projects = useProjects();
+  const jobs = useJobs();
+  const group: SpendGroup = project ? "job" : chosenGroup;
   const summary = useSpendSummary();
   const { from, to } = rangeDates(range, summary.data);
   const report = useSpendReport(group, from, to, !!summary.data);
+  const projectList = projects.data?.projects ?? [];
+  const shown = (() => {
+    if (!report.data || !project) return report.data;
+    const want = Number(project);
+    const owner = new Map((jobs.data ?? []).map((job) => [job.id, job.project_id ?? 0]));
+    return filterReport(report.data, (row) => owner.has(row.key) && owner.get(row.key) === want);
+  })();
   return (
     <div className="flex min-h-0 flex-col gap-2 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Tabs<SpendRange> id="spend-range" label="Range" className="w-full whitespace-nowrap sm:w-auto" value={range} onChange={setRange} items={(["today", "week", "30d"] as const).map((value) => ({ value, label: rangeLabels[value] }))} />
-        <Tabs<SpendGroup> id="spend-group" label="Group by" className="w-full whitespace-nowrap sm:w-auto" value={group} onChange={setGroup} items={(["job", "model", "day"] as const).map((value) => ({ value, label: groupLabels[value] }))} />
+        {!project && (
+          <Tabs<SpendGroup> id="spend-group" label="Group by" className="w-full whitespace-nowrap sm:w-auto" value={group} onChange={setGroup} items={(["job", "model", "day"] as const).map((value) => ({ value, label: groupLabels[value] }))} />
+        )}
+        {projectList.length > 0 && (
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            Project
+            <select aria-label="Project filter" value={project} onChange={(event) => setProject(event.target.value)} className="min-h-11 rounded border border-border-strong bg-surface px-2 text-xs text-heading md:min-h-7">
+              <option value="">All</option>
+              {projectList.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name}
+                </option>
+              ))}
+              <option value="0">Unfiled</option>
+            </select>
+          </label>
+        )}
       </div>
+      {project && <p className="text-2xs text-muted">Showing this project's jobs; the orchestrator's and leads' own conversations are left out.</p>}
       <TabPanel id="spend-range" value={range} className="flex min-h-0 flex-col">
-        <TabPanel id="spend-group" value={group} className="flex min-h-0 flex-col gap-2">
-          <ReportBody report={report.data} pending={report.isPending || summary.isPending} error={report.error ?? summary.error} retry={() => void report.refetch()} />
-        </TabPanel>
+        {project ? (
+          <div className="flex min-h-0 flex-col gap-2">
+            <ReportBody report={shown} pending={report.isPending || summary.isPending} error={report.error ?? summary.error} retry={() => void report.refetch()} />
+          </div>
+        ) : (
+          <TabPanel id="spend-group" value={group} className="flex min-h-0 flex-col gap-2">
+            <ReportBody report={shown} pending={report.isPending || summary.isPending} error={report.error ?? summary.error} retry={() => void report.refetch()} />
+          </TabPanel>
+        )}
       </TabPanel>
     </div>
   );

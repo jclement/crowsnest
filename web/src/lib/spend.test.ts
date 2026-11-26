@@ -79,3 +79,23 @@ describe("bucketTurns", () => {
     expect(bucketTurns(turns, 2).map((bar) => bar.cost === null)).toEqual([true, false]);
   });
 });
+
+describe("filterReport (the Spend sheet's project filter)", () => {
+  it("keeps the chosen rows and sums the total again", async () => {
+    const { filterReport } = await import("./spend");
+    const row = (key: string, cost: number | null, tokens: number) =>
+      ({
+        key, label: key, measured: true, input_tokens: tokens, output_tokens: 1, cache_write_tokens: 0, cache_read_tokens: tokens,
+        total_tokens: tokens * 2 + 1, turns: 1, tool_calls: 2, wall_seconds: 3, cost_usd: cost, cost_partial: false, unpriced_tokens: 0,
+        cache_hit_share: 0.5, models: ["sonnet"], first_at: null, last_at: null,
+      }) as import("./spend").SpendRow;
+    const report = { from: "2026-11-20", to: "2026-11-26", group: "job", rows: [row("j_1", 1, 10), row("j_2", 2, 20), row("j_3", null, 5)], total: row("total", 3, 35), prices_checked: "x", prices_source: "x", note: "" } as import("./spend").SpendReport;
+    const narrowed = filterReport(report, (r) => r.key !== "j_2");
+    expect(narrowed.rows.map((r) => r.key)).toEqual(["j_1", "j_3"]);
+    expect(narrowed.total.cost_usd).toBe(1);
+    expect(narrowed.total.cost_partial).toBe(true);
+    expect(narrowed.total.input_tokens).toBe(15);
+    expect(narrowed.total.turns).toBe(2);
+    expect(filterReport(report, () => false).total.cost_usd).toBe(0);
+  });
+});
