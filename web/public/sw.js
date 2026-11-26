@@ -79,7 +79,8 @@ function showNotice(notice) {
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
     actions: buttons,
-    data: { url: notice.url, kind: notice.kind, token: buttons.length > 0 ? notice.token : "" },
+    // The token rides only on a notification that shows its buttons.
+    data: buttons.length > 0 ? { url: notice.url, kind: notice.kind, token: notice.token } : { url: notice.url, kind: notice.kind },
   });
 }
 self.crowsnestShowNotice = showNotice;
@@ -132,7 +133,7 @@ async function answerFromNotification(data, action, tag) {
     renotify: false,
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
-    data: { url: safePath(data.url), kind: "result", token: "" },
+    data: { url: safePath(data.url), kind: "result" },
   });
 }
 self.crowsnestAnswer = answerFromNotification;

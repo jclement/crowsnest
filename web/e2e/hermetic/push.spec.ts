@@ -18,6 +18,7 @@
 // not the default headless shell: the shell reports Notification.permission "denied" whatever
 // grantPermissions says, and showNotification refuses (checked 2026-11-26).
 import type { BrowserContext, CDPSession, Page } from "@playwright/test";
+import { askAsAgent } from "../support/agent";
 import { mockPushManagerScript, startFakePush, type FakePush } from "../support/fake-push";
 import { expect, expectAccessible, isPhone, smallTapTargets, test } from "../support/fixtures";
 
@@ -151,4 +152,64 @@ test("the sheet passes axe and keeps tap targets at 44 px", async ({ page }, tes
   await expect(sheet.getByRole("switch", { name: /Questions/ })).toBeVisible();
   await expectAccessible(page, testInfo, "notifications sheet");
   if (isPhone(testInfo)) expect(await smallTapTargets(page, "[role=dialog]")).toEqual([]);
+});
+
+// Answering from a notification (DESIGN.md 8.7): a blocking confirm question is pushed with its
+// first two options as buttons and a single-use action token; the worker, pressed "No", posts the
+// token alone (no cookie) and the question is answered; the same token a second time is refused.
+test("a question answered from a notification's button, with a single-use token", async ({ page, context, baseURL, app }) => {
+  const sheet = await openNotifications(page);
+  await sheet.getByRole("button", { name: "Turn on for this device" }).click();
+  await expect(page.getByText("Notifications are on for this device")).toBeVisible();
+  const before = fake.requests.length;
+  const id = await askAsAgent(app, { title: "Deploy the docs site?", kind: "confirm", recommend: "yes", urgency: "blocking" });
+  await expect.poll(() => fake.requests.length, { timeout: 10_000 }).toBeGreaterThan(before);
+  const payload = JSON.parse(fake.decrypt(fake.requests.at(-1)!.body)) as {
+    title: string;
+    tag: string;
+    url: string;
+    actions: { action: string; title: string }[];
+    action_token: string;
+  };
+  expect(payload.tag).toBe(id);
+  expect(payload.actions.map((action) => action.action)).toEqual(["yes", "no"]);
+  expect(payload.action_token).toMatch(/^cna_[\w-]{43}$/);
+
+  const cdp = await context.newCDPSession(page);
+  const registration = await registrationId(cdp, `${baseURL}/`);
+  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+  await expect(async () => {
+    await cdp.send("ServiceWorker.deliverPushMessage", { origin: baseURL!, registrationId: registration, data: JSON.stringify(payload) });
+    await expect.poll(() => page.evaluate(async () => (await (await navigator.serviceWorker.ready).getNotifications()).length), { timeout: 3_000 }).toBe(1);
+  }).toPass({ timeout: 20_000 });
+  const shown = await worker.evaluate(async () => {
+    const scope = self as unknown as { registration: ServiceWorkerRegistration };
+    const [notification] = await scope.registration.getNotifications();
+    return { actions: (notification as unknown as { actions: { action: string }[] }).actions.map((a) => a.action), data: notification!.data as Record<string, string> };
+  });
+  expect(shown.actions).toEqual(["yes", "no"]);
+  expect(shown.data.token).toBe(payload.action_token);
+
+  // Press "No": the worker's own answer path, as notificationclick with an action runs it.
+  await worker.evaluate(async () => {
+    const scope = self as unknown as {
+      registration: ServiceWorkerRegistration;
+      crowsnestAnswer: (data: unknown, action: string, tag: string) => Promise<void>;
+    };
+    const [notification] = await scope.registration.getNotifications();
+    notification!.close();
+    await scope.crowsnestAnswer(notification!.data, "no", notification!.tag);
+  });
+  await expect
+    .poll(async () => ((await (await page.request.get(`/api/v1/questions/${id}`)).json()) as { data: { status: string; answer_value: string } }).data)
+    .toMatchObject({ status: "answered", answer_value: "no" });
+  const result = await page.evaluate(async () => (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body })));
+  expect(result).toEqual([{ title: "crowsnest: answered", body: "Answered: Deploy the docs site?" }]);
+
+  // The token is spent: a replay is refused, with no cookie involved either way.
+  const replay = await page.request.post("/api/v1/push/action", {
+    headers: { Origin: baseURL!, "X-Crowsnest": "1" },
+    data: { token: payload.action_token, action: "yes" },
+  });
+  expect(replay.status()).toBe(403);
 });
