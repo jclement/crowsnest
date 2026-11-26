@@ -62,15 +62,33 @@ run = [
 ]
 
 [tasks."test:integration"]
-description = "Go integration tests against real herdr, in throwaway crowsnest-test-* sessions (the client, worktree.create, the terminal bridges). Needs herdr installed"
+description = "Go integration tests against real herdr, in throwaway crowsnest-test-* sessions (the client, worktree.create, the terminal bridges, the fleet cache following events). Needs herdr installed"
 run = [
-  "go vet -tags integration ./internal/herdr/... ./internal/term/... ./internal/orch/... ./internal/jobs/...",
-  "CGO_ENABLED=1 go test -race -count=1 -tags integration -run Integration -v ./internal/herdr/... ./internal/term/...",
+  "go vet -tags integration ./internal/herdr/... ./internal/term/... ./internal/orch/... ./internal/jobs/... ./internal/fleet/...",
+  "CGO_ENABLED=1 go test -race -count=1 -tags integration -run Integration -v ./internal/herdr/... ./internal/term/... ./internal/fleet/...",
 ]
 
 [tasks."test:claude"]
 description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API and calls the ask MCP tool; and the stop test: three haiku job agents (an undeclared stop is refused, done stops cleanly, a non-blocking ask is answered and the job finishes)"
 run = "CROWSNEST_E2E_CLAUDE=1 CGO_ENABLED=1 go test -count=1 -tags integration -run IntegrationClaude -v -timeout 15m ./internal/orch/... ./internal/jobs/..."
+
+[tasks."test:clone"]
+description = "Prove a clean clone builds: clone HEAD into a temporary directory, then mise run setup and mise run build there (nothing from this checkout's node_modules, bin or web/dist). Slow: a full npm ci"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+src="$PWD"
+head="$(git -C "$src" rev-parse HEAD)"
+dir="$(mktemp -d "${TMPDIR:-/tmp}/crowsnest-clone.XXXXXX")"
+trap 'rm -rf "$dir"' EXIT
+git clone --quiet --no-local "$src" "$dir/crowsnest"
+git -C "$dir/crowsnest" checkout --quiet "$head"
+mise trust --quiet "$dir/crowsnest/mise.toml"
+mise -C "$dir/crowsnest" run setup
+mise -C "$dir/crowsnest" run build
+"$dir/crowsnest/bin/crowsnest" version
+echo "clean clone at ${head:0:7}: setup and build OK"
+"""
 
 [tasks.lint]
 description = "go vet, golangci-lint, gofmt check, tsc, eslint. Read-only"
