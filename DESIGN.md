@@ -87,6 +87,8 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | false | Start Claude job agents with Remote Control too (7.10) |
 | `--compact-at` | `CROWSNEST_COMPACT_AT` | `150000` | Compact the orchestrator past this many tokens; `0` off (7.9) |
 | `--fresh-at` | `CROWSNEST_FRESH_AT` | off | `HH:MM`: the daily hand-over and new conversation (7.9) |
+| `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Largest attachment, pasted, dropped or attached by an agent (8.6) |
+| `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Disk all attachments may take; past it the oldest unneeded files are deleted, else an upload is refused (8.6) |
 | `--allowed-host` | `CROWSNEST_ALLOWED_HOSTS` | derived | Extra Host/Origin names (reverse proxy, MagicDNS). Repeatable |
 | `--trusted-proxy` | `CROWSNEST_TRUSTED_PROXY` | none | `loopback`, an IP or a CIDR whose client-IP header is believed (4.2, R2-L2). Repeatable |
 | `--trusted-proxy-header` | `CROWSNEST_TRUSTED_PROXY_HEADER` | `x-forwarded-for` | The one header a trusted proxy's client is read from: `x-forwarded-for` (its last hop) or `cf-connecting-ip` (cloudflared only; 4.2, R3-L1) |
@@ -144,7 +146,8 @@ rebinding against `--no-auth` on localhost); secrets leaking into logs; agent ou
 10. **Child processes** get a scrubbed environment: every `HERDR_*` variable is removed and the session is always addressed by its explicit socket path, so crowsnest started from inside a herdr pane cannot drive the pane's session. Every `CROWSNEST_*` variable except the pane variables (`CROWSNEST`, `CROWSNEST_SESSION`, `CROWSNEST_SOCKET`, `CROWSNEST_JOB`) and every `ELEVENLABS_*` one is removed too. That covers the herdr server crowsnest starts (which spawns every pane and agent, so a prompt-injected `env` in any pane finds no secret), the TUI client and each pane-control process (R1 H1). **A herdr session crowsnest did not start keeps whatever environment its server was started with**: if that shell exported the password or the ElevenLabs key, every pane in it can read them. Start the session through crowsnest, or from a shell without them.
 11. **Resource limits** (R1 L3): request headers are capped at 32 KiB and must arrive within 10 s; a login body must arrive within 5 s; at most 128 connections are open at once across all listeners. Past the cap, new connections wait in the kernel's backlog until one closes rather than being refused, so the event stream and terminal sockets (which stay open for hours and so cannot have a request timeout) keep working, and the header and body deadlines make a slow or silent client give its slot back within seconds. Each non-loopback address may hold at most 32 of them; one more from it is closed at once, so a single unauthenticated peer can no longer take every slot (R1b N4). Loopback is exempt, because a local proxy (`tailscale serve`, a tunnel sharing the network namespace) carries every real user through it; with `--trusted-proxy` those users are capped one by one at the HTTP layer instead (4.2, R2-L2). An SSE frame's write deadline is cleared once the frame is flushed: over HTTP/2 an armed deadline resets an idle stream (R1b-C03).
 12. **Files** (R1 L5): the data and state directories are made `0700` at start even when they already existed with looser modes, and the database is created (or tightened to) `0600`; SQLite gives its `-wal` and `-shm` files the same mode. A `--password-file` that its group or others can read or write is refused (`chmod 600` it). A config file that holds `password` and is readable by others is a startup warning (move the password to `CROWSNEST_PASSWORD` or `--password-file`, or `chmod 600` the file).
-13. **TLS**: optional built-in cert/key; the documented path for a phone is `tailscale serve`, which also gives the secure context the microphone needs.
+13. **Attachments** (8.6): types are sniffed from the bytes; only raster images, PDF and plain text are served inline, and never under an active name; SVG, HTML and everything else are `Content-Disposition: attachment`; every file carries `nosniff` and (but an inline PDF) a sandboxing CSP. Blobs are named by hash under the 0700 data directory, never by a client's name. An agent can have crowsnest read a file only with a token and only inside its own directories (`os.Root`).
+14. **TLS**: optional built-in cert/key; the documented path for a phone is `tailscale serve`, which also gives the secure context the microphone needs.
 
 Residual risk, stated plainly: anyone with the password has a shell as the user. Basic password
 login over plain HTTP on a tailnet relies on WireGuard for confidentiality.
@@ -590,6 +593,7 @@ all through `termtext.Block`, unless noted):
 |---|---|---|
 | `httpd/conversation.go` handlePrompt | the human's Chat prompt (with the voice header for talk) | none needed: the human's words |
 | `jobs/actions.go` Message | `[crowsnest message j_N] ` + the human's text | as above |
+| `httpd/conversation.go`, `httpd/jobs.go` (attachments) | `Attached: <path> (type, size)` lines after a prompt or job message (8.6) | each line through `termtext.Clean`; the path is crowsnest's own copy, its name reduced to `[A-Za-z0-9._-]` |
 | `jobs/launch.go` sendBrief | one line naming the brief file | the path through `termtext.Clean`; the brief itself is never typed |
 | `jobs/launch.go` DispatchOrchestrator | one line naming the brief file | as above; the role through `Clean` |
 | `jobs/launch.go` startInPane (restart) | fixed `[crowsnest restart]` text | fixed |
@@ -1095,6 +1099,148 @@ Push (8.5) reaches subscribed devices with no tab open.
 - **A secure context is required**: localhost for development; on a tailnet `tailscale serve`
   (HTTPS on the MagicDNS name) or `--tls-cert`/`--tls-key`.
 
+**8.6 Attachments** (built on `wip/attach`; `internal/attach`, `internal/httpd/attachments.go`,
+`internal/agentapi/attachments.go`, `cmd/crowsnest/attachments.go`, migration
+`0010_attachments.sql`; the web app's `lib/attachments.ts`, `components/attach/`). Jeff works from
+a phone and a Mac: he pastes a screenshot, drops a file or attaches a photo when talking to the
+orchestrator, giving a job, messaging a job's agent or answering a question, and sees files agents
+attach to their questions and results.
+
+- **Storage.** `POST /api/v1/attachments` takes one file: the raw bytes with the name in
+  `X-Filename` (URL-encoded; what the web app sends, so it can show progress per file) or
+  `multipart/form-data` with a `file` part. Authenticated, with the usual Origin and
+  `X-Crowsnest` checks. The bytes go to `<data-dir>/attachments/<sha256>` (0600, in a 0700
+  directory), named by their hash, never by anything a client sent, so two uploads of one
+  screenshot are one file; the row (`attachments`: id `a_<24 hex>`, cleaned display name, sniffed
+  type, size, SHA-256, origin, owner, role, the agent's copy, times) says what each upload is.
+  An upload is pending (no owner) until a send names it, and can be named by one send only (a
+  double-clicked Send cannot deliver it twice; the loser gets 409).
+- **Type** comes from the bytes (`http.DetectContentType`, plus SVG found anywhere in the first
+  512 bytes, HEIC by its ISO brand, Markdown by its name because its bytes are plain text), never
+  from the client's `Content-Type`.
+- **Serving** (`GET /attachments/{id}`, `/thumb`, `/meta`; `GET /attachments?owner=job:j_3` or
+  `?answer=q_7`; `DELETE` for a pending upload). This origin holds a shell, so a file a browser
+  renders here is an XSS surface. **Inline** only: PNG, JPEG, GIF, WebP, BMP, PDF and plain text
+  (Markdown is served as `text/plain`), and only when the name does not claim an active type
+  (`.html`, `.svg`, `.xml`, `.js`, …: a text file called `page.html` is a download). **Everything
+  else is `Content-Disposition: attachment`**, SVG and HTML above all, whatever they are called,
+  with the sniffed `Content-Type`. Every response carries `nosniff`, and every one but an inline
+  PDF a `Content-Security-Policy: sandbox; default-src 'none'; …`, so even a browser that rendered
+  a download anyway would run no script and would sit in an opaque origin without the session.
+  (An inline PDF keeps the app's own CSP instead, because a sandboxed document is not expected
+  to host the browser's PDF viewer; that was reasoned, not tested, and opening a PDF in the
+  browser was not exercised.) The name goes into the header through
+  `mime.FormatMediaType`, so a name cannot add parameters. `?download=1` forces a download.
+  Ranges work (`http.ServeContent`). SVG is never a thumbnail or a picture in the web app.
+- **Thumbnails**: PNG, JPEG and GIF get a JPEG at most 320 px on its long side, made once per blob
+  at upload by a box filter over white (the standard library only; no new dependency). A picture
+  over 40 megapixels (checked with `DecodeConfig` before decoding) or one Go cannot decode (WebP,
+  HEIC) gets none and is shown as a file chip, or full size in the lightbox when inline.
+- **Limits**: `--attachment-max-mb` (25) per file (413 `TOO_LARGE`; a declared `Content-Length`
+  past it is refused before reading; the upload has its own 5-minute read deadline), 10 files per
+  message, job, answer, question or result, and `--attachment-quota-mb` (1024) for all blobs. An
+  upload that would pass the quota first deletes, oldest first, files nobody needs any more:
+  released ones, then uploads abandoned in a composer for over an hour; if that is not enough it
+  is refused (507 `QUOTA_FULL`, "… finish or cancel some jobs, or raise --attachment-quota-mb").
+- **Release.** A job's files are released when it reaches done, failed or cancelled; a question's
+  (the agent's files) when it is answered, expires or is cancelled; files sent to the orchestrator
+  or to a plain pane a week after they were sent (they have no settling event); a pending upload
+  never sent is deleted after a day. Release removes the agent's copy at once; the blob stays,
+  viewable in the browser, until the quota needs the room. (There is no job deletion in v1, so
+  "deleting a job" is "the job settling".) `cmd/crowsnest/attachments.go` follows the hub's `job`
+  and `question` events for this, and reconciles at start and every 10 minutes (a job or question
+  that settled while crowsnest was down, or an event a dropped subscription lost);
+  `attach.Service.Run` sweeps every 10 minutes.
+
+**Getting files to an agent.** Agents read files from disk, so a file sent to one becomes a copy
+in that agent's **inbox** under the state directory, and one line is typed for it after the
+message: `Attached: <path> (image/png, 240 KB)` (through `termtext.Clean`, like everything typed
+into a terminal). The copy is `<attachment id>-<name>` with the name reduced to
+`[A-Za-z0-9._-]` (no hidden files, nothing that reads as a flag), 0600, created exclusively without
+following a link; no component of the inbox path under the state directory may be a link.
+
+| Sent from | Inbox (`attach.Layout`) | How the agent learns of it |
+|---|---|---|
+| Chat to the orchestrator | `<state>/orchestrator/attachments/` | lines after the prompt |
+| A new job with a directory; its messages | `<state>/jobs/j_N/attachments/` | the brief file lists them ("Files given with this brief"); lines after a message |
+| A new job with no directory (the orchestrator holds it) | the orchestrator's inbox (owned by the job) | the brief file |
+| An answer | the asker's: its job's, the orchestrator's, else its pane's | `(attached: <path> (type, size), …)` in the `[crowsnest answer q_N]` line; `answer_attachments` (with paths) in `GET /questions/{id}` for an asker on the long-poll |
+| Fleet's Chat to an agent crowsnest did not start | `<state>/panes/<pane>/attachments/` | lines after the prompt |
+
+A send that provably typed nothing (a dialog, a draft, an agent not found) takes its files back:
+the copies go and the uploads are pending again, so "Send anyway" or a retry can name them.
+
+**Will Claude read them?** Probed on Claude Code 2.1.332 (haiku) with `claude -p`: an image
+outside the working directory is read without a prompt under `auto` (the classifier allows it),
+and refused under `default` ("a permission request … that hasn't been granted"). So every
+Claude agent crowsnest starts gets a Read allow rule for its own inbox in its `--settings`
+(`agentcfg.AllowRead`): the orchestrator `Read(//<state>/orchestrator/attachments/**)`, a job
+agent its `jobs/j_N/attachments`. Claude matches a rule against the path **as written**, not
+resolved (`Read(//tmp/x/**)` allowed `/tmp/x/a.png`; `Read(//private/tmp/x/**)` did not), so the
+rule is given for the path crowsnest types and again for its resolved form when that differs.
+**Verified** by `mise run test:claude` (`internal/orch/attach_integration_test.go`): a PNG with
+the word PELICAN drawn in it, uploaded and sent with a prompt to a haiku orchestrator under
+`default`, was read with no dialog and answered "PELICAN" in under 8 s. Claude Code shows a
+picture it reads to the model, so a pasted screenshot is seen, not just named. An agent
+crowsnest did not start has no such rule; under `default` it will ask, in its terminal.
+
+**Agents attaching things.** The `ask` tool and `crowsnest ask` take `attachments: [paths]`
+(`--attach` on the CLI); `done` and `crowsnest job done --attach` likewise. The CLI and the MCP
+server make a relative path absolute against their own working directory (the agent's); the
+server reads a file **only** for a caller with a token, and only inside that caller's roots
+(`AttachRoots`: the orchestrator's working directory and `<state>/orchestrator`; a job's work
+directory, requested directory and `<state>/jobs/j_N`), through `os.Root`: the open is relative
+to a handle on the root, and the kernel walk refuses `..` above it and any link whose target
+leaves it, so there is no check-then-open to race. A path with a `..` element is refused outright;
+only regular files, at most the size limit. One bad path refuses the whole set and nothing is
+stored. The files go on the question card (pictures inline with a lightbox, others as download
+chips) or the job's Files card ("Attached to the result").
+
+**The web app.** Every box that talks to an agent (Chat's composer, the job box and its full
+form, a job's message box, a question's note) has the same parts (`useAttachments`):
+
+- **Paste**: files on the clipboard (Cmd+V of a screenshot) become chips; a screenshot named
+  `image.png` by the browser is renamed `pasted-<date>-<time>.png`. A **long paste** (over 2,000
+  characters or 40 lines) becomes `pasted-….txt` (or `.md` when it looks like Markdown) by default,
+  because long pastes into a terminal are fragile; a toast offers "Paste as text instead", which
+  removes the chip and puts the text at the cursor.
+- **Drop** on the box, or anywhere on the conversation pane in Chat and Fleet, with a dashed drop
+  target while files hover; a file dropped anywhere else in the app is ignored rather than
+  opened by the browser.
+- **Paperclip**: a file picker with no `accept` and no `capture`, which on iOS and Android offers
+  the photo library, the camera and files; on a touch screen a camera button beside it has
+  `accept="image/*" capture="environment"` and opens the camera directly.
+- **Chips**: a preview (from the file itself, before the upload finishes) or a file icon, name,
+  size, upload progress (XMLHttpRequest, since fetch reports none), Retry on failure, Remove
+  (cancels a running upload, deletes a finished one). Limits from `/auth/me` (`features.
+  attachments`) refuse a file before uploading it. **Sending waits** until every chip has
+  finished, and says so; a file alone, with no words, is a send.
+- **Showing**: a user message's `Attached:` lines become thumbnails and chips (the id in the copy's
+  name finds the attachment; a line naming any other path stays text, and nothing is ever fetched
+  by path); a question shows the agent's files and, once answered, the human's; a job has a Files
+  card grouped by what each file was for. An `attachment` SSE event (`{owner}`) refreshes them.
+- **Not done**: the command palette's "Give job" and "Send to orchestrator" take no files (left as
+  they were); a tool card that names an image an agent wrote shows no thumbnail (doing so would
+  mean importing a file by path on the browser's request, which is exactly what the server
+  refuses to do; the agent can `ask` or `done` with it instead).
+
+**Tests**: `internal/attach` (sniffing, inline rules, limits, dedupe, thumbnails and the
+decompression bomb, quota cleanup order, release and sweep, inbox links refused, confinement:
+absolute paths outside, `..`, a link to a file outside, a file through a linked directory, a
+relative path, a directory, too large, a root given through a link), `internal/httpd`
+(`attachments_test.go`: authentication, CSRF, raw and multipart uploads, 413/507, every
+inline-or-attachment case with HTML and SVG under every name, the disposition header, a prompt's
+lines and copies, the take-back on a draft, an answer's files in the typed line),
+`internal/agentapi` (ask and done with files: inside, outside, links, no token, another agent's
+directory), `internal/jobs` (the brief lists its files; agents cannot pass uploads), Vitest
+(`ComposerAttachments.test.tsx`: progress and the held send, retry, cancel, the size limit, long
+paste and its undo, drop), Playwright (`e2e/hermetic/attachments.spec.ts`, all three projects:
+paste into Chat through a synthetic paste event, drop on the job box, the seeded question with a
+screenshot and a report, long paste to file, HTML and SVG never inline; screenshots
+`web/screenshots/attach-*.png`), and the real-Claude image check above. `--demo` attaches a drawn
+screenshot and a Markdown report to the seeded question "Which findings should the builder fix
+before merge?".
+
 ## 9. Agent-side CLI
 
 The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identified by
@@ -1102,11 +1248,11 @@ The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identif
 
 | Command | Does |
 |---|---|
-| `crowsnest ask --file q.json [--wait] [--timeout 12h]` | Post a question. Without `--wait` it prints the id and returns; the answer is typed to the asker later. With `--wait`, block until settled and print `{status, answer_value, answer_note}`. Exit 0 answered, 3 expired/cancelled, 1 error |
+| `crowsnest ask --file q.json [--wait] [--timeout 12h] [--attach file]` | Post a question (`attachments` in the file, or `--attach`, repeatable: files shown with it, 8.6). Without `--wait` it prints the id and returns; the answer is typed to the asker later. With `--wait`, block until settled and print `{status, answer_value, answer_note}`. Exit 0 answered, 3 expired/cancelled, 1 error |
 | `crowsnest question <id>` | A question with its whole answer as JSON (R1b-C01): what a too-long answer line points to |
 | `crowsnest notify "text" [--urgency]` | A `notice` question (no answer needed) |
 | `crowsnest say "sentence"` | Speak now in talk mode (progress lines); no-op when off |
-| `crowsnest job update|done|fail|get|create|list` | The job protocol of section 6.2 for agents without MCP (Codex) and for scripts. The job is `CROWSNEST_JOB` unless `--job` is given |
+| `crowsnest job update|done|fail|get|create|list` | The job protocol of section 6.2 for agents without MCP (Codex) and for scripts. The job is `CROWSNEST_JOB` unless `--job` is given; `done --attach file` attaches files to the result (8.6) |
 | `crowsnest hook <event> [--job j_<n>] [--socket PATH] [--token-file PATH]` | Claude Code hook entry point (section 6.3): stdin JSON to the server with a 5 s timeout, the server's decision to stdout; silent success when the server is unreachable, slow, or anything else fails |
 | `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done`, `fail`, `job_create`, `job_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
 
@@ -1129,7 +1275,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /health` | Unauthenticated: `{status, version, update_available, latest_version?, release_url?}` (16.1) |
 | `POST /admin/update` | Self-update from the browser (16.1): verify, install, answer, exit for a supervisor to restart |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`, and the instance's `name`, 7.10) |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say`, `attachment` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
@@ -1149,6 +1295,7 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `POST /voice/read` `{question_id}` → `{text_id}`; `POST /voice/reply` `{target, message_id}` → `{text_id, text}` | A question, or a reply's SAY line, made speakable (13.1, 13.2). 404 when disabled |
 | `GET`/`PUT /voice/settings`, `GET /voice/voices`, `POST /voice/preview` `{voice_id, speed, model}` → `{text_id, playback_rate}` | Voice, speed and model of spoken replies, the account's voices, and a preview (13.3). 404 when disabled |
+| `POST /attachments` (raw body + `X-Filename`, or multipart `file`) → `201` the pending attachment; `GET /attachments/{id}` (the bytes), `/thumb`, `/meta`; `GET /attachments?owner=job:j_3[&role=]` or `?answer=q_7`; `DELETE /attachments/{id}` (pending only) | Attachments (8.6). `POST /agents/{target}/prompt`, `POST /jobs`, `POST /jobs/{id}/message` and `POST /questions/{id}/answer` take `attachments: [ids]`; questions carry `attachments` and `answer_attachments`; `/auth/me` reports `features.attachments` `{max_bytes, max_files}`; an `attachment` event `{owner}` says an owner's files changed |
 | `GET /push/key`, `GET`/`PUT /push/settings`, `POST`/`DELETE /push/subscriptions`, `DELETE /push/subscriptions/{id}`, `POST /push/test` | Web Push (8.5) |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
 
@@ -1225,6 +1372,7 @@ The client sends a resize first; the server starts the process on that first res
 - `jobs.root_dir` (migration `0008_job_root.sql`, R3-H1): the resolved directory a job's children may use without asking, recorded when crowsnest opens its pane; `''` grants nothing
 - `jobs.lifecycle_op`, `lifecycle_owner`, `lifecycle_at`, `lifecycle_gen` (migration `0006_job_lifecycle.sql`): the lifecycle claim (6.9); the same migration indexes `jobs(agent_name, state)`, `jobs(pane_id, state)` and `questions(job_id, status)`
 - `push_subscriptions(id, endpoint, p256dh, auth, user_agent, created_at, last_success_at, last_failure_at, failures)` (migration `0009_push.sql`, 8.5); `kv` keys `push.vapid` and `push.settings`
+- `attachments(id, name, type, size, sha256, has_thumb, origin, origin_pane, owner_kind, owner_id, role, ref, path, created_at, attached_at, released_at)` (migration `0010_attachments.sql`, 8.6): one row per upload or agent file; the bytes are `<data-dir>/attachments/<sha256>` (and `.thumb.jpg`); `owner_kind` is `''` (pending), `job`, `orchestrator`, `pane` or `question`; `role` is `brief`, `message`, `prompt`, `answer` (with `ref` the question), `ask` or `result`; `path` is the agent's copy
 - `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), settings
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -1576,6 +1724,7 @@ internal/transcript/         locate, tail, normalise Claude JSONL
 internal/questions/          store, long-poll, expiry
 internal/term/               PTY bridge, pane-control bridge
 internal/voice/              ElevenLabs client
+internal/attach/             attachments: blobs, sniffing, thumbnails, quota, agents' inboxes, confined agent files (8.6)
 internal/push/               Web Push: VAPID keys, subscriptions, SSRF-guarded sender, notice watcher
 internal/agentapi/           unix-socket server, the CLI client, the stdio MCP proxy
 internal/update/             self-update: GitHub release check, Sigstore + checksum verification, install
@@ -1825,6 +1974,24 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
     sentence per reply costs a few tokens; it doubles as the caption. Whether it is heard is the
     browser's business (a remembered switch), and nothing is synthesised unless a browser asks.
 
+61. **Attachments are files in the agent's inbox, named by a typed line** (8.6). Agents read files
+    from disk, and Claude shows a picture it reads to the model; a path in one clean line is what
+    the terminal can carry, where pasting an image into a pane cannot be done at all. The copy is
+    under the state directory, not the agent's working directory, so nothing is written into a
+    repository; a Read allow rule per inbox keeps `default` mode from asking.
+62. **The server never serves a path** (8.6). The web app finds a typed line's file by the
+    attachment id in the copy's name and fetches `/attachments/{id}`; a tool card naming an image
+    an agent wrote gets no thumbnail, because "show me this path" is the arbitrary file read the
+    agent side refuses too. Agents attach files explicitly (`ask`, `done`), inside their own
+    directories only.
+63. **Inline is an allowlist, decided by the bytes and the name together** (8.6). A browser
+    renders by type, the type is sniffed, and a name that claims an active type turns an
+    otherwise harmless file into a download; everything off the list is a download with a sandbox
+    CSP, so a mistake in the list fails closed.
+64. **A long paste becomes a file by default** (8.6). Long pastes into a terminal are fragile
+    (bracketed paste, line limits, a stray escape), and a file is what the brief and message paths
+    already prefer (decision 41); the undo is one tap away.
+
 ## 18. Milestones
 
 Each is one builder (Opus) in a herdr worktree; at most two build at once; each ends green on `mise run check`.
@@ -1908,6 +2075,15 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
   draws box drawing and powerline itself and would close them, at the cost of a GPU context per
   terminal. Not checked on a real iPhone (WebKit in Playwright only). Material Design icons are
   about 6,900 glyphs in 54 chunks; a prompt that uses many of them fetches several.
+- **Attachments** (8.6): nothing is verified on a real phone; the paperclip and camera
+  inputs, Safari's paste of a screenshot and drag and drop were exercised in Playwright's
+  Chromium and WebKit through synthetic events only (real clipboards and file pickers are not
+  available to tests). HEIC photos (an iPhone's camera when the picker does not convert) and WebP
+  get no thumbnail; HEIC is not shown inline at all. Only the orchestrator's reading of a pasted
+  image was checked with a real Claude; job agents get the same allow rule (unit-tested) but no
+  real-Claude run. An agent crowsnest did not start has no allow rule for its pane inbox. The quota
+  counts blobs only (thumbnails and agents' copies are extra, at most twice the quota). The command
+  palette takes no files.
 - Paste from the key bar needs the Clipboard API, which browsers give only to a secure context (localhost or HTTPS); over a plain-HTTP tailnet address it falls back to the system's long-press paste.
 - **Found by the M9 test campaign, not fixed** (`docs/TESTING.md` has the detail):
   - Claude Code 2.1.332's folder-trust prompt is an unnumbered list ("No, exit" preselected), so

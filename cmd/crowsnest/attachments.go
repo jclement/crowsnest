@@ -9,6 +9,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/config"
@@ -111,8 +112,9 @@ func (a *attachWiring) roots(ctx context.Context, caller questions.Caller) []str
 
 // run sweeps (abandoned uploads, old conversation files, the quota) and releases the files of
 // jobs and questions as they settle, until ctx ends.
-func (a *attachWiring) run(ctx context.Context, events *hub.Hub) {
+func (a *attachWiring) run(ctx context.Context, events *hub.Hub, questionService func() *questions.Service) {
 	go a.service.Run(ctx)
+	go a.reconcileEvery(ctx, questionService)
 	for ctx.Err() == nil {
 		subscription := events.Subscribe(hub.DefaultBuffer)
 		a.drain(ctx, subscription)
@@ -130,6 +132,44 @@ func (a *attachWiring) drain(ctx context.Context, subscription *hub.Subscription
 				return
 			}
 			a.release(ctx, event)
+		}
+	}
+}
+
+// reconcileInterval is how often settled owners missed by the event stream are released.
+const reconcileInterval = 10 * time.Minute
+
+// reconcileEvery runs reconcile at start (a job or question that settled while crowsnest was down)
+// and then every reconcileInterval (an event the subscription dropped).
+func (a *attachWiring) reconcileEvery(ctx context.Context, questionService func() *questions.Service) {
+	ticker := time.NewTicker(reconcileInterval)
+	defer ticker.Stop()
+	for {
+		a.reconcile(ctx, questionService())
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// reconcile releases the files of jobs that are terminal and questions that are settled (or gone).
+func (a *attachWiring) reconcile(ctx context.Context, questionService *questions.Service) {
+	if a.jobs != nil {
+		owners, _ := a.service.LiveOwners(ctx, attach.OwnerJob)
+		for _, id := range owners {
+			if job, err := a.jobs.Get(ctx, id); err == nil && job.State.Terminal() {
+				_ = a.service.Release(ctx, attach.OwnerJob, id)
+			}
+		}
+	}
+	if questionService != nil {
+		owners, _ := a.service.LiveOwners(ctx, attach.OwnerQuestion)
+		for _, id := range owners {
+			if question, err := questionService.Get(ctx, id); err == nil && question.Status != questions.StatusOpen {
+				_ = a.service.Release(ctx, attach.OwnerQuestion, id)
+			}
 		}
 	}
 }

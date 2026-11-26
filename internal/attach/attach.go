@@ -525,6 +525,12 @@ func (s *Service) Release(ctx context.Context, kind, ownerID string) error {
 	return nil
 }
 
+// LiveOwners lists the owners of a kind whose files are not released yet (a reconcile pass checks
+// them against the jobs and questions they belong to).
+func (s *Service) LiveOwners(ctx context.Context, kind string) ([]string, error) {
+	return s.opts.Store.LiveAttachmentOwners(ctx, kind)
+}
+
 // Sweep runs the periodic upkeep: uploads never sent for a day are deleted, files sent to the
 // orchestrator or a plain pane a week ago are released, and a quota passed (the limit lowered
 // across a restart) is brought back under.

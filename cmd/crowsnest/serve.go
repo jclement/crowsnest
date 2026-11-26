@@ -143,7 +143,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, files, logger)
 	files.jobs = jobService
-	go files.run(ctx, events)
+	go files.run(ctx, events, refs.questions.Load)
 	pushService, pusher, err := startPush(ctx, cfg, db, events, logger)
 	if err != nil {
 		return err

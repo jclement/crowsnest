@@ -128,6 +128,25 @@ func (s *Store) ReleaseAttachmentsOlderThan(ctx context.Context, kinds []string,
 	return released, nil
 }
 
+// LiveAttachmentOwners lists the distinct owners of a kind that still hold unreleased files: what
+// a reconcile pass checks against the jobs and questions they belong to.
+func (s *Store) LiveAttachmentOwners(ctx context.Context, kind string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT owner_id FROM attachments WHERE owner_kind = ? AND released_at = 0`, kind)
+	if err != nil {
+		return nil, fmt.Errorf("listing attachment owners: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var owners []string
+	for rows.Next() {
+		var owner string
+		if err := rows.Scan(&owner); err != nil {
+			return nil, err
+		}
+		owners = append(owners, owner)
+	}
+	return owners, rows.Err()
+}
+
 // CleanupCandidates lists rows that may be deleted to make room, best candidates first: released
 // rows (oldest release first), then pending uploads created before pendingBefore (oldest first).
 // Rows still owned by something live are never listed.
