@@ -1,0 +1,18 @@
+[
+  {
+    "id": "d019153f-8492-418d-92de-7900e95ead81",
+    "index": 0,
+    "seq": 1,
+    "kind": "user",
+    "text": "Reply with exactly one word: pineapple",
+    "at": "2026-11-26T06:31:22.969Z"
+  },
+  {
+    "id": "ea5c18f9-c766-49da-bf02-809ac3ce6505",
+    "index": 1,
+    "seq": 2,
+    "kind": "assistant",
+    "text": "pineapple",
+    "at": "2026-11-26T06:31:25.252Z"
+  }
+]

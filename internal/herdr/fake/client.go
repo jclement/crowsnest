@@ -291,14 +291,14 @@ func (f *Fake) AgentStart(_ context.Context, params herdr.AgentStartParams) (her
 	}
 	f.attachAgentLocked(p, params.Name, params.Kind, status, session)
 	if notReady {
-		p.agent.InteractiveReady = false
+		p.agent.InteractiveReady, p.agent.LaunchPending = false, true
 	}
+	// Like herdr over the socket, agent.start answers at once with the launch still pending;
+	// the caller polls agent.get until the agent is interactive-ready.
 	agent := *p.agent
+	agent.LaunchPending, agent.InteractiveReady, agent.AgentStatus, agent.AgentSession = true, false, herdr.StatusUnknown, nil
 	f.mu.Unlock()
 	f.emit(herdr.Event{Kind: "pane_agent_detected", PaneID: agent.PaneID, WorkspaceID: agent.WorkspaceID})
-	if notReady {
-		return agent, &herdr.Error{Code: herdr.CodeAgentNotReady, Message: "agent did not become ready (trust dialog)", Method: "agent.start"}
-	}
 	return agent, nil
 }
 

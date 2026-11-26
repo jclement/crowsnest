@@ -171,6 +171,9 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 	agent, err := o.opts.Client.AgentStart(startCtx, herdr.AgentStartParams{
 		Name: Name, Kind: "claude", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS,
 	})
+	if err == nil {
+		agent, err = o.waitForLaunch(ctx, agent)
+	}
 	switch {
 	case err == nil:
 		o.remember(ctx, paneID, sessionOf(agent, sessionID))
@@ -182,6 +185,38 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 		}), nil
 	default:
 		return o.fail(fmt.Errorf("starting Claude in pane %s: %w", paneID, err))
+	}
+}
+
+// waitForLaunch waits for a started agent to finish launching. Over the socket agent.start
+// answers at once with launch_pending set (the CLI is what waits; found in M4), and Claude takes a
+// few seconds to boot, so the start-up sequence polls until herdr calls the agent
+// interactive-ready. An agent still not ready when the launch timeout passes, or one sitting at a
+// dialog before it ever became ready (folder trust, login), is reported as agent_not_ready.
+func (o *Orchestrator) waitForLaunch(ctx context.Context, agent herdr.Agent) (herdr.Agent, error) {
+	deadline := o.opts.Now().Add(o.opts.LaunchTimeout)
+	for {
+		if !agent.LaunchPending && agent.InteractiveReady {
+			return agent, nil
+		}
+		if !agent.InteractiveReady && agent.AgentStatus == herdr.StatusBlocked {
+			return agent, fmt.Errorf("the agent is at a start-up dialog: %w", herdr.ErrAgentNotReady)
+		}
+		if o.opts.Now().After(deadline) {
+			return agent, fmt.Errorf("the agent did not become ready within %s: %w", o.opts.LaunchTimeout, herdr.ErrAgentNotReady)
+		}
+		select {
+		case <-ctx.Done():
+			return agent, ctx.Err()
+		case <-time.After(launchPollInterval):
+		}
+		next, err := o.getAgent(ctx)
+		if err != nil && !herdr.IsNotFound(err) {
+			return agent, fmt.Errorf("waiting for Claude to start: %w", err)
+		}
+		if err == nil {
+			agent = next
+		}
 	}
 }
 

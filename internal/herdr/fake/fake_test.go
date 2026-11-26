@@ -20,14 +20,14 @@ func TestFakeAgentsAndPrompts(t *testing.T) {
 		t.Fatalf("a shell pane is not an agent: err = %v", err)
 	}
 	agent, err := f.AgentStart(ctx, herdr.AgentStartParams{Name: "builder", Kind: "claude", PaneID: pane})
-	if err != nil || agent.Name != "builder" || agent.AgentSession == nil {
-		t.Fatalf("start = %+v, %v", agent, err)
+	if err != nil || agent.Name != "builder" || !agent.LaunchPending {
+		t.Fatalf("start = %+v, %v (want the launch pending, as herdr answers over the socket)", agent, err)
 	}
 	if _, err := f.AgentStart(ctx, herdr.AgentStartParams{Name: "again", Kind: "claude", PaneID: pane}); err == nil {
 		t.Fatal("starting a second agent in a busy pane should fail")
 	}
 	byPane, err := f.AgentGet(ctx, pane)
-	if err != nil || byPane.Name != "builder" {
+	if err != nil || byPane.Name != "builder" || byPane.AgentSession == nil || byPane.LaunchPending || !byPane.InteractiveReady {
 		t.Fatalf("target by pane id: %+v, %v", byPane, err)
 	}
 

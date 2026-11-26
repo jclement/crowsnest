@@ -43,6 +43,10 @@ const (
 	maxRestartsPerHour = 3
 	// herdrCallTimeout bounds each ordinary herdr call.
 	herdrCallTimeout = 5 * time.Second
+	// DefaultLaunchTimeout is how long a started Claude gets to become interactive-ready.
+	DefaultLaunchTimeout = 60 * time.Second
+	// launchPollInterval is how often a launching agent is checked.
+	launchPollInterval = 250 * time.Millisecond
 )
 
 // State is the orchestrator's lifecycle state as the UI shows it.
@@ -103,6 +107,9 @@ type Options struct {
 	// ShellWait is how long to wait for a pane to show a bare shell (after creating it, or
 	// after /exit). Defaults to 15 s.
 	ShellWait time.Duration
+	// LaunchTimeout is how long a started Claude gets to become ready before the orchestrator is
+	// reported as needing the terminal. DefaultLaunchTimeout when zero.
+	LaunchTimeout time.Duration
 	// OnStatus, when set, is called after every status change (serve uses it to pin the
 	// orchestrator's conversation). It must not block.
 	OnStatus func(Status)
@@ -132,6 +139,9 @@ func New(opts Options) *Orchestrator {
 	}
 	if opts.ShellWait <= 0 {
 		opts.ShellWait = 15 * time.Second
+	}
+	if opts.LaunchTimeout <= 0 {
+		opts.LaunchTimeout = DefaultLaunchTimeout
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -230,6 +240,8 @@ func stateOf(agent herdr.Agent, previous State) State {
 	switch {
 	case !agent.InteractiveReady && (agent.AgentStatus == herdr.StatusBlocked || previous == StateNeedsTerminal):
 		return StateNeedsTerminal
+	case agent.LaunchPending:
+		return StateStarting
 	case agent.AgentStatus == herdr.StatusWorking:
 		return StateWorking
 	case agent.AgentStatus == herdr.StatusBlocked:

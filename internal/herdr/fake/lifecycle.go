@@ -1,8 +1,9 @@
 // Agent lifecycle scripting for the fake: what the orchestrator's start-up and upkeep code needs
-// to be tested against (DESIGN.md section 7). agent.start records its arguments and takes the
-// Claude session id from --session-id or --resume, as real Claude does; a test can make the next
-// start stop at a trust dialog (agent_not_ready), make an agent exit back to its shell, and read
-// the environment a pane was created with.
+// to be tested against (DESIGN.md section 7). agent.start records its arguments, answers with the
+// launch still pending (as herdr does over the socket; agent.get then shows it ready), and takes
+// the Claude session id from --session-id or --resume, as real Claude does. A test can make the
+// next start stop at a trust dialog, make an agent exit back to its shell, and read the
+// environment a pane was created with.
 
 package fake
 
@@ -11,8 +12,8 @@ import (
 )
 
 // StartNotReadyNext makes the next agent.start behave like Claude stopping at a folder-trust
-// dialog: the agent is attached, blocked and not interactive-ready, and the call returns
-// agent_not_ready. ClearDialog later lets it through.
+// dialog: the agent is attached, blocked, still launching and never interactive-ready until
+// ClearDialog lets it through.
 func (f *Fake) StartNotReadyNext() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -29,7 +30,7 @@ func (f *Fake) ClearDialog(target string) error {
 		return err
 	}
 	f.setStatusLocked(p, herdr.StatusIdle)
-	p.agent.InteractiveReady = true
+	p.agent.InteractiveReady, p.agent.LaunchPending = true, false
 	f.mu.Unlock()
 	f.emitStatus(p.info.ID, p.info.WorkspaceID, herdr.StatusIdle)
 	return nil
