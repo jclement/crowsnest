@@ -137,13 +137,19 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	agentSocket := agentSocketPath(cfg)
 	journalLog := journal.New(db, events, logger, nil)
 	refs := &jobRefs{}
-	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, logger)
+	files, err := newAttachments(cfg, db, events, refs, logger)
+	if err != nil {
+		return err
+	}
+	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, files, logger)
+	files.jobs = jobService
+	go files.run(ctx, events)
 	pushService, pusher, err := startPush(ctx, cfg, db, events, logger)
 	if err != nil {
 		return err
 	}
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), logger)
+		standingContext(cfg, refs, refs.questions.Load, jobService), files, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
@@ -167,6 +173,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		Orchestrator: orchestrator, Conversations: conversations,
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
 		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
+		Attachments: files.service, AttachLayout: files.layout,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

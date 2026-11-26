@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/journal"
@@ -106,6 +107,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 type promptRequest struct {
 	orch.PromptRequest
 	Voice bool `json:"voice"`
+	// Attachments are uploads (a_…) sent with the prompt: copied into the agent's inbox and
+	// named on their own lines after the text (8.6).
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // voicePrompt puts the voice header on a transcribed prompt (DESIGN.md 7.1). An empty transcript
@@ -150,8 +154,14 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), promptTimeout)
 	defer cancel()
+	delivered, ok := s.promptAttachments(w, r, target, request.Attachments)
+	if !ok {
+		return
+	}
+	body.Text = attach.WithLines(body.Text, delivered)
 	result, err := orch.Prompt(ctx, s.deps.Herdr, target, body)
 	if err != nil {
+		s.takeBack(ctx, delivered, err)
 		s.promptError(w, r, err)
 		return
 	}
@@ -165,6 +175,20 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		s.deps.Orchestrator.Watch(ctx) // the status chip flips to working now, not at the next tick
 	}
 	writeData(w, http.StatusOK, result)
+}
+
+// promptAttachments delivers a prompt's files to the target's inbox. ok is false when a
+// response was written.
+func (s *Server) promptAttachments(w http.ResponseWriter, r *http.Request, target string, ids []string) ([]attach.Attachment, bool) {
+	if len(ids) == 0 {
+		return nil, true
+	}
+	inbox, err := s.inboxForTarget(r.Context(), target)
+	if err != nil {
+		writeHerdrUnavailable(w)
+		return nil, false
+	}
+	return s.deliverAttachments(w, r, ids, inbox, attach.RolePrompt, "")
 }
 
 func (s *Server) promptError(w http.ResponseWriter, r *http.Request, err error) {

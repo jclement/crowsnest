@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/store"
 	"io"
 	"log/slog"
@@ -248,6 +249,14 @@ func TestAnswerLine(t *testing.T) {
 		{"ack", Question{ID: "q_4", Title: "FYI", Kind: KindAck, Status: StatusAnswered, AnswerValue: "ack"}, `[crowsnest answer q_4] acknowledged; the question was "FYI"`},
 		{"expired", Question{ID: "q_5", Title: "Ship?", Kind: KindConfirm, Status: StatusExpired}, `[crowsnest answer q_5] expired with no answer (expiry is not consent); the question was "Ship?"`},
 		{"cancelled", Question{ID: "q_6", Title: "Ship?", Kind: KindConfirm, Status: StatusCancelled}, `[crowsnest answer q_6] cancelled by the human (not consent); the question was "Ship?"`},
+		// DESIGN 8.6: files sent with an answer are named by the copies the asker can read.
+		{"with attachments", Question{ID: "q_8", Title: "Which?", Kind: KindChoice, Options: options, Status: StatusAnswered, AnswerValue: "a", AnswerNote: "see shot",
+			AnswerAttachments: []attach.Attachment{
+				{Path: "/s/jobs/j_2/attachments/a_1-shot.png", Type: "image/png", Size: 240 * 1024},
+				{Path: "", Type: "text/plain", Size: 3}, // no copy: not named
+				{Path: "/s/jobs/j_2/attachments/a_2-log.txt\nrm -rf ~", Type: "text/plain", Size: 812},
+			}},
+			`[crowsnest answer q_8] "Alpha" (note: see shot) (attached: /s/jobs/j_2/attachments/a_1-shot.png (image/png, 240 KB), /s/jobs/j_2/attachments/a_2-log.txt rm -rf ~ (text/plain, 812 B)); the question was "Which?"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

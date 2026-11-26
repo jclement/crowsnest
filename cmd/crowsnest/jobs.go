@@ -98,9 +98,9 @@ func newJobUpdateCommand(jobID *string) *cobra.Command {
 
 func newJobDoneCommand(jobID *string) *cobra.Command {
 	var result, resultFile string
-	var verified, notVerified []string
+	var verified, notVerified, attachments []string
 	command := &cobra.Command{
-		Use:   `done --result "…" --verified "…" --not-verified "…"`,
+		Use:   `done --result "…" --verified "…" --not-verified "…" [--attach file]`,
 		Short: "Declare the job finished, with evidence (repeat the list flags; 'none' for an empty list)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -118,7 +118,7 @@ func newJobDoneCommand(jobID *string) *cobra.Command {
 			if !cmd.Flags().Changed("verified") || !cmd.Flags().Changed("not-verified") {
 				return usageError{fmt.Errorf("--verified and --not-verified are both required (pass 'none' for an empty list)")}
 			}
-			job, err := client.DoneJob(cmd.Context(), id, jobs.DoneInput{ResultMD: result, Verified: listFlag(verified), NotVerified: listFlag(notVerified)})
+			job, err := client.DoneJob(cmd.Context(), id, jobs.DoneInput{ResultMD: result, Verified: listFlag(verified), NotVerified: listFlag(notVerified), Attachments: attachments})
 			if err != nil {
 				return err
 			}
@@ -129,6 +129,7 @@ func newJobDoneCommand(jobID *string) *cobra.Command {
 	command.Flags().StringVar(&resultFile, "result-file", "", "read the result from a file (- for stdin)")
 	command.Flags().StringArrayVar(&verified, "verified", nil, "something you checked and saw (repeatable)")
 	command.Flags().StringArrayVar(&notVerified, "not-verified", nil, "something you did not check (repeatable)")
+	command.Flags().StringArrayVar(&attachments, "attach", nil, "a file to attach to the result, inside your working or job directory (repeatable)")
 	return command
 }
 

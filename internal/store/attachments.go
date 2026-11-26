@@ -68,6 +68,16 @@ func (s *Store) AssignAttachment(ctx context.Context, id string, owner Attachmen
 	return nil
 }
 
+// UnassignAttachment puts a delivered attachment back to pending (a send that provably typed
+// nothing, so the human can send it again).
+func (s *Store) UnassignAttachment(ctx context.Context, id string) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE attachments SET owner_kind = '', owner_id = '', role = '', ref = '', path = '', attached_at = 0
+		WHERE id = ? AND released_at = 0`, id); err != nil {
+		return fmt.Errorf("unassigning attachment %s: %w", id, err)
+	}
+	return nil
+}
+
 // ListAttachmentsByOwner returns an owner's rows, oldest first. An empty role matches every role.
 func (s *Store) ListAttachmentsByOwner(ctx context.Context, kind, ownerID, role string) ([]AttachmentRecord, error) {
 	query := `SELECT ` + attachmentColumns + ` FROM attachments WHERE owner_kind = ? AND owner_id = ?`

@@ -18,6 +18,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -113,6 +114,9 @@ type harnessOptions struct {
 	// Scheduled tasks and upkeep (schedule_test.go); nil: those routes answer 503
 	schedule *schedule.Service
 	tender   *orch.Tender
+	// Attachments (attachments_test.go); nil: the routes answer 503
+	attachments  *attach.Service
+	attachLayout attach.Layout
 	// R2-L2: --trusted-proxy
 	trustedProxies     []netip.Prefix
 	trustedProxyHeader string // default x-forwarded-for
@@ -189,6 +193,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Updater:       opts.updater,
 		Schedule:      opts.schedule,
 		Tender:        opts.tender,
+		Attachments:   opts.attachments,
+		AttachLayout:  opts.attachLayout,
 	})
 	if err != nil {
 		t.Fatal(err)

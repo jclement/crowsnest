@@ -347,6 +347,9 @@ type DoneInput struct {
 	ResultMD    string   `json:"result_md"`
 	Verified    []string `json:"verified"`
 	NotVerified []string `json:"not_verified"`
+	// Attachments are files the agent attaches to its result (absolute paths inside its working
+	// or job directory). The agent socket imports them; Done itself never reads a path.
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // Done declares the job finished with its evidence.

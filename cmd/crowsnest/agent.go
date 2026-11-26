@@ -46,12 +46,14 @@ func newAskCommand() *cobra.Command {
 	var file string
 	var wait bool
 	var timeout time.Duration
+	var attachments []string
 	command := &cobra.Command{
-		Use:   "ask --file q.json|- [--wait] [--timeout 12h]",
+		Use:   "ask --file q.json|- [--wait] [--timeout 12h] [--attach file]",
 		Short: "Ask the human a question (agent side)",
 		Long: "Posts a question from a JSON file (or - for stdin) to the inbox. The shape is Meat Prompt's\n" +
 			"plus multi: title, body_md, kind (confirm|choice|ack|manual|notice), multi, options\n" +
-			"[{key,label,detail}], recommend, context, urgency (low|normal|blocking), expires_in_hours, files.\n\n" +
+			"[{key,label,detail}], recommend, context, urgency (low|normal|blocking), expires_in_hours, files,\n" +
+			"attachments (paths of files to show as they are: inside your working or job directory).\n\n" +
 			"Without --wait it prints the question id and returns; the answer is typed into this pane later\n" +
 			"as a line starting [crowsnest answer q_<n>]. With --wait it blocks until the question settles\n" +
 			"and prints {status, answer_value, answer_note}: exit 0 answered, 3 expired or cancelled, 1 error.",
@@ -64,12 +66,14 @@ func newAskCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			input.Attachments = append(input.Attachments, attachments...)
 			return runAsk(cmd.Context(), cmd.OutOrStdout(), input, wait, timeout)
 		},
 	}
 	command.Flags().StringVarP(&file, "file", "f", "", "question JSON file, or - for stdin")
 	command.Flags().BoolVar(&wait, "wait", false, "block until the question is answered, expired or cancelled")
 	command.Flags().DurationVar(&timeout, "timeout", 0, "with --wait: give up after this long (also sets the question's expiry when the file sets none)")
+	command.Flags().StringArrayVar(&attachments, "attach", nil, "a file to show with the question, inside your working or job directory (repeatable)")
 	return command
 }
 

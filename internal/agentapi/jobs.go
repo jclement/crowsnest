@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/jobs"
 )
 
@@ -163,11 +164,21 @@ func (s *Server) handleJobDone(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, maxJobBody, &input) || !s.mayActOnJob(w, r, service) {
 		return
 	}
+	caller := s.callerOf(r)
+	if caller.JobID == "" {
+		caller.JobID = r.PathValue("id") // the orchestrator, acting on a job it holds (checked above)
+	}
+	files, ok := s.importFiles(w, r, caller, input.Attachments)
+	if !ok {
+		return
+	}
 	job, err := service.Done(r.Context(), r.PathValue("id"), input)
 	if err != nil {
+		s.discardFiles(r.Context(), files)
 		s.writeJobError(w, r, err)
 		return
 	}
+	s.adoptFiles(r.Context(), files, attach.OwnerJob, job.ID, attach.RoleResult)
 	writeData(w, http.StatusOK, job)
 }
 

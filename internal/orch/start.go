@@ -18,8 +18,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jclement/crowsnest/internal/agentcfg"
-	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/agentid"
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/transcript"
 )

@@ -81,6 +81,7 @@ func (c *Client) UpdateJob(ctx context.Context, id string, input jobs.UpdateInpu
 
 // DoneJob is done.
 func (c *Client) DoneJob(ctx context.Context, id string, input jobs.DoneInput) (jobs.Job, error) {
+	input.Attachments = AbsPaths(input.Attachments)
 	var out jobs.Job
 	err := c.do(ctx, http.MethodPost, jobPath(id, "/done"), input, &out)
 	return out, err

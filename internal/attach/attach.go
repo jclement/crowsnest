@@ -419,6 +419,19 @@ func (s *Service) Deliver(ctx context.Context, ids []string, inbox Inbox, role, 
 	return out, nil
 }
 
+// Undeliver takes back a delivery whose message provably never reached the agent (a dialog, a
+// draft, an agent not found): the copies go and the uploads are pending again, so the composer's
+// retry or "Send anyway" can name them once more.
+func (s *Service) Undeliver(ctx context.Context, attachments []Attachment) {
+	for _, attachment := range attachments {
+		if err := s.opts.Store.UnassignAttachment(ctx, attachment.ID); err != nil {
+			s.opts.Logger.Warn("taking back an attachment after a send that typed nothing", "attachment", attachment.ID, "err", err)
+			continue
+		}
+		removeCopy(store.AttachmentRecord{ID: attachment.ID, Path: attachment.Path})
+	}
+}
+
 // Adopt gives pending attachments an owner without copying them anywhere: an agent's files on
 // its question or its finished job, which the human reads in the browser.
 func (s *Service) Adopt(ctx context.Context, ids []string, kind, ownerID, role string) error {
@@ -444,10 +457,14 @@ func (s *Service) ImportAgentFiles(ctx context.Context, paths, roots []string, p
 	if len(roots) == 0 {
 		return nil, errors.New("crowsnest does not know this agent's directories, so it cannot attach files for it")
 	}
-	files := make([]*os.File, 0, len(paths))
+	type opened struct {
+		path string
+		file *os.File
+	}
+	files := make([]opened, 0, len(paths))
 	defer func() {
-		for _, file := range files {
-			_ = file.Close()
+		for _, item := range files {
+			_ = item.file.Close()
 		}
 	}()
 	for _, path := range paths {
@@ -455,14 +472,14 @@ func (s *Service) ImportAgentFiles(ctx context.Context, paths, roots []string, p
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, file)
+		files = append(files, opened{path: path, file: file})
 	}
 	out := make([]Attachment, 0, len(files))
-	for i, file := range files {
-		attachment, err := s.store(ctx, filepath.Base(paths[i]), file, OriginAgent, pane)
+	for _, item := range files {
+		attachment, err := s.store(ctx, filepath.Base(item.path), item.file, OriginAgent, pane)
 		if err != nil {
 			s.discardAll(ctx, out)
-			return nil, fmt.Errorf("%s: %w", paths[i], err)
+			return nil, fmt.Errorf("%s: %w", item.path, err)
 		}
 		out = append(out, attachment)
 	}

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -96,6 +97,10 @@ type Deps struct {
 	Schedule *schedule.Service
 	// Tender serves /orchestrator/context and /orchestrator/compact (7.9). Nil: 503.
 	Tender *orch.Tender
+	// Attachments stores pasted and dropped files and hands them to agents (8.6); AttachLayout
+	// says where each agent's copies go. Nil: the routes answer 503 and sends refuse files.
+	Attachments  *attach.Service
+	AttachLayout attach.Layout
 	// Updater is self-update (16.1): /health reports what it found, POST /admin/update applies
 	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
 	// answers 409 with the reason.
@@ -176,6 +181,7 @@ func (s *Server) routes() http.Handler {
 	s.registerScheduleRoutes(mux)
 	s.registerVoiceRoutes(mux)
 	s.registerPushRoutes(mux)
+	s.registerAttachmentRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)

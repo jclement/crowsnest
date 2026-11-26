@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -61,6 +62,15 @@ type Options struct {
 	OnAsked func(Question)
 	// OnSettled runs after a question settles (the Deliverer's kick). It must not block.
 	OnSettled func(Question)
+	// Attachments lists a question's files for Get (internal/attach, wired in serve). Nil: none.
+	Attachments AttachmentSource
+}
+
+// AttachmentSource lists the files of a question: the asker's (role ask) and the human's sent
+// with the answer (role answer, by reference to the question).
+type AttachmentSource interface {
+	List(ctx context.Context, kind, ownerID, role string) ([]attach.Attachment, error)
+	ListByRef(ctx context.Context, role, ref string) ([]attach.Attachment, error)
 }
 
 // Service is the question inbox.
@@ -136,7 +146,12 @@ func (s *Service) Get(ctx context.Context, id string) (Question, error) {
 	if err != nil {
 		return Question{}, err
 	}
-	return fromRecord(record, true), nil
+	question := fromRecord(record, true)
+	if source := s.opts.Attachments; source != nil {
+		question.Attachments, _ = source.List(ctx, attach.OwnerQuestion, question.ID, attach.RoleAsk)
+		question.AnswerAttachments, _ = source.ListByRef(ctx, attach.RoleAnswer, question.ID)
+	}
+	return question, nil
 }
 
 // List returns questions with the given status ("" or "all" for every status, or a

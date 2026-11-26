@@ -6,10 +6,12 @@
 package httpd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/questions"
 )
@@ -69,14 +71,44 @@ func (s *Server) handleQuestionAnswer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, "Send JSON with answer_value and answer_note.")
 		return
 	}
+	delivered, ok := s.answerAttachments(w, r, service, answer.Attachments)
+	if !ok {
+		return
+	}
 	question, err := service.Answer(r.Context(), r.PathValue("id"), answer)
 	if err != nil {
+		if s.deps.Attachments != nil {
+			s.deps.Attachments.Undeliver(context.WithoutCancel(r.Context()), delivered)
+		}
 		s.writeQuestionError(w, r, err)
 		return
 	}
 	s.deps.Journal.Add(r.Context(), journal.KindAnswer, "You answered "+question.ID+": "+question.Title,
 		map[string]any{"question": question.ID, "answer_value": answer.Value, "has_note": answer.Note != ""})
 	writeData(w, http.StatusOK, question)
+}
+
+// answerAttachments copies the files sent with an answer into the asker's inbox (its job's, the
+// orchestrator's, or its pane's), before the answer settles, so the line typed back can name
+// them. ok is false when a response was written.
+func (s *Server) answerAttachments(w http.ResponseWriter, r *http.Request, service *questions.Service, ids []string) ([]attach.Attachment, bool) {
+	if len(ids) == 0 {
+		return nil, true
+	}
+	question, err := service.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeQuestionError(w, r, err)
+		return nil, false
+	}
+	if question.Status != questions.StatusOpen {
+		s.writeQuestionError(w, r, questions.ErrNotOpen)
+		return nil, false
+	}
+	inbox := s.inboxForPane(r.Context(), question.SourcePane)
+	if question.JobID != "" {
+		inbox = s.inboxForJob(r.Context(), question.JobID)
+	}
+	return s.deliverAttachments(w, r, ids, inbox, attach.RoleAnswer, question.ID)
 }
 
 func (s *Server) handleQuestionCancel(w http.ResponseWriter, r *http.Request) {
