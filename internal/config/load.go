@@ -449,3 +449,19 @@ func FlagTable() [][4]string {
 	}
 	return rows
 }
+
+// secretEnv are the environment variables that hold a secret or switch authentication. After
+// the config is loaded they have done their job; UnsetSecretEnv removes them so no child
+// process, and nothing that inspects this process later, can read them (R1 H1).
+var secretEnv = []string{
+	"CROWSNEST_PASSWORD", "CROWSNEST_PASSWORD_FILE", "ELEVENLABS_API_KEY",
+	"CROWSNEST_NO_AUTH", "SUPPRESS_AUTH", "CROWSNEST_I_KNOW_THIS_IS_OPEN",
+}
+
+// UnsetSecretEnv removes the secret and auth-switch variables from this process's environment.
+// Call it once the config has been loaded.
+func UnsetSecretEnv() {
+	for _, name := range secretEnv {
+		_ = os.Unsetenv(name)
+	}
+}

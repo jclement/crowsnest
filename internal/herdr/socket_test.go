@@ -516,6 +516,17 @@ func TestScrubEnvAndSessionNames(t *testing.T) {
 	if strings.Join(got, ",") != "HOME=/h,PATH=/bin,XHERDR_KEEP=1" {
 		t.Fatalf("ScrubEnv = %v", got)
 	}
+	// R1 H1: secrets and auth switches never reach a child; the pane variables do. SUPPRESS_AUTH
+	// is a generic name other projects use, so it is not scrubbed from children here; serve
+	// removes it from its own environment after loading the config (config.UnsetSecretEnv).
+	got = ScrubEnv([]string{
+		"CROWSNEST_PASSWORD=s3cret", "CROWSNEST_PASSWORD_FILE=/p", "CROWSNEST_NO_AUTH=1", "SUPPRESS_AUTH=true",
+		"ELEVENLABS_API_KEY=sk-1", "ELEVENLABS_OTHER=x", "CROWSNEST_ANYTHING_NEW=y",
+		"CROWSNEST=1", "CROWSNEST_SESSION=s", "CROWSNEST_SOCKET=/s", "CROWSNEST_JOB=j_1", "HOME=/h",
+	})
+	if strings.Join(got, ",") != "SUPPRESS_AUTH=true,CROWSNEST=1,CROWSNEST_SESSION=s,CROWSNEST_SOCKET=/s,CROWSNEST_JOB=j_1,HOME=/h" {
+		t.Fatalf("ScrubEnv kept or dropped the wrong variables: %v", got)
+	}
 	for _, tc := range []struct {
 		name  string
 		allow bool
@@ -526,6 +537,20 @@ func TestScrubEnvAndSessionNames(t *testing.T) {
 	} {
 		if err := ValidateSessionName(tc.name, tc.allow); (err == nil) != tc.ok {
 			t.Errorf("ValidateSessionName(%q, %v) = %v", tc.name, tc.allow, err)
+		}
+	}
+}
+
+// TestServerEnvironmentCarriesNoSecret is R1 H1 for the herdr server, which spawns every pane
+// and agent: its environment (from os.Environ by default) must hold no secret.
+func TestServerEnvironmentCarriesNoSecret(t *testing.T) {
+	t.Setenv("CROWSNEST_PASSWORD", "s3cret")
+	t.Setenv("ELEVENLABS_API_KEY", "sk-test")
+	t.Setenv("HERDR_SOCKET_PATH", "/must/not/leak")
+	opts := SessionOptions{Name: "crowsnest-test-env"}.withDefaults()
+	for _, entry := range opts.Environ {
+		if strings.Contains(entry, "s3cret") || strings.Contains(entry, "sk-test") || strings.HasPrefix(entry, "HERDR_") {
+			t.Fatalf("the herdr server would inherit %q", entry)
 		}
 	}
 }

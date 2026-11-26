@@ -21,7 +21,8 @@ import (
 )
 
 // fakeEnv selects what the re-executed test binary pretends to be.
-const fakeEnv = "CROWSNEST_TERM_FAKE"
+// It is deliberately not a CROWSNEST_* name: the bridges scrub those from children (R1 H1).
+const fakeEnv = "CN_TEST_TERM_FAKE"
 
 func TestMain(m *testing.M) {
 	switch os.Getenv(fakeEnv) {
@@ -148,6 +149,8 @@ func fakeLauncher(t *testing.T, mode string) HerdrLauncher {
 	t.Helper()
 	t.Setenv(fakeEnv, mode)
 	t.Setenv("HERDR_SOCKET_PATH", "/must/not/leak") // the bridge must scrub this
+	t.Setenv("CROWSNEST_PASSWORD", "s3cret")       // and these (R1 H1)
+	t.Setenv("ELEVENLABS_API_KEY", "sk-test")
 	return HerdrLauncher{Binary: os.Args[0], Session: "crowsnest-test-unit"}
 }
 
@@ -325,10 +328,12 @@ func fakeControl(mode string) {
 	os.Exit(0)
 }
 
+// countHerdrEnv counts what a child of crowsnest must never inherit: HERDR_* (DESIGN.md 4.10)
+// and the secrets the tests plant (R1 H1).
 func countHerdrEnv() int {
 	count := 0
 	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, "HERDR_") {
+		if strings.HasPrefix(entry, "HERDR_") || strings.HasPrefix(entry, "CROWSNEST_PASSWORD=") || strings.HasPrefix(entry, "ELEVENLABS_") {
 			count++
 		}
 	}

@@ -44,6 +44,7 @@ func newServeCommand() *cobra.Command {
 
 func runServe(cmd *cobra.Command, _ []string) error {
 	cfg, err := config.LoadForServe(cmd.Flags(), config.Options{})
+	config.UnsetSecretEnv() // loaded or refused, nothing after this needs them (R1 H1)
 	if err != nil {
 		return err
 	}

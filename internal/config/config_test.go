@@ -514,3 +514,22 @@ func assertErrorContains(t *testing.T, err error, want string) {
 		t.Fatalf("error %q does not contain %q", err, want)
 	}
 }
+
+// TestUnsetSecretEnv is R1 H1: once loaded, the secrets and auth switches leave the process
+// environment, so nothing started later inherits them.
+func TestUnsetSecretEnv(t *testing.T) {
+	for _, name := range []string{"CROWSNEST_PASSWORD", "CROWSNEST_PASSWORD_FILE", "ELEVENLABS_API_KEY", "CROWSNEST_NO_AUTH", "SUPPRESS_AUTH", "CROWSNEST_I_KNOW_THIS_IS_OPEN"} {
+		t.Setenv(name, "set")
+	}
+	t.Setenv("CROWSNEST_PORT", "2770")
+	UnsetSecretEnv()
+	for _, name := range secretEnv {
+		if _, ok := os.LookupEnv(name); ok {
+			t.Errorf("%s is still in the environment", name)
+		}
+	}
+	if os.Getenv("CROWSNEST_PORT") != "2770" {
+		t.Error("an ordinary setting was removed too")
+	}
+}
+

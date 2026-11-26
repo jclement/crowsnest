@@ -59,11 +59,29 @@ type Session struct {
 	Started    bool // true when this call started the server
 }
 
-// ScrubEnv returns env without any HERDR_* variable.
+// paneEnvNames are the CROWSNEST_* variables ScrubEnv keeps: the ones crowsnest deliberately
+// puts in an agent's pane (DESIGN.md 7 step 2, and the agent socket and job id M6/M7 add). None
+// of them is a secret.
+var paneEnvNames = map[string]bool{"CROWSNEST": true, "CROWSNEST_SESSION": true, "CROWSNEST_SOCKET": true, "CROWSNEST_JOB": true}
+
+// ScrubEnv returns env without the variables no child of crowsnest may inherit:
+//
+//   - HERDR_*: a crowsnest started inside a herdr pane must not be able to drive that pane's
+//     session (DESIGN.md 4.10);
+//   - CROWSNEST_*, except the pane variables above: they carry the login password and the auth
+//     switches;
+//   - ELEVENLABS_*: the talk-mode API key.
+//
+// Every child gets this: the herdr server (which spawns every pane and agent, so they inherit
+// it), the TUI client and each pane-control process (R1 H1).
 func ScrubEnv(env []string) []string {
 	scrubbed := make([]string, 0, len(env))
 	for _, entry := range env {
-		if strings.HasPrefix(entry, "HERDR_") {
+		name, _, _ := strings.Cut(entry, "=")
+		switch {
+		case strings.HasPrefix(name, "HERDR_"), strings.HasPrefix(name, "ELEVENLABS_"):
+			continue
+		case strings.HasPrefix(name, "CROWSNEST_") && !paneEnvNames[name]:
 			continue
 		}
 		scrubbed = append(scrubbed, entry)
