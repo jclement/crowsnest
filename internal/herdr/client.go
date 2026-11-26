@@ -21,6 +21,8 @@ type Client interface {
 	// TabCreate opens a tab; TabList lists the tabs of one workspace, or all when id is empty.
 	TabCreate(ctx context.Context, params TabCreateParams) (TabCreated, error)
 	TabList(ctx context.Context, workspaceID string) ([]Tab, error)
+	// WorktreeCreate makes a git worktree and opens a workspace on it (M7, the job launcher).
+	WorktreeCreate(ctx context.Context, params WorktreeCreateParams) (WorktreeCreated, error)
 
 	// PaneList lists the panes of one workspace, or all when id is empty.
 	PaneList(ctx context.Context, workspaceID string) ([]Pane, error)

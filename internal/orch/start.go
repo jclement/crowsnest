@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jclement/crowsnest/internal/agentcfg"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/transcript"
 )
@@ -34,7 +35,7 @@ const (
 // MCPAllowRule pre-approves every tool of crowsnest's MCP server in the orchestrator's settings,
 // so `ask` never stops at a permission prompt (DESIGN.md 6.2; verified in M6 under
 // --permission-mode auto, see section 7.6).
-const MCPAllowRule = "mcp__crowsnest__*"
+const MCPAllowRule = agentcfg.MCPAllowRule
 
 // shellNames are the processes that count as "a bare shell" in a pane.
 var shellNames = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": true, "dash": true, "ksh": true, "tcsh": true, "csh": true, "nu": true}
@@ -339,7 +340,7 @@ func (o *Orchestrator) writeFiles() (startFiles, error) {
 	if err := writePrivate(files.instructions, []byte(body)); err != nil {
 		return startFiles{}, err
 	}
-	if err := writeJSONFile(files.settings, ClaudeSettings(o.mcpEnabled())); err != nil {
+	if err := writeJSONFile(files.settings, o.claudeSettings()); err != nil {
 		return startFiles{}, err
 	}
 	if o.mcpEnabled() {
@@ -355,27 +356,16 @@ func (o *Orchestrator) mcpEnabled() bool {
 	return o.opts.Executable != "" && o.opts.AgentSocket != ""
 }
 
-// ClaudeSettings is the --settings file: the allow rule for crowsnest's MCP tools when they are
-// offered. (M7 adds the hooks.)
-func ClaudeSettings(withMCP bool) map[string]any {
-	if !withMCP {
-		return map[string]any{}
-	}
-	return map[string]any{"permissions": map[string]any{"allow": []string{MCPAllowRule}}}
+// claudeSettings is the --settings file: the allow rule for crowsnest's MCP tools and the
+// supervisor's hooks (M7), built by agentcfg like every job agent's. The orchestrator's hooks
+// carry no job id: the server maps them to the job the orchestrator currently holds.
+func (o *Orchestrator) claudeSettings() map[string]any {
+	return agentcfg.ClaudeSettings(o.opts.Executable, o.opts.AgentSocket, "", o.mcpEnabled())
 }
 
-// MCPConfig is the --mcp-config file: one stdio server, `<executable> mcp`, told where the agent
-// socket is. The pane's own environment (HERDR_PANE_ID) reaches it too, which is how the server
-// knows which pane is asking.
+// MCPConfig is the --mcp-config file (agentcfg.MCPConfig with no job).
 func MCPConfig(executable, socket string) map[string]any {
-	return map[string]any{"mcpServers": map[string]any{
-		"crowsnest": map[string]any{
-			"type":    "stdio",
-			"command": executable,
-			"args":    []string{"mcp"},
-			"env":     map[string]string{"CROWSNEST_SOCKET": socket},
-		},
-	}}
+	return agentcfg.MCPConfig(executable, socket, "")
 }
 
 func writeJSONFile(path string, value any) error {

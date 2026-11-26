@@ -87,6 +87,7 @@ type Fake struct {
 	onPrompt PromptHook
 
 	starts        []herdr.AgentStartParams // every agent.start accepted, in order
+	worktrees     []herdr.WorktreeCreateParams
 	startNotReady bool                     // the next agent.start stops at a dialog
 }
 
