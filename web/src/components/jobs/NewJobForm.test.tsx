@@ -1,8 +1,9 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { makeJob } from "../../lib/jobFixtures";
 import { renderWithClient, stubApi } from "../../test/render";
+import { offerJobDraft } from "../../lib/jobDraft";
 import { NewJobForm } from "./NewJobForm";
 
 function stubForm() {
@@ -58,5 +59,16 @@ describe("NewJobForm", () => {
     await userEvent.click(screen.getByRole("button", { name: "Give job" }));
     expect(await screen.findByText("dir /nope does not exist")).toBeInTheDocument();
     expect(screen.getByLabelText("What needs doing?")).toHaveValue("Do it");
+  });
+
+  it("takes a draft from the command palette: fills the box and opens the options", async () => {
+    stubForm();
+    offerJobDraft({ brief: "Tidy the README" });
+    renderWithClient(<NewJobForm />);
+    expect(screen.getByLabelText("What needs doing?")).toHaveValue("Tidy the README");
+    expect(screen.getByRole("button", { name: /To the orchestrator/ })).toHaveAttribute("aria-expanded", "true");
+    // A draft offered while the form is on screen lands too, once.
+    act(() => offerJobDraft({ brief: "Second thought" }));
+    expect(screen.getByLabelText("What needs doing?")).toHaveValue("Second thought");
   });
 });

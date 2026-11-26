@@ -110,6 +110,23 @@ glyph in them is on screen (DESIGN.md 12, "Terminal font"). Setting localStorage
 Note that herdr's TUI shows every machine your herdr config names, remote ones included, so the
 Terminal view reaches those too.
 
+**Command palette.** ⌘K on a Mac (Ctrl K elsewhere), or the "Search or run…" field in the
+header (a search icon on a phone, which opens it full screen with the keyboard up). One box
+searches everything the app already has live: jobs (by title, id, state, agent or directory, with
+their state), open questions and agents at a dialog, agents and shell panes, the views,
+Notifications, Journal, Keyboard shortcuts, the theme and Sign out, and actions (Poke now, New
+conversation, Restart orchestrator, Send test notification, New job form). Whatever you type is
+also offered as **Give job: …** (Enter gives it to the orchestrator; ⌘/Ctrl Enter opens the full
+form with it filled in) and **Send to orchestrator: …** (a Chat prompt); start with `>` or `job `
+to offer only Give job. → (or Tab) shows an item's other actions: nudge, message or cancel a job,
+open an agent's conversation or terminal, and answer a confirm or single-choice question from its
+options. Restart, New conversation and Cancel ask first, in the same words as the views. Esc goes
+back a level, then closes and puts focus back where it was. With an empty box, recently used
+items come first (kept in localStorage, `crowsnest-palette-recent`). Inside a terminal only ⌘K
+opens it: Ctrl K belongs to the shell. `?` lists every shortcut, and `g` then `j`, `c`, `i`, `f`
+or `t` goes to Jobs, Chat, Inbox, Fleet or Terminal; neither fires while you type in a field or a
+terminal.
+
 For development, `mise run dev` runs the Go server with `--no-auth --demo` on :2769 and Vite on
 :5173 (open http://localhost:5173; Vite proxies `/api` to Go).
 
@@ -447,6 +464,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run screenshots:inbox` | (The three `screenshots:*` tasks run `web/e2e/screenshots` in the `screenshots` Playwright project, a fresh demo instance per test.) Builds, then Playwright against `./bin/crowsnest --demo`: the Inbox list and a question (mermaid and a diff) at 375×812 and 1440×900, light and dark, a multi-select, the 375 px checks, and an answer round trip |
 | `mise run screenshots:jobs` | Builds, then Playwright against `./bin/crowsnest --demo`: the Jobs board (light and dark), the new-job form, a running, a stuck and a done job at 375×812 and 1440×900, the 375 px checks, and giving a job |
+| `mise run screenshots:palette` | Builds, then Playwright against `./bin/crowsnest --demo`: the command palette open, with a query (highlights, Give job), and a job's actions at 375×812 and 1440×900 in light and dark, plus the keyboard shortcuts sheet |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
 | `mise run e2e:voice` | Talk mode alone (also part of `e2e`). Builds, then Playwright against `./bin/crowsnest --demo` with talk mode on and a fake ElevenLabs (`web/e2e/support/fake-elevenlabs.mjs`, never the real API), Chromium's fake microphone: hold to talk, the transcript is sent, the SAY reply is fetched from `/voice/tts` and played; Cancel sends nothing; screenshots of Chat with talk mode at 375×812 and 1440×900 |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives, `checksums.txt` and the Homebrew cask (`dist/homebrew/Casks/crowsnest.rb`); nothing signed, nothing published |

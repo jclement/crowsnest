@@ -5,6 +5,7 @@
 // confirmation first, in a Sheet, because they interrupt whatever the orchestrator is doing.
 import { BellRing, Brain, CalendarClock, Minimize2, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { relaunchConfirmations, type RelaunchAction } from "../../lib/conversation";
 import { useOrchestratorAction } from "../../lib/conversation-queries";
 import { pokeToast } from "../../lib/journal";
 import { useCompactNow, useOrchestratorContext, usePokeNow } from "../../lib/queries";
@@ -15,20 +16,8 @@ import { Button, IconButton } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
 
-type Action = "restart" | "new";
-
-const confirmations: Record<Action, { title: string; body: string; button: string }> = {
-  restart: {
-    title: "Restart the orchestrator?",
-    body: "Claude is stopped (anything it is doing is interrupted) and started again on the same conversation.",
-    button: "Restart",
-  },
-  new: {
-    title: "Start a new conversation?",
-    body: "Claude is stopped and started with an empty conversation. The current one stays in its transcript file but leaves this view.",
-    button: "New conversation",
-  },
-};
+type Action = RelaunchAction;
+const confirmations = relaunchConfirmations;
 
 interface ChatMenuProps {
   showThinking: boolean;

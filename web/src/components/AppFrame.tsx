@@ -1,6 +1,6 @@
 // The signed-in frame: a dark header (session, connection state, theme, user menu), the five
 // views as a left rail from md and a bottom nav on mobile, the reconnect banner, and the
-// footer. It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
+// footer, and the command palette (⌘K; components/palette). It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
 // badge and the tab title count what needs Jeff: open questions plus agents at a terminal dialog.
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
@@ -15,6 +15,8 @@ import type { StreamStatus } from "../lib/sse";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Footer } from "./Footer";
 import { navItems } from "./nav";
+import { PaletteButton } from "./palette/PaletteButton";
+import { PaletteProvider } from "./palette/PaletteProvider";
 import { ThemeToggle } from "./ThemeToggle";
 import { UserMenu } from "./UserMenu";
 
@@ -51,6 +53,7 @@ export function AppFrame() {
   };
 
   return (
+    <PaletteProvider onSignOut={() => void signOut()}>
     <div className="flex h-full flex-col">
       <header className="box-content flex h-11 shrink-0 items-center gap-2 border-b border-chrome-border bg-chrome pl-3 pr-1 pt-[env(safe-area-inset-top)] text-chrome-fg md:h-10">
         <img src="/icons/crowsnest.svg" alt="" className="h-5 w-5" />
@@ -74,7 +77,8 @@ export function AppFrame() {
             fixtures
           </span>
         )}
-        <div className="ml-auto flex items-center">
+        <PaletteButton className="ml-auto sm:mr-1" />
+        <div className="flex items-center">
           <ConnectionState status={stream.status} />
           <ThemeToggle />
           {me.data && <UserMenu me={me.data} onSignOut={() => void signOut()} />}
@@ -128,6 +132,7 @@ export function AppFrame() {
         ))}
       </nav>
     </div>
+    </PaletteProvider>
   );
 }
 

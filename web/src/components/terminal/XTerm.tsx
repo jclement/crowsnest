@@ -128,6 +128,9 @@ function openTerminal(container: HTMLElement, path: string, fontSize: number, la
   terminal.unicode.activeVersion = "11";
   terminal.loadAddon(new WebLinksAddon((_event, uri) => window.open(uri, "_blank", "noopener,noreferrer")));
   terminal.open(container);
+  // ⌘K opens the command palette even from a terminal (lib/hotkeys.ts): xterm must not take it.
+  // Ctrl+K is left alone, since that is the shell's kill-line.
+  terminal.attachCustomKeyEventHandler((event) => !(event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k"));
 
   const socket = new TerminalSocket({
     path,

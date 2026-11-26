@@ -77,9 +77,11 @@ const inboxRoute = createRoute({
 const fleetRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/fleet",
-  // ?agent=<pane id> selects an agent, so a link or a reload opens the same one.
-  validateSearch: (search: Record<string, unknown>): { agent?: string } => ({
+  // ?agent=<pane id> selects an agent, so a link or a reload opens the same one; &view=terminal
+  // or conversation picks its tab (the command palette's "Open terminal").
+  validateSearch: (search: Record<string, unknown>): { agent?: string; view?: "conversation" | "terminal" } => ({
     agent: typeof search.agent === "string" && search.agent ? search.agent : undefined,
+    view: search.view === "terminal" || search.view === "conversation" ? search.view : undefined,
   }),
   component: FleetView,
 });

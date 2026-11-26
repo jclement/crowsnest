@@ -111,6 +111,23 @@ export interface OrchestratorStatus {
   updated_at: string;
 }
 
+/** Restart (same conversation) or New conversation: both relaunch Claude. */
+export type RelaunchAction = "restart" | "new";
+
+/** The confirmation each relaunch asks for (the Chat menu and the command palette say the same). */
+export const relaunchConfirmations: Record<RelaunchAction, { title: string; body: string; button: string }> = {
+  restart: {
+    title: "Restart the orchestrator?",
+    body: "Claude is stopped (anything it is doing is interrupted) and started again on the same conversation.",
+    button: "Restart",
+  },
+  new: {
+    title: "Start a new conversation?",
+    body: "Claude is stopped and started with an empty conversation. The current one stays in its transcript file but leaves this view.",
+    button: "New conversation",
+  },
+};
+
 // ---- Sending -------------------------------------------------------------------------
 
 /** POST /agents/{target}/prompt */
