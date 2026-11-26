@@ -1,0 +1,10 @@
+{
+  "name": "crowsnest",
+  "short_name": "crowsnest",
+  "description": "Run a herdr session and its orchestrator from a browser",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b1220",
+  "icons": [{ "src": "/icons/crowsnest.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

@@ -1,0 +1,138 @@
+# crowsnest
+
+One Go binary that starts a [herdr](https://herdr.dev) session and a Claude Code orchestrator in
+it, and serves a mobile-friendly web app for running that session from a browser: chat with the
+orchestrator, answer questions from agents, drive a terminal, and see every agent in the fleet.
+
+> **Status: M1 (skeleton).** Today crowsnest serves the login, the API health and auth
+> endpoints, the event stream and the web app shell with four empty views. herdr, the
+> orchestrator, questions, terminals and talk mode arrive in later milestones; see
+> [DESIGN.md](DESIGN.md) section 17 and [STATUS.md](STATUS.md).
+
+A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
+default, refuses to start without a login (or an explicit `--no-auth`), and checks Host and
+Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the security model.
+
+## Quick start
+
+```sh
+git clone git@github.com:jclement/crowsnest.git && cd crowsnest
+mise run setup            # tools, Go modules, web dependencies (idempotent)
+mise run build            # web app, then ./bin/crowsnest
+
+CROWSNEST_PASSWORD='something long' ./bin/crowsnest --username jeff
+# open http://localhost:2769
+```
+
+For development, `mise run dev` runs the Go server with `--no-auth` on :2769 and Vite on :5173
+(open http://localhost:5173; Vite proxies `/api` to Go).
+
+On a phone over Tailscale, bind the tailnet address, or keep localhost and use `tailscale serve`,
+which also gives the HTTPS secure context the microphone needs later:
+
+```sh
+./bin/crowsnest --bind tailnet --username jeff --password-file ~/.config/crowsnest/password
+```
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `crowsnest` / `crowsnest serve` | Serve the web app (the default) |
+| `crowsnest version [--json]` | Version, commit, build date, Go version, platform, a tagline |
+| `crowsnest --version` | `crowsnest v1.2.3 (abc1234, 2026-01-15T10:30:00Z)` |
+| `crowsnest health [--json]` | GET `/api/v1/health` on the configured address; exit 0 healthy, 1 not (Docker `HEALTHCHECK`) |
+
+Exit codes: `0` success, `1` runtime error, `2` usage error.
+
+## Configuration
+
+Precedence: flag, then environment, then `~/.config/crowsnest/config.yaml` (keys are the flag
+names without the leading `--`, e.g. `username: jeff`, `bind: [localhost, tailnet]`), then the
+default. List values (`--bind`, `--allowed-host`) repeat as flags, are comma-separated in the
+environment, and are a YAML list or string in the file. An unknown key in the file is an error.
+
+| Flag | Environment | Default | Meaning |
+|---|---|---|---|
+| `--username` | `CROWSNEST_USERNAME` | none | Login name |
+| `--password` | `CROWSNEST_PASSWORD` | none | Login password. Prefer the env var or `--password-file`: a flag is visible in `ps` |
+| `--password-file` | `CROWSNEST_PASSWORD_FILE` | none | File holding the password (first line) |
+| `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured) | `false` | No login. For a trusted localhost or tailnet only |
+| `--bind` | `CROWSNEST_BIND` | `localhost` | `localhost`, `tailnet`, an interface name, an IP, or `ip:port`. Repeatable |
+| `--port` | `CROWSNEST_PORT` | `2769` | Port for binds that do not name one (C-R-O-W on a keypad) |
+| `--session` | `CROWSNEST_SESSION` | `crowsnest` | herdr session to create or connect to |
+| `--dir` | `CROWSNEST_DIR` | `<data-dir>/orchestrator` | Orchestrator's working directory |
+| `--model` | `CROWSNEST_MODEL` | Claude's default | Orchestrator model |
+| `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Orchestrator permission mode (`acceptEdits`, `auto`, `bypassPermissions`, `dontAsk`, `manual`, `plan`) |
+| `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke interval; `0` disables timer pokes |
+| `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | `false` | Serve the UI over the session without starting Claude |
+| `--allowed-host` | `CROWSNEST_ALLOWED_HOSTS` | derived | Extra Host/Origin name (reverse proxy, MagicDNS). Repeatable |
+| `--tls-cert` | `CROWSNEST_TLS_CERT` | none | PEM certificate: serve HTTPS directly |
+| `--tls-key` | `CROWSNEST_TLS_KEY` | none | PEM key for `--tls-cert` |
+| `--elevenlabs-api-key` | `ELEVENLABS_API_KEY` | none | Enables talk mode |
+| `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id | Voice for spoken replies |
+| `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs API base URL (tests point it at a fake) |
+| `--notify-url` | `CROWSNEST_NOTIFY_URL` | none | POST a one-line notice here when something needs you (ntfy-style) |
+| `--demo` | `CROWSNEST_DEMO` | `false` | In-memory fake herdr and scripted orchestrator |
+| `--i-know-this-is-open` | `CROWSNEST_I_KNOW_THIS_IS_OPEN` | `false` | Allow `--no-auth` on a bind that is not loopback or tailnet |
+| `--allow-default-session` | `CROWSNEST_ALLOW_DEFAULT_SESSION` | `false` | Allow `--session default` (your main herdr session) |
+| `--data-dir` | `CROWSNEST_DATA_DIR` | `~/.local/share/crowsnest` | Where the database (`<session>.db`) lives |
+| `--config` | `CROWSNEST_CONFIG` | `~/.config/crowsnest/config.yaml` | Config file to read |
+
+`--web-dev` (`CROWSNEST_WEB_DEV`) is a hidden development flag used by `mise run dev`: the UI is
+served by Vite, so the binary does not require embedded web assets.
+
+The settings for herdr, the orchestrator, talk mode and notices are parsed and validated now and
+take effect in their milestones.
+
+### Startup refusals
+
+Crowsnest refuses to start, and says what to pass instead, when:
+
+- there are neither credentials nor `--no-auth` (or both are given);
+- `--no-auth` is combined with a bind that is not loopback or a Tailscale address (including
+  `0.0.0.0`), unless `--i-know-this-is-open` is also given;
+- `--session default` is given without `--allow-default-session`;
+- `--bind tailnet` finds no Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48); it never
+  falls back to all interfaces.
+
+## HTTP API
+
+Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), errors
+`{"error": {"message", "code"}}`. Every non-GET request needs a same-origin `Origin` and
+`X-Crowsnest: 1`.
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `GET /health` | none | `{status, version, update_available}` |
+| `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
+| `POST /auth/logout` | none | Deletes the session and clears the cookie |
+| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session}}` |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, later `fleet`, `message`, `question`, … |
+
+## Tasks
+
+| Task | Does |
+|---|---|
+| `mise run setup` | Install tools, Go modules and web dependencies. Idempotent |
+| `mise run dev` | Go server (`--no-auth`, `--web-dev`) on :2769 and Vite on :5173. Long-running |
+| `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
+| `mise run test` | Go tests with `-race`, then Vitest (single run) |
+| `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
+| `mise run fmt` | gofmt and eslint `--fix` |
+| `mise run check` | lint + test: the gate before calling anything done |
+| `mise run e2e` | Playwright suite (not built until M9; fails with a message) |
+| `mise run snapshot` | GoReleaser snapshot (needs `.goreleaser.yml`, written in M10) |
+| `mise run release` | Interactive tag bump and push (Jeff's step) |
+| `mise run dev:reset` | Remove build output, web dist, Vite cache and the dev database |
+
+## Files
+
+| Path | Holds |
+|---|---|
+| `~/.config/crowsnest/config.yaml` | Optional config file |
+| `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed) and settings |
+
+## License
+
+MIT. (C) 2026 Jeff Clement. See [LICENSE](LICENSE).

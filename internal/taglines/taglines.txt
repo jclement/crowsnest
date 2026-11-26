@@ -1,0 +1,200 @@
+Someone has to watch the horizon. Today it is software.
+Land ho. Also: three agents are blocked.
+The view is great. The weather is your build logs.
+High above the deck, slightly judgmental.
+Watching your agents so you can watch the kettle.
+A crow's eye view of everything you forgot to merge.
+Sails trimmed, tests green, coffee questionable.
+We see it coming. We just may not stop it.
+The lookout never sleeps. The lookout naps strategically.
+Keeping a weather eye on your weather eyes.
+Mast-mounted, mildly caffeinated.
+All hands on deck. Most hands are bots.
+Spotting icebergs since this morning.
+Nothing on the horizon but merge conflicts.
+Fair winds and following seas. And a green CI.
+Climb up. The Wi-Fi is better here.
+Crows remember faces. We remember sessions.
+Caw. That is the whole status report.
+Your fleet, from a safe and lofty distance.
+Steering by the stars and the error messages.
+The barrel at the top of the mast, now with auth.
+Ahoy, or whatever the polite greeting is now.
+Looking out so you can look at your phone.
+Calm seas, busy agents, one suspicious log line.
+Dead reckoning, live terminals.
+A ship is safe in harbour. That is not what ships are for.
+Report from the top: it is turtles. No, wait, agents.
+Watch kept, kettle on, nothing on fire. Yet.
+If you can read this, the lookout is doing its job.
+The horizon called. It wants its pull requests back.
+Ravens are for kings. Crows are for night shifts.
+Sighting: one orchestrator, idle, looking smug.
+High ground. Low latency.
+We do the squinting so you do not have to.
+Spyglass polished. Expectations managed.
+Swabbing the deck, one stale branch at a time.
+A murder of crows, a fleet of agents. Same energy.
+The sea is calm. The backlog is not.
+Your shell, at the end of a very long rope.
+Watching the wake so you can watch the bow.
+Rigging checked. Secrets not logged.
+Even the crow takes a break. The orchestrator does not.
+One mast, many panes.
+Thar she builds.
+Weighing anchor, then weighing options.
+Bridge to lookout: anything? Lookout: tests, mostly.
+Shiver me timbers, that was a lot of tokens.
+Fog on the water, clarity in the inbox.
+Sailing the seven seas of stdout.
+The crow's nest: now with fewer splinters.
+A small barrel with a big opinion about your agents.
+Port side: idle. Starboard: working. Aft: who knows.
+We see your agent is blocked. We judge it gently.
+Nautical miles from the nearest standup.
+Reef the sails, the build is getting rough.
+Spotted: a question. Scrambling the human.
+The view from up here is mostly YAML.
+Hoist the mainsail and the main branch.
+Every ship needs a lookout. Every lookout needs snacks.
+Crows can use tools. So can these agents, sometimes.
+Look out below. And above. And at the inbox.
+A watchful eye and a very long telescope.
+Keeping the logbook, minus the passwords.
+Becalmed? Poke the orchestrator.
+Man the pumps, the token budget is leaking.
+Steady as she goes, unless she is blocked.
+The lookout called. The orchestrator did not answer.
+We put the mast in master branch.
+Your agents, in formation, mostly.
+Smooth sailing is just rough sailing with good logs.
+High above, quietly counting your open questions.
+Cawing since 2026.
+Keel even, shell open, password required.
+Anchors aweigh, workers away.
+From up here, every bug looks small.
+Somewhere a crow is laughing at your regex.
+Tide is turning. So is the spinner.
+No pirates sighted. Two linters sighted.
+On watch: four views and a strong cup of tea.
+Ropes tied, tests tied, tie-breaker pending.
+A lighthouse that answers back.
+Telescope extended, scope crept.
+Your harbour master for herdr.
+Many tabs make light work. Or so we hear.
+Every agent reports to the mast eventually.
+Clouds on the horizon. Probably the Docker cache.
+Whistle up a wind and a green check.
+We spot it. You decide it.
+The orchestrator is at the helm. You are on the beach.
+Crow-certified. Not seaworthy for spreadsheets.
+Bilge pumped, branch pruned, mind at ease.
+Spotting trouble before it reaches the deck.
+Sea legs not required. Phone recommended.
+Yo ho ho and a bottle of cold brew.
+Look sharp. An agent is asking for permission.
+Dry land is overrated. Dry runs are not.
+A tall mast for a tall stack of tasks.
+Sunrise over the fleet. Somebody is still compiling.
+Full sail on a Tuesday.
+You sleep. The crow counts.
+Crows hold grudges. We hold sessions for 30 days.
+Signal flags raised: please answer your inbox.
+The sea does not care. The lookout does, a little.
+Navigating by tab title and gut feeling.
+Every crew needs someone who climbs the mast.
+Clear skies. Rate limit reached. Try again in 60s.
+Ship shape and Bristol fashion, give or take a lint.
+A lookout with opinions about your permission mode.
+Aye aye, said the agent, and then did something else.
+Watching the weather so the weather does not watch you.
+The barrel is small. The view is not.
+Bring a jacket. It is windy at the top of the stack.
+Agents ahoy.
+Plotting a course through the backlog.
+The calm before the poke.
+Your fleet will see you now.
+We have the high ground and the low ports.
+Somewhere between a bird and a sysadmin.
+Lines secured, origins checked.
+Keep your hands inside the terminal at all times.
+The crow sees all. The crow logs some.
+Nothing to report. Reporting it anyway.
+Look out for number one. And number two pane.
+Raise the alarm, or at least a notification.
+Mind the boom. And the merge.
+A tidy ship and a tidier inbox.
+Fathoms deep in someone else's codebase.
+Mutiny suppressed. Agent restarted.
+Gulls steal chips. Crows steal attention.
+Sailing on, one heartbeat every twenty seconds.
+Sweeping the horizon for regressions.
+Up the mast, down the rabbit hole.
+The deck is clear. The context window is not.
+All quiet on the western terminal.
+Hard to starboard, gently with the force push.
+The view is free. The tokens are not.
+Charted waters, uncharted transcripts.
+Trust the lookout. Verify the diff.
+On the lookout for lookouts looking out.
+Ahead: rocks. Behind: a green test suite. Choose wisely.
+Watch the skies. Then watch the logs.
+A seat at the very top of the process tree.
+Full speed ahead, at most two builds at once.
+Keeping one eye open and one tab pinned.
+Looks like rain. Looks like a rebase.
+Oars in the water, agents in the panes.
+Tall ship, short attention span.
+Scanning for sails, finding only spinners.
+Lookout duty: the original remote work.
+Avast. That command touches production.
+A crow on the mast is worth two in the backlog.
+Horizon scanned. Nothing but other horizons.
+The crew is restless. The orchestrator says noop.
+Sea breeze, server breeze.
+Pouring one out for the agents that hit a dialog.
+Vigilance, served over HTTP.
+The ocean is big. The inbox is bigger.
+Peering into the fog of other people's terminals.
+At the top, there is always a little more signal.
+Fetch the captain. A question needs answering.
+Shipwrecks are just unreviewed pull requests.
+The mast sways. The tests do not.
+Barnacles removed, dependencies updated.
+Crows can count to five. So can the rate limiter.
+In the nest, on the watch, out of the loop.
+Battening the hatches against flaky tests.
+Steady hands at the wheel, nervous ones at the keyboard.
+Distant thunder. Probably npm.
+If it moves on the horizon, we have opinions.
+Long watch, short summary.
+A crow, a mast, a modest amount of authority.
+Below decks, the agents toil. Above, we judge.
+We watch. You sail. Someone else writes the YAML.
+The lookout does not do mornings. Except all of them.
+Tied to the mast, ignoring the sirens of scope creep.
+Splashdown imminent. Please merge responsibly.
+Best viewed from a great height.
+Man overboard. Agent recovered with --resume.
+Dawn patrol for your dev environment.
+Hold fast. The poke is coming.
+Gazing at the stars and the GitHub notifications.
+Stormy weather ahead. Bring a rollback.
+Crows mob hawks. We mob blocked agents.
+Lookout's log: day one, still nothing on fire.
+Raise the black flag. The tests failed.
+Rope ladders, real terminals.
+Your crew, accounted for.
+Afloat, alert, and mildly overcommitted.
+A view to a build.
+The quiet one at the top who sees everything.
+Ship's bell rings on the quarter hour. So do pokes.
+Navigating the shallows of a fresh worktree.
+Up here the only merge conflict is with gravity.
+Ready about. Somebody pushed to main.
+We keep watch so the night shift can be a nap.
+A word from the masthead: answer your questions.
+The sea remembers. So does SQLite.
+Cast off. Check in. Look out.
+Crow's feet: what years of squinting at logs gets you.
+Port and starboard. And port 2769.

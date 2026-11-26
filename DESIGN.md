@@ -76,7 +76,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--bind` | `CROWSNEST_BIND` | `localhost` | `localhost`, `tailnet`, an interface name, an IP, or `ip:port`. Repeatable |
 | `--port` | `CROWSNEST_PORT` | `2769` | Port (C-R-O-W on a keypad) |
 | `--session` | `CROWSNEST_SESSION` | `crowsnest` | herdr session to create or connect to |
-| `--dir` | `CROWSNEST_DIR` | `~/.local/share/crowsnest/orchestrator` | Orchestrator's working directory (created) |
+| `--dir` | `CROWSNEST_DIR` | `<data-dir>/orchestrator` | Orchestrator's working directory (created) |
 | `--model` | `CROWSNEST_MODEL` | unset (Claude's default) | Orchestrator model |
 | `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Orchestrator permission mode |
 | `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke; `0` disables timer pokes |
@@ -87,6 +87,18 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id | TTS voice |
 | `--notify-url` | `CROWSNEST_NOTIFY_URL` | none | POST a one-line notice here when something needs Jeff (ntfy-style) |
 | `--demo` | `CROWSNEST_DEMO` | false | In-memory fake herdr and scripted orchestrator: UI work, hermetic E2E, screenshots |
+| `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs base URL (section 13; tests point it at a fake) |
+| `--i-know-this-is-open` | `CROWSNEST_I_KNOW_THIS_IS_OPEN` | false | Allow `--no-auth` on an open bind (startup rules) |
+| `--allow-default-session` | `CROWSNEST_ALLOW_DEFAULT_SESSION` | false | Allow `--session default` (startup rules) |
+| `--data-dir` | `CROWSNEST_DATA_DIR` | `~/.local/share/crowsnest` (XDG) | Database directory; also the parent of the default `--dir` |
+| `--config` | `CROWSNEST_CONFIG` | `~/.config/crowsnest/config.yaml` (XDG) | Config file; a missing explicit file or an unknown key is an error |
+| `--web-dev` (hidden) | `CROWSNEST_WEB_DEV` | false | Development only: Vite serves the UI, so no embedded assets are required |
+
+Config-file keys are the flag names. List options repeat as flags, are comma-separated in the
+environment, and are a YAML list or string in the file. `internal/config` owns all of this:
+Viper only reads the YAML file, precedence is applied explicitly by the loader, and the result is
+one plain validated `Config` struct that nothing else re-reads. Durations must carry a unit
+(`15m`); a bare `15` is refused rather than guessed.
 
 Startup rules (all fail closed, with a message that says what to pass):
 
@@ -94,6 +106,10 @@ Startup rules (all fail closed, with a message that says what to pass):
 - `--no-auth` with a bind that is not loopback and not a tailnet address: refuse unless `--i-know-this-is-open` is also given.
 - `--session default`: refuse unless `--allow-default-session`. Crowsnest is never pointed at Jeff's main herdr session by accident.
 - `tailnet` resolves the local address in 100.64.0.0/10 (and the fd7a:115c:a1e0::/48 one); if there is none, refuse rather than fall back to all interfaces.
+- `--no-auth` together with a username and password: refuse and ask for one or the other (added in M1; an ambiguous auth setting should not silently pick the open one).
+
+`localhost` binds 127.0.0.1 and ::1; ::1 is optional, so a machine without IPv6 still starts. An
+interface name binds every address on it except IPv6 link-local.
 
 Other subcommands: `version`, `health` (exit code for Docker), and the agent-side `job`, `ask`, `say`, `notify`, `hook`, `mcp` (section 9).
 
@@ -104,12 +120,12 @@ a malicious web page driving a logged-in browser (CSRF, cross-site WebSocket hij
 rebinding against `--no-auth` on localhost); secrets leaking into logs; agent output attacking the UI (XSS).
 
 1. **Bind**: loopback by default. Never `0.0.0.0` unless the user types it (the container image does, with auth required).
-2. **Login**: one user. Password compared in constant time over SHA-256 digests. 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session`, `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials).
+2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session`, `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; `X-Forwarded-For` is never trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. `X-Forwarded-Proto: https` is honoured only from loopback, and only to add `Secure` to the cookie.
 3. **Host check** on every request: `Host` must be loopback, a bound IP, the machine hostname, a detected MagicDNS name, or an `--allowed-host`. This is what stops DNS rebinding, and it applies with `--no-auth` too.
-4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host`. Non-GET API calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set).
+4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host` (host and port, default ports normalised). `null` counts as missing. Non-GET calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set). A failed host check is `403` with a message naming `--allowed-host`. MagicDNS names are not auto-detected yet (M1); pass them with `--allowed-host`.
 5. **WebSockets** authenticate with the same cookie at upgrade, check Origin, and are closed when the session is revoked. No tokens in URLs.
 6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions are the authentication; it serves only the agent API (ask, say, notify, hook), never terminals.
-7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'`. (`unsafe-inline` styles are for xterm.js and mermaid; no inline script.)
+7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'`. (`unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
 8. **Rendering untrusted text**: transcripts, pane text and question bodies are data. Markdown renders without raw HTML; mermaid runs with `securityLevel: 'strict'`; links open with `rel="noopener noreferrer"`; no `dangerouslySetInnerHTML` outside the sanitised mermaid SVG.
 9. **Secrets**: the password, session ids and the ElevenLabs key are never logged, never returned by any endpoint, never placed in argv of a child process. Request logs record method, path, status, duration and client IP only. A `redact` helper scrubs token-shaped strings from anything echoed from panes into logs or notices.
 10. **Child processes** get a scrubbed environment: every `HERDR_*` variable is removed and the session is always addressed by its explicit socket path, so crowsnest started from inside a herdr pane cannot drive the pane's session.
@@ -393,6 +409,16 @@ The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`:
 ## 10. HTTP API
 
 `/api/v1`, one envelope: `{"data":…}`, lists add `meta`, errors `{"error":{"message","code"}}`.
+All routes below are under `/api/v1` (so login is `POST /api/v1/auth/login`). An unknown `/api/`
+path is a JSON 404; any other path is the SPA (index.html, `Cache-Control: no-cache`), except
+`/assets/*` and paths with a file extension, which 404 when missing. `/assets/*` is fingerprinted
+by Vite and served `public, max-age=31536000, immutable`.
+
+SSE (M1): the stream opens with `retry: 3000` and a `hello` event (`{version, session}`), then
+forwards hub events, and sends a `heartbeat` event (`{at}`) every 20 s when idle. Each heartbeat
+re-checks the session cookie, so a logout or password change ends open streams within 20 s. The
+hub closes a subscriber whose 64-event queue overflows instead of silently dropping events: the
+browser reconnects, gets `hello`, and refetches.
 
 | Route | Purpose |
 |---|---|
@@ -470,6 +496,7 @@ Enabled only when an ElevenLabs key is configured; the key stays on the server.
 ```
 cmd/crowsnest/main.go        Cobra root; serve, version, health, job, ask, say, notify, hook, mcp
 internal/config/             flags + env + file → Config; bind resolution; startup refusals
+internal/taglines/           taglines.txt (200 lines), embedded; the web app imports the same file
 internal/httpd/              router, middleware (host, origin, auth, headers, log), SPA, SSE
 internal/auth/               login, rate limit, session store
 internal/herdr/              Client interface, socket client, events, types; fake/
@@ -483,7 +510,7 @@ internal/voice/              ElevenLabs client
 internal/agentapi/           unix-socket server, the CLI client, the stdio MCP proxy
 internal/store/              SQLite, migrations/
 internal/hub/                pub/sub
-web/                         React app; web/e2e Playwright
+web/                         React app; web/e2e Playwright; web/embed.go embeds web/dist
 deploy/                      Dockerfile (devbox), compose.yaml, entrypoint
 mise.toml  .goreleaser.yml  .github/workflows/{ci,release}.yml
 ```
@@ -539,6 +566,19 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 14. **One session per process.** Run two crowsnests on two ports for two sessions.
 
 ## 18. Milestones
+||||||| 1c3439e
+## 17. Milestones
+15. **The built SPA is embedded from `web/dist` with a committed placeholder.** `web/dist/.gitkeep`
+    is committed (and copied back from `web/public` by every Vite build) so the Go code always
+    compiles and `go test` needs no Node. A binary built without the web app has no
+    `index.html`, and `serve` refuses to start with "build it with `mise run build`" rather than
+    serve a blank page; `--web-dev` is the development escape hatch.
+16. **Taglines live in one file** (`internal/taglines/taglines.txt`): Go embeds it for
+    `crowsnest version`; Vite imports it raw for the login page and footer. A test pins the count
+    at 200, each under 60 characters, no duplicates.
+17. **TypeScript is pinned to 6.0.x**, not 7: typescript-eslint 8.x supports `<6.1`.
+
+## 17. Milestones
 
 Each is one builder (Opus) in a herdr worktree; at most two build at once; each ends green on `mise run check`.
 

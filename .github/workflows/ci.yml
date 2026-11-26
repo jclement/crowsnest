@@ -1,0 +1,29 @@
+# CI: the same gate as local work. mise installs the pinned toolchain from mise.toml, setup
+# installs Go modules and web dependencies, and check runs lint and the full test suite.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+        with:
+          install: true
+          cache: true
+      - name: Setup
+        run: mise run setup
+      - name: Check
+        run: mise run check

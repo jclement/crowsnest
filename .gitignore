@@ -1,16 +1,24 @@
-# build output
-/dist/
+# Build output
 /bin/
-/web/dist/
-/web/node_modules/
-node_modules/
-# local
-mise.local.toml
+/dist/
+/coverage.out
+/coverage.html
+
+# Web: dependencies and build output (dist keeps a placeholder so //go:embed always has a file)
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+web/coverage/
+
+# Local state and secrets
+/.dev/
 .env
-.env.*
-!.env.sample
+mise.local.toml
 *.db
-*.db-*
+*.db-shm
+*.db-wal
+
+# Agent report for the lead; not part of the repo
+/REPORT.md
+
 .DS_Store
-/web/test-results/
-/web/playwright-report/
