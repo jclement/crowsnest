@@ -113,6 +113,11 @@ type Deps struct {
 	// says where each agent's copies go. Nil: the routes answer 503 and sends refuse files.
 	Attachments  *attach.Service
 	AttachLayout attach.Layout
+	// Handoffs redeems the browser opener's one-time setup ids (GET /setup/open/{id}, setup mode
+	// only). Nil: those requests land on the plain setup page.
+	Handoffs interface {
+		Redeem(id string) (string, bool)
+	}
 	// Setup makes this the locked first-run server (setup.go): only /health, the setup
 	// endpoints and the web app's files, nothing else. Nil for the normal server.
 	Setup *setup.Service

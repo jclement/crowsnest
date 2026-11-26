@@ -100,7 +100,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	hooks := defaultServeHooks()
-	hooks.logs, hooks.reload = logs, reloader(cmd.Flags())
+	hooks.logs, hooks.reload, hooks.open = logs, reloader(cmd.Flags()), browserOpener(cfg, logger)
 	return serve(ctx, cfg, logger, hooks)
 }
 
@@ -113,6 +113,8 @@ type serveHooks struct {
 	// with saved settings (nil: settings cannot be changed in the app).
 	logs   *system.LogRing
 	reload func(stored map[string]string) (config.Config, error)
+	// open opens a URL in the browser (--open); nil never opens (tests).
+	open func(url string)
 }
 
 func defaultServeHooks() serveHooks { return serveHooks{connect: connectHerdr} }

@@ -24,6 +24,7 @@ import (
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
+	"github.com/jclement/crowsnest/internal/opener"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/sysstat"
@@ -184,4 +185,22 @@ func startStats(ctx context.Context, cfg config.Config, events *hub.Hub, fleetCa
 	})
 	go sampler.Run(ctx)
 	return sampler
+}
+
+// browserOpener returns serve's --open: it decides once (internal/opener) and opens URLs with the
+// chosen opener, logging what it did or why it did not. The opener's environment is scrubbed of
+// crowsnest's secrets like every child's.
+func browserOpener(cfg config.Config, logger *slog.Logger) func(url string) {
+	decision := opener.Decide(cfg.Open, opener.Detect(stderrIsTerminal(), doctor.InContainer()))
+	return func(url string) {
+		if decision.Command == nil {
+			logger.Debug("not opening a browser", "reason", decision.Reason)
+			return
+		}
+		if err := opener.Open(decision, url, herdr.ScrubEnv(os.Environ())); err != nil {
+			logger.Warn("could not open a browser; use the link above", "err", err)
+			return
+		}
+		logger.Info("opened the setup page in your browser (the link above works too)", "via", decision.Via)
+	}
 }
