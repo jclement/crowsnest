@@ -37,7 +37,7 @@ export function SpendButton({ onOpen }: { onOpen: () => void }) {
   return (
     <Button compact variant="ghost" icon={Coins} onClick={onOpen} title={`Estimated spend. ${SPEND_NOTE}`} aria-label={`Spend: today ${money(data?.today)}, this week ${money(data?.week)} (estimates)`}>
       <span className="font-mono">
-        {money(data?.today)} <span className="text-muted">today</span> · {money(data?.week)} <span className="text-muted">week</span>
+        {money(data?.today)} <span className="text-muted">today</span> · {money(data?.week)} <span className="text-muted">wk</span>
       </span>
     </Button>
   );
@@ -63,8 +63,8 @@ export function SpendPanel() {
   return (
     <div className="flex min-h-0 flex-col gap-2 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Tabs<SpendRange> id="spend-range" label="Range" value={range} onChange={setRange} items={(["today", "week", "30d"] as const).map((value) => ({ value, label: rangeLabels[value] }))} />
-        <Tabs<SpendGroup> id="spend-group" label="Group by" value={group} onChange={setGroup} items={(["job", "model", "day"] as const).map((value) => ({ value, label: groupLabels[value] }))} />
+        <Tabs<SpendRange> id="spend-range" label="Range" className="w-full whitespace-nowrap sm:w-auto" value={range} onChange={setRange} items={(["today", "week", "30d"] as const).map((value) => ({ value, label: rangeLabels[value] }))} />
+        <Tabs<SpendGroup> id="spend-group" label="Group by" className="w-full whitespace-nowrap sm:w-auto" value={group} onChange={setGroup} items={(["job", "model", "day"] as const).map((value) => ({ value, label: groupLabels[value] }))} />
       </div>
       <TabPanel id="spend-range" value={range} className="flex min-h-0 flex-col">
         <TabPanel id="spend-group" value={group} className="flex min-h-0 flex-col gap-2">
@@ -90,7 +90,8 @@ function ReportBody({ report, pending, error, retry }: { report: SpendReport | u
         <span>
           <span className="font-mono text-sm font-semibold text-heading">{costText(report.total)}</span>{" "}
           <span className="text-muted">
-            · {formatTokens(report.total.total_tokens)} tokens · {report.total.turns} model calls · {report.from === report.to ? report.from : `${report.from} to ${report.to}`}
+            · {formatTokens(report.total.total_tokens)} tokens · {report.total.turns} model calls ·{" "}
+            <span className="whitespace-nowrap">{report.from === report.to ? report.from : `${report.from} to ${report.to}`}</span>
           </span>
         </span>
         <Button compact variant="secondary" icon={Download} onClick={() => download(report)} disabled={report.rows.length === 0}>
@@ -121,7 +122,7 @@ const columns: { key: SpendSortKey; label: string; numeric: boolean; wide?: bool
   { key: "output", label: "Out", numeric: true, wide: true, value: (row) => formatTokens(row.output_tokens) },
   { key: "cache_write", label: "Cache w", numeric: true, wide: true, value: (row) => formatTokens(row.cache_write_tokens) },
   { key: "cache_read", label: "Cache r", numeric: true, wide: true, value: (row) => formatTokens(row.cache_read_tokens) },
-  { key: "turns", label: "Calls", numeric: true, value: (row) => String(row.turns) },
+  { key: "turns", label: "Calls", numeric: true, wide: true, value: (row) => String(row.turns) },
   { key: "tool_calls", label: "Tools", numeric: true, wide: true, value: (row) => String(row.tool_calls) },
 ];
 

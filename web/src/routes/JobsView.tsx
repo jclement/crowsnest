@@ -35,7 +35,7 @@ export function JobsView() {
     <div className="flex h-full min-h-0 flex-col md:flex-row">
       <div className="flex min-h-0 flex-col border-border md:w-96 md:shrink-0 md:border-r lg:w-[28rem]">
         <NewJobForm onCreated={(job) => select(job.id)} />
-        <div className="flex flex-wrap items-center justify-end gap-1 border-b border-border px-2 py-0.5">
+        <div className="flex flex-wrap items-center justify-end gap-x-0.5 border-b border-border px-1 py-0.5">
           <span className="mr-auto">
             <SpendButton onOpen={() => setSpendOpen(true)} />
           </span>

@@ -11,6 +11,7 @@ export function SpendSection({ spend, turns }: { spend: SpendSummary | undefined
   if (!spend) return null;
   return (
     <Card
+      aria-label="Spend"
       title={
         <>
           <Coins className="h-3.5 w-3.5 text-muted" aria-hidden />
