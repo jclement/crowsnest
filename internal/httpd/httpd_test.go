@@ -26,6 +26,7 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
@@ -105,6 +106,8 @@ type harnessOptions struct {
 	// M8: the journal and the poker (journal_test.go)
 	journal *journal.Journal
 	poker   *orch.Poker
+	// Web Push (push_test.go); nil: the /push routes answer 503
+	push *push.Service
 	// R2-L2: --trusted-proxy
 	trustedProxies     []netip.Prefix
 	trustedProxyHeader string // default x-forwarded-for
@@ -117,6 +120,7 @@ var testWeb = fstest.MapFS{
 	"assets/index-abc123.css":   {Data: []byte("body{}")},
 	"icons/crowsnest.svg":       {Data: []byte("<svg/>")},
 	"manifest.webmanifest":      {Data: []byte("{}")},
+	"sw.js":                     {Data: []byte("/* service worker */")},
 	"assets/nested/chunk-1.js":  {Data: []byte("1")},
 	"assets/nested/chunk-2.css": {Data: []byte("2")},
 }
@@ -176,6 +180,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Voice:         opts.voice,
 		Journal:       opts.journal,
 		Poker:         opts.poker,
+		Push:          opts.push,
 	})
 	if err != nil {
 		t.Fatal(err)
