@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // demoPrompt is drawn before every input line.
@@ -126,7 +127,7 @@ func (b *demoBridge) keyLocked(r rune, echo *strings.Builder) {
 // skipEscape swallows an escape sequence: ESC, then optionally [ or O, then parameters, ending
 // at a final byte in @..~ (so arrows, Home and function keys do not print garbage).
 func (b *demoBridge) skipEscape(r rune) {
-	b.escape = append(b.escape, byte(r))
+	b.escape = utf8.AppendRune(b.escape, r)
 	if len(b.escape) == 1 {
 		return
 	}

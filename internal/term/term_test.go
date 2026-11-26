@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -152,13 +153,13 @@ func fakeLauncher(t *testing.T, mode string) HerdrLauncher {
 
 func TestPaneBridgeFramesInputResizeAndRelease(t *testing.T) {
 	bridge := fakeLauncher(t, "control").Pane("w1:p2")
-	if _, err := bridge.Write([]byte("x")); err != ErrNotStarted {
+	if _, err := bridge.Write([]byte("x")); !errors.Is(err, ErrNotStarted) {
 		t.Fatalf("Write before Start = %v, want ErrNotStarted", err)
 	}
 	if err := bridge.Start(90, 25); err != nil {
 		t.Fatal(err)
 	}
-	if err := bridge.Start(90, 25); err != ErrStarted {
+	if err := bridge.Start(90, 25); !errors.Is(err, ErrStarted) {
 		t.Fatalf("second Start = %v", err)
 	}
 	var seen bytes.Buffer
@@ -213,7 +214,7 @@ func TestPaneBridgeCloseBeforeStart(t *testing.T) {
 	if reason := waitClosed(t, bridge); reason != ReasonClosed {
 		t.Errorf("reason = %q", reason)
 	}
-	if err := bridge.Start(80, 24); err != ErrClosed {
+	if err := bridge.Start(80, 24); !errors.Is(err, ErrClosed) {
 		t.Errorf("Start after Close = %v, want ErrClosed", err)
 	}
 }

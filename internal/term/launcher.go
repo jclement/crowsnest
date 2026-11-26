@@ -15,7 +15,9 @@ type HerdrLauncher struct {
 func (l HerdrLauncher) TUI() Bridge { return newTUIBridge(l.binary(), l.Session) }
 
 // Pane controls one pane of the session.
-func (l HerdrLauncher) Pane(paneID string) Bridge { return newPaneBridge(l.binary(), l.Session, paneID) }
+func (l HerdrLauncher) Pane(paneID string) Bridge {
+	return newPaneBridge(l.binary(), l.Session, paneID)
+}
 
 func (l HerdrLauncher) binary() string {
 	if l.Binary == "" {
