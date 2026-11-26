@@ -81,6 +81,11 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Orchestrator permission mode |
 | `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke; `0` disables timer pokes |
 | `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | false | Serve the UI over the session without starting Claude |
+| `--name` | `CROWSNEST_NAME` | the short hostname | This instance's name: header, title, push titles, `/auth/me`, Remote Control (7.10) |
+| `--no-remote-control` | `CROWSNEST_NO_REMOTE_CONTROL` | false | Start the orchestrator without Remote Control (7.10) |
+| `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | false | Start Claude job agents with Remote Control too (7.10) |
+| `--compact-at` | `CROWSNEST_COMPACT_AT` | `150000` | Compact the orchestrator past this many tokens; `0` off (7.9) |
+| `--fresh-at` | `CROWSNEST_FRESH_AT` | off | `HH:MM`: the daily hand-over and new conversation (7.9) |
 | `--allowed-host` | `CROWSNEST_ALLOWED_HOSTS` | derived | Extra Host/Origin names (reverse proxy, MagicDNS). Repeatable |
 | `--trusted-proxy` | `CROWSNEST_TRUSTED_PROXY` | none | `loopback`, an IP or a CIDR whose client-IP header is believed (4.2, R2-L2). Repeatable |
 | `--trusted-proxy-header` | `CROWSNEST_TRUSTED_PROXY_HEADER` | `x-forwarded-for` | The one header a trusted proxy's client is read from: `x-forwarded-for` (its last hop) or `cf-connecting-ip` (cloudflared only; 4.2, R3-L1) |
@@ -655,12 +660,12 @@ builds the reason list. Nothing due means no poke and no tokens spent. Gate: orc
 done **and** an empty input box; skipped while working; a blocked orchestrator raises a "needs
 you" item instead. Text sent: `[crowsnest poke 2026-11-26T03:10Z talk=off]` followed by one line
 per reason. Every poke and skip is recorded in the journal table and visible in the UI.
-Scheduled tasks (`tasks/*.md` with `every:` frontmatter in `--dir`, as the front door has) are a
-stretch item; the precheck is built so they can be added as another reason source.
+Scheduled tasks (`tasks/*.md` with `every:` frontmatter, as the front door has) are another
+reason source: 7.8.
 
 **7.5 Upkeep**: if the orchestrator pane is back at a shell, restart with `--resume`. "New
 conversation" in the UI sends `/exit`, waits for the shell, and starts with a fresh session id.
-Compaction is left to Claude's own auto-compact in v1.
+Compaction past a threshold and a daily new conversation with a hand-over: 7.9.
 
 **7.6 As built in M4** (`internal/orch`, `internal/transcript`; checked against herdr 0.9.5 and
 Claude Code 2.1.332 by `mise run test:claude`):
@@ -777,6 +782,121 @@ Claude Code 2.1.332 by `mise run test:claude`):
   Journal is a Sheet with a dense table (when, kind chip, summary), a kind filter and "Load
   older". A poke in a conversation is a one-line system row ("Poke · 2 reasons · 03:10") with the
   reasons behind a disclosure, not a user bubble.
+
+**7.8 Scheduled work** (built on `wip/upkeep`; `internal/schedule`, `internal/orch/poke.go` and
+`poker.go`, `cmd/crowsnest/upkeep.go`, `internal/httpd/schedule.go`,
+`web/src/components/schedule/SchedulePanel.tsx`). The front door's periodic tasks, in Go, in the
+existing poker:
+
+- **Files.** `<--dir>/tasks/*.md` and `~/.config/crowsnest/tasks/*.md` (beside the config file's
+  `roles/`; not read under `--demo`), re-read at every check, so a new or edited file needs no
+  restart. A name is the file name (`[a-z0-9][a-z0-9_-]*`); the orchestrator's directory wins a
+  clash and the other file is a problem. Frontmatter keys: `every` (`Nm` of at least 5 minutes,
+  `Nh`, `Nd`, `poke`, `change`), `after` (`HH:MM`, local), `as` (`poke`, the default, or `job`),
+  and for jobs `dir` and `role`. An unknown key is an error, not ignored (a misspelt `afer:` would
+  run a daily task at midnight). The front door's files parse unchanged.
+- **Due** is pure (`schedule.Check`, a table in `due_test.go` with a fixed time zone): an
+  interval since the last run; `Nd` by calendar days between local dates (DST-proof, never twice
+  on one day); `after:` by local wall clock (a time skipped by spring-forward counts as passed at
+  the first check after it); `poke` is a *ride-along*, due only with a poke that has something
+  else due; `change` when the fingerprint of the fleet (every agent but the orchestrator, with its
+  state) and the live jobs (state, stuck, cause) differs from the one at its last run, at most
+  every 5 minutes (`ChangeMinGap`, so agents flickering between turns do not cost a turn each);
+  Run now makes any task due once, switched off or not.
+- **Stamps are crowsnest's**, in kv `schedule.state` (last run, last outcome, the last job, the
+  `change` fingerprint, Run now, the switches, the problems already reported), set when the poke
+  that carried the task was delivered (the poker calls `Delivered` with the task names), so a task
+  never repeats because the model forgot to mark it, and a poke the gate held keeps its tasks due.
+  A poke whose delivery was uncertain counts as delivered, as every reason does (decision 35).
+- **The precheck** takes `Tasks` (due by themselves: a poke even when nothing else is due) and
+  `RideAlong` (added only when the poke has something else). Each is one reason line, key
+  `task:<name>`: `scheduled task <name> is due (<cadence>, last run <time>|never run): read <file>
+  and do what it says`. Task reasons are rebuilt by observation, never kept pending in kv.
+- **`as: job`** tasks are run by the service's own 30-second tick, not by pokes: the body (after
+  its title and a line naming the file) becomes a job's brief, created as the human would
+  (`jobs.Service.Create`), with the full supervisor; a task whose previous job is still live waits
+  for it ("waiting: the previous run, j_4, is still running") rather than stacking copies.
+- **Problems** (unreadable file, bad frontmatter, a name clash) are journalled once each as an
+  `alert` (keyed by path and error, remembered across restarts), and listed by `GET /schedule`.
+- **The instructions** (`CROWSNEST.md`) say a `scheduled task …` reason means read that file and
+  do it, and that there is nothing to mark done.
+- **UI**: the Schedule sheet (Chat menu, the Jobs view's Schedule button, and the command
+  palette's "Schedule"): per task the name, title, cadence in words, last run, next time (from
+  `schedule.NextDue`: "with the next poke" and "on a change" for the clock-free cadences), last
+  outcome with the job's live state, an on/off switch and Run now; then the skipped files. A table
+  from `md`, a list on a phone.
+- **Examples** in `examples/tasks/` (`check.md` every 15m, `tidy.md` every 60m, `digest.md` every
+  1d after 17:00), off until copied into a tasks directory; a test parses them.
+
+**7.9 Keeping the orchestrator small** (built on `wip/upkeep`; `internal/orch/compact.go` (pure),
+`tender.go`, `internal/transcript` (usage), `cmd/crowsnest/upkeep.go`). Copied from the front
+door's `frontdoor-poke`, with its lessons:
+
+- **The size** comes from the transcript the tailer already reads (no second reader): each
+  non-sidechain assistant record's `usage` (`input_tokens + cache_creation_input_tokens +
+  cache_read_input_tokens`) is the context now; a `system`/`compact_boundary` record resets it to
+  `compactMetadata.postTokens`, or to *unknown* when that is absent (Claude Code 2.1.332 records
+  `preTokens` only for auto compaction, seen in a real transcript), until the next call reports.
+  The tailer also notes when the human last typed (an untagged or voice user message that is not
+  one of crowsnest's `[crowsnest …]` lines, nor a compaction summary). `transcript.Manager.Usage`
+  serves it.
+- **The Tender** runs first at every poke check (it shares the input box with the pokes, so they
+  never interleave; a check it spends holds the poke to the next one). It reads the screen only
+  when something is possibly due, so the common check costs nothing.
+- **Compaction** (`DecideCompact`): over `--compact-at` (150000, `0` off, at least 20000) on a
+  known reading; the orchestrator idle, screen read, no dialog, empty input box; no job it holds
+  with a lifecycle step in flight (a brief, a nudge or a retry being typed, 6.9); and not again
+  without growth since the last attempt unless a compaction boundary has appeared since (which
+  settles it). It types `/compact <focus>` through `orch.Prompt` (so the dialog and draft
+  re-checks and the wait for the turn to start apply); the focus keeps every open job with its id
+  and state, unanswered questions, unfinished requests, standing instructions, today's decisions
+  and the reply contract. Journalled as `upkeep`. "Compact now" (`POST /orchestrator/compact`)
+  does the same at any size and answers 409 when the orchestrator cannot take it.
+- **The daily new conversation** (`--fresh-at HH:MM`, off by default; `DecideFresh`): after that
+  local time, once per calendar day, when the human has been quiet 20 minutes and the
+  orchestrator is ready: first `[crowsnest upkeep] … write what the next conversation needs to
+  <state>/handoff.md …` (it starts with a crowsnest header so it never counts as the human), and
+  on a later check, at least 30 s after and idle again, `NewConversation` (the existing /exit and
+  fresh session). The first sighting of the setting only marks the day, so turning it on (or
+  installing) never restarts a session on the spot; an empty conversation skips the hand-over.
+  The day is recorded before the restart, so a failing restart is not retried all day.
+- **Standing context.** The SessionStart hook already re-injected a held job; the agent socket now
+  adds, for the orchestrator's own pane (a caller whose token names no job), its standing
+  context (`agentapi.ServerOptions.SessionContext`): the hand-over file (at most 16 KB, with its
+  path and time), the questions it asked that are still open, and the live jobs it holds or
+  created. Every source: startup (so the new conversation starts with the hand-over), resume,
+  compact and clear. Framed as records, not instructions from the human.
+- **UI**: the Chat menu shows the context ("128k tokens · compacts at 150k") and a bar against the
+  threshold (amber past 80 %), with Compact now and New conversation; the command palette has
+  "Compact now".
+- **Job agents** are not compacted by crowsnest: the tailer follows a job's transcript only while
+  someone reads it, so the size is not there for free; Claude's own auto-compact and the
+  SessionStart re-injection cover them, as before.
+
+**7.10 The instance's name, and Remote Control** (built on `wip/upkeep`; `internal/config/upkeep.go`,
+`internal/orch/start.go` and `upkeep.go`, `internal/jobs/launch.go`):
+
+- **Name**: `--name` / `CROWSNEST_NAME`, 1 to 32 of `[A-Za-z0-9_-]` starting with a letter or
+  digit, else the hostname lower-cased up to its first dot with anything else made `-`
+  (`crowsnest` if nothing is left). It is in the header (beside the session chip), the page title
+  (`(3) crowsnest · quark`), Web Push titles (`quark: …`), the startup log and `/auth/me`
+  (`features.name`). Not in the PWA manifest (a static file; not cheap) nor the `--notify-url`
+  line (no title there).
+- **Remote Control** (verified against Claude Code 2.1.332 by
+  `remote_control_integration_test.go` in a throwaway session: `--remote-control <name>` is
+  accepted, the session starts normally, and the screen shows "/remote-control is active ·
+  Continue here, on your phone, or at https://claude.ai/code/session_…"). The orchestrator is
+  started with `--remote-control "<name> crowsnest"` (plus ` <session>` when it is not the default
+  one) unless `--no-remote-control` (and never under `--demo`); one argv entry, since herdr passes
+  args without a shell. Claude Code's documentation (read 2026-11-26) says the interactive flag
+  starts the session with Remote Control off when the login cannot use it (an API key, a plan
+  without it, Bedrock or Vertex, an organisation policy), so there is nothing to fall back from:
+  the start never depends on it. The watch reads the pane for 45 s after each start and sets
+  `Status.remote_control_note` to `active` on the banner, or to a sentence saying it did not come
+  up and why it may not have. The name is not shown on the screen; it is the title in
+  claude.ai/code and the app.
+- **Job agents**: off by default; `--job-remote-control` adds `--remote-control "<name> <job id>
+  <title, cleaned, 40 characters>"` to Claude job agents (Codex has no such flag).
 
 ## 8. Needs-you: questions and dialogs
 
@@ -1007,7 +1127,7 @@ browser reconnects, gets `hello`, and refetches.
 |---|---|
 | `GET /health` | Unauthenticated: `{status, version, update_available, latest_version?, release_url?}` (16.1) |
 | `POST /admin/update` | Self-update from the browser (16.1): verify, install, answer, exit for a supervisor to restart |
-| `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`) |
+| `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`, and the instance's `name`, 7.10) |
 | `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
@@ -1017,12 +1137,14 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, isolate?}`; `budget?` with M12) → `201` and the queued job; detail with `timeline` and `questions` (6.8) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
-| `GET /orchestrator` | The orchestrator's status (added in M4; 7.6) |
+| `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control` and `remote_control_note` (7.10) |
+| `GET /orchestrator/context`, `POST /orchestrator/compact` | The orchestrator's context size and upkeep `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}`; Compact now (409 when it cannot take it) (7.9) |
+| `GET /schedule`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin, every, after, schedule, as, dir, role, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now}], problems:[{path, error}], dirs}`; Run now; `{enabled}` (7.8). A `schedule` event (`{at}`) says a stamp or switch changed |
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
 | `GET /inbox/summary` | `{open, blocking}`: the Inbox badge (added in M6) |
 | `POST /orchestrator/poke` | "Poke now" (M8) → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}` (7.7) |
-| `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated; `limit` 50 by default, at most 200 |
+| `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated (`task`, a scheduled job started, 7.8; `upkeep`, compaction and hand-over, 7.9); `limit` 50 by default, at most 200 |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `POST /voice/talk` `{client_id, on}` → `{talk, heartbeat_seconds, max_recording_seconds}`; `POST /voice/read` `{question_id}` → `{text_id}` | Talk-mode heartbeat; a question made speakable (M11, 13.1). 404 when disabled |
 | `GET /push/key`, `GET`/`PUT /push/settings`, `POST`/`DELETE /push/subscriptions`, `DELETE /push/subscriptions/{id}`, `POST /push/test` | Web Push (8.5) |
@@ -1101,7 +1223,7 @@ The client sends a resize first; the server starts the process on that first res
 - `jobs.root_dir` (migration `0008_job_root.sql`, R3-H1): the resolved directory a job's children may use without asking, recorded when crowsnest opens its pane; `''` grants nothing
 - `jobs.lifecycle_op`, `lifecycle_owner`, `lifecycle_at`, `lifecycle_gen` (migration `0006_job_lifecycle.sql`): the lifecycle claim (6.9); the same migration indexes `jobs(agent_name, state)`, `jobs(pane_id, state)` and `questions(job_id, status)`
 - `push_subscriptions(id, endpoint, p256dh, auth, user_agent, created_at, last_success_at, last_failure_at, failures)` (migration `0009_push.sql`, 8.5); `kv` keys `push.vapid` and `push.settings`
-- `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), settings
+- `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), settings
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
 Paths are XDG: config `~/.config/crowsnest`, data `~/.local/share/crowsnest`, state and logs `~/.local/state/crowsnest/<session>/`, agent socket in `$XDG_RUNTIME_DIR/crowsnest/` or the state dir.
@@ -1245,7 +1367,9 @@ key rules in `lib/hotkeys.ts`; all three are pure and unit-tested.
   dismiss; a dialog: the Inbox or its terminal). Cancel, Restart orchestrator and New conversation
   ask in a confirmation level worded as the views word it (`relaunchConfirmations` in
   `lib/conversation.ts` is shared with the Chat menu). Messaging a job's agent is a one-line text
-  level. Esc, Backspace in an empty box or ← at the start goes back a level; Esc at the top closes
+  level. The Schedule sheet and "Compact now" (7.8, 7.9) are items too; Compact now
+  runs at once (it never interrupts a turn: the server refuses it unless the orchestrator is idle
+  with an empty input box). Esc, Backspace in an empty box or ← at the start goes back a level; Esc at the top closes
   and returns focus to where it was (when that element still exists). Effects close the palette at
   once and report as a toast, with a link where it landed ("Open j_12", "Open Chat"); toasts gained
   an optional action for this.
@@ -1370,6 +1494,7 @@ internal/jobs/               job service, launcher, supervisor (hooks, dispositi
 internal/agentcfg/           the --settings (hooks, allow rule) and --mcp-config files every Claude agent gets
 internal/orch/               lifecycle, send, poke precheck and gate, poker, herdr-side backstop
 internal/journal/            journal entries (pokes, skips, sends, answers, restarts, alerts)
+internal/schedule/           scheduled task files: parse, due rules, stamps, job tasks (7.8)
 internal/transcript/         locate, tail, normalise Claude JSONL
 internal/questions/          store, long-poll, expiry
 internal/term/               PTY bridge, pane-control bridge
@@ -1590,6 +1715,22 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
     for one glyph. Cutting them by page with exact `unicode-range`s keeps a phone's cost to the
     chunks on screen. Python's fontTools does the cutting, through `uv` (pinned in mise), because
     it is the standard subsetter.
+53. **A scheduled task is stamped by crowsnest when its poke is delivered** (7.8). The front door
+    asked the model to run `task-done`; a model that forgot repeated the task every tick. The
+    poker knows exactly when a reason was delivered, which is the same at-most-once point every
+    other reason uses.
+54. **`every: poke` rides along; it never makes a poke** (7.8). A task that asked for a turn on
+    every check would turn the precheck's "nothing due, no tokens" into a turn every two seconds.
+55. **Job tasks run outside the poke** (7.8). A job needs no orchestrator turn to start, and gets
+    the supervisor; tying it to the poke gate would hold it while the human types at the terminal.
+56. **Compaction and the hand-over run in the poker's check, before the poke** (7.9). They type
+    into the same input box; one loop deciding which goes first is simpler than two locks, and the
+    poke loses nothing by waiting one check.
+57. **The context size is read from the transcript the tailer already follows** (7.9), not from a
+    second reader or the screen: one parser, and the reading is free.
+58. **Remote Control is asked for, never required** (7.10). Claude starts without it when the
+    login cannot have it, so crowsnest passes the flag, reports what it saw, and never retries or
+    blocks a start over it.
 
 ## 18. Milestones
 
@@ -1625,7 +1766,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 7. **MCP tools or a CLI for the job protocol?** Both, over one socket API: MCP for Claude agents crowsnest starts (declared tools get used; a CLI named in a prompt gets forgotten), CLI for everything else. Taken.
 8. **Should a refused stop ever be overridden?** Yes, after three nudges with no progress: an agent in a loop costs money and tells Jeff nothing. It becomes `stuck` and he is told. Taken.
 9. **Agents pulling jobs from a queue (Paperclip's checkout)**: not in v1; crowsnest assigns. Revisit if several leads share one board.
-10. **Scheduled tasks, passkeys, Codex conversation view, multi-session**: after v1.
+10. **Scheduled tasks, passkeys, Codex conversation view, multi-session**: after v1. Scheduled tasks were built on `wip/upkeep` (7.8).
 
 ## 20. Known limitations (kept honest as the build proceeds)
 
@@ -1648,7 +1789,8 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - A launch interrupted by a crash while herdr was creating the worktree can leave that worktree behind; the relaunch makes a new one (or fails on the branch name and shows `needs_you`/launch).
 - A restart mints a new start token, which revokes the agent's previous one. It now happens only once the old agent is confirmed gone (R2-C07); replacing tokens atomically per pane is R2-C15, in `internal/agentid`.
 - Codex jobs are launched but have no hooks: they are covered by the herdr-side backstop (M8 calls `NudgeIfDue`), not the Stop hook.
-- Pokes (M8): the agent-settled trigger is herdr's `done`/`blocked`; an agent that goes `idle` without passing through `done` is not reported. The timer reports a change in the standing list, not elapsed time, so a stuck job that stays stuck is pushed once (at its event) and then only when the list changes. Scheduled tasks (`tasks/*.md`) are not built; the precheck takes them as another reason source. A poke whose delivery was uncertain is not resent.
+- Pokes (M8): the agent-settled trigger is herdr's `done`/`blocked`; an agent that goes `idle` without passing through `done` is not reported. The timer reports a change in the standing list, not elapsed time, so a stuck job that stays stuck is pushed once (at its event) and then only when the list changes. A poke whose delivery was uncertain is not resent, and the scheduled tasks it carried count as run.
+- Scheduled work (7.8) and upkeep (7.9): a task's run is "the poke carrying it was delivered", not "the orchestrator did it"; crowsnest cannot see the difference, and a task file should say what to report. `every: change` watches herdr's agent states, which flicker between turns, so it runs at most every 5 minutes rather than on every change. The context size is unknown after an auto compaction until the next call (Claude 2.1.332 records no `postTokens` for those). The hand-over is written by the orchestrator's own Write tool into the state directory, outside its working directory; whether that needs a permission prompt was not tested (under `default` it may stop at a dialog; the Inbox would then show it and the restart waits). The daily new conversation and compaction were exercised against the fake herdr only, not against a real Claude (the real tests cover the scheduled task and Remote Control). Job agents are not compacted by crowsnest.
 - The backstop's "stop handled by a hook" test is time-based (a Stop hook stamp within 15 s before the agent was seen to settle). An agent whose hook works on one turn and fails on the very next within that window would miss one backstop nudge; the next idle minute catches it.
 - Answers are typed back only to the pane the question came from, as its token says. An agent restarted in another pane, or a caller without a token (a pane crowsnest did not create, a script), gets the answer only through the Inbox, `--wait`, `get_question` or `job_get`. A held delivery (dialog or draft) waits up to a week.
 - **Agent identity is per uid, not per process** (R1b N2, R2-M2): every agent in a session runs as the same uid, so any agent can read another's environment or its 0600 token file under the state directory with an ordinary file read, and then act as it on the socket (finish or fail its job, forge its hooks and so silence its supervision, ask or `say` as it, the orchestrator included). The token stops accidents and forged environment variables, not a hostile same-uid process; a separate uid for crowsnest would (4.6). Questions and jobs can still be read (`GET`) by any caller (R2-I3), and role overrides in `~/.config/crowsnest/roles/` are writable by every agent and join every future job's system prompt (R2-I6).
