@@ -79,6 +79,71 @@ which also gives the HTTPS secure context the microphone needs later:
 ./bin/crowsnest --bind tailnet --username jeff --password-file ~/.config/crowsnest/password
 ```
 
+## Container (devbox)
+
+`ghcr.io/jclement/crowsnest` is a ready-made devbox: crowsnest, herdr and mise in one container
+(linux amd64 and arm64), with Claude Code and node installed by mise into a volume on first
+start. A browser gets the herdr session, a terminal and (once the orchestrator lands) Claude.
+
+```sh
+cp deploy/.env.sample deploy/.env          # set CROWSNEST_USERNAME and CROWSNEST_PASSWORD
+docker compose -f deploy/compose.yaml up -d
+docker compose -f deploy/compose.yaml logs -f crowsnest   # first start: watch mise install
+open http://127.0.0.1:2769
+```
+
+Or without compose:
+
+```sh
+docker run -d --name crowsnest -p 127.0.0.1:2769:2769 \
+  -e CROWSNEST_USERNAME=jeff -e CROWSNEST_PASSWORD_FILE=/run/secrets/pw \
+  -v "$PWD/pw:/run/secrets/pw:ro" -v crowsnest-home:/home/crow ghcr.io/jclement/crowsnest
+```
+
+**The one manual step is signing Claude in.** Nothing personal is in the image, Claude's login
+included: after the first start, log in to crowsnest, open **Terminal**, run `claude`, and
+complete its login (it prints a URL to open on any device). The login is kept in the volume.
+
+What is in it, and where things live:
+
+| | |
+|---|---|
+| Base | `debian:trixie-slim`, `tini` as PID 1, user `crow` (uid 1000), `HOME=/home/crow` |
+| Baked in | crowsnest, herdr (pinned, checksummed), mise (pinned, checksummed), git, gh, openssh-client, curl, build-essential, ripgrep, jq, less, en_US.UTF-8 |
+| Volume `/home/crow` | Claude's login (`~/.claude`), mise tools (`~/.local/share/mise`), herdr sessions, the crowsnest database, your projects. Keep it across upgrades |
+| Port | 2769, published on 127.0.0.1 only by `deploy/compose.yaml` |
+| Health | `HEALTHCHECK` runs `crowsnest health` |
+
+The entrypoint (`deploy/entrypoint.sh`) on every start:
+
+1. **Refuses to start without credentials**: `CROWSNEST_USERNAME` plus `CROWSNEST_PASSWORD` or
+   `CROWSNEST_PASSWORD_FILE`, or else both `CROWSNEST_NO_AUTH=true` and
+   `CROWSNEST_I_KNOW_THIS_IS_OPEN=true`. It exits 64 with a message saying which to set.
+2. **On first start only** writes `~/.config/mise/config.toml` (node LTS, and Claude Code from
+   mise's `claude` registry entry, the native binary) and a herdr config that skips herdr's
+   first-run screen. Existing files are never overwritten; edit them to change the tool set.
+3. **Runs `mise install`** and waits up to `CROWSNEST_MISE_WAIT` seconds (default 300) for it. A
+   failure is logged with the last lines of `~/.local/state/crowsnest/mise-install.log` and a slow
+   install carries on in the background; neither stops crowsnest from starting.
+4. **Execs `crowsnest serve --bind 0.0.0.0`**, passing through any arguments given to the
+   container. Every other setting is a `CROWSNEST_*` variable (see Configuration). Change the
+   port with `CROWSNEST_PORT`, not `--port`, so the health check probes the same port.
+
+Upgrading tools needs no rebuild: `mise upgrade` in the web terminal (Claude Code's own
+auto-updater is off in the image for that reason). Upgrading crowsnest, herdr or mise is a new
+image; the volume carries over.
+
+**Blast radius.** Whoever logs in has a shell as `crow`, and so does every agent in the
+container. They reach what is mounted and what the network reaches, nothing else on the host.
+That is the point: mount only what you would hand an agent (never the Docker socket or your real
+home), and put a tunnel or tailnet in front rather than publishing the port
+(`deploy/compose.yaml` has commented cloudflared and tailscale sidecars).
+
+`mise run image` builds `crowsnest:dev` locally for this machine's architecture.
+`mise run publish` builds amd64 and arm64 and pushes `ghcr.io/jclement/crowsnest:<version>` and
+`:latest` (token from `GHCR_TOKEN`, or `gh auth token` with `write:packages`); the release
+workflow does the same on every `v*` tag.
+
 ## Commands
 
 | Command | Does |
@@ -177,6 +242,8 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures, and the terminals on a throwaway `crowsnest-test-*` herdr session. Each spec starts and stops its own instance on a random localhost port |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives and `checksums.txt`, nothing published |
+| `mise run image` | Build the devbox image (`deploy/Dockerfile`) for this machine's architecture as `crowsnest:dev`. Needs Docker |
+| `mise run publish` | Build the devbox image for amd64 and arm64 and push `ghcr.io/jclement/crowsnest:<version>` and `:latest`. Jeff's step |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |
 | `mise run dev:reset` | Remove build output, web dist, Vite cache and the dev database |
 
@@ -186,8 +253,10 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 it reads the latest tag, offers the next patch, minor or major version, creates an annotated tag
 and asks before pushing it. The pushed `v*` tag starts `.github/workflows/release.yml`, which runs
 `mise run setup` and `mise run check`, then GoReleaser (`.goreleaser.yml`) builds the archives and
-checksums and attaches them to a GitHub release (a `-rc.N` style tag becomes a prerelease). The
-workflow uses only `GITHUB_TOKEN`. Never build release artifacts by hand or tag around a broken
+checksums and attaches them to a GitHub release (a `-rc.N` style tag becomes a prerelease). When
+that succeeds, its `image` job builds the devbox image for amd64 and arm64 and pushes
+`ghcr.io/jclement/crowsnest:<tag>` (and `:latest`, unless the tag is a prerelease). The
+workflow uses only `GITHUB_TOKEN` (`packages: write` for the image job). Never build release artifacts by hand or tag around a broken
 pipeline: fix the pipeline.
 
 `mise run snapshot` runs the same GoReleaser config locally with `--snapshot` (no tag, nothing
@@ -200,6 +269,7 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | `~/.config/crowsnest/config.yaml` | Optional config file |
 | `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed) and settings |
 | `~/.local/state/crowsnest/<session>/herdr-server.log` | Output of a herdr server crowsnest started |
+| `~/.local/state/crowsnest/mise-install.log` | Devbox image only: the entrypoint's last `mise install` |
 
 ## License
 
