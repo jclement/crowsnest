@@ -7,6 +7,7 @@
 package agentcfg
 
 import (
+	"path/filepath"
 	"strings"
 )
 
@@ -89,4 +90,55 @@ func MCPConfig(executable, socket, jobID, token string) map[string]any {
 // quote single-quotes text for a POSIX shell.
 func quote(text string) string {
 	return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'"
+}
+
+// AllowRead adds a Read allow rule for each directory (and everything under it) to a --settings
+// map, so an agent reads the attachments crowsnest copied into its inbox without a permission
+// prompt under the default permission mode (DESIGN.md 8.6). Claude Code matches a rule against
+// the path as the agent writes it, not resolved (probed on 2.1.332: `Read(//tmp/x/**)` allowed
+// /tmp/x/a.png, `Read(//private/tmp/x/**)` did not), so both the path crowsnest types and its
+// resolved form get a rule when they differ. `//` starts an absolute path in a rule.
+func AllowRead(settings map[string]any, dirs ...string) map[string]any {
+	var rules []string
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		rules = append(rules, readRule(dir))
+		if resolved := resolveExisting(dir); resolved != filepath.Clean(dir) {
+			rules = append(rules, readRule(resolved))
+		}
+	}
+	if len(rules) == 0 {
+		return settings
+	}
+	permissions, _ := settings["permissions"].(map[string]any)
+	if permissions == nil {
+		permissions = map[string]any{}
+	}
+	allow, _ := permissions["allow"].([]string)
+	permissions["allow"] = append(allow, rules...)
+	settings["permissions"] = permissions
+	return settings
+}
+
+// resolveExisting resolves the links in dir's nearest existing ancestor and joins the rest back
+// on: an inbox is often made after the agent starts.
+func resolveExisting(dir string) string {
+	dir = filepath.Clean(dir)
+	rest := ""
+	for path := dir; ; path = filepath.Dir(path) {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		if parent := filepath.Dir(path); parent == path {
+			return dir
+		}
+		rest = filepath.Join(filepath.Base(path), rest)
+	}
+}
+
+// readRule is the allow rule for a directory: Read(//abs/path/**).
+func readRule(dir string) string {
+	return "Read(//" + strings.TrimPrefix(filepath.ToSlash(filepath.Clean(dir)), "/") + "/**)"
 }

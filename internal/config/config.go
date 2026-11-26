@@ -92,6 +92,11 @@ type Config struct {
 	CompactAt        int    // compact the orchestrator past this many tokens; 0 off
 	FreshAt          int    // daily new conversation, minutes after local midnight; -1 off
 
+	// ---- Attachments (attach.go) ----
+
+	AttachmentMaxMB   int // largest attachment, MB
+	AttachmentQuotaMB int // all attachments together, MB
+
 	// ---- Talk mode and notices ----
 
 	ElevenLabsAPIKey string // enables talk mode when set

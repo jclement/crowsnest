@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jclement/crowsnest/internal/agentcfg"
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/transcript"
@@ -430,7 +431,10 @@ func (o *Orchestrator) mcpEnabled() bool {
 // supervisor's hooks (M7), built by agentcfg like every job agent's. The orchestrator's hooks
 // carry no job id: the server maps them to the job the orchestrator currently holds.
 func (o *Orchestrator) claudeSettings(tokenFile string) map[string]any {
-	return agentcfg.ClaudeSettings(o.opts.Executable, o.opts.AgentSocket, "", tokenFile, o.mcpEnabled())
+	// Its attachment inbox (Chat's pasted files, and those of jobs it holds) is readable without
+	// a prompt (DESIGN.md 8.6).
+	return agentcfg.AllowRead(agentcfg.ClaudeSettings(o.opts.Executable, o.opts.AgentSocket, "", tokenFile, o.mcpEnabled()),
+		attach.Layout{StateDir: o.opts.StateDir}.Orchestrator().Dir)
 }
 
 // MCPConfig is the --mcp-config file (agentcfg.MCPConfig with no job): one stdio server,

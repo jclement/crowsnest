@@ -115,6 +115,9 @@ func (s *Service) limits() DelegationLimits {
 // CreateForAgent is job_create: Create under the rules above. A job that needs the human's
 // approval is returned queued with cause approval; it starts only if the human allows it.
 func (s *Service) CreateForAgent(ctx context.Context, input CreateInput, caller AgentCaller) (Job, error) {
+	if len(input.Attachments) > 0 {
+		return Job{}, invalid("attachments are the human's uploads; an agent's job cannot carry them. Name the files in the brief instead")
+	}
 	who, err := s.creatorOf(ctx, caller)
 	if err != nil {
 		return Job{}, err

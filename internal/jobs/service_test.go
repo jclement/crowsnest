@@ -216,8 +216,11 @@ func assertJobFiles(t *testing.T, args []string, jobID string) {
 	if err := json.Unmarshal(body, &settings); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(settings.Permissions.Allow, []string{"mcp__crowsnest__*"}) {
-		t.Fatalf("allow %v", settings.Permissions.Allow)
+	// The MCP tools, then Read on the job's attachment inbox (as typed, and resolved when that
+	// differs), so pasted files are read without a prompt (DESIGN.md 8.6).
+	allow := settings.Permissions.Allow
+	if len(allow) < 2 || allow[0] != "mcp__crowsnest__*" || !strings.HasPrefix(allow[1], "Read(//") || !strings.HasSuffix(allow[1], "/jobs/"+jobID+"/attachments/**)") {
+		t.Fatalf("allow %v", allow)
 	}
 	for _, event := range []string{"Stop", "SessionStart", "Notification", "StopFailure", "PermissionDenied", "SessionEnd", "PostToolUse"} {
 		hooks := settings.Hooks[event]

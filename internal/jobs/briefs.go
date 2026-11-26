@@ -12,6 +12,7 @@
 package jobs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/termtext"
 )
@@ -63,6 +65,7 @@ func (s *Service) writeBrief(job Job) (string, error) {
 		b.WriteString(protocol + "\n\n---\n\n")
 	}
 	b.WriteString(briefText(job))
+	b.WriteString(s.briefAttachments(job.ID))
 	path := filepath.Join(dir, briefFile)
 	if err := writeReadOnly(path, []byte(b.String())); err != nil {
 		return "", fmt.Errorf("writing the brief of %s: %w", job.ID, err)
@@ -91,6 +94,22 @@ func writeReadOnly(path string, data []byte) error {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// briefAttachments lists the files given with the job, one "Attached: <path> (type, size)" line
+// each, after the brief. The files are images, logs or documents the human pasted: the agent
+// reads them with its Read tool (Claude sees an image it reads).
+func (s *Service) briefAttachments(jobID string) string {
+	if s.opts.Attachments == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lines := s.opts.Attachments.BriefLines(ctx, jobID)
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\nFiles given with this brief (read each one with your Read tool; images are shown to you):\n" + strings.Join(lines, "\n") + "\n"
 }
 
 // briefText is the brief as an agent should read it: the human's words as they are, or another
