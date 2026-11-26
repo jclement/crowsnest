@@ -97,8 +97,12 @@ func isHTTPS(r *http.Request) bool {
 	return err == nil && addr.Unmap().IsLoopback()
 }
 
+// setSessionCookie sets the session cookie. Secure follows the request scheme rather than being
+// always on, because the documented tailnet path is plain HTTP over WireGuard, where a Secure
+// cookie would never be sent back.
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is set whenever the request is HTTPS
+
 		Name:     SessionCookie,
 		Value:    token,
 		Path:     "/",
@@ -111,7 +115,8 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expi
 }
 
 func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // see setSessionCookie
+
 		Name:     SessionCookie,
 		Value:    "",
 		Path:     "/",

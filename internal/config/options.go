@@ -50,7 +50,7 @@ const (
 	optAllowedHost         = "allowed-host"
 	optTLSCert             = "tls-cert"
 	optTLSKey              = "tls-key"
-	optElevenLabsAPIKey    = "elevenlabs-api-key"
+	optElevenLabsAPIKey    = "elevenlabs-api-key" //nolint:gosec // a flag name, not a credential
 	optElevenLabsVoice     = "elevenlabs-voice"
 	optElevenLabsURL       = "elevenlabs-url"
 	optNotifyURL           = "notify-url"

@@ -79,7 +79,8 @@ func resolveBinds(binds []string, port int, interfaces []Interface) ([]Listener,
 // then interface names, so an interface literally named "tailnet" cannot shadow the keyword.
 func resolveBind(bind string, port int, interfaces []Interface) ([]Listener, error) {
 	at := func(addr netip.Addr, optional bool) Listener {
-		return Listener{Addr: netip.AddrPortFrom(addr, uint16(port)), Optional: optional, Source: bind}
+		// port was checked to be 1..65535 in loadNetwork before binds are resolved.
+		return Listener{Addr: netip.AddrPortFrom(addr, uint16(port)), Optional: optional, Source: bind} //nolint:gosec // range-checked
 	}
 	switch strings.ToLower(bind) {
 	case "localhost":

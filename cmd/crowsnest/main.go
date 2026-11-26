@@ -1,0 +1,73 @@
+// Command crowsnest runs a herdr session and its orchestrator from a browser. This file is the
+// Cobra root: `crowsnest` with no subcommand is `crowsnest serve`. Every configuration flag is
+// persistent on the root so `serve` and `health` resolve the same config the same way.
+//
+// Exit codes: 0 success, 1 runtime error, 2 usage error (go-cli house style).
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+
+	"github.com/jclement/crowsnest/internal/config"
+)
+
+// Stamped by -ldflags at build time (mise run build).
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
+// usageError marks a mistake in how the command was invoked (exit code 2).
+type usageError struct{ err error }
+
+func (e usageError) Error() string { return e.err.Error() }
+func (e usageError) Unwrap() error { return e.err }
+
+func main() {
+	root := newRootCommand()
+	if err := root.Execute(); err != nil {
+		printError(err)
+		var usage usageError
+		if errors.As(err, &usage) {
+			os.Exit(2)
+		}
+		os.Exit(1)
+	}
+}
+
+func newRootCommand() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "crowsnest",
+		Short:         "Run a herdr session and its orchestrator from a browser",
+		Long:          "Crowsnest starts a herdr session and a Claude Code orchestrator in it, and serves a\nmobile-friendly web app for chatting with it, answering questions and driving terminals.\n\nWith no subcommand, crowsnest runs `serve`.",
+		Version:       versionLine(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE:          runServe,
+	}
+	root.SetVersionTemplate("crowsnest {{.Version}}\n")
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
+	config.RegisterFlags(root.PersistentFlags())
+	root.AddCommand(newServeCommand(), newVersionCommand(), newHealthCommand())
+	return root
+}
+
+// versionLine is "v1.2.3 (abc1234, 2026-01-15T10:30:00Z)".
+func versionLine() string {
+	return fmt.Sprintf("%s (%s, %s)", version, commit, buildDate)
+}
+
+// printError shows an error on stderr, in red on a terminal.
+func printError(err error) {
+	if stderrIsTerminal() {
+		fmt.Fprintf(os.Stderr, "\x1b[1;31merror:\x1b[0m %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "error: %v\n", err)
+}
