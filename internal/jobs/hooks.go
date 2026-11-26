@@ -147,9 +147,11 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 		decision := Decide(&job, c.questions.Open, StopInput{SessionID: input.SessionID, StopHookActive: input.StopHookActive}, s.historyLocked(*r, c), s.opts.Now())
 		// The stop is handled here: the herdr-side backstop leaves a stop whose hook ran alone, so
 		// it is never nudged twice (internal/orch/backstop.go). Except when the turn was let end
-		// only because an answer is on its way: that grace runs out, and the backstop must look
-		// again then (R2-C04).
-		if decision.Rule != RuleAnswerIncoming {
+		// only because input is on its way, an answer (R2-C04) or crowsnest's own typing (R3-C05):
+		// that proves a send is in flight, not that another turn follows, so the stop stays
+		// unhandled and the backstop looks again once the agent has sat idle. An agent that did
+		// carry on is working by then, and is left alone.
+		if decision.Rule != RuleAnswerIncoming && decision.Rule != RuleInputIncoming {
 			r.LastStopAt = s.opts.Now()
 		}
 		reply = s.applyDecisionLocked(r, c, decision, input)

@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
+	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -230,5 +232,41 @@ func TestCancelDuringTheSendsChecksTypesNothingAndInterruptsLast(t *testing.T) {
 	}
 	if d := r.get(job.ID); d.State != StateCancelled {
 		t.Fatalf("state %s", d.State)
+	}
+}
+
+// ---- R3-C05: a stop let through for crowsnest's own typing is looked at again -----------------
+
+func TestStopDuringTypingIsRevisitedWhenTheAgentStaysIdle(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+	if err := r.fake.SetScreen(job.PaneID, fleet.StripANSI(emptyInputScreen), emptyInputScreen); err != nil {
+		t.Fatal(err)
+	}
+	poker := backstopPoker(r)
+	_ = r.fake.SetStatus(job.PaneID, herdr.StatusWorking)
+	poker.Check(ctx, false)
+	// The human's nudge is being typed when the agent's turn ends: the stop is allowed, since the
+	// nudge starts the next turn. But that turn ends at once, with nothing declared.
+	var hookReply string
+	r.fake.OnPrompt(func(_ *fake.Fake, _, text string) {
+		if strings.HasPrefix(text, "[crowsnest nudge]") {
+			r.fake.OnPrompt(nil)
+			hookReply = r.stop(job.ID)
+		}
+	})
+	if _, err := r.svc.Nudge(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if hookReply != "" {
+		t.Fatalf("a stop while crowsnest types is allowed: %q", hookReply)
+	}
+	_ = r.fake.SetStatus(job.PaneID, herdr.StatusIdle)
+	poker.Check(ctx, false)
+	r.clock.Advance(orch.BackstopIdle + time.Second)
+	poker.Check(ctx, false)
+	if typed := nudgesTyped(r, job.PaneID); typed != 2 {
+		t.Fatalf("the agent sat idle after a stop let through for typing and was never nudged: %d nudges typed (want the human's and the backstop's)", typed)
 	}
 }
