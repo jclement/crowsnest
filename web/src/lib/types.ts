@@ -108,7 +108,10 @@ export interface Fleet {
 
 /** One numbered option of a terminal dialog: pressing `key` (a digit) chooses it. */
 export interface DialogOption {
+  /** The digit that picks a numbered option; empty in an arrow-key menu. */
   key: string;
+  /** For an arrow-key menu (Claude's folder-trust question): the keys that pick this option. */
+  keys?: string[];
   label: string;
   /** The highlighted (cursor) option. */
   selected: boolean;

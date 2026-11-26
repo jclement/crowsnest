@@ -59,9 +59,12 @@ type Dialog struct {
 	Warnings []string `json:"warnings"`
 }
 
-// DialogOption is one numbered choice. Key is the digit to send.
+// DialogOption is one choice. Key is the digit to send for a numbered option; an option of an
+// arrow-key menu (Claude's folder-trust question: "❯ No, exit / Yes, I trust this folder") has no
+// digit, and Keys is the sequence that picks it from where the cursor is ("down", "Enter").
 type DialogOption struct {
-	Key      string `json:"key"`
+	Key      string   `json:"key"`
+	Keys     []string `json:"keys,omitempty"`
 	Label    string `json:"label"`
 	Selected bool   `json:"selected"`          // the highlighted (cursor) option
 	Warning  string `json:"warning,omitempty"` // set when the label itself is risky
@@ -103,6 +106,9 @@ func DetectDialog(text string) Dialog {
 		return none
 	}
 	options, lastOption := lastOptionRun(lines)
+	if len(options) == 0 {
+		options, lastOption = arrowMenu(lines)
+	}
 	if len(options) == 0 || findInputLine(lines) > lastOption {
 		return none
 	}
@@ -167,6 +173,59 @@ func lastOptionRun(lines []string) ([]DialogOption, int) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// arrowMenu reads an unnumbered menu answered with the arrow keys and Enter: the block of short
+// lines just above the footer, exactly one of them marked with the cursor (❯). Each option's
+// Keys move the cursor to it and press Enter. It returns the options and the menu's last line.
+func arrowMenu(lines []string) ([]DialogOption, int) {
+	end := len(lines) - 1
+	for end >= 0 && (lines[end] == "" || isRule(lines[end]) || dialogFooter.MatchString(lines[end])) {
+		end--
+	}
+	if end < 1 {
+		return nil, -1
+	}
+	start := end
+	for start > 0 && lines[start-1] != "" && !isRule(lines[start-1]) {
+		start--
+	}
+	block := lines[start : end+1]
+	if len(block) < 2 || len(block) > 9 {
+		return nil, -1
+	}
+	selected := -1
+	labels := make([]string, len(block))
+	for i, line := range block {
+		label, marked := strings.CutPrefix(line, "❯")
+		label = strings.TrimSpace(label)
+		if label == "" || len([]rune(label)) > 80 || optionLine.MatchString(line) {
+			return nil, -1
+		}
+		if marked {
+			if selected >= 0 {
+				return nil, -1
+			}
+			selected = i
+		}
+		labels[i] = label
+	}
+	if selected < 0 {
+		return nil, -1
+	}
+	options := make([]DialogOption, 0, len(labels))
+	for i, label := range labels {
+		var keys []string
+		for range max(0, i-selected) {
+			keys = append(keys, "down")
+		}
+		for range max(0, selected-i) {
+			keys = append(keys, "up")
+		}
+		keys = append(keys, "Enter")
+		options = append(options, DialogOption{Label: label, Keys: keys, Selected: i == selected, Warning: riskyLabel(label)})
+	}
+	return options, end
+}
 
 func isForm(lines []string) bool {
 	for _, line := range lines {

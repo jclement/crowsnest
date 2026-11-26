@@ -216,10 +216,15 @@ func browserOpener(cfg config.Config, logger *slog.Logger) func(url string) {
 }
 
 // firstGreeting is typed into the orchestrator once, after the first-run checklist's Start, so
-// the person lands in Chat with a message from it rather than an empty page. One short turn.
-const firstGreeting = "[crowsnest first run] The person who just set up crowsnest is looking at this chat for the first time. " +
-	"Greet them in two or three short sentences: you are this crowsnest's orchestrator, and they can give you a job, " +
-	"ask you something, or ask what the agents are doing. Do not start any work."
+// the person lands in Chat with a message from it rather than an empty page. One short turn. It
+// wears a poke's header, so Chat shows it as a compact automatic row rather than as something the
+// person typed, and the orchestrator treats it as one (its instructions cover pokes).
+func firstGreeting(now time.Time) string {
+	return "[crowsnest poke " + now.UTC().Format("2006-01-02T15:04Z") + "]\n" +
+		"- first run: the person who just set up crowsnest opened Chat for the first time. Greet them in two or three short " +
+		"sentences: you are this crowsnest's orchestrator, and they can give you a job, ask you something, or ask what the " +
+		"agents are doing. Do not start any work."
+}
 
 // greetingWait is how long the greeting waits for the orchestrator to be ready (a folder-trust
 // question answered on the checklist, a slow first start).
@@ -233,7 +238,7 @@ func greeter(ctx context.Context, client herdr.Client, orchestrator *orch.Orches
 		for time.Now().Before(deadline) && ctx.Err() == nil {
 			if orchestrator.Status().State == orch.StateIdle {
 				sendCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
-				_, err := orch.Prompt(sendCtx, client, orch.Name, orch.PromptRequest{Text: firstGreeting, ExpectAgent: orch.Name})
+				_, err := orch.Prompt(sendCtx, client, orch.Name, orch.PromptRequest{Text: firstGreeting(time.Now()), ExpectAgent: orch.Name})
 				cancel()
 				if err != nil {
 					logger.Warn("sending the first-run greeting", "err", err)
