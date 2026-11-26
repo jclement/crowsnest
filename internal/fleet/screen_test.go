@@ -118,6 +118,22 @@ func TestDetectDialogFromANSI(t *testing.T) {
 	}
 }
 
+// Claude Code 2.1.332's folder-trust prompt, captured by `mise run e2e:claude` (M9), is an
+// unnumbered list with "No, exit" preselected, unlike the numbered box in claude_trust.txt (an
+// older shape). A digit cannot answer it, so it is not a pressable dialog: the agent still needs
+// you (herdr reports it blocked) and the card says to answer it in the terminal.
+func TestRealTrustPromptIsNotAPressableDialog(t *testing.T) {
+	dialog := DetectDialog(StripANSI(fixture(t, "real_claude_2.1.332_trust.ansi")))
+	if dialog.Present || len(dialog.Options) != 0 {
+		t.Fatalf("the unnumbered trust prompt was read as a pressable dialog: %+v", dialog)
+	}
+	for _, file := range []string{"real_claude_2.1.332_idle.ansi", "real_claude_2.1.332_typed_draft.ansi"} {
+		if got := DetectDialog(StripANSI(fixture(t, file))); got.Present {
+			t.Fatalf("%s: a dialog was found on an idle screen: %+v", file, got)
+		}
+	}
+}
+
 func TestDetectDraft(t *testing.T) {
 	cases := []struct {
 		file       string
@@ -131,6 +147,11 @@ func TestDetectDraft(t *testing.T) {
 		{"claude_boxed_draft.ansi", true, "fix the flaky test"},
 		{"claude_dialog.ansi", false, ""},
 		{"shell_prompt.txt", false, ""},
+		// Captured from real Claude Code 2.1.332 by `mise run e2e:claude` (M9), joining the
+		// hand-made screens above: the idle prompt after a reply, and a draft typed at the TUI.
+		{"real_claude_2.1.332_idle.ansi", true, ""},
+		{"real_claude_2.1.332_typed_draft.ansi", true, "half-typed draft from the terminal"},
+		{"real_claude_2.1.332_trust.ansi", false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {

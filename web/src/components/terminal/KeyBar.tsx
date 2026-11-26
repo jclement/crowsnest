@@ -1,7 +1,9 @@
 // KeyBar: the keys a phone keyboard lacks, in a strip that sits just above it: Esc, Tab, a
 // sticky Ctrl, the arrows, Enter, Paste, and the font size. It must never take focus from the
 // terminal, or the on-screen keyboard would close on every tap: the buttons cancel the
-// pointerdown/mousedown that would move focus, and are out of the tab order.
+// pointerdown/mousedown that would move focus, and are out of the tab order. A key drawn as text
+// ("Esc", "A−") has that text at the start of its accessible name, so voice control can say what
+// it sees (axe's label-content-name-mismatch, found in M9).
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ClipboardPaste, CornerDownLeft, type LucideIcon } from "lucide-react";
 import type { MouseEvent, PointerEvent, ReactNode } from "react";
 import { cn } from "../../lib/cn";
@@ -31,13 +33,13 @@ export function KeyBar({ onKey, ctrl, onCtrlChange, onPaste, fontSize, onFontSiz
       data-allow-overflow
       className={cn("flex shrink-0 overflow-x-auto border-t border-border bg-surface-raised [scrollbar-width:none]", className)}
     >
-      <BarButton label="Escape" onPress={() => onKey("esc")}>
+      <BarButton label="Esc (Escape)" onPress={() => onKey("esc")}>
         Esc
       </BarButton>
       <BarButton label="Tab" onPress={() => onKey("tab")}>
         Tab
       </BarButton>
-      <BarButton label="Control (applies to the next key)" pressed={ctrl} onPress={() => onCtrlChange(!ctrl)}>
+      <BarButton label="Ctrl (applies to the next key)" pressed={ctrl} onPress={() => onCtrlChange(!ctrl)}>
         Ctrl
       </BarButton>
       <BarButton label="Left" icon={ArrowLeft} onPress={() => onKey("left")} />
@@ -46,10 +48,10 @@ export function KeyBar({ onKey, ctrl, onCtrlChange, onPaste, fontSize, onFontSiz
       <BarButton label="Right" icon={ArrowRight} onPress={() => onKey("right")} />
       <BarButton label="Enter" icon={CornerDownLeft} onPress={() => onKey("enter")} />
       <BarButton label="Paste" icon={ClipboardPaste} onPress={onPaste} />
-      <BarButton label="Smaller text" onPress={() => onFontSize(fontSize - 1)}>
+      <BarButton label="A− (smaller text)" onPress={() => onFontSize(fontSize - 1)}>
         A−
       </BarButton>
-      <BarButton label="Larger text" onPress={() => onFontSize(fontSize + 1)}>
+      <BarButton label="A+ (larger text)" onPress={() => onFontSize(fontSize + 1)}>
         A+
       </BarButton>
     </div>

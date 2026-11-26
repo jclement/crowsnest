@@ -230,6 +230,10 @@ func (s *Service) questionsOf(ctx context.Context, id int64) ([]Question, error)
 		if len(record.AnswerValue) > 0 {
 			_ = json.Unmarshal(record.AnswerValue, &question.AnswerValue)
 		}
+		question.Options = []QuestionOption{}
+		if len(record.Options) > 0 {
+			_ = json.Unmarshal(record.Options, &question.Options)
+		}
 		out = append(out, question)
 	}
 	return out, nil

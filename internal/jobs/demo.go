@@ -76,7 +76,7 @@ func demoJobs(now time.Time, panes DemoPanes) []demoJob {
 	running.WorktreeBranch, running.WorkDir = "job/1-add-retry-back-off", "~/.herdr/worktrees/crowsnest/job-1"
 	running.Progress, running.LastTool = "Writing table tests for the back-off schedule", "Bash: go test ./internal/webhook/ -run Backoff"
 
-	nudged := base("Tidy the README install section", "Tidy the README install section: one path per platform.", "builder", "~/src/website", string(StateRunning), panes.Docs, "job-2", 25*time.Minute)
+	nudged := base("Tidy the README install section", "Tidy the README install section: one path per platform.", "builder", "~/src/website", string(StateRunning), panes.Builder, "job-2", 25*time.Minute)
 	nudged.Progress, nudged.Nudges, nudged.NudgeStreak, nudged.LastNudgeAt = "Rewriting the macOS steps", 2, 1, ago(3*time.Minute)
 
 	limit := base("Migrate the settings page to the new form kit", "Migrate the settings page to the new form kit.", "builder", "~/src/crowsnest", string(StateRunning), panes.Linter, "job-3", 2*time.Hour)
@@ -87,11 +87,11 @@ func demoJobs(now time.Time, panes DemoPanes) []demoJob {
 	needsYou.Cause, needsYou.CauseDetail, needsYou.Waiting, needsYou.Progress = string(CauseQuestions), "1 open question", true, "Waiting on the release date"
 	needsYou.LastActivityAt = ago(29 * time.Minute)
 
-	dialog := base("Review the auth change", "Review the auth change on branch fix/limiter.", "reviewer", "~/src/crowsnest", string(StateNeedsYou), panes.Reviewer, "job-5", 12*time.Minute)
+	dialog := base("Review the auth change", "Review the auth change on branch fix/limiter.", "reviewer", "~/src/crowsnest", string(StateNeedsYou), panes.Docs, "job-5", 12*time.Minute)
 	dialog.Cause, dialog.CauseDetail = string(CauseDialog), "Claude wants to run: rm -rf node_modules"
 	dialog.LastActivityAt = ago(2 * time.Minute)
 
-	unresponsive := base("Profile the fleet cache", "Profile the fleet cache under 200 panes.", "tester", "~/src/crowsnest", string(StateRunning), "", "job-6", 3*time.Hour)
+	unresponsive := base("Profile the fleet cache", "Profile the fleet cache under 200 panes.", "tester", "~/src/crowsnest", string(StateRunning), panes.Reviewer, "job-6", 3*time.Hour)
 	unresponsive.Stuck, unresponsive.Cause, unresponsive.Nudges, unresponsive.NudgeStreak = true, string(CauseUnresponsive), 3, 3
 	unresponsive.CauseDetail, unresponsive.LastActivityAt = "Ended its turn 4 times in a row without declaring anything or doing any work.", ago(35*time.Minute)
 

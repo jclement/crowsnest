@@ -9,12 +9,14 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run",
-    "screenshots": "playwright test e2e/screenshots.spec.ts",
-    "screenshots:chat": "playwright test --config playwright.chat.config.ts",
-    "screenshots:inbox": "playwright test --config playwright.inbox.config.ts",
-    "screenshots:jobs": "playwright test --config playwright.jobs.config.ts",
+    "e2e": "playwright test --project=desktop-chromium --project=mobile-chromium --project=mobile-webkit",
     "e2e:real": "playwright test -c playwright.real.config.ts",
-    "e2e:voice": "playwright test --config playwright.voice.config.ts"
+    "e2e:claude": "playwright test -c playwright.claude.config.ts",
+    "e2e:voice": "playwright test --project=desktop-chromium e2e/hermetic/talk.spec.ts",
+    "screenshots": "playwright test -c playwright.fixtures.config.ts",
+    "screenshots:chat": "playwright test --project=screenshots e2e/screenshots/chat.spec.ts",
+    "screenshots:inbox": "playwright test --project=screenshots e2e/screenshots/inbox.spec.ts",
+    "screenshots:jobs": "playwright test --project=screenshots e2e/screenshots/jobs.spec.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",
@@ -34,6 +36,7 @@
     "remark-gfm": "4.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.1",
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.65.1",
     "@tailwindcss/vite": "4.3.5",

@@ -65,7 +65,7 @@ describe("JobDetail", () => {
 
   it("puts an open question right in the job, answerable there", async () => {
     const open = fixtureQuestions.find((q) => q.status === "open" && q.kind === "confirm")!;
-    renderDetail(makeDetail({ state: "needs_you", cause: "questions", cause_text: "Waiting on your answers", questions: [{ id: open.id, title: open.title, kind: open.kind, status: "open", urgency: open.urgency, wait: false, answer_value: null, answer_note: "", created_at: open.created_at }] }));
+    renderDetail(makeDetail({ state: "needs_you", cause: "questions", cause_text: "Waiting on your answers", questions: [{ id: open.id, title: open.title, kind: open.kind, status: "open", urgency: open.urgency, wait: false, answer_value: null, answer_note: "", created_at: open.created_at, options: open.options }] }));
     expect(await screen.findByRole("article", { name: open.title })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Answer in Inbox" })).toBeInTheDocument();
   });

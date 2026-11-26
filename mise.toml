@@ -62,15 +62,33 @@ run = [
 ]
 
 [tasks."test:integration"]
-description = "Go integration tests against real herdr, in throwaway crowsnest-test-* sessions (the client, worktree.create, the terminal bridges). Needs herdr installed"
+description = "Go integration tests against real herdr, in throwaway crowsnest-test-* sessions (the client, worktree.create, the terminal bridges, the fleet cache following events). Needs herdr installed"
 run = [
-  "go vet -tags integration ./internal/herdr/... ./internal/term/... ./internal/orch/... ./internal/jobs/...",
-  "CGO_ENABLED=1 go test -race -count=1 -tags integration -run Integration -v ./internal/herdr/... ./internal/term/...",
+  "go vet -tags integration ./internal/herdr/... ./internal/term/... ./internal/orch/... ./internal/jobs/... ./internal/fleet/...",
+  "CGO_ENABLED=1 go test -race -count=1 -tags integration -run Integration -v ./internal/herdr/... ./internal/term/... ./internal/fleet/...",
 ]
 
 [tasks."test:claude"]
 description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API, calls the ask MCP tool, and answers a manual poke with one synthetic reason; and the stop test: three haiku job agents (an undeclared stop is refused, done stops cleanly, a non-blocking ask is answered and the job finishes)"
 run = "CROWSNEST_E2E_CLAUDE=1 CGO_ENABLED=1 go test -count=1 -tags integration -run IntegrationClaude -v -timeout 15m ./internal/orch/... ./internal/jobs/..."
+
+[tasks."test:clone"]
+description = "Prove a clean clone builds: clone HEAD into a temporary directory, then mise run setup and mise run build there (nothing from this checkout's node_modules, bin or web/dist). Slow: a full npm ci"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+src="$PWD"
+head="$(git -C "$src" rev-parse HEAD)"
+dir="$(mktemp -d "${TMPDIR:-/tmp}/crowsnest-clone.XXXXXX")"
+trap 'rm -rf "$dir"' EXIT
+git clone --quiet --no-local "$src" "$dir/crowsnest"
+git -C "$dir/crowsnest" checkout --quiet "$head"
+mise trust --quiet "$dir/crowsnest/mise.toml"
+mise -C "$dir/crowsnest" run setup
+mise -C "$dir/crowsnest" run build
+"$dir/crowsnest/bin/crowsnest" version
+echo "clean clone at ${head:0:7}: setup and build OK"
+"""
 
 [tasks.lint]
 description = "go vet, golangci-lint, gofmt check, tsc, eslint. Read-only"
@@ -94,8 +112,9 @@ description = "The done-gate: lint and test"
 depends = ["lint", "test"]
 
 [tasks.e2e]
-description = "Playwright end-to-end suite against crowsnest --demo"
-run = "echo 'e2e: not built until M9 (DESIGN.md section 17)' >&2; exit 1"
+description = "The hermetic browser suite: Playwright against the built binary in --demo (a fresh instance per test; the auth specs with the login on), desktop Chromium 1440x900 plus 375x812 Chromium and WebKit. Report in web/playwright-report"
+depends = ["build"]
+run = "npm --prefix web run e2e"
 
 [tasks."e2e:real"]
 description = "Build, then Playwright against the real binary (web/e2e/real): --demo fleet, and terminals on a throwaway herdr session. Needs herdr"
@@ -103,6 +122,11 @@ run = [
   "mise run build",
   "npm --prefix web run e2e:real",
 ]
+
+[tasks."e2e:claude"]
+description = "Real Claude through the browser (opt-in, costs a few cents, haiku): jobs given from the Jobs box run to done, a question answered in the Inbox, a nudge on the timeline, a chat reply, `crowsnest ask --wait` from a pane. Throwaway crowsnest-test-* herdr session, your real HOME for Claude's login"
+depends = ["build"]
+run = "npm --prefix web run e2e:claude"
 
 [tasks.screenshots]
 description = "Fleet view with fixtures at 375 and 1440 px, light and dark, into web/screenshots; plus the 375 px layout checks"
@@ -124,7 +148,7 @@ depends = ["build"]
 run = "npm --prefix web run screenshots:chat"
 
 [tasks."e2e:voice"]
-description = "Talk mode against the built binary in --demo mode and a fake ElevenLabs (never the real one), with Chromium's fake microphone: hold to talk, transcript sent, SAY reply played; plus Chat-with-talk screenshots at 375 and 1440 px into web/screenshots"
+description = "Talk mode alone (it is also part of e2e): the built binary in --demo mode and a fake ElevenLabs (never the real one), with Chromium's fake microphone: hold to talk, transcript sent, SAY reply played; plus Chat-with-talk screenshots at 375 and 1440 px into web/screenshots"
 depends = ["build"]
 run = "npm --prefix web run e2e:voice"
 

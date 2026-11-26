@@ -48,7 +48,7 @@ describe("TerminalPanel", () => {
   it("sends bar keys, following the cursor mode", async () => {
     const user = userEvent.setup();
     renderWithClient(<TerminalPanel path="/api/v1/term/tui" label="t" fill="fixed" />);
-    await user.click(screen.getByRole("button", { name: "Escape" }));
+    await user.click(screen.getByRole("button", { name: "Esc (Escape)" }));
     await user.click(screen.getByRole("button", { name: "Up" }));
     stub.appCursor = true;
     await user.click(screen.getByRole("button", { name: "Up" }));
@@ -59,7 +59,7 @@ describe("TerminalPanel", () => {
   it("applies a sticky Ctrl to the next typed key only", async () => {
     const user = userEvent.setup();
     renderWithClient(<TerminalPanel path="/api/v1/term/tui" label="t" fill="fixed" />);
-    const ctrl = screen.getByRole("button", { name: /^Control/ });
+    const ctrl = screen.getByRole("button", { name: /^Ctrl/ });
     await user.click(ctrl);
     expect(ctrl).toHaveAttribute("aria-pressed", "true");
     act(() => stub.type("c"));
@@ -71,7 +71,7 @@ describe("TerminalPanel", () => {
   it("lets go of Ctrl when a bar key is pressed instead", async () => {
     const user = userEvent.setup();
     renderWithClient(<TerminalPanel path="/api/v1/term/tui" label="t" fill="fixed" />);
-    await user.click(screen.getByRole("button", { name: /^Control/ }));
+    await user.click(screen.getByRole("button", { name: /^Ctrl/ }));
     await user.click(screen.getByRole("button", { name: "Tab" }));
     act(() => stub.type("x"));
     expect(stub.sent).toEqual(["\t", "x"]);
@@ -108,8 +108,8 @@ describe("TerminalPanel", () => {
   it("changes and remembers the font size", async () => {
     const user = userEvent.setup();
     renderWithClient(<TerminalPanel path="/api/v1/term/tui" label="t" fill="fixed" />);
-    await user.click(screen.getByRole("button", { name: "Larger text" }));
-    await user.click(screen.getByRole("button", { name: "Larger text" }));
+    await user.click(screen.getByRole("button", { name: "A+ (larger text)" }));
+    await user.click(screen.getByRole("button", { name: "A+ (larger text)" }));
     expect(localStorage.getItem("crowsnest-terminal-font-size")).toBe("15");
   });
 });

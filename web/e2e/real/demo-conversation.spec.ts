@@ -3,7 +3,7 @@
 // its Terminal tab still connects, and Chat still does a prompt round trip with the demo
 // orchestrator. Added when M4 (conversations) was merged with M5 (terminals, real fleet types).
 import { expect, test, type Page } from "@playwright/test";
-import { startInstance, type Instance } from "./instance";
+import { startInstance, type Instance } from "../support/instance";
 
 let instance: Instance;
 

@@ -1,8 +1,9 @@
 // The Chat view against `crowsnest --demo`, photographed at phone and desktop sizes in both
 // themes, after a real prompt round trip through the scripted demo orchestrator (send, "working",
 // the reply arriving over SSE). Also checks the 375 px rules: no sideways scroll, 44 px targets.
-// Run with `mise run screenshots:chat`.
-import { expect, test, type Page } from "@playwright/test";
+// Run with `mise run screenshots:chat` (each test gets its own demo instance).
+import { type Page } from "@playwright/test";
+import { expect, test } from "../support/fixtures";
 
 const themes = ["light", "dark"] as const;
 const sizes = [
@@ -24,7 +25,8 @@ async function roundTrip(page: Page, text: string) {
   await page.getByRole("textbox", { name: /Message to the orchestrator/ }).fill(text);
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByTestId("chat-state")).toHaveText("Working");
-  await expect(replies).toHaveCount(before + 1, { timeout: 15_000 });
+  // At least one more: a fresh demo may also be answering the answer it was typed at start-up.
+  await expect.poll(() => replies.count(), { timeout: 15_000 }).toBeGreaterThan(before);
   await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 10_000 });
 }
 

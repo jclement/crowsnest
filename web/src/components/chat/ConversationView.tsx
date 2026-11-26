@@ -70,20 +70,24 @@ export function ConversationView({
           <ConversationBody query={query} messages={messages} agentName={agentName} />
           <div ref={anchorRef} aria-hidden className="h-px" />
         </div>
+      </div>
+      <div
+        className={cn(
+          "border-t border-border bg-surface px-3 pt-2",
+          // Sticky and relative both anchor the new-messages pill below.
+          page ? "sticky bottom-0 pb-2 md:relative" : "relative pb-2",
+        )}
+      >
+        {/* The pill hangs just above the composer rather than at the bottom of the list: on a
+            phone the list scrolls with the page and the sticky composer covered a pill placed
+            there, so it could not be tapped (found by the M9 WebKit run). */}
         {unseen > 0 && (
-          <div className="pointer-events-none sticky bottom-2 flex justify-center">
+          <div className="pointer-events-none absolute inset-x-0 bottom-full mb-2 flex justify-center">
             <Button compact variant="primary" icon={ArrowDown} onClick={scrollToBottom} className="pointer-events-auto rounded-full shadow-md">
               {unseen === 1 ? "1 new message" : `${unseen} new messages`}
             </Button>
           </div>
         )}
-      </div>
-      <div
-        className={cn(
-          "border-t border-border bg-surface px-3 pt-2",
-          page ? "sticky bottom-0 pb-2 md:static" : "pb-2",
-        )}
-      >
         <div className={cn("mx-auto flex min-w-0 flex-col gap-2", page && "max-w-3xl")}>
           {composerExtra?.(scrollToBottom)}
           <Composer target={target} agentName={agentName} state={state} onSent={scrollToBottom} onOpenTerminal={onOpenTerminal} />

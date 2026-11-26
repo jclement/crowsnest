@@ -15,7 +15,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { scrubbedEnv, startInstance, type Instance } from "./instance";
+import { scrubbedEnv, startInstance, type Instance } from "../support/instance";
 
 /** The visible text of the terminal's rows (xterm's DOM renderer draws one div per row). */
 async function terminalText(page: Page): Promise<string> {
@@ -57,7 +57,7 @@ test.describe("demo terminals", () => {
 
   test("a shell pane in Fleet opens the pane terminal", async ({ page }) => {
     await page.goto(`${instance.baseURL}/fleet`);
-    await page.getByRole("button", { name: /^Shell w\d+:p\d+/ }).first().click();
+    await page.getByRole("button", { name: /^shell w\d+:p\d+/i }).first().click();
     await expectTerminalText(page, /standing in for pane w\d+:p\d+/);
     await typeInTerminal(page, "size");
     await expectTerminalText(page, /\d+ columns x \d+ rows/);
@@ -104,7 +104,7 @@ test.describe("real herdr terminals", () => {
   test("the Fleet pane view runs a command in the pane", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${instance.baseURL}/fleet`);
-    await page.getByRole("button", { name: /^Shell w1:p1/ }).click();
+    await page.getByRole("button", { name: /^shell w1:p1/i }).click();
     await expect(page.getByRole("region", { name: "Terminal for pane w1:p1" })).toBeVisible();
     await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible({ timeout: 15_000 });
     const { command, output } = computedEcho();

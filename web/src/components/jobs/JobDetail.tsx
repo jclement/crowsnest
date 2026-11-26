@@ -143,10 +143,12 @@ function StuckBanner({ job, openTerminal }: { job: Detail; openTerminal: () => v
   const press = () => {
     if (action === "terminal") return openTerminal();
     if (action === "inbox") return void navigate({ to: "/inbox", search: { q: job.questions.find((question) => question.status === "open")?.id } });
-    run.mutate(action === "retry" || action === "resume" ? "resume" : "nudge", {
-      onSuccess: () => toast.show({ tone: "success", title: actionLabels[action] + ": done" }),
-      onError: (error) => toast.show({ tone: "danger", title: actionLabels[action] + " failed", description: error.message }),
-    });
+    // mutateAsync: a nudge that works clears the stuck flag, and the refetch removes this banner
+    // before mutate's own callbacks would run (see DialogCard).
+    run.mutateAsync(action === "retry" || action === "resume" ? "resume" : "nudge").then(
+      () => toast.show({ tone: "success", title: actionLabels[action] + ": done" }),
+      (error: unknown) => toast.show({ tone: "danger", title: actionLabels[action] + " failed", description: error instanceof Error ? error.message : String(error) }),
+    );
   };
   return (
     <Banner

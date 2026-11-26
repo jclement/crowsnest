@@ -901,3 +901,35 @@ func TestDialogNoticeIsAFixedSentence(t *testing.T) {
 		t.Fatalf("the card lost the message: %+v", got.Job)
 	}
 }
+
+// The job detail carries each question's options, so the job view can show an answer by its
+// label rather than its key (found by the M9 e2e suite: "→ fri" instead of "→ Friday").
+func TestJobQuestionsCarryTheirOptions(t *testing.T) {
+	r := newRig(t, nil)
+	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+	options := json.RawMessage(`[{"key":"fri","label":"Friday"},{"key":"mon","label":"Next Monday","detail":"after the docs pass"}]`)
+	id, err := r.db.InsertQuestion(context.Background(), store.QuestionRecord{Title: "Ship on Friday?", Kind: "choice", Options: options, Recommend: "fri",
+		Urgency: "normal", JobID: job.ID, CreatedAt: time.Unix(1_800_000_000, 0), ExpiresAt: time.Unix(1_900_000_000, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertQuestion(t, r.db, job.ID, false) // an ack: no options, and an empty list rather than null
+	if err := r.db.SettleQuestion(context.Background(), id, "answered", json.RawMessage(`"fri"`), "", "type", time.Unix(1_800_000_100, 0)); err != nil {
+		t.Fatal(err)
+	}
+	questions := r.get(job.ID).Questions
+	if len(questions) != 2 {
+		t.Fatalf("questions: %+v", questions)
+	}
+	byKind := map[string]Question{}
+	for _, question := range questions {
+		byKind[question.Kind] = question
+	}
+	want := []QuestionOption{{Key: "fri", Label: "Friday"}, {Key: "mon", Label: "Next Monday"}}
+	if got := byKind["choice"].Options; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("choice options: %+v", got)
+	}
+	if got := byKind["ack"].Options; got == nil || len(got) != 0 {
+		t.Fatalf("ack options should be an empty list: %#v", got)
+	}
+}

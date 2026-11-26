@@ -113,13 +113,14 @@ function CancelButton({ question, onDone }: { question: Question; onDone?: () =>
       disabled={cancel.isPending}
       className="self-start text-muted"
       onClick={() =>
-        cancel.mutate(undefined, {
-          onSuccess: () => {
+        // mutateAsync: the refetch that follows replaces this button (see AnswerForm).
+        cancel.mutateAsync().then(
+          () => {
             toast.show({ tone: "info", title: `Cancelled ${question.id}`, description: "The agent is told there is no answer." });
             onDone?.();
           },
-          onError: (error) => toast.show({ tone: "danger", title: "Not cancelled", description: error.message }),
-        })
+          (error: unknown) => toast.show({ tone: "danger", title: "Not cancelled", description: error instanceof Error ? error.message : String(error) }),
+        )
       }
     >
       Cancel question

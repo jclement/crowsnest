@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
@@ -172,5 +173,50 @@ func TestPromptChecksTheExpectedAgent(t *testing.T) {
 	}
 	if _, err := Prompt(context.Background(), f, pane, PromptRequest{Text: "nudge", ExpectAgent: "builder"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// slowTyper is a herdr client whose agent.prompt takes a while and, meanwhile, shows the text in
+// the input box, as a real agent.prompt does while it types (before it presses Enter).
+type slowTyper struct {
+	*fake.Fake
+	typing chan struct{} // closed once the first prompt is on screen and not yet submitted
+	once   bool
+}
+
+func (s *slowTyper) AgentPrompt(ctx context.Context, target, text string, wait *herdr.PromptWait) (herdr.Agent, error) {
+	partial := rule + "\n❯ " + strings.SplitN(text, "\n", 2)[0] + "\x1b[7m \x1b[27m\n" + rule + "\n"
+	_ = s.SetScreen(target, fleet.StripANSI(partial), partial)
+	if !s.once {
+		s.once = true
+		close(s.typing)
+		time.Sleep(300 * time.Millisecond)
+	}
+	_ = s.SetScreen(target, fleet.StripANSI(emptyInput), emptyInput) // submitted: the box is empty again
+	return s.Fake.AgentPrompt(ctx, target, text, wait)
+}
+
+// Crowsnest's own typing (a poke, an answer, a brief) and a human's send to the same pane must
+// not race: the second send waits for the first to be submitted instead of reading the half-typed
+// text as somebody's draft and refusing (found by `mise run e2e:claude`, M9: a poke being typed
+// made the human's Chat send fail with 409 DRAFT, and the message was never sent).
+func TestConcurrentPromptsToOnePaneDoNotSeeEachOtherAsADraft(t *testing.T) {
+	f, _ := sendRig(t, herdr.StatusIdle, emptyInput)
+	client := &slowTyper{Fake: f, typing: make(chan struct{})}
+	first := make(chan error, 1)
+	go func() {
+		_, err := Prompt(context.Background(), client, "builder", PromptRequest{Text: "[crowsnest poke] - job j_3 is cancelled"})
+		first <- err
+	}()
+	<-client.typing
+	if _, err := Prompt(context.Background(), client, "builder", PromptRequest{Text: "the human's message"}); err != nil {
+		t.Fatalf("the second send was refused while the first was being typed: %v", err)
+	}
+	if err := <-first; err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+	prompts := f.Prompts()
+	if len(prompts) != 2 || prompts[0].Text != "[crowsnest poke] - job j_3 is cancelled" || prompts[1].Text != "the human's message" {
+		t.Fatalf("prompts = %+v", prompts)
 	}
 }

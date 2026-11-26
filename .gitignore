@@ -29,3 +29,7 @@ mise.local.toml
 
 # Real-Claude smoke test working directories (removed by the test; ignored in case it is killed)
 internal/orch/e2e-orchestrator-*/
+
+# Real-Claude browser suite scratch repos (removed by the suite; ignored in case it is killed)
+web/e2e/claude/.scratch-*/
+web/e2e/claude/captured/

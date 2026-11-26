@@ -2,7 +2,7 @@
 // that the client's types match what the server sends (DESIGN.md section 10): agents render, the
 // demo's blocked docs writer shows its dialog card, and pressing an option is accepted.
 import { expect, test } from "@playwright/test";
-import { startInstance, type Instance } from "./instance";
+import { startInstance, type Instance } from "../support/instance";
 
 let instance: Instance;
 
