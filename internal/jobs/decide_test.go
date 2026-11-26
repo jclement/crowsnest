@@ -59,6 +59,8 @@ func TestDecide(t *testing.T) {
 		// An answer typed back after the agent's last progress starts the next turn.
 		{name: "answer just typed back", job: running(nil),
 			history: NudgeHistory{LastProgressAt: earlier, AnswerIncomingAt: later}, allow: true, rule: RuleAnswerIncoming},
+		{name: "answer in the same second as the last progress", job: running(nil),
+			history: NudgeHistory{LastProgressAt: later, AnswerIncomingAt: later}, allow: true, rule: RuleAnswerIncoming},
 		{name: "answer already acted on", job: running(nil),
 			history: NudgeHistory{LastProgressAt: later, AnswerIncomingAt: earlier}, rule: RuleNudge, streak: 1},
 		{name: "answer too long ago", job: running(nil),

@@ -105,7 +105,10 @@ func Decide(job *Job, openQuestions int, input StopInput, history NudgeHistory, 
 	if history.InputIncoming {
 		return Decision{Allow: true, Rule: RuleInputIncoming, Streak: history.Streak}
 	}
-	if !history.AnswerIncomingAt.IsZero() && now.Sub(history.AnswerIncomingAt) < answerGrace && history.AnswerIncomingAt.After(history.LastProgressAt) {
+	// Times are whole seconds in the store, so an answer in the same second as the last progress
+	// (the stop test's job_update(waiting) and its answer, often) counts as after it; the grace
+	// is short, and the backstop looks again when it runs out (R2-C04).
+	if !history.AnswerIncomingAt.IsZero() && now.Sub(history.AnswerIncomingAt) < answerGrace && !history.AnswerIncomingAt.Before(history.LastProgressAt) {
 		return Decision{Allow: true, Rule: RuleAnswerIncoming, Streak: history.Streak}
 	}
 	progress := !history.LastProgressAt.IsZero() && history.LastProgressAt.After(history.LastNudgeAt)
