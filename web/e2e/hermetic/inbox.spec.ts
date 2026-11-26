@@ -180,19 +180,19 @@ test("a terminal dialog is answered from its card; a press against a changed scr
 test("the badge and the tab title count what needs you, and follow new questions live", async ({ page, app }) => {
   await page.goto("/");
   // Six open demo questions, the job's question and the docs writer's dialog.
-  await expect(page).toHaveTitle("(8) crowsnest");
+  await expect(page).toHaveTitle(/^\(8\) crowsnest/);
   const badge = page.getByRole("navigation", { name: "Views" }).getByLabel(/need you/).first();
   await expect(badge).toHaveAttribute("aria-label", "8 need you");
 
   await askAsAgent(app, { title: "A new question from an agent", kind: "ack" });
-  await expect(page).toHaveTitle("(9) crowsnest", { timeout: 10_000 });
+  await expect(page).toHaveTitle(/^\(9\) crowsnest/, { timeout: 10_000 });
   await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("9 need you").first()).toBeAttached();
 
   // Answering one from another tab brings it down here, without a reload.
   const other = await page.context().newPage();
   await other.goto("/inbox?q=q_5");
   await other.getByRole("button", { name: "Acknowledge", exact: true }).click();
-  await expect(page).toHaveTitle("(8) crowsnest", { timeout: 10_000 });
+  await expect(page).toHaveTitle(/^\(8\) crowsnest/, { timeout: 10_000 });
   await other.close();
 });
 

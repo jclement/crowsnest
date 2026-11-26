@@ -146,10 +146,19 @@ describe("buildItems", () => {
     expect(items.some((item) => item.id.startsWith("pane:"))).toBe(true);
   });
 
+  it("offers the Schedule and Compact now (DESIGN.md 7.8, 7.9)", () => {
+    const items = buildItems(sources());
+    expect(items.find((item) => item.id === "sheet:schedule")?.command).toEqual({ kind: "sheet", sheet: "schedule" });
+    expect(items.find((item) => item.id === "action:compact")?.command).toEqual({ kind: "compact" });
+    const found = rankItems(items, "schedule", []).flatMap((group) => group.items.map((ranked) => ranked.item.id));
+    expect(found).toContain("sheet:schedule");
+  });
+
   it("leaves out what does not apply", () => {
     const items = buildItems(sources({ orchestrator: false, auth: false }));
     expect(items.some((item) => item.id === "action:poke")).toBe(false);
     expect(items.some((item) => item.id === "action:restart")).toBe(false);
+    expect(items.some((item) => item.id === "action:compact")).toBe(false);
     expect(items.some((item) => item.id === "signout")).toBe(false);
     expect(items.some((item) => item.id === "action:speak")).toBe(false);
     expect(items.some((item) => item.id === "sheet:voice")).toBe(false);

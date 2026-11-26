@@ -2,14 +2,16 @@
 // (needs-you and stuck first, then running, then finished today; older finished jobs behind a
 // toggle), and the selected job: beside the board from md, a full-screen sheet on a phone. The
 // selection is in the URL (/?job=j_12) so a link or a reload lands on it. The Journal (pokes,
-// sends, answers, restarts, alerts) opens from the button above the board.
+// sends, answers, restarts, alerts) and the Schedule (scheduled tasks) open from the buttons
+// above the board.
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ListTodo, NotebookText, RefreshCw } from "lucide-react";
+import { CalendarClock, ListTodo, NotebookText, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { JobCard } from "../components/jobs/JobCard";
 import { JobDetail } from "../components/jobs/JobDetail";
 import { NewJobForm } from "../components/jobs/NewJobForm";
 import { JournalSheet } from "../components/journal/JournalPanel";
+import { ScheduleSheet } from "../components/schedule/SchedulePanel";
 import { Banner } from "../components/ui/Banner";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -25,17 +27,22 @@ export function JobsView() {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const select = (id: string | undefined) => void navigate({ to: "/", search: { job: id } });
   const [journalOpen, setJournalOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
 
   return (
     <div className="flex h-full min-h-0 flex-col md:flex-row">
       <div className="flex min-h-0 flex-col border-border md:w-96 md:shrink-0 md:border-r lg:w-[28rem]">
         <NewJobForm onCreated={(job) => select(job.id)} />
-        <div className="flex justify-end border-b border-border px-2 py-0.5">
+        <div className="flex justify-end gap-1 border-b border-border px-2 py-0.5">
+          <Button compact variant="ghost" icon={CalendarClock} onClick={() => setScheduleOpen(true)}>
+            Schedule
+          </Button>
           <Button compact variant="ghost" icon={NotebookText} onClick={() => setJournalOpen(true)}>
             Journal
           </Button>
         </div>
         <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
+        <ScheduleSheet open={scheduleOpen} onClose={() => setScheduleOpen(false)} />
         <div className="min-h-0 flex-1 overflow-y-auto">
           <Board selected={selected} onSelect={select} />
         </div>

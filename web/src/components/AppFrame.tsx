@@ -8,7 +8,7 @@ import { Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/
 import { useEffect } from "react";
 import { endpoints, fixturesEnabled } from "../lib/api";
 import { cn } from "../lib/cn";
-import { inboxCount, needsYouCount } from "../lib/fleet";
+import { inboxCount, needsYouCount, pageTitle } from "../lib/fleet";
 import { listenForNavigation, registerServiceWorker } from "../lib/push";
 import { useLiveQueries } from "../lib/live";
 import { useFleet, useInboxSummary, useMe } from "../lib/queries";
@@ -35,9 +35,10 @@ export function AppFrame() {
   const voice = me.data?.features.voice ?? false;
   useSyncPlaybackRate(voice);
 
+  const name = me.data?.features.name;
   useEffect(() => {
-    document.title = needsYou > 0 ? `(${needsYou}) crowsnest` : "crowsnest";
-  }, [needsYou]);
+    document.title = pageTitle(needsYou, name);
+  }, [needsYou, name]);
 
   // Web Push (DESIGN.md 8.5): keep the service worker registered (it caches nothing; it only shows
   // pushes), and follow a tapped notification to its item without a reload.
@@ -62,6 +63,11 @@ export function AppFrame() {
       <header className="box-content flex h-11 shrink-0 items-center gap-2 border-b border-chrome-border bg-chrome pl-3 pr-1 pt-[env(safe-area-inset-top)] text-chrome-fg md:h-10">
         <img src="/icons/crowsnest.svg" alt="" className="h-5 w-5" />
         <span className="hidden text-sm font-semibold tracking-tight sm:inline">crowsnest</span>
+        {me.data?.features.name && (
+          <span className="min-w-0 max-w-[40%] truncate text-sm font-semibold text-chrome-fg" title={`This crowsnest is ${me.data.features.name}`}>
+            {me.data.features.name}
+          </span>
+        )}
         {me.data && (
           <span
             className="min-w-0 truncate rounded bg-chrome-hover px-1.5 py-0.5 font-mono text-xs text-chrome-fg"

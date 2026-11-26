@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { endpoints, queryKeys } from "./api";
 import type { CreateJobRequest } from "./jobs";
 import type { JournalKind } from "./journal";
+import type { ScheduleView } from "./schedule";
 import type { AnswerRequest } from "./questions";
 import type { SendKeysRequest } from "./types";
 
@@ -156,5 +157,38 @@ export function usePokeNow() {
   return useMutation({
     mutationFn: endpoints.poke,
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.journal }),
+  });
+}
+
+// ---- Scheduled work and the orchestrator's context (7.8, 7.9) ------------------------------
+
+/** The scheduled tasks; `schedule` and `job` events refresh them, a minute's poll keeps "next due" fresh. */
+export function useSchedule(enabled = true) {
+  return useQuery({ queryKey: queryKeys.schedule, queryFn: endpoints.schedule, enabled, refetchInterval: 60_000 });
+}
+
+/** Run now, or the on/off switch. The answer is the new list, written straight into the cache. */
+export function useScheduleAction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: { name: string; run: true } | { name: string; enabled: boolean }) =>
+      "run" in action ? endpoints.scheduleRun(action.name) : endpoints.scheduleSet(action.name, action.enabled),
+    onSuccess: (view: ScheduleView) => queryClient.setQueryData(queryKeys.schedule, view),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.journal }),
+  });
+}
+
+/** The orchestrator's context size, while the menu that shows it is open. */
+export function useOrchestratorContext(enabled: boolean) {
+  return useQuery({ queryKey: queryKeys.orchestratorContext, queryFn: endpoints.orchestratorContext, enabled, refetchInterval: enabled ? 15_000 : false });
+}
+
+/** Compact now. */
+export function useCompactNow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: endpoints.orchestratorCompact,
+    onSettled: () =>
+      Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.orchestratorContext }), queryClient.invalidateQueries({ queryKey: queryKeys.journal })]),
   });
 }

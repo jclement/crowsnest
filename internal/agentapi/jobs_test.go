@@ -238,3 +238,29 @@ func isStatus(err error, status int) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.Status == status
 }
+
+// The orchestrator's SessionStart gets its standing context (DESIGN.md 7.9); a job agent's does
+// not, and a pane the provider does not know gets nothing extra.
+func TestSessionStartStandingContext(t *testing.T) {
+	f := startSocket(t, func(o *ServerOptions) {
+		o.SessionContext = func(_ context.Context, pane, source string) string {
+			if pane != "w1:p1" {
+				return ""
+			}
+			return "# Standing context (" + source + ")"
+		}
+	})
+	ctx := context.Background()
+	out, err := NewClient(f.socket, f.token(t, "w1:p1", "")).Hook(ctx, jobs.HookSessionStart, json.RawMessage(`{"source":"compact"}`))
+	if err != nil || out != "# Standing context (compact)" {
+		t.Fatalf("orchestrator: %q %v", out, err)
+	}
+	if out, _ := NewClient(f.socket, f.token(t, "w9:p9", "")).Hook(ctx, jobs.HookSessionStart, json.RawMessage(`{"source":"startup"}`)); out != "" {
+		t.Fatalf("another pane: %q", out)
+	}
+	id := startRunningJob(t, f)
+	out, _ = NewClient(f.socket, f.token(t, "w1:p1", id)).WithJob(id).Hook(ctx, jobs.HookSessionStart, json.RawMessage(`{"source":"startup"}`))
+	if strings.Contains(out, "Standing context") || !strings.Contains(out, "Build the thing") {
+		t.Fatalf("a job agent: %q", out)
+	}
+}

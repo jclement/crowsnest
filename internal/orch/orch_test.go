@@ -425,3 +425,60 @@ func assertStoredSession(t *testing.T, rig *testRig, want string) {
 		t.Fatalf("stored session = %q, want %q", stored, want)
 	}
 }
+
+// Remote Control (DESIGN.md 7.10): the name is one argv entry after --remote-control, kept on a
+// resume, absent when off; the status names it.
+func TestStartArgsRemoteControl(t *testing.T) {
+	f := fake.New()
+	rig := newRig(t, f, func(o *Options) { o.RemoteControlName = "quark crowsnest" })
+	status, err := rig.orch.Ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := argValue(f.Starts()[0].Args, "--remote-control"); got != "quark crowsnest" || status.RemoteControl != "quark crowsnest" {
+		t.Fatalf("args %v status %+v", f.Starts()[0].Args, status)
+	}
+	if _, err := rig.orch.Restart(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := argValue(f.Starts()[1].Args, "--remote-control"); got != "quark crowsnest" {
+		t.Fatalf("restart args %v", f.Starts()[1].Args)
+	}
+	off := newRig(t, fake.New())
+	if status, err := off.orch.Ensure(context.Background()); err != nil || status.RemoteControl != "" {
+		t.Fatalf("off: %+v %v", status, err)
+	}
+	if slices.Contains(off.fake.Starts()[0].Args, "--remote-control") {
+		t.Fatalf("off args %v", off.fake.Starts()[0].Args)
+	}
+}
+
+// The watch reports whether Remote Control came up: Claude's banner, or nothing within the
+// window (Claude starts without it when the login cannot have it; nothing is restarted).
+func TestRemoteControlNote(t *testing.T) {
+	for _, tc := range []struct {
+		screen string
+		wait   time.Duration
+		want   string
+	}{
+		{"  /remote-control is active · Continue here, on your phone", 0, RemoteControlActive},
+		{"Welcome", time.Second, ""},
+		{"Welcome", time.Minute, RemoteControlUnconfirmed},
+	} {
+		f := fake.New()
+		clock := &pokeClock{now: pokeEpoch}
+		rig := newRig(t, f, func(o *Options) { o.RemoteControlName = "quark crowsnest"; o.Now = clock.Now })
+		status, err := rig.orch.Ensure(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.SetScreen(status.PaneID, tc.screen, tc.screen); err != nil {
+			t.Fatal(err)
+		}
+		clock.Advance(tc.wait)
+		rig.orch.Watch(context.Background())
+		if got := rig.orch.Status().RemoteControlNote; got != tc.want {
+			t.Errorf("screen %q after %s: note %q, want %q", tc.screen, tc.wait, got, tc.want)
+		}
+	}
+}

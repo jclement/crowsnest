@@ -102,9 +102,34 @@ type PokerOptions struct {
 	// ManualOnly sends pokes only for "Poke now" (--demo, whose scripted fleet would otherwise
 	// poke its scripted orchestrator every two minutes); the automatic checks still observe.
 	ManualOnly bool
+	// Tasks are the scheduled tasks (7.8). Nil: none.
+	Tasks TaskSource
+	// Tender keeps the orchestrator's context small (7.9): it runs first at every check and may
+	// spend the check on a compaction or a hand-over, holding the poke to the next one. Nil: none.
+	Tender Upkeep
 	// CheckInterval overrides DefaultPokeCheckInterval.
 	CheckInterval time.Duration
 	Now           func() time.Time
+}
+
+// ScheduledTask is a due task as the poker needs it (internal/schedule adapts to this).
+type ScheduledTask struct {
+	Name      string
+	Text      string // the reason line, naming the task file
+	RideAlong bool   // every: poke: only with a poke that has something else due
+}
+
+// TaskSource lists due scheduled tasks and is told which ones a delivered poke carried; the
+// stamps are its own, set only then, so a task never repeats because the model forgot it.
+type TaskSource interface {
+	DueTasks(ctx context.Context, now time.Time) []ScheduledTask
+	Delivered(ctx context.Context, at time.Time, names []string)
+}
+
+// Upkeep is what shares the orchestrator's input box with the pokes (the Tender: compaction, the
+// daily new conversation). Tend reports whether it typed something this check.
+type Upkeep interface {
+	Tend(ctx context.Context, now time.Time, status Status) bool
 }
 
 // pokeState is the bookkeeping kept in kv.
@@ -171,6 +196,14 @@ func (p *Poker) Run(ctx context.Context) {
 		case <-p.kick:
 		}
 		p.Check(ctx, false)
+	}
+}
+
+// Kick asks for a check now rather than at the next tick (a scheduled task's Run now).
+func (p *Poker) Kick() {
+	select {
+	case p.kick <- struct{}{}:
+	default:
 	}
 }
 
@@ -247,7 +280,18 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 	if status.State == StateDisabled {
 		return p.disabled(ctx, now, manual)
 	}
+	if !p.opts.ManualOnly && p.opts.Tender != nil && p.opts.Tender.Tend(ctx, now, status) {
+		// The check went on upkeep; due reasons stay and go with the next poke.
+		result := PokeResult{Outcome: OutcomeNothing, Reasons: []string{}, Manual: manual, At: now}
+		if manual {
+			result.Outcome, result.Reason = OutcomeSkipped, "the orchestrator is being compacted or handed over; the poke goes next"
+			p.journal(ctx, journal.KindSkip, "Poke now skipped: "+result.Reason, result)
+			p.publish(result)
+		}
+		return result
+	}
 	input := p.precheckInput(now, manual)
+	input.Tasks, input.RideAlong = p.dueTasks(ctx, now)
 	due := Precheck(input)
 	result := PokeResult{Outcome: OutcomeNothing, Reasons: ReasonTexts(due.Reasons), Manual: manual, At: now}
 	if len(due.Reasons) == 0 {
@@ -309,6 +353,22 @@ func (p *Poker) observe(ctx context.Context, now time.Time) {
 		seen[agent.PaneID] = next
 	}
 	p.agents = seen
+}
+
+// dueTasks asks the task source what is due, as reasons keyed task:<name>.
+func (p *Poker) dueTasks(ctx context.Context, now time.Time) (tasks, rideAlong []Reason) {
+	if p.opts.Tasks == nil {
+		return nil, nil
+	}
+	for _, task := range p.opts.Tasks.DueTasks(ctx, now) {
+		reason := Reason{Key: "task:" + task.Name, Source: SourceTask, Text: task.Text, At: now}
+		if task.RideAlong {
+			rideAlong = append(rideAlong, reason)
+		} else {
+			tasks = append(tasks, reason)
+		}
+	}
+	return tasks, rideAlong
 }
 
 func (p *Poker) precheckInput(now time.Time, manual bool) PrecheckInput {
@@ -464,7 +524,7 @@ func (p *Poker) delivered(ctx context.Context, at time.Time, due PrecheckResult)
 	p.pending = slices.DeleteFunc(p.pending, func(r Reason) bool { _, found := slices.BinarySearch(keys, r.Key); return found })
 	for _, reason := range due.Reasons {
 		switch reason.Source {
-		case SourceAgent:
+		case SourceAgent, SourceTask: // tasks are stamped by their source
 		case SourceTimer:
 			p.state.Timer = strings.TrimPrefix(reason.Key, "timer:")
 		default:
@@ -480,6 +540,21 @@ func (p *Poker) delivered(ctx context.Context, at time.Time, due PrecheckResult)
 	p.lastSkip, p.draftSince, p.alerted = "", time.Time{}, false
 	p.pruneLocked(at)
 	p.saveLocked(ctx)
+	if names := taskNames(due.Reasons); len(names) > 0 && p.opts.Tasks != nil {
+		// Under p.mu: the task source takes only its own lock and never calls back.
+		p.opts.Tasks.Delivered(context.WithoutCancel(ctx), at, names)
+	}
+}
+
+// taskNames are the scheduled tasks among reasons.
+func taskNames(reasons []Reason) []string {
+	var names []string
+	for _, reason := range reasons {
+		if reason.Source == SourceTask {
+			names = append(names, strings.TrimPrefix(reason.Key, "task:"))
+		}
+	}
+	return names
 }
 
 // ---- Bookkeeping -------------------------------------------------------------------------
@@ -518,7 +593,7 @@ func (p *Poker) loadLocked(ctx context.Context) {
 
 // durable reports a reason that only an event produced, which nothing would rebuild.
 func durable(reason Reason) bool {
-	return reason.Source != SourceAgent && reason.Source != SourceTimer
+	return reason.Source != SourceAgent && reason.Source != SourceTimer && reason.Source != SourceTask
 }
 
 func (p *Poker) saveLocked(ctx context.Context) {

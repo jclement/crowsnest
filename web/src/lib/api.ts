@@ -12,6 +12,7 @@ import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } fro
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
+import type { ContextInfo, ScheduleView } from "./schedule";
 import type { PushDevice, PushKind, PushSettings, PushSubscriptionJSON, PushTestResult } from "./push";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
@@ -119,6 +120,8 @@ export interface Features {
   voice: boolean;
   demo: boolean;
   session: string;
+  /** This instance's name (--name, else the short hostname): header, page title. */
+  name?: string;
 }
 
 export interface Me {
@@ -177,6 +180,14 @@ export const endpoints = {
     const text = query.toString();
     return api<JournalPage>(`/journal${text ? `?${text}` : ""}`);
   },
+  // ---- Scheduled work and the orchestrator's context (7.8, 7.9) ----
+  schedule: () => api<ScheduleView>("/schedule"),
+  /** Run now: a poke task goes with the next poke, a job task starts its job. */
+  scheduleRun: (name: string) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}/run`, { method: "POST" }),
+  scheduleSet: (name: string, enabled: boolean) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}`, { method: "PUT", body: { enabled } }),
+  orchestratorContext: () => api<ContextInfo>("/orchestrator/context"),
+  /** Compact now: 409 CONFLICT when the orchestrator is busy or has a draft. */
+  orchestratorCompact: () => api<ContextInfo>("/orchestrator/compact", { method: "POST" }),
   // ---- M11: talk mode (every route is 404 when voice is off) ----
   /** Uploads one recording as it came from MediaRecorder; returns what was said. */
   transcribe: (audio: Blob) => uploadAudio(audio),
@@ -283,6 +294,9 @@ export const queryKeys = {
   agentScreen: (target: string) => ["agents", target, "screen"] as const,
   agentMessages: (target: string) => ["agents", target, "messages"] as const,
   orchestrator: ["orchestrator"] as const,
+  /** Under ["orchestrator"], so an `orchestrator` event refreshes it too. */
+  orchestratorContext: ["orchestrator", "context"] as const,
+  schedule: ["schedule"] as const,
   /** Everything about jobs sits under ["jobs"], so one `job` event refreshes the board and the detail. */
   jobs: ["jobs"] as const,
   jobList: ["jobs", "list"] as const,

@@ -29,6 +29,7 @@ import (
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
+	"github.com/jclement/crowsnest/internal/schedule"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
 	"github.com/jclement/crowsnest/internal/voice"
@@ -91,6 +92,10 @@ type Deps struct {
 	Poker *orch.Poker
 	// Push serves the /push routes (Web Push, 8.5). Nil: they answer 503.
 	Push *push.Service
+	// Schedule serves /schedule (scheduled tasks, 7.8). Nil: those routes answer 503.
+	Schedule *schedule.Service
+	// Tender serves /orchestrator/context and /orchestrator/compact (7.9). Nil: 503.
+	Tender *orch.Tender
 	// Updater is self-update (16.1): /health reports what it found, POST /admin/update applies
 	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
 	// answers 409 with the reason.
@@ -168,6 +173,7 @@ func (s *Server) routes() http.Handler {
 	s.registerQuestionRoutes(mux)
 	s.registerJobRoutes(mux)
 	s.registerJournalRoutes(mux)
+	s.registerScheduleRoutes(mux)
 	s.registerVoiceRoutes(mux)
 	s.registerPushRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))

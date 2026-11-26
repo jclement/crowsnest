@@ -29,7 +29,7 @@ func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	kinds, err := journal.ParseKinds(query.Get("kind"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, codeValidation, "kind must be a comma-separated list of: poke, skip, send, answer, restart, alert, backstop.")
+		writeError(w, http.StatusBadRequest, codeValidation, "kind must be a comma-separated list of: poke, skip, send, answer, restart, alert, backstop, task, upkeep.")
 		return
 	}
 	before, okBefore := optionalInt(query.Get("before"))

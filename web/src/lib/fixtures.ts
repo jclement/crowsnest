@@ -6,6 +6,7 @@
 // whose dialog is a multi-question form, agents in every state, plain shell panes, a long cwd
 // and a long terminal title. fixtureApi() answers API calls from it in memory, so pressing a
 // dialog option in fixtures mode behaves like the real thing (the dialog goes away).
+import { scheduleFixtureApi } from "./scheduleFixtures";
 import type { AnswerRequest, Question } from "./questions";
 import { fixtureQuestions } from "./questionFixtures";
 import { makeBoard, makeDetail } from "./jobFixtures";
@@ -365,7 +366,7 @@ export function makeScreens(): Record<string, ScreenState> {
 /** What fixtures mode answers for /auth/me. */
 export const fixtureMe = {
   username: "jeff",
-  features: { auth: true, voice: false, demo: false, session: "crowsnest" },
+  features: { auth: true, voice: false, demo: false, session: "crowsnest", name: "quark" },
 };
 
 /** What fixtures mode answers for /health. */
@@ -424,6 +425,8 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
   if (jobsAnswer !== undefined) return jobsAnswer;
   const journalAnswer = journalFixtureApi(path, method);
   if (journalAnswer !== undefined) return journalAnswer;
+  const scheduleAnswer = scheduleFixtureApi(path, method);
+  if (scheduleAnswer !== undefined) return scheduleAnswer;
   const match = /^\/agents\/([^/]+)\/(screen|keys)$/.exec(path);
   if (match?.[1] && match[2]) {
     const target = decodeURIComponent(match[1]);

@@ -69,6 +69,7 @@ type Conversation struct {
 	byID      map[string]int
 	source    string
 	sessionID string
+	usage     Usage
 }
 
 // NewConversation returns an empty conversation from source for a session.
@@ -82,6 +83,22 @@ func (c *Conversation) Reset(source, sessionID string) {
 	defer c.mu.Unlock()
 	c.gen, c.seq, c.messages, c.byID = nextGeneration(), 0, nil, map[string]int{}
 	c.source, c.sessionID = source, sessionID
+	c.usage = Usage{}
+}
+
+// SetUsage records what the tailer last read about the context size.
+func (c *Conversation) SetUsage(usage Usage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.usage = usage
+}
+
+// Usage is the context size and the human's last message, as last read (zero on the pane-text
+// fallback).
+func (c *Conversation) Usage() Usage {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.usage
 }
 
 // Apply adds new messages and replaces changed ones (matched by ID), assigning Index and Seq.

@@ -206,6 +206,11 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		s.writeJobError(w, r, err)
 		return
 	}
+	if r.PathValue("event") == jobs.HookSessionStart && caller.JobID == "" && caller.PaneID != "" && s.sessionContext != nil {
+		if standing := s.sessionContext(r.Context(), caller.PaneID, input.Source); standing != "" {
+			reply.Stdout = strings.TrimSpace(reply.Stdout + "\n\n" + standing)
+		}
+	}
 	writeData(w, http.StatusOK, reply)
 }
 

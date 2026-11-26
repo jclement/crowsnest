@@ -73,7 +73,8 @@ test("turn on, test, receive a push and open its deep link", async ({ page, cont
   expect(pushed.headers["urgency"]).toBe("normal");
   expect(String(pushed.headers["authorization"])).toMatch(/^vapid t=[\w-]+\.[\w-]+\.[\w-]+, k=[\w-]{87}$/);
   const payload = JSON.parse(fake.decrypt(pushed.body)) as { title: string; body: string; url: string; tag: string };
-  expect(payload).toMatchObject({ title: "crowsnest", body: "Notifications work on this device.", url: "/", tag: "test" });
+  expect(payload).toMatchObject({ body: "Notifications work on this device.", url: "/", tag: "test" });
+  expect(payload.title).toMatch(/^[A-Za-z0-9_-]+: crowsnest$/); // titles start with the instance's name (--name)
 
   // The service worker shows a pushed notice. A real push service would carry the encrypted body
   // and the browser would decrypt it; here CDP hands the worker the plaintext directly.

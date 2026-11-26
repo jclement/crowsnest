@@ -76,10 +76,16 @@ type Status struct {
 	SessionID string `json:"session_id"` // Claude's session id, when known
 	Dir       string `json:"dir"`
 	// Model is the model Claude was started with (--model); empty means Claude's own default.
-	Model     string    `json:"model"`
-	Detail    string    `json:"detail,omitempty"` // a sentence for the human when something is wrong
-	Restarts  int       `json:"restarts"`         // automatic restarts in the last hour
-	UpdatedAt time.Time `json:"updated_at"`
+	Model  string `json:"model"`
+	Detail string `json:"detail,omitempty"` // a sentence for the human when something is wrong
+	// RemoteControl is the Remote Control session name Claude was started with ("" when off,
+	// --no-remote-control). Claude turns Remote Control off by itself when the login cannot use
+	// it (an API key, a plan without it, an organisation policy) and the session starts anyway;
+	// RemoteControlNote says so when crowsnest saw it.
+	RemoteControl     string    `json:"remote_control,omitempty"`
+	RemoteControlNote string    `json:"remote_control_note,omitempty"`
+	Restarts          int       `json:"restarts"` // automatic restarts in the last hour
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // KV is the small persistent store the orchestrator keeps its session id in (store.Store).
@@ -95,14 +101,16 @@ type Options struct {
 	KV     KV
 	Hub    *hub.Hub // nil: no events (tests)
 	// Journal records restarts (automatic and manual); nil records nothing.
-	Journal        *journal.Journal
-	Logger         *slog.Logger
-	Session        string // herdr session name, for the pane env and the instructions
-	Dir            string // working directory (--dir), created if missing
-	StateDir       string // where CROWSNEST.md and claude-settings.json are written
-	Model          string // --model, when set
-	PermissionMode string // --permission-mode
-	Version        string // crowsnest version, written into CROWSNEST.md
+	Journal  *journal.Journal
+	Logger   *slog.Logger
+	Session  string // herdr session name, for the pane env and the instructions
+	Dir      string // working directory (--dir), created if missing
+	StateDir string // where CROWSNEST.md and claude-settings.json are written
+	Model    string // --model, when set
+	// RemoteControlName, when set, starts Claude with `--remote-control <name>` (DESIGN.md 7.10).
+	RemoteControlName string
+	PermissionMode    string // --permission-mode
+	Version           string // crowsnest version, written into CROWSNEST.md
 	// BinDir is prepended to PATH in the pane env so `crowsnest ask` resolves; empty skips it.
 	BinDir string
 	// Executable is the absolute path of the crowsnest binary, named in mcp.json as the command
@@ -148,6 +156,8 @@ type Orchestrator struct {
 	// across New conversation (which clears the status) so it can be recognised as stale.
 	launch       launchBaseline
 	knownSession string
+	// rcCheckUntil is how long after a start the watch looks for Remote Control's banner.
+	rcCheckUntil time.Time
 }
 
 // launchBaseline is the session id Claude was started with and the ids herdr may go on

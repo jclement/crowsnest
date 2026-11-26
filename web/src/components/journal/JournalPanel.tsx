@@ -23,6 +23,8 @@ const kindTones: Record<JournalKind, ChipTone> = {
   restart: "warning",
   alert: "danger",
   backstop: "warning",
+  task: "accent",
+  upkeep: "neutral",
 };
 
 export function JournalPanel() {

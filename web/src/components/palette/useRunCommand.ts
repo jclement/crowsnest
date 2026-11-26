@@ -133,6 +133,16 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
             .catch(failed("Could not poke"))
             .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.journal }));
           return;
+        case "compact":
+          endpoints
+            .orchestratorCompact()
+            .then(() => toast.show({ tone: "success", title: "Compacting the orchestrator" }))
+            .catch(failed("Not compacted"))
+            .finally(() => {
+              void queryClient.invalidateQueries({ queryKey: queryKeys.orchestratorContext });
+              void queryClient.invalidateQueries({ queryKey: queryKeys.journal });
+            });
+          return;
         case "relaunch":
           (command.action === "restart" ? endpoints.orchestratorRestart() : endpoints.orchestratorNew())
             .then((status) => {

@@ -18,7 +18,7 @@ import (
 
 // startPush builds the push service and starts its watcher, which runs until ctx ends.
 func startPush(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, logger *slog.Logger) (*push.Service, *push.Watcher, error) {
-	service, err := push.New(ctx, push.Options{Store: db, Logger: logger, AllowLoopbackHTTP: cfg.Demo})
+	service, err := push.New(ctx, push.Options{Store: db, Logger: logger, AllowLoopbackHTTP: cfg.Demo, Name: cfg.Name})
 	if err != nil {
 		return nil, nil, fmt.Errorf("starting Web Push: %w", err)
 	}
