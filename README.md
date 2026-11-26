@@ -92,6 +92,10 @@ docker compose -f deploy/compose.yaml logs -f crowsnest   # first start: watch m
 open http://127.0.0.1:2769
 ```
 
+While the repository is private its GHCR package is private too: `docker login ghcr.io` (a
+token with `read:packages`, e.g. `gh auth token | docker login ghcr.io -u <you> --password-stdin`)
+before the first pull.
+
 Or without compose:
 
 ```sh
