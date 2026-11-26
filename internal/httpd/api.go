@@ -219,9 +219,19 @@ func (s *Server) me(ctx context.Context) MeResponse {
 		Username: s.deps.Auth.Username(ctx),
 		Features: Features{
 			Auth: s.deps.Auth.Enabled(), Voice: cfg.VoiceEnabled(), Demo: cfg.Demo, Session: cfg.Session,
-			HerdrVersion: s.deps.HerdrVersion, Name: s.instanceName(), Attachments: s.attachmentLimits(),
+			HerdrVersion: s.herdrVersion(), Name: s.instanceName(), Attachments: s.attachmentLimits(),
 		},
 	}
+}
+
+// herdrVersion is the herdr version to report: now, when herdr connects after start.
+func (s *Server) herdrVersion() string {
+	if s.deps.HerdrVersionNow != nil {
+		if version := s.deps.HerdrVersionNow(); version != "" {
+			return version
+		}
+	}
+	return s.deps.HerdrVersion
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {

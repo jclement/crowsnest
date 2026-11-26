@@ -19,6 +19,7 @@ import (
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/setup"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/system"
 	"github.com/jclement/crowsnest/web"
 )
 
@@ -121,6 +122,9 @@ func runSetupPhase(ctx context.Context, cfg config.Config, db *store.Store, logg
 	stopServer()
 	if err := <-served; err != nil {
 		return err
+	}
+	if err := system.MarkOnboardingPending(ctx, db); err != nil {
+		logger.Warn("recording the first-run checklist", "err", err)
 	}
 	logger.Info("setup complete; starting crowsnest")
 	return nil

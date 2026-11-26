@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/herdr"
@@ -57,6 +58,8 @@ type TenderOptions struct {
 // Tender keeps the orchestrator compact. Build it with NewTender.
 type Tender struct {
 	opts TenderOptions
+	// live overrides opts.CompactAt and opts.FreshAt once SetThresholds is called (Settings).
+	live atomic.Pointer[[2]int]
 
 	mu     sync.Mutex
 	loaded bool
@@ -88,15 +91,15 @@ func (t *Tender) Tend(ctx context.Context, now time.Time, status Status) bool {
 		return false
 	}
 	state := t.load(ctx)
-	freshPossible := t.opts.FreshAt >= 0 && state.FreshDay != now.In(t.opts.Location).Format(time.DateOnly)
-	compactPossible := t.opts.CompactAt > 0 && usage.Known && usage.Tokens >= t.opts.CompactAt
+	freshPossible := t.freshAt() >= 0 && state.FreshDay != now.In(t.opts.Location).Format(time.DateOnly)
+	compactPossible := t.compactAt() > 0 && usage.Known && usage.Tokens >= t.compactAt()
 	if !freshPossible && !compactPossible {
 		return false // the common case: no screen read at all
 	}
 	readiness := t.readiness(ctx, status)
 	if freshPossible {
 		step := DecideFresh(FreshInput{
-			Now: now, Location: t.opts.Location, AtMinutes: t.opts.FreshAt, DoneDay: state.FreshDay,
+			Now: now, Location: t.opts.Location, AtMinutes: t.freshAt(), DoneDay: state.FreshDay,
 			HandoffAt: state.HandoffAt, HasTranscript: usage.Known || !usage.At.IsZero(), Usage: usage, Readiness: readiness,
 		})
 		if step != FreshNone {
@@ -104,7 +107,7 @@ func (t *Tender) Tend(ctx context.Context, now time.Time, status Status) bool {
 		}
 	}
 	decision := DecideCompact(CompactInput{
-		Threshold: t.opts.CompactAt, Usage: usage, Last: state.Compact, Readiness: readiness, HeldJobBusy: t.heldJobBusy(ctx),
+		Threshold: t.compactAt(), Usage: usage, Last: state.Compact, Readiness: readiness, HeldJobBusy: t.heldJobBusy(ctx),
 	})
 	if !decision.Compact {
 		return false
@@ -154,7 +157,7 @@ func (t *Tender) compact(ctx context.Context, now time.Time, status Status, usag
 	} else if !result.Started {
 		summary += "; it did not visibly start"
 	}
-	t.opts.Journal.Add(ctx, journal.KindUpkeep, summary, map[string]any{"tokens": usage.Tokens, "threshold": t.opts.CompactAt, "how": how, "started": result.Started})
+	t.opts.Journal.Add(ctx, journal.KindUpkeep, summary, map[string]any{"tokens": usage.Tokens, "threshold": t.compactAt(), "how": how, "started": result.Started})
 	return true
 }
 
@@ -234,9 +237,9 @@ type ContextInfo struct {
 func (t *Tender) Info(ctx context.Context) ContextInfo {
 	usage, _ := t.opts.Usage(ctx)
 	state := t.load(ctx)
-	info := ContextInfo{Usage: usage, Threshold: t.opts.CompactAt, LastCompactAt: state.Compact.At, FreshDay: state.FreshDay}
-	if t.opts.FreshAt >= 0 {
-		info.FreshAt = fmt.Sprintf("%02d:%02d", t.opts.FreshAt/60, t.opts.FreshAt%60)
+	info := ContextInfo{Usage: usage, Threshold: t.compactAt(), LastCompactAt: state.Compact.At, FreshDay: state.FreshDay}
+	if t.freshAt() >= 0 {
+		info.FreshAt = fmt.Sprintf("%02d:%02d", t.freshAt()/60, t.freshAt()%60)
 	}
 	return info
 }
@@ -269,4 +272,22 @@ func (t *Tender) update(ctx context.Context, change func(*upkeepState)) {
 	if err := t.opts.KV.SetKV(context.WithoutCancel(ctx), kvUpkeep, string(body)); err != nil {
 		t.opts.Logger.Warn("storing upkeep bookkeeping", "err", err)
 	}
+}
+
+// SetThresholds changes --compact-at and --fresh-at at once (the app's Settings). freshAt is
+// minutes after local midnight, negative for off.
+func (t *Tender) SetThresholds(compactAt, freshAt int) { t.live.Store(&[2]int{compactAt, freshAt}) }
+
+func (t *Tender) compactAt() int {
+	if live := t.live.Load(); live != nil {
+		return live[0]
+	}
+	return t.opts.CompactAt
+}
+
+func (t *Tender) freshAt() int {
+	if live := t.live.Load(); live != nil {
+		return live[1]
+	}
+	return t.opts.FreshAt
 }

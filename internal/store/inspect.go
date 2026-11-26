@@ -18,11 +18,11 @@ import (
 
 // Inspection is what a read-only look at a database file found.
 type Inspection struct {
-	Exists        bool   // the file is there
-	SchemaVersion int    // highest applied migration; 0 for a database never migrated
-	KnownVersion  int    // the highest migration this binary carries
-	Owner         bool   // an owner was stored at first-run setup
-	PushKeys      bool   // Web Push (VAPID) keys exist
+	Exists        bool // the file is there
+	SchemaVersion int  // highest applied migration; 0 for a database never migrated
+	KnownVersion  int  // the highest migration this binary carries
+	Owner         bool // an owner was stored at first-run setup
+	PushKeys      bool // Web Push (VAPID) keys exist
 	Mode          fs.FileMode
 }
 

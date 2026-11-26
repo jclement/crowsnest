@@ -87,14 +87,14 @@ const (
 
 // Setting describes one option the app may change.
 type Setting struct {
-	Name      string `json:"name"`    // the option (flag) name
-	Label     string `json:"label"`   // what the Settings page calls it
-	Section   string `json:"section"` // the Settings page section
-	Help      string `json:"help"`
-	Kind      string `json:"kind"` // text, bool, int, duration, list, choice, secret
+	Name      string   `json:"name"`    // the option (flag) name
+	Label     string   `json:"label"`   // what the Settings page calls it
+	Section   string   `json:"section"` // the Settings page section
+	Help      string   `json:"help"`
+	Kind      string   `json:"kind"` // text, bool, int, duration, list, choice, secret
 	Choices   []string `json:"choices,omitempty"`
-	Apply     Apply  `json:"apply"`
-	WriteOnly bool   `json:"write_only,omitempty"` // the value is never sent back (the notify URL)
+	Apply     Apply    `json:"apply"`
+	WriteOnly bool     `json:"write_only,omitempty"` // the value is never sent back (the notify URL)
 	// Invert shows a "no-…" option as its positive ("Remote Control" on = no-remote-control false).
 	Invert bool `json:"invert,omitempty"`
 }
@@ -111,7 +111,7 @@ var editable = []Setting{
 		Help: "the orchestrator's Claude Code permission mode"},
 	{Name: optNoRemoteControl, Label: "Remote Control", Section: "Agents", Kind: "bool", Invert: true, Apply: ApplyOrchestrator,
 		Help: "start the orchestrator with Claude Code's Remote Control, so the Claude app can reach it too"},
-	{Name: optJobRemoteControl, Label: "Remote Control for jobs", Section: "Agents", Kind: "bool", Apply: ApplyLive,
+	{Name: optJobRemoteControl, Label: "Remote Control for jobs", Section: "Agents", Kind: "bool", Apply: ApplyRestart,
 		Help: "start Claude job agents with Remote Control too"},
 	{Name: optPokeInterval, Label: "Poke interval", Section: "Orchestrator upkeep", Kind: "duration", Apply: ApplyLive,
 		Help: "how often the timer considers poking the orchestrator; 0 turns timer pokes off"},
@@ -123,7 +123,7 @@ var editable = []Setting{
 		Help: "pasted, dropped or attached by an agent"},
 	{Name: optAttachmentQuotaMB, Label: "Attachment quota (MB)", Section: "Attachments", Kind: "int", Apply: ApplyRestart,
 		Help: "disk all attachments may take; past it the oldest unneeded files are deleted"},
-	{Name: optNotifyURL, Label: "Notify URL", Section: "Notices", Kind: "secret", WriteOnly: true, Apply: ApplyLive,
+	{Name: optNotifyURL, Label: "Notify URL", Section: "Notices", Kind: "secret", WriteOnly: true, Apply: ApplyRestart,
 		Help: "ntfy-style URL that gets a one-line POST when something needs you. Write-only: it is never shown again"},
 	{Name: optProtectedHost, Label: "Protected hosts", Section: "Guard", Kind: "list", Apply: ApplyRestart,
 		Help: "production hosts no agent may reach unattended (added to the protected-hosts file's)"},
@@ -274,4 +274,18 @@ func (l *loader) loadEngine(cfg *Config) error {
 		return fmt.Errorf("--open %q is not auto, always or never", cfg.Open)
 	}
 	return nil
+}
+
+// WithSettings returns c with every app-editable setting (and Sources) taken from from: how the
+// server applies a reloaded config without touching paths, binds or auth, which never change at
+// run time.
+func (c Config) WithSettings(from Config) Config {
+	c.Model, c.JobModel, c.Engine, c.PermissionMode = from.Model, from.JobModel, from.Engine, from.PermissionMode
+	c.NoRemoteControl, c.JobRemoteControl = from.NoRemoteControl, from.JobRemoteControl
+	c.PokeInterval, c.CompactAt, c.FreshAt = from.PokeInterval, from.CompactAt, from.FreshAt
+	c.AttachmentMaxMB, c.AttachmentQuotaMB = from.AttachmentMaxMB, from.AttachmentQuotaMB
+	c.NotifyURL = from.NotifyURL
+	c.ProtectedHosts, c.ProtectedBranches = from.ProtectedHosts, from.ProtectedBranches
+	c.Sources = from.Sources
+	return c
 }

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/approvals"
@@ -120,6 +121,14 @@ type Deps struct {
 	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
 	// answers 409 with the reason.
 	Updater Updater
+	// System serves /system, /settings and /onboarding (doctor, Settings, the first run). Nil:
+	// they answer 503.
+	System System
+	// OpenShell opens a plain shell pane for the checklist's fix commands. Nil: 503.
+	OpenShell ShellOpener
+	// HerdrVersionNow, when set, reports herdr's version now (it may connect after start);
+	// HerdrVersion is used otherwise.
+	HerdrVersionNow func() string
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).
@@ -216,6 +225,7 @@ func (s *Server) routes() http.Handler {
 	s.registerSpendRoutes(mux)
 	s.registerAttachmentRoutes(mux)
 	s.registerApprovalRoutes(mux)
+	s.registerSystemRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)
@@ -282,6 +292,11 @@ func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 		if err != nil {
 			for _, open := range listeners {
 				_ = open.Close()
+			}
+			if errors.Is(err, syscall.EADDRINUSE) {
+				return nil, fmt.Errorf("port %d is already in use on %s: another program (or another crowsnest) has it. "+
+					"Stop it, or run on another port: `crowsnest --port %d` (or CROWSNEST_PORT). `crowsnest doctor` says who answers there",
+					target.Addr.Port(), target.Addr.Addr(), target.Addr.Port()+1)
 			}
 			return nil, fmt.Errorf("listening on %s (from --bind %s): %w", target.Addr, target.Source, err)
 		}

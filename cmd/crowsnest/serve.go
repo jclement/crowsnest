@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/system"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/web"
 )
@@ -74,7 +76,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer cleanupDemo()
-	logger := newLogger()
+	home, _ := os.UserHomeDir()
+	logs := system.NewLogRing(home)
+	logger := slog.New(logs.Handler(newLogger().Handler()))
 	slog.SetDefault(logger)
 	logger.Info("starting crowsnest", "name", cfg.Name, "version", version, "config", cfg)
 	for _, warning := range cfg.Warnings {
@@ -89,7 +93,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return serve(ctx, cfg, logger, defaultServeHooks())
+	hooks := defaultServeHooks()
+	hooks.logs, hooks.reload = logs, reloader(cmd.Flags())
+	return serve(ctx, cfg, logger, hooks)
 }
 
 // serveHooks are the seams serve's tests use: how herdr is reached (a test passes a fake and
@@ -97,6 +103,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 type serveHooks struct {
 	connect  func(ctx context.Context, cfg config.Config, logger *slog.Logger) (herdr.Client, string, error)
 	setupURL func(link, token string)
+	// logs keeps recent warnings for the System page (nil in tests); reload re-reads the config
+	// with saved settings (nil: settings cannot be changed in the app).
+	logs   *system.LogRing
+	reload func(stored map[string]string) (config.Config, error)
 }
 
 func defaultServeHooks() serveHooks { return serveHooks{connect: connectHerdr} }
@@ -162,10 +172,12 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	if err != nil {
 		return err
 	}
+	live := &liveServices{}
+	journalLog := journal.New(db, events, logger, nil)
+	sys := newSystem(cfg, db, events, journalLog, client, agentSocketPath(cfg), hooks, live, logger)
 	identity := agentid.New(db, nil)
 	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
-	journalLog := journal.New(db, events, logger, nil)
 	refs := &jobRefs{guard: guardRules(cfg, logger)}
 	approvalLinks := &approvalWiring{}
 	approvalService, err := newApprovals(cfg, db, events, refs.guard, approvalLinks, logger)
@@ -183,6 +195,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	meter := newSpendMeter(cfg, db, events, refs, jobServiceRef.Load, logger)
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, files, meter, logger)
 	jobServiceRef.Store(jobService)
+	live.jobs.Store(jobService)
+	go live.applyJobDefaults(cfg)
 	approvalLinks.jobs.Store(jobService)
 	files.jobs = jobService
 	go files.run(ctx, events, refs.questions.Load)
@@ -193,24 +207,28 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	approvalLinks.pusher.Store(pusher)
 	runApprovals(ctx, approvalService, fleetCache, client, logger)
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, logger)
+		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, sys, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err
 	}
-	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, logger)
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard,
+		orchGate{gate: sys.Gate, launch: sys.LaunchSettings(orchestratorRemoteControl)}, logger)
+	sys.SetOrchestrator(orchestrator)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	startJobs(ctx, jobService, client, logger)
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
 	tender := newTender(cfg, client, db, journalLog, orchestrator, conversations, logger)
+	live.tender.Store(tender)
 	poker := startPoker(ctx, cfg, db, events, pokeServices{
 		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
 		tasks: scheduleTasks{service: scheduleService}, tender: tender,
 	}, client, logger)
 	pokerRef.Store(poker)
+	live.poker.Store(poker)
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
@@ -220,6 +238,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
 		Names: db, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
+		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
@@ -231,6 +250,10 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	server, err := httpd.New(deps)
 	if err != nil {
 		return err
+	}
+	var readyOnce sync.Once
+	server.OnListening = func(url string) {
+		readyOnce.Do(func() { logReady(ctx, sys, []string{browsableBase(url)}, logger) })
 	}
 	return server.Run(ctx)
 }
@@ -248,19 +271,23 @@ func connectHerdr(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		logger.Info("demo mode: using the in-memory herdr with a scripted fleet", "herdr_version", fake.Version)
 		return demo, fake.Version, nil
 	}
-	session, err := herdr.EnsureSession(ctx, herdr.SessionOptions{
+	if err := herdr.ValidateSessionName(cfg.Session, cfg.AllowDefaultSession); err != nil {
+		return nil, "", err
+	}
+	// herdr may be missing or slow to start: serve comes up anyway and connects in the
+	// background, so the app can explain and things start once herdr is there (DESIGN.md 3.4).
+	lazy := herdr.NewLazy()
+	go lazy.Connect(ctx, herdr.SessionOptions{
 		Name: cfg.Session, AllowDefault: cfg.AllowDefaultSession, LogDir: cfg.StateDir, Logger: logger,
+	}, func(session *herdr.Session) {
+		logger.Info("connected to herdr", "session", session.Name, "socket", session.SocketPath,
+			"herdr_version", session.Pong.Version, "protocol", session.Pong.Protocol, "started", session.Started)
+		if session.Pong.Protocol != herdr.ProtocolVersion {
+			logger.Warn("herdr speaks a different protocol than crowsnest was built for; some features may misbehave",
+				"herdr_protocol", session.Pong.Protocol, "expected", herdr.ProtocolVersion)
+		}
 	})
-	if err != nil {
-		return nil, "", fmt.Errorf("connecting to herdr session %q: %w", cfg.Session, err)
-	}
-	logger.Info("connected to herdr", "session", session.Name, "socket", session.SocketPath,
-		"herdr_version", session.Pong.Version, "protocol", session.Pong.Protocol, "started", session.Started)
-	if session.Pong.Protocol != herdr.ProtocolVersion {
-		logger.Warn("herdr speaks a different protocol than crowsnest was built for; some features may misbehave",
-			"herdr_protocol", session.Pong.Protocol, "expected", herdr.ProtocolVersion)
-	}
-	return session.Client, session.Pong.Version, nil
+	return lazy, "", nil
 }
 
 // terminals picks the bridges behind the terminal routes. --demo gets the built-in toy: the fake

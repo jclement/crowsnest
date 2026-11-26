@@ -139,6 +139,9 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 		return store.JobRecord{}, invalid("unknown role %q; known roles: %s", role, strings.Join(s.opts.Roles.Names(), ", "))
 	}
 	engine := strings.TrimSpace(input.Engine)
+	if engine == "" && strings.TrimSpace(input.Dir) != "" {
+		engine = s.defaultEngine()
+	}
 	if engine == "" {
 		engine = EngineClaude
 	}
@@ -155,7 +158,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	model := strings.TrimSpace(input.Model)
 	if model == "" && engine == EngineClaude && dir != "" {
 		// A job with no directory goes to the orchestrator, which keeps its own model.
-		model = s.opts.DefaultModel
+		model = s.defaultModel()
 	}
 	if model != "" && !modelPattern.MatchString(model) {
 		return store.JobRecord{}, invalid("model %q is not a model name (letters, digits and . _ : [ ] -, at most 64)", termtext.Cap(termtext.Clean(model), 70))

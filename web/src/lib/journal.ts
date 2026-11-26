@@ -3,7 +3,7 @@
 // that splits a poke message into its header and reasons for the compact Chat row.
 
 /** What a journal entry records (internal/journal Kind). */
-export const journalKinds = ["poke", "skip", "send", "answer", "restart", "alert", "backstop", "task", "upkeep"] as const;
+export const journalKinds = ["poke", "skip", "send", "answer", "restart", "alert", "backstop", "task", "upkeep", "settings"] as const;
 export type JournalKind = (typeof journalKinds)[number];
 
 export const journalKindLabels: Record<JournalKind, string> = {
@@ -16,6 +16,7 @@ export const journalKindLabels: Record<JournalKind, string> = {
   backstop: "Backstop",
   task: "Task",
   upkeep: "Upkeep",
+  settings: "Settings",
 };
 
 /** One entry of GET /journal. */
