@@ -97,7 +97,7 @@ run = "echo 'e2e: not built until M9 (DESIGN.md section 17)' >&2; exit 1"
 description = "Build, then Playwright against the real binary (web/e2e/real): --demo fleet, and terminals on a throwaway herdr session. Needs herdr"
 run = [
   "mise run build",
-  "npm --prefix web exec -- playwright test -c playwright.real.config.ts",
+  "npm --prefix web run e2e:real",
 ]
 
 [tasks.screenshots]
