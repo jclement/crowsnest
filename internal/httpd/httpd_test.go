@@ -4,6 +4,7 @@
 package httpd
 
 import (
+	"net/netip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -104,6 +105,8 @@ type harnessOptions struct {
 	// M8: the journal and the poker (journal_test.go)
 	journal *journal.Journal
 	poker   *orch.Poker
+	// R2-L2: --trusted-proxy
+	trustedProxies []netip.Prefix
 }
 
 var testWeb = fstest.MapFS{
@@ -139,6 +142,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	t.Cleanup(func() { _ = db.Close() })
 	c := &clock{now: time.Now()}
 	cfg := testConfig(opts.noAuth)
+	cfg.TrustedProxies = opts.trustedProxies
 	service, err := auth.New(ctx, auth.Options{Username: cfg.Username, Password: cfg.Password, NoAuth: cfg.NoAuth, Now: c.Now}, db)
 	if err != nil {
 		t.Fatal(err)

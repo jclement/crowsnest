@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -119,8 +118,9 @@ func (s *Server) internalError(w http.ResponseWriter, r *http.Request, doing str
 // ---- Cookies -----------------------------------------------------------------
 
 // isHTTPS reports whether the browser reached us over HTTPS: directly, or through a reverse
-// proxy on this machine (tailscale serve) that says so. X-Forwarded-Proto is trusted only from
-// loopback, and only ever to add the Secure flag, which cannot weaken anything.
+// proxy that says so. X-Forwarded-Proto is trusted only from loopback or a --trusted-proxy (the
+// TCP peer, not the client it names), and only ever to add the Secure flag, which cannot weaken
+// anything.
 func isHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
@@ -128,8 +128,8 @@ func isHTTPS(r *http.Request) bool {
 	if r.Header.Get("X-Forwarded-Proto") != "https" {
 		return false
 	}
-	addr, err := netip.ParseAddr(clientIP(r))
-	return err == nil && addr.Unmap().IsLoopback()
+	info, _ := r.Context().Value(clientKey{}).(clientInfo)
+	return info.viaProxy || peerAddr(r).IsLoopback()
 }
 
 // setSessionCookie sets the session cookie. Secure follows the request scheme rather than being

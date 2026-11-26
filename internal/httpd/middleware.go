@@ -218,10 +218,15 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 	})
 }
 
-// clientIP is the TCP peer address. X-Forwarded-For is deliberately ignored: it is
-// client-supplied, and trusting it would let anyone pick their own rate-limit bucket. Behind a
-// local reverse proxy every client shares the proxy's bucket, which fails safe.
+// clientIP is the client's address: the TCP peer, or, for a request through a --trusted-proxy,
+// the client that proxy names (proxy.go, R2-L2). Forwarding headers from anyone else are
+// ignored: they are client-supplied, and trusting them would let anyone pick their own
+// rate-limit bucket. Without a trusted proxy every client behind a local proxy shares the
+// proxy's bucket, which fails safe.
 func clientIP(r *http.Request) string {
+	if info, ok := r.Context().Value(clientKey{}).(clientInfo); ok {
+		return info.ip
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

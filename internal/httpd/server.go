@@ -169,7 +169,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 	next = s.checkOrigin(next)
 	next = s.checkHost(next)
 	next = securityHeaders(next)
-	return s.logRequests(next)
+	return s.trustProxies(s.logRequests(next))
 }
 
 // ---- Running -----------------------------------------------------------------
