@@ -113,6 +113,11 @@ description = "Inbox against the built binary in --demo mode (seeded questions, 
 depends = ["build"]
 run = "npm --prefix web run screenshots:inbox"
 
+[tasks."screenshots:jobs"]
+description = "Jobs view against the built binary in --demo mode (a job in every state, one nudged, one stuck on a limit) at 375 and 1440 px: the board, the new-job form, a running and a stuck job; plus giving a job"
+depends = ["build"]
+run = "npm --prefix web run screenshots:jobs"
+
 [tasks."screenshots:chat"]
 description = "Chat view against the built binary in --demo mode (a real prompt round trip) at 375 and 1440 px, light and dark, into web/screenshots"
 depends = ["build"]

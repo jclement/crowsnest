@@ -157,7 +157,7 @@ export type BoardSection = "attention" | "running" | "today" | "older";
 
 export const sectionLabels: Record<BoardSection, string> = {
   attention: "Needs you or stuck",
-  running: "Running",
+  running: "In progress",
   today: "Finished today",
   older: "Older",
 };

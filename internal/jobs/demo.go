@@ -53,6 +53,11 @@ func SeedDemo(ctx context.Context, s *Service, panes DemoPanes) error {
 			}
 		}
 		ids[item.record.AgentName] = FormatID(id)
+		if item.record.State == string(StateNeedsYou) && Cause(item.record.Cause) == CauseQuestions {
+			if err := seedDemoQuestion(ctx, s, FormatID(id), item.record.PaneID); err != nil {
+				return err
+			}
+		}
 	}
 	go runDemo(ctx, s, ids, s.opts.Logger)
 	return nil
@@ -80,9 +85,11 @@ func demoJobs(now time.Time, panes DemoPanes) []demoJob {
 
 	needsYou := base("Decide the release date for v0.2", "Draft the v0.2 release notes and pick a date.", "lead", "", string(StateNeedsYou), panes.Orchestrator, OrchestratorName, 90*time.Minute)
 	needsYou.Cause, needsYou.CauseDetail, needsYou.Waiting, needsYou.Progress = string(CauseQuestions), "1 open question", true, "Waiting on the release date"
+	needsYou.LastActivityAt = ago(29 * time.Minute)
 
 	dialog := base("Review the auth change", "Review the auth change on branch fix/limiter.", "reviewer", "~/src/crowsnest", string(StateNeedsYou), panes.Reviewer, "job-5", 12*time.Minute)
 	dialog.Cause, dialog.CauseDetail = string(CauseDialog), "Claude wants to run: rm -rf node_modules"
+	dialog.LastActivityAt = ago(2 * time.Minute)
 
 	unresponsive := base("Profile the fleet cache", "Profile the fleet cache under 200 panes.", "tester", "~/src/crowsnest", string(StateRunning), "", "job-6", 3*time.Hour)
 	unresponsive.Stuck, unresponsive.Cause, unresponsive.Nudges, unresponsive.NudgeStreak = true, string(CauseUnresponsive), 3, 3
@@ -114,6 +121,18 @@ func demoJobs(now time.Time, panes DemoPanes) []demoJob {
 		{record: failed, events: []demoEvent{{6 * time.Hour, EventCreated, "Job created"}, {5 * time.Hour, EventFail, "Failed: Bubble Tea v2 is not released yet"}}},
 		{record: queued, events: []demoEvent{{2 * time.Minute, EventCreated, "Job created"}}},
 	}
+}
+
+// seedDemoQuestion gives the demo's needs-you job the open question it is waiting on.
+func seedDemoQuestion(ctx context.Context, s *Service, jobID, paneID string) error {
+	now := s.opts.Now()
+	options, _ := json.Marshal([]map[string]string{{"key": "fri", "label": "Friday"}, {"key": "mon", "label": "Next Monday"}})
+	_, err := s.opts.Store.InsertQuestion(ctx, store.QuestionRecord{
+		Title: "Ship v0.2 on Friday?", BodyMD: "The release notes are drafted. Friday gives a quiet weekend to watch it; Monday gives the docs another pass.",
+		Kind: "choice", Options: options, Recommend: "fri", Urgency: "normal", SourcePane: paneID, JobID: jobID,
+		CreatedAt: now.Add(-30 * time.Minute), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	return err
 }
 
 var demoProgress = []string{"Writing table tests for the back-off schedule", "Running the webhook tests", "Fixing the jitter bound", "Committing on job/1-add-retry-back-off"}
