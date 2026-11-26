@@ -24,6 +24,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -349,13 +350,20 @@ func (s *Service) askApproval(ctx context.Context, job Job, who creator, wider [
 		s.cancelHeld(ctx, job.ID, "the approval question could not be asked")
 		return Job{}, fmt.Errorf("asking the human to allow %s: %w", job.ID, err)
 	}
-	return s.mutate(ctx, job.ID, func(r *store.JobRecord, c *change) error {
+	held, err := s.mutate(ctx, job.ID, func(r *store.JobRecord, c *change) error {
 		if State(r.State) == StateQueued && Cause(r.Cause) == CauseApproval {
 			r.CauseDetail = question.ID
 		}
 		c.event(EventQuestion, "Held for the human's approval ("+question.ID+"): "+strings.Join(wider, "; "), map[string]any{"question": question.ID})
 		return nil
 	})
+	if err != nil {
+		return held, err
+	}
+	// An answer that arrived before the link was stored found nothing to act on (R3-C02); look
+	// once more now that it is there. The tick looks too, so nothing hangs on this call.
+	s.ApprovalSettled(ctx, job.ID)
+	return held, nil
 }
 
 // approvalQuestion is the human's question: who wants what, why it needs them, and the brief.
@@ -397,9 +405,14 @@ func IsApprovalQuestion(question questions.Question) (string, bool) {
 }
 
 // ApprovalSettled applies the human's decision on a held job, reading the question from the
-// store, so the same call serves the settle callback and the start-up reconcile (a decision
-// that landed just before a crash is not lost). It does nothing for a job not held for approval
-// or a question still open.
+// store, so the same call serves the settle callback and the supervisor's tick (a decision that
+// landed just before a crash, or before the job learnt its question's id, is not lost). It does
+// nothing for a job not held for approval or a question still open.
+//
+// Only a plain "allow" launches. An allow that carries a note does not (R3-C03): in this product
+// the note outranks the choice, and crowsnest cannot follow a condition such as "not until
+// tomorrow" or "only with Claude", so a qualified allow is treated as not given. The job is
+// cancelled, and the note reaches the asking agent with the answer, which may ask again.
 func (s *Service) ApprovalSettled(ctx context.Context, jobID string) {
 	detail, err := s.Get(ctx, jobID)
 	if err != nil || detail.State != StateQueued || detail.Cause != CauseApproval {
@@ -407,17 +420,63 @@ func (s *Service) ApprovalSettled(ctx context.Context, jobID string) {
 	}
 	questionID, err := questions.ParseID(detail.CauseDetail)
 	if err != nil {
-		return // not asked yet (or the ask failed and cancelled it)
+		var ok bool
+		if questionID, ok = s.relinkApproval(ctx, detail.Job); !ok {
+			return
+		}
 	}
 	question, err := s.opts.Store.GetDelivery(ctx, questionID)
 	if err != nil || question.Status == string(questions.StatusOpen) {
 		return
 	}
-	if question.Status == string(questions.StatusAnswered) && string(question.AnswerValue) == `"`+approvalAllow+`"` {
-		s.approve(ctx, jobID, detail.CauseDetail)
-		return
+	label := fmt.Sprintf("q_%d", questionID)
+	allowed := question.Status == string(questions.StatusAnswered) && string(question.AnswerValue) == `"`+approvalAllow+`"`
+	switch {
+	case allowed && strings.TrimSpace(question.AnswerNote) == "":
+		s.approve(ctx, jobID, label)
+	case allowed:
+		s.cancelHeld(ctx, jobID, fmt.Sprintf("the human allowed it with a note (%s), and crowsnest does not act on a qualified allow; "+
+			"the note went to the asking agent, which may ask again", label))
+	default:
+		s.cancelHeld(ctx, jobID, fmt.Sprintf("the human did not allow it (%s %s; not consent)", label, question.Status))
 	}
-	s.cancelHeld(ctx, jobID, fmt.Sprintf("the human did not allow it (%s %s; not consent)", detail.CauseDetail, question.Status))
+}
+
+// approvalAskGrace is how long a held job may go without a linked question before it counts as
+// orphaned: askApproval stores the link a moment after creating the job.
+const approvalAskGrace = time.Minute
+
+// relinkApproval repairs a held job whose question id was never stored (R3-C02: creating the
+// job, asking, and storing the link are separate writes, and a crash can fall between them). An
+// approval question attached to the job is found and linked; with none, after approvalAskGrace,
+// the job is cancelled: nothing was asked, so nothing can approve it. ok reports a linked question.
+func (s *Service) relinkApproval(ctx context.Context, job Job) (int64, bool) {
+	records, err := s.opts.Store.ListQuestionsByJob(ctx, job.ID)
+	if err != nil {
+		return 0, false
+	}
+	for _, record := range records {
+		var context map[string]string
+		if json.Unmarshal(record.Context, &context) != nil || context[approvalContextKey] != job.ID {
+			continue
+		}
+		label := fmt.Sprintf("q_%d", record.ID)
+		if _, err := s.mutate(ctx, job.ID, func(r *store.JobRecord, c *change) error {
+			if State(r.State) != StateQueued || Cause(r.Cause) != CauseApproval {
+				return errNotHeld
+			}
+			r.CauseDetail = label
+			c.event(EventQuestion, "Found its approval question "+label+" (crowsnest stopped before linking it)", map[string]any{"question": label})
+			return nil
+		}); err != nil {
+			return 0, false
+		}
+		return record.ID, true
+	}
+	if s.opts.Now().Sub(job.CreatedAt) >= approvalAskGrace {
+		s.cancelHeld(ctx, job.ID, "its approval question was never asked (crowsnest stopped while asking); the agent may ask again")
+	}
+	return 0, false
 }
 
 // approve releases a held job and launches it. Its directory joins the remembered list: the
@@ -443,8 +502,11 @@ func (s *Service) approve(ctx context.Context, jobID, questionID string) {
 // errNotHeld stops an approval that raced another change to the job.
 var errNotHeld = errors.New("the job is no longer held for approval")
 
-// cancelHeld cancels a job that was held for approval.
+// cancelHeld cancels a job that was held for approval. It does not use the caller's context: a
+// request that was itself cancelled (the agent hung up mid-call) must still clean up its job.
 func (s *Service) cancelHeld(ctx context.Context, jobID, why string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), herdrCallTimeout)
+	defer cancel()
 	_, _ = s.mutate(ctx, jobID, func(r *store.JobRecord, c *change) error {
 		if State(r.State).Terminal() {
 			return nil
@@ -455,16 +517,15 @@ func (s *Service) cancelHeld(ctx context.Context, jobID, why string) {
 	})
 }
 
-// ReconcileApprovals applies decisions on every held job (serve calls it at start).
+// ReconcileApprovals applies decisions on every held job, all of them, a page at a time (serve
+// calls it at start; the tick does the same job by job).
 func (s *Service) ReconcileApprovals(ctx context.Context) {
-	held, err := s.opts.Store.ListJobs(ctx, []string{string(StateQueued)}, listLimit)
-	if err != nil {
-		s.opts.Logger.Warn("reading jobs held for approval", "err", err)
-		return
-	}
-	for _, record := range held {
+	err := s.eachLive(ctx, []State{StateQueued}, func(record store.JobRecord) {
 		if Cause(record.Cause) == CauseApproval {
 			s.ApprovalSettled(ctx, FormatID(record.ID))
 		}
+	})
+	if err != nil && ctx.Err() == nil {
+		s.opts.Logger.Warn("reading jobs held for approval", "err", err)
 	}
 }

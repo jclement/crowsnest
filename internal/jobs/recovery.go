@@ -101,6 +101,13 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		r = record
 	}
 	now := s.opts.Now()
+	if State(r.State) == StateQueued && Cause(r.Cause) == CauseApproval {
+		// Held for the human: apply a decision the callback missed, repair a missing link, and
+		// remind them of a question left too long (R3-C02).
+		s.ApprovalSettled(ctx, id)
+		s.renotifyQuestions(ctx, r)
+		return
+	}
 	if State(r.State) == StateQueued && r.PaneID == "" {
 		if r.Dir != "" && now.Sub(r.CreatedAt) > relaunchAfter {
 			s.goBackground(ctx, id, func(ctx context.Context) { s.launch(ctx, id) })

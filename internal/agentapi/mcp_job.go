@@ -121,7 +121,8 @@ func init() {
 				}
 				if job.Cause == jobs.CauseApproval {
 					return textResult(fmt.Sprintf("Created %s (%s), but it waits for the human's approval (%s): it asks for more than your own directory, engine and isolation. "+
-						"It starts only if they allow it; otherwise it is cancelled. The answer arrives as a message starting [crowsnest answer %s]. Carry on with other work meanwhile.",
+						"It starts only if they allow it as asked; otherwise it is cancelled. An allow that carries a note from the human does not start it either: read the note and ask again if it still makes sense. "+
+						"The answer arrives as a message starting [crowsnest answer %s]. Carry on with other work meanwhile.",
 						job.ID, job.Title, job.CauseDetail, job.CauseDetail)), nil, nil
 				}
 				return textResult(fmt.Sprintf("Created %s (%s, role %s). It is starting now. Check on it with job_get(job_id=%q).", job.ID, job.Title, job.Role, job.ID)), nil, nil

@@ -6,6 +6,8 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -268,5 +271,97 @@ func TestStopDuringTypingIsRevisitedWhenTheAgentStaysIdle(t *testing.T) {
 	poker.Check(ctx, false)
 	if typed := nudgesTyped(r, job.PaneID); typed != 2 {
 		t.Fatalf("the agent sat idle after a stop let through for typing and was never nudged: %d nudges typed (want the human's and the backstop's)", typed)
+	}
+}
+
+// ---- R3-C03: an allow with a note starts nothing ----------------------------------------------
+
+func TestAllowWithANoteDoesNotLaunch(t *testing.T) {
+	ctx := context.Background()
+	d := newDelegateRig(t, DelegationLimits{})
+	_, caller := d.parent(CreateInput{Role: "lead"})
+	other := t.TempDir()
+	job, err := d.svc.CreateForAgent(ctx, CreateInput{Brief: "Elsewhere", Dir: other, Role: "tester"}, caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.questions.Answer(ctx, job.CauseDetail, questions.AnswerInput{Value: json.RawMessage(`"allow"`), Note: "Not until tomorrow"}); err != nil {
+		t.Fatal(err)
+	}
+	starts := len(d.fake.Starts())
+	d.svc.ReconcileApprovals(ctx)
+	got := d.get(job.ID)
+	if got.State != StateCancelled || len(d.fake.Starts()) != starts {
+		t.Fatalf("a qualified allow launched the job: %+v", got.Job)
+	}
+	if slices.Contains(d.svc.RememberedDirs(ctx), other) {
+		t.Fatal("a qualified allow widened the remembered directories")
+	}
+}
+
+// ---- R3-C02: held job, question and link survive a crash between them --------------------------
+
+func TestOrphanedApprovalIsCancelledByTheTick(t *testing.T) {
+	ctx := context.Background()
+	d := newDelegateRig(t, DelegationLimits{})
+	_, caller := d.parent(CreateInput{Role: "lead"})
+	// crowsnest died after recording the held job and before asking.
+	d.svc.opts.AskHuman = func(context.Context, questions.AskInput, questions.Caller) (questions.Question, error) {
+		panic("crash")
+	}
+	var held Job
+	func() {
+		defer func() { _ = recover() }()
+		held, _ = d.svc.CreateForAgent(ctx, CreateInput{Brief: "Elsewhere", Dir: t.TempDir(), Role: "tester"}, caller)
+	}()
+	list, err := d.svc.List(ctx, []State{StateQueued})
+	if err != nil || len(list) != 1 || held.ID != "" {
+		t.Fatalf("setup: %+v %v", list, err)
+	}
+	d.clock.Advance(2 * time.Minute)
+	d.svc.Tick(ctx)
+	if got := d.get(list[0].ID); got.State != StateCancelled {
+		t.Fatalf("an orphaned held job sits forever, taking a live slot: %+v", got.Job)
+	}
+}
+
+func TestApprovalWithItsLinkLostIsFoundAndApplied(t *testing.T) {
+	ctx := context.Background()
+	d := newDelegateRig(t, DelegationLimits{})
+	_, caller := d.parent(CreateInput{Role: "lead"})
+	job, err := d.svc.CreateForAgent(ctx, CreateInput{Brief: "Elsewhere", Dir: t.TempDir(), Role: "tester"}, caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	questionID := job.CauseDetail
+	// crowsnest died after asking, before the job learnt its question's id.
+	d.edit(job.ID, func(rec *store.JobRecord) { rec.CauseDetail = "Asked the human to allow it: elsewhere" })
+	if _, err := d.questions.Answer(ctx, questionID, questions.AnswerInput{Value: json.RawMessage(`"allow"`)}); err != nil {
+		t.Fatal(err)
+	}
+	d.svc.Tick(ctx)
+	if got := d.get(job.ID); got.State != StateRunning {
+		t.Fatalf("an allowed job whose link was lost never started: %+v", got.Job)
+	}
+}
+
+func TestApprovalAnsweredBeforeItsLinkIsStoredStillApplies(t *testing.T) {
+	ctx := context.Background()
+	d := newDelegateRig(t, DelegationLimits{})
+	_, caller := d.parent(CreateInput{Role: "lead"})
+	// The human answers before askApproval stores the question id on the job.
+	d.svc.opts.AskHuman = func(ctx context.Context, input questions.AskInput, caller questions.Caller) (questions.Question, error) {
+		q, err := d.questions.Ask(ctx, input, caller)
+		if err == nil {
+			_, err = d.questions.Answer(ctx, q.ID, questions.AnswerInput{Value: json.RawMessage(`"allow"`)})
+		}
+		return q, err
+	}
+	job, err := d.svc.CreateForAgent(ctx, CreateInput{Brief: "Elsewhere", Dir: t.TempDir(), Role: "tester"}, caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.get(job.ID); got.State != StateRunning {
+		t.Fatalf("an answer that beat the link was never applied: %+v", got.Job)
 	}
 }
