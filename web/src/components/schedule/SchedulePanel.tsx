@@ -66,7 +66,7 @@ export function SchedulePanel({ projectId, onOpenJob }: SchedulePanelProps) {
               aria-label="Project filter"
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
-              className="min-h-11 rounded border border-border-strong bg-surface px-2 text-xs text-heading md:min-h-7"
+              className="h-11 rounded border border-border-strong bg-surface px-2 text-xs text-heading md:h-7"
             >
               <option value="">All</option>
               <option value="0">Orchestrator and unfiled</option>

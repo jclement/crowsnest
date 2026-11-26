@@ -93,7 +93,7 @@ export function SpendPanel({ projectId }: { projectId?: number } = {}) {
         {projectList.length > 0 && (
           <label className="flex items-center gap-1.5 text-xs text-muted">
             Project
-            <select aria-label="Project filter" value={project} onChange={(event) => setProject(event.target.value)} className="min-h-11 rounded border border-border-strong bg-surface px-2 text-xs text-heading md:min-h-7">
+            <select aria-label="Project filter" value={project} onChange={(event) => setProject(event.target.value)} className="h-11 rounded border border-border-strong bg-surface px-2 text-xs text-heading md:h-7">
               <option value="">All</option>
               {projectList.map((entry) => (
                 <option key={entry.id} value={entry.id}>

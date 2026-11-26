@@ -35,7 +35,7 @@ test("the tree shows every workspace, tab and agent, with the ones that need you
   await expect(tree.getByRole("button", { name: /^shell w2:p3/i })).toBeVisible();
 
   // A workspace collapses and expands.
-  const crowsnest = tree.getByRole("button", { name: /crowsnest\s*\d+ agents?/ });
+  const crowsnest = tree.getByRole("button", { name: /(?<!lead )crowsnest\s*\d+ agents?/ });
   await crowsnest.click();
   await expect(crowsnest).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByRole("list", { name: "Tabs in crowsnest" })).toHaveCount(0);

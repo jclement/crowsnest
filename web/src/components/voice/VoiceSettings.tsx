@@ -88,7 +88,7 @@ function AgentVoicesSection() {
                 value={entry.voice_id}
                 onChange={(event) => choose(entry.agent, event.target.value)}
                 disabled={set.isPending || voices.isPending}
-                className="ml-auto min-h-11 min-w-0 max-w-full rounded border border-border-strong bg-surface px-2 text-xs text-heading md:min-h-7"
+                className="ml-auto h-11 min-w-0 max-w-full rounded border border-border-strong bg-surface px-2 text-xs text-heading md:h-7"
               >
                 <option value="">Instance voice ({nameOf(voices.data, agents.data.default_voice)})</option>
                 {(voices.data ?? []).map((voice) => (

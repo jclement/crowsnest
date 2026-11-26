@@ -229,7 +229,7 @@ function TargetSwitcher({ value, orchestrator, projects, onChange }: { value: st
         onChange={(event) => onChange(event.target.value)}
         aria-label="Chat with"
         data-testid="chat-target"
-        className="min-h-11 min-w-0 max-w-[14rem] truncate rounded border border-transparent bg-transparent pr-1 text-sm font-semibold text-heading hover:border-border-strong focus-visible:outline-2 focus-visible:outline-accent md:min-h-8"
+        className="h-11 min-w-0 max-w-[14rem] truncate rounded border border-transparent bg-transparent pr-1 text-sm font-semibold text-heading hover:border-border-strong focus-visible:outline-2 focus-visible:outline-accent md:h-8"
       >
         {showOrchestrator && <option value={ORCHESTRATOR}>Orchestrator</option>}
         {projects.map((project) => (
