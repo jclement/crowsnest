@@ -173,6 +173,28 @@ func TestKeysBoundToScreenHash(t *testing.T) {
 	}
 }
 
+// An agent herdr detected but did not start by name (a Claude started by hand) refuses
+// agent.send_keys with agent_not_ready; the press must still reach its pane (M9 real-herdr e2e).
+func TestKeysFallBackToThePaneForAnAgentHerdrDidNotStart(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	screen := decodeData[ScreenResponse](t, h.do(request(http.MethodGet, "/api/v1/agents/builder/screen", "")).Body.Bytes())
+	f.FailNext("agent.send_keys", herdr.ErrAgentNotReady)
+	response := h.do(request(http.MethodPost, "/api/v1/agents/builder/keys", keysBody(t, []string{"3"}, screen.Hash)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("press = %d %s", response.Code, response.Body)
+	}
+	sent := f.SentKeys()
+	if len(sent) != 1 || sent[0].PaneID != "w1:p1" || sent[0].Keys[0] != "3" {
+		t.Fatalf("sent = %+v", sent)
+	}
+	// Any other refusal is still an error, and nothing is sent twice.
+	f.FailNext("agent.send_keys", herdr.ErrAgentBlocked)
+	response = h.do(request(http.MethodPost, "/api/v1/agents/builder/keys", keysBody(t, []string{"3"}, screen.Hash)))
+	if response.Code == http.StatusOK || len(f.SentKeys()) != 1 {
+		t.Fatalf("blocked press = %d, sent %+v", response.Code, f.SentKeys())
+	}
+}
+
 func TestKeysValidation(t *testing.T) {
 	h, f, shellPane := herdrHarness(t)
 	cases := []struct {

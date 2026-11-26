@@ -243,7 +243,16 @@ func (s *Server) sendKeys(ctx context.Context, target screenTarget, keys []strin
 	ctx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
 	defer cancel()
 	if target.agent != nil {
-		return s.deps.Herdr.AgentSendKeys(ctx, target.paneID, keys)
+		err := s.deps.Herdr.AgentSendKeys(ctx, target.paneID, keys)
+		// agent.send_keys works only for agents herdr started by name (agent.start). A Claude
+		// someone started by hand in a pane is detected and reported (and can sit at a dialog),
+		// but herdr answers agent_not_ready for it, so the press goes to the pane instead: the
+		// same bytes into the same terminal, already checked against the screen hash. Found by
+		// the M9 real-herdr e2e suite, where every press on such a dialog was a 502.
+		if errors.Is(err, herdr.ErrAgentNotReady) || errors.Is(err, herdr.ErrAgentNotFound) {
+			return s.deps.Herdr.PaneSendKeys(ctx, target.paneID, keys)
+		}
+		return err
 	}
 	return s.deps.Herdr.PaneSendKeys(ctx, target.paneID, keys)
 }
