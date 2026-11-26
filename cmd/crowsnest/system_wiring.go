@@ -39,10 +39,19 @@ const setupWorkspace = "setup"
 
 // liveServices are the services a settings change is applied to, set as they are built.
 type liveServices struct {
+	// greet sends the first-run greeting (set once the orchestrator exists).
+	greeter atomic.Pointer[func()]
 	poker  atomic.Pointer[orch.Poker]
 	tender atomic.Pointer[orch.Tender]
 	jobs   atomic.Pointer[jobs.Service]
 	system atomic.Pointer[system.Service]
+}
+
+// greet runs the first-run greeting, when it is wired.
+func (l *liveServices) greet() {
+	if greet := l.greeter.Load(); greet != nil {
+		go (*greet)()
+	}
 }
 
 // apply pushes the settings that apply live into the services.
@@ -92,6 +101,7 @@ func newSystem(cfg config.Config, db *store.Store, events *hub.Hub, journalLog *
 	service := system.New(system.Options{
 		Config: cfg, Version: version, KV: db, Journal: journalLog, Hub: events, Logs: hooks.logs, Herdr: lazy,
 		AgentSocket: socket, Reload: hooks.reload, Apply: live.apply, Env: env, Logger: logger,
+		OnStarted: func() { live.greet() },
 	})
 	live.system.Store(service)
 	return service
@@ -202,5 +212,35 @@ func browserOpener(cfg config.Config, logger *slog.Logger) func(url string) {
 			return
 		}
 		logger.Info("opened the setup page in your browser (the link above works too)", "via", decision.Via)
+	}
+}
+
+// firstGreeting is typed into the orchestrator once, after the first-run checklist's Start, so
+// the person lands in Chat with a message from it rather than an empty page. One short turn.
+const firstGreeting = "[crowsnest first run] The person who just set up crowsnest is looking at this chat for the first time. " +
+	"Greet them in two or three short sentences: you are this crowsnest's orchestrator, and they can give you a job, " +
+	"ask you something, or ask what the agents are doing. Do not start any work."
+
+// greetingWait is how long the greeting waits for the orchestrator to be ready (a folder-trust
+// question answered on the checklist, a slow first start).
+const greetingWait = 10 * time.Minute
+
+// greeter returns the first-run greeting: it waits for the orchestrator to be idle, then types
+// the greeting once. A greeting that cannot be sent is logged and dropped: it is a courtesy.
+func greeter(ctx context.Context, client herdr.Client, orchestrator *orch.Orchestrator, logger *slog.Logger) func() {
+	return func() {
+		deadline := time.Now().Add(greetingWait)
+		for time.Now().Before(deadline) && ctx.Err() == nil {
+			if orchestrator.Status().State == orch.StateIdle {
+				sendCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+				_, err := orch.Prompt(sendCtx, client, orch.Name, orch.PromptRequest{Text: firstGreeting, ExpectAgent: orch.Name})
+				cancel()
+				if err != nil {
+					logger.Warn("sending the first-run greeting", "err", err)
+				}
+				return
+			}
+			time.Sleep(time.Second)
+		}
 	}
 }

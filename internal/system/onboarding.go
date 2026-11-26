@@ -109,6 +109,9 @@ func (s *Service) StartOnboarding(ctx context.Context, engine string) error {
 	}
 	s.journal(ctx, "First run finished: the orchestrator starts on "+selection.Orchestrator, map[string]any{"engine": selection.Orchestrator})
 	s.kickOrchestrator()
+	if s.opts.OnStarted != nil {
+		s.opts.OnStarted()
+	}
 	return nil
 }
 

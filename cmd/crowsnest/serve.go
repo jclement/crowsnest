@@ -224,6 +224,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions,
 		orchGate{gate: sys.Gate, launch: sys.LaunchSettings(orchestratorRemoteControl)}, logger)
 	sys.SetOrchestrator(orchestrator)
+	greet := greeter(ctx, client, orchestrator, logger)
+	live.greeter.Store(&greet)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	var projectOf func(string) (int64, string)
 	if cfg.Demo {
