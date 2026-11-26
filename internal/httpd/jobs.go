@@ -137,6 +137,9 @@ func (s *Server) handleJobMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := service.Message(ctx, r.PathValue("id"), input)
 	if err != nil {
+		if errors.Is(err, jobs.ErrNoAgent) && s.deps.Attachments != nil {
+			s.deps.Attachments.Undeliver(context.WithoutCancel(ctx), delivered) // no agent: nothing was typed
+		}
 		s.takeBack(ctx, delivered, err)
 		s.writeJobError(w, r, err)
 		return
