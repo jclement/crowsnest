@@ -449,7 +449,7 @@ type jobFiles struct {
 }
 
 // writeJobFiles writes <state>/jobs/<id>/{prompt.md,settings.json,mcp.json,agent-token}, all
-// 0600. The token is minted for this start, bound to the job and its pane.
+// written fresh and read-only (0400, R3-L4). The token is minted for this start, bound to the job and its pane.
 func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) {
 	dir, err := s.jobDir(job.ID)
 	if err != nil {
@@ -460,7 +460,7 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 	if err != nil {
 		return jobFiles{}, err
 	}
-	if err := os.WriteFile(files.prompt, []byte(prompt), 0o600); err != nil {
+	if err := writeReadOnly(files.prompt, []byte(prompt)); err != nil {
 		return jobFiles{}, fmt.Errorf("writing the job prompt: %w", err)
 	}
 	withMCP := s.opts.Launch.Executable != "" && s.opts.Launch.AgentSocket != ""
@@ -472,7 +472,7 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 			return jobFiles{}, fmt.Errorf("minting the job agent's token: %w", err)
 		}
 		tokenFile = filepath.Join(dir, "agent-token")
-		if err := os.WriteFile(tokenFile, []byte(token+"\n"), 0o600); err != nil {
+		if err := writeReadOnly(tokenFile, []byte(token+"\n")); err != nil {
 			return jobFiles{}, fmt.Errorf("writing the job agent's token file: %w", err)
 		}
 	}
@@ -493,8 +493,8 @@ func writeJSON(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+	if err := writeReadOnly(path, append(body, '\n')); err != nil {
+		return err
 	}
 	return nil
 }

@@ -189,7 +189,7 @@ func briefFileOf(t *testing.T, line string) string {
 		t.Fatalf("no brief file named in %q", line)
 	}
 	info, err := os.Stat(match[1])
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || info.Mode().Perm() != 0o400 {
 		t.Fatalf("brief file %s: %v, mode %v", match[1], err, info.Mode())
 	}
 	body, err := os.ReadFile(match[1])
@@ -271,7 +271,7 @@ func TestJobAgentsCarryTheirTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("hook token file", fromFile, agentid.KindStart)
-	if info, _ := os.Stat(tokenFile); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(tokenFile); info.Mode().Perm() != 0o400 {
 		t.Fatalf("token file mode %v", info.Mode().Perm())
 	}
 	if info, _ := os.Stat(filepath.Dir(tokenFile)); info.Mode().Perm() != 0o700 {

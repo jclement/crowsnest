@@ -264,3 +264,35 @@ func TestHeldApprovalsLeaveTheLiveCapForRealWork(t *testing.T) {
 		t.Fatalf("held requests crowded out a child inside the parent: %v", err)
 	}
 }
+
+// ---- R3-L4: job files are written fresh and read-only, never through a planted link -----------
+
+func TestBriefIsNeverWrittenThroughALink(t *testing.T) {
+	r := newRig(t, nil)
+	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+	path, err := r.svc.writeBrief(job.Job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(t.TempDir(), "victim.md")
+	if err := os.WriteFile(victim, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Another agent replaces the brief with a link to a file of its choosing.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.svc.writeBrief(job.Job); err != nil {
+		t.Fatal(err)
+	}
+	if body, _ := os.ReadFile(victim); string(body) != "mine" {
+		t.Fatalf("the brief was written through the link into %s: %q", victim, body)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o400 {
+		t.Fatalf("the brief is not a fresh read-only file: %v %v", info.Mode(), err)
+	}
+}

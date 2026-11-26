@@ -1,6 +1,6 @@
 // How a brief reaches the agent that holds the job (R2-M1). A brief is never typed into a
 // terminal: it may be many lines, it may be long, and it may have been written by another agent.
-// crowsnest writes it to <state>/jobs/<id>/brief.md (0600, in the job's 0700 directory) and
+// crowsnest writes it to <state>/jobs/<id>/brief.md (0400, in the job's 0700 directory) and
 // types one clean line that names the file: "[crowsnest job j_N] Your brief for job j_N is in
 // <file>; read it and begin." job_get and the SessionStart hook give the same brief as text, so
 // an agent that cannot read the file still has it.
@@ -12,10 +12,13 @@
 package jobs
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/jclement/crowsnest/internal/termtext"
 )
@@ -24,9 +27,15 @@ import (
 const briefFile = "brief.md"
 
 // jobDir is <state>/jobs/<id>, created 0700 (and tightened if it already existed looser): it
-// holds the agent's token file next to its brief (R2-L1).
+// holds the agent's token file next to its brief (R2-L1). A link planted in its place (an agent
+// pre-creating the next job's directory) is refused, not followed (R3-L4).
 func (s *Service) jobDir(jobID string) (string, error) {
 	dir := filepath.Join(s.opts.Launch.StateDir, "jobs", jobID)
+	for _, path := range []string{filepath.Dir(dir), dir} {
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("%s is a symbolic link; crowsnest writes job files only into its own directory", path)
+		}
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("creating %s: %w", dir, err)
 	}
@@ -55,10 +64,33 @@ func (s *Service) writeBrief(job Job) (string, error) {
 	}
 	b.WriteString(briefText(job))
 	path := filepath.Join(dir, briefFile)
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+	if err := writeReadOnly(path, []byte(b.String())); err != nil {
 		return "", fmt.Errorf("writing the brief of %s: %w", job.ID, err)
 	}
 	return path, nil
+}
+
+// writeReadOnly writes data to path as a fresh owner-read-only (0400) file (R3-L4). Whatever was
+// at path is removed first (a link is removed, never followed), and the file is created
+// exclusively, so a link planted between the two makes the write fail rather than land elsewhere.
+// Read-only stops an accidental overwrite and a stray editor; it does not stop an agent of the
+// same uid, which can chmod the file back or remove and recreate it (DESIGN 4.6).
+func writeReadOnly(path string, data []byte) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("replacing %s: %w", path, err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o400) //nolint:gosec // path is crowsnest's own, under its 0700 state directory
+	if err != nil {
+		return fmt.Errorf("creating %s: %w", path, err)
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
 }
 
 // briefText is the brief as an agent should read it: the human's words as they are, or another
