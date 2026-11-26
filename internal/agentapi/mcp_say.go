@@ -9,7 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const sayDescription = `Speak one short sentence aloud to the human, when they have talk mode on in the crowsnest web page; otherwise it does nothing. Use it for a progress line worth hearing while they are away from the screen ("Tests are green; opening the pull request now"). Never use it for questions (use ask) or for long text. At most one sentence, 300 characters.`
+const sayDescription = `Speak one short sentence aloud to the human, when they have speak mode on in the crowsnest web page; otherwise it does nothing. Use it for a progress line worth hearing while they are away from the screen ("Tests are green; opening the pull request now"). Never use it for questions (use ask) or for long text. At most one sentence, 300 characters.`
 
 // SayArgs are the say tool's arguments.
 type SayArgs struct {

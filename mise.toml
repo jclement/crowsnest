@@ -174,7 +174,7 @@ depends = ["build"]
 run = "npm --prefix web run screenshots:chat"
 
 [tasks."e2e:voice"]
-description = "Talk mode alone (it is also part of e2e): the built binary in --demo mode and a fake ElevenLabs (never the real one), with Chromium's fake microphone: hold to talk, transcript sent, SAY reply played; plus Chat-with-talk screenshots at 375 and 1440 px into web/screenshots"
+description = "Talk mode alone (it is also part of e2e): the built binary in --demo mode and a fake ElevenLabs (never the real one), Chromium's fake microphone and WebKit's mock one: the mic, transcript sent, SAY reply played with speak mode on, hold Space with real key events, the Voice sheet; plus Chat-recording screenshots at 375 and 1440 px into web/screenshots"
 depends = ["build"]
 run = "npm --prefix web run e2e:voice"
 

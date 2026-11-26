@@ -12,7 +12,7 @@
     "e2e": "playwright test --project=desktop-chromium --project=mobile-chromium --project=mobile-webkit",
     "e2e:real": "playwright test -c playwright.real.config.ts",
     "e2e:claude": "playwright test -c playwright.claude.config.ts",
-    "e2e:voice": "playwright test --project=desktop-chromium e2e/hermetic/talk.spec.ts",
+    "e2e:voice": "playwright test --project=desktop-chromium --project=mobile-webkit e2e/hermetic/talk.spec.ts",
     "screenshots": "playwright test -c playwright.fixtures.config.ts",
     "screenshots:chat": "playwright test --project=screenshots e2e/screenshots/chat.spec.ts",
     "screenshots:inbox": "playwright test --project=screenshots e2e/screenshots/inbox.spec.ts",
