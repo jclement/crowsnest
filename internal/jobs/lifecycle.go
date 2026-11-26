@@ -62,7 +62,25 @@ type claim struct {
 	op  string
 	gen int64
 	at  time.Time
+	// owned is the job's disposition when the step claimed it (after its own bookkeeping). A step
+	// may replace that disposition when it finishes, and only that: a newer one the agent or a
+	// hook wrote meanwhile (blocked, an auth failure, a limit) is not the step's to erase (R3-C04).
+	owned disposition
 }
+
+// disposition is the part of a job's row that says what the job is doing and why.
+type disposition struct {
+	state string
+	stuck bool
+	cause string
+}
+
+func dispositionOf(r store.JobRecord) disposition {
+	return disposition{state: r.State, stuck: r.Stuck, cause: r.Cause}
+}
+
+// owns reports whether r still carries the disposition cl claimed, so the step may replace it.
+func (cl claim) owns(r store.JobRecord) bool { return dispositionOf(r) == cl.owned }
 
 // newInstance names this crowsnest process in the claims it writes.
 func newInstance() string {
@@ -110,7 +128,7 @@ func (s *Service) claimLocked(r *store.JobRecord, c *change, op string, check fu
 	now := s.opts.Now()
 	r.LifecycleGen++
 	r.LifecycleOp, r.LifecycleOwner, r.LifecycleAt = op, s.instance, now
-	*out = claim{id: FormatID(r.ID), op: op, gen: r.LifecycleGen, at: now}
+	*out = claim{id: FormatID(r.ID), op: op, gen: r.LifecycleGen, at: now, owned: dispositionOf(*r)}
 	return nil
 }
 

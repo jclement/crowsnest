@@ -188,8 +188,8 @@ func (s *Service) startInPane(ctx context.Context, cl claim, job Job, resume boo
 			if sendErr != nil {
 				c.event(EventRestart, "Restarted; the restart note could not be typed: "+oneLine(sendErr.Error(), 160), nil)
 			}
-			if Cause(r.Cause) == CauseExited {
-				r.Stuck, r.Cause, r.CauseDetail = false, "", ""
+			if cl.owns(*r) && Cause(r.Cause) == CauseExited {
+				r.Stuck, r.Cause, r.CauseDetail = false, "", "" // only the restart's own mark (R3-C04)
 			}
 		})
 		return nil
@@ -243,7 +243,7 @@ func (s *Service) sendBrief(ctx context.Context, cl claim, job Job) error {
 	_, err = s.finish(ctx, cl, func(r *store.JobRecord, c *change) {
 		now := s.opts.Now()
 		r.BriefSent, r.StartedAt, r.LastActivityAt = true, now, now
-		r.State, r.Stuck, r.Cause, r.CauseDetail = string(StateRunning), false, "", ""
+		briefDelivered(r, cl)
 		summary := "Brief sent to " + r.AgentName
 		switch {
 		case outcome == typedMaybe:
@@ -254,6 +254,21 @@ func (s *Service) sendBrief(ctx context.Context, cl claim, job Job) error {
 		c.event(EventLaunch, summary, nil)
 	})
 	return err
+}
+
+// briefDelivered moves a job whose brief has just been typed to running, replacing only the
+// disposition the step claimed (R3-C04): queued (crowsnest's own "no agent yet"), a start-up
+// dialog or failed launch, a restart's "exited". If the agent or a hook wrote something newer
+// while the brief was typed (job_update blocked, an auth failure, a limit), that stays; a queued
+// job still becomes running, since queued with a brief delivered would be a state nobody watches.
+func briefDelivered(r *store.JobRecord, cl claim) {
+	if cl.owns(*r) {
+		r.State, r.Stuck, r.Cause, r.CauseDetail = string(StateRunning), false, "", ""
+		return
+	}
+	if State(r.State) == StateQueued {
+		r.State = string(StateRunning)
+	}
 }
 
 // sendText types a message into a job's agent, provided its pane still holds agent (R2-I5).
@@ -549,7 +564,9 @@ func (s *Service) DispatchOrchestrator(ctx context.Context) {
 	s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
 		now := s.opts.Now()
 		r.BriefSent, r.StartedAt, r.LastActivityAt = true, now, now
-		r.State = string(StateRunning)
+		if State(r.State) == StateQueued {
+			r.State = string(StateRunning) // not over a disposition the orchestrator declared meanwhile (R3-C04)
+		}
 		summary := "Assigned to the orchestrator"
 		if outcome == typedMaybe {
 			summary += " (crowsnest lost track of the send; it is not typed again)"

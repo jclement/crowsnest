@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -66,4 +67,70 @@ func anyContains(list []string, part string) bool {
 		}
 	}
 	return false
+}
+
+// ---- R3-C04: delivering a brief never erases a newer disposition ------------------------------
+
+func TestBriefDeliveryKeepsWhatTheAgentDeclaredMeanwhile(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		act   func(r *rig, jobID string)
+		state State
+		cause Cause
+	}{
+		{"blocked", func(r *rig, id string) {
+			if _, err := r.svc.Update(context.Background(), id, UpdateInput{Progress: "waiting on the database", State: string(StateBlocked), Reason: "the database is down"}); err != nil {
+				r.t.Error(err)
+			}
+		}, StateBlocked, ""},
+		{"auth failure", func(r *rig, id string) {
+			if _, err := r.svc.HandleHook(context.Background(), HookStopFailure, id, "", HookInput{Error: "authentication_failed"}); err != nil {
+				r.t.Error(err)
+			}
+		}, StateNeedsYou, CauseAuth},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, nil)
+			// While crowsnest waits for the brief's turn to start, the agent (or its hook) speaks.
+			r.fake.OnPrompt(func(_ *fake.Fake, _, text string) {
+				if id, ok := strings.CutPrefix(text, "[crowsnest job "); ok {
+					r.fake.OnPrompt(nil)
+					tc.act(r, strings.Fields(id)[0][:len(strings.Fields(id)[0])-1])
+				}
+			})
+			job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+			d := r.get(job.ID)
+			if d.State != tc.state || d.Cause != tc.cause || !d.briefSent {
+				t.Fatalf("the brief's completion overwrote the agent's own word: %s/%s, want %s/%s (brief sent %v)", d.State, d.Cause, tc.state, tc.cause, d.briefSent)
+			}
+		})
+	}
+}
+
+func TestDispatchKeepsWhatTheOrchestratorDeclaredMeanwhile(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	_, _, pane := r.fake.AddWorkspace("orchestrator", "/tmp/orch")
+	if err := r.fake.AddAgent(pane, "orchestrator", "claude", herdr.StatusIdle, "s-orch"); err != nil {
+		t.Fatal(err)
+	}
+	job, err := r.svc.Create(ctx, CreateInput{Brief: "Plan the release"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.fake.OnPrompt(func(_ *fake.Fake, paneID, _ string) {
+		if paneID == pane {
+			r.fake.OnPrompt(nil)
+			if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "need a decision", State: string(StateBlocked), Reason: "waiting on the vendor"}); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	r.mu.Lock()
+	r.orch = OrchestratorInfo{PaneID: pane, Ready: true}
+	r.mu.Unlock()
+	r.svc.DispatchOrchestrator(ctx)
+	if d := r.get(job.ID); d.State != StateBlocked || !d.briefSent {
+		t.Fatalf("the dispatch's completion overwrote the orchestrator's blocked: %+v", d.Job)
+	}
 }
