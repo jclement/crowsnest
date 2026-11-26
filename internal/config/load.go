@@ -54,6 +54,8 @@ type loader struct {
 	file  *viper.Viper // nil when no config file was read
 	opts  Options
 	home  string
+	// warnings are things worth telling the user that do not stop the load (Config.Warnings).
+	warnings []string
 }
 
 // source is where a value came from, for error messages that tell the user what to fix.
@@ -82,6 +84,7 @@ func Load(flags *pflag.FlagSet, opts Options) (Config, error) {
 			return Config{}, err
 		}
 	}
+	cfg.Warnings = l.warnings
 	return cfg, nil
 }
 
@@ -142,6 +145,13 @@ func (l *loader) readFile() (string, error) {
 		}
 	}
 	l.file = file
+	if file.IsSet(optPassword) {
+		if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o044 != 0 {
+			l.warnings = append(l.warnings, fmt.Sprintf(
+				"config file %s holds a password and other users can read it (mode %s); run `chmod 600 %s`, or move the password to CROWSNEST_PASSWORD or --password-file",
+				path, info.Mode().Perm(), path))
+		}
+	}
 	return path, nil
 }
 
@@ -272,6 +282,7 @@ func (l *loader) loadAuth(cfg *Config) error {
 	if cfg.NoAuth, err = l.boolean(optNoAuth); err != nil {
 		return err
 	}
+	cfg.NoAuthFromSuppressAuth = cfg.NoAuth && l.lookup(optNoAuth).where == envSuppressAuth
 	cfg.Username = l.str(optUsername)
 	password := l.lookup(optPassword)
 	passwordFile := l.path(optPasswordFile)
@@ -293,9 +304,23 @@ func (l *loader) loadAuth(cfg *Config) error {
 	return nil
 }
 
-// readPasswordFile returns the first line of path without its line ending.
+// othersMayAccess are the permission bits that let someone other than the owner read or write a
+// file. A password file with any of them is refused: others could read the password, or replace
+// it with one they know (R1 L5).
+const othersMayAccess fs.FileMode = 0o066
+
+// readPasswordFile returns the first line of path without its line ending. It refuses a file
+// that its group or others may read or write.
 func readPasswordFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("reading --password-file: %w", err)
+	}
+	if info.Mode().Perm()&othersMayAccess != 0 {
+		return "", fmt.Errorf("--password-file %s can be read or written by other users (mode %s); run `chmod 600 %s` and start again",
+			path, info.Mode().Perm(), path)
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // the path is configuration
 	if err != nil {
 		return "", fmt.Errorf("reading --password-file: %w", err)
 	}
@@ -448,4 +473,20 @@ func FlagTable() [][4]string {
 		rows = append(rows, [4]string{"--" + opt.name, strings.Join(opt.env, ", "), opt.def, opt.usage})
 	}
 	return rows
+}
+
+// secretEnv are the environment variables that hold a secret or switch authentication. After
+// the config is loaded they have done their job; UnsetSecretEnv removes them so no child
+// process, and nothing that inspects this process later, can read them (R1 H1).
+var secretEnv = []string{
+	"CROWSNEST_PASSWORD", "CROWSNEST_PASSWORD_FILE", "ELEVENLABS_API_KEY",
+	"CROWSNEST_NO_AUTH", "SUPPRESS_AUTH", "CROWSNEST_I_KNOW_THIS_IS_OPEN",
+}
+
+// UnsetSecretEnv removes the secret and auth-switch variables from this process's environment.
+// Call it once the config has been loaded.
+func UnsetSecretEnv() {
+	for _, name := range secretEnv {
+		_ = os.Unsetenv(name)
+	}
 }

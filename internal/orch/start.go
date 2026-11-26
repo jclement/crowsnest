@@ -176,6 +176,9 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 	}
 	sessionID, resuming := o.chooseSession(ctx, resume)
 	args := o.startArgs(sessionID, resuming, files)
+	o.mu.Lock()
+	prior := o.knownSession
+	o.mu.Unlock()
 	o.opts.Logger.Info("starting the orchestrator", "pane", paneID, "session", sessionID, "resume", resuming)
 	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: Name, Kind: "claude", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
 	if err == nil {
@@ -183,11 +186,14 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 	}
 	switch {
 	case err == nil:
-		o.remember(ctx, paneID, sessionOf(agent, sessionID))
-		return o.follow(agent), nil
+		// The id passed to Claude is the truth, not herdr's report: that can still be the
+		// previous conversation's, or missing, right after a launch (R1-C02).
+		o.remember(ctx, paneID, sessionID)
+		return o.followLaunch(agent, sessionID, prior), nil
 	case errors.Is(err, herdr.ErrAgentNotReady):
 		o.remember(ctx, paneID, sessionID)
 		return o.update(func(s *Status) {
+			o.launch = newLaunchBaseline(sessionID, prior)
 			s.State, s.Detail, s.PaneID, s.SessionID = StateNeedsTerminal, needsTerminalDetail, paneID, sessionID
 		}), nil
 	default:

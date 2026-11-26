@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/auth"
@@ -62,6 +63,8 @@ type Deps struct {
 	Terminals term.Launcher
 	// TermQueueBytes overrides DefaultTermQueueBytes; tests shrink it.
 	TermQueueBytes int
+	// MaxTerminals overrides DefaultMaxTerminals, the cap on open terminal sockets.
+	MaxTerminals int
 
 	// Conversations serves /agents/{target}/messages and Orchestrator the /orchestrator routes
 	// (M4). Either may be nil; their routes then answer 503.
@@ -78,6 +81,14 @@ type Server struct {
 	hosts     hostSet
 	handler   http.Handler
 	heartbeat time.Duration
+	// sseWriteTimeout is sseWriteTimeout unless a test shortens it.
+	sseWriteTimeout time.Duration
+	// openStreams counts SSE handlers still running, so tests can see one return.
+	openStreams atomic.Int32
+	// loginBodyTimeout is loginBodyTimeout unless a test shortens it.
+	loginBodyTimeout time.Duration
+	// terminalSlots holds one token per open terminal socket (R1 I5).
+	terminalSlots chan struct{}
 
 	// stopping is closed when shutdown begins, so long-lived SSE handlers return promptly
 	// instead of holding Shutdown open until its grace period runs out.
@@ -98,10 +109,18 @@ func New(deps Deps) (*Server, error) {
 		hosts:     newHostSet(deps.Config.HostNames),
 		heartbeat: deps.Heartbeat,
 		stopping:  make(chan struct{}),
+
+		sseWriteTimeout:  sseWriteTimeout,
+		loginBodyTimeout: loginBodyTimeout,
 	}
 	if server.heartbeat <= 0 {
 		server.heartbeat = DefaultHeartbeat
 	}
+	maxTerminals := deps.MaxTerminals
+	if maxTerminals <= 0 {
+		maxTerminals = DefaultMaxTerminals
+	}
+	server.terminalSlots = make(chan struct{}, maxTerminals)
 	server.handler = server.middleware(server.routes())
 	return server, nil
 }
@@ -149,6 +168,7 @@ func (s *Server) Run(ctx context.Context) error {
 	httpServer := &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: readHeaderTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
 		IdleTimeout:       2 * time.Minute,
 		ErrorLog:          slog.NewLogLogger(s.deps.Logger.Handler(), slog.LevelWarn),
 	}
@@ -176,6 +196,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 	var listeners []net.Listener
 	var listenConfig net.ListenConfig
+	limiter := newConnLimiter(maxConnections)
 	for _, target := range s.deps.Config.Listeners {
 		listener, err := listenConfig.Listen(ctx, "tcp", target.Addr.String())
 		if err != nil && target.Optional {
@@ -188,7 +209,7 @@ func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 			}
 			return nil, fmt.Errorf("listening on %s (from --bind %s): %w", target.Addr, target.Source, err)
 		}
-		listeners = append(listeners, listener)
+		listeners = append(listeners, limiter.wrap(listener))
 		s.deps.Logger.Info("listening", "url", s.urlFor(listener.Addr()))
 	}
 	if len(listeners) == 0 {

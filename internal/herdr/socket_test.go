@@ -298,8 +298,21 @@ func TestSocketClientHonoursContext(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want deadline exceeded", err)
 	}
+	// The request went out and no answer came: the caller is told herdr may have acted (R1-C09).
+	if !errors.Is(err, ErrNoResponse) {
+		t.Fatalf("err = %v, want ErrNoResponse", err)
+	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("call took %s after its context expired", elapsed)
+	}
+}
+
+// TestSocketClientUnreachableIsNotNoResponse: a call that never reached herdr is a plain
+// failure, safe to retry.
+func TestSocketClientUnreachableIsNotNoResponse(t *testing.T) {
+	_, err := NewSocketClient(filepath.Join(shortSocketDir(t), "absent.sock")).Ping(context.Background())
+	if err == nil || errors.Is(err, ErrNoResponse) {
+		t.Fatalf("err = %v, want a failure that is not ErrNoResponse", err)
 	}
 }
 
@@ -379,6 +392,55 @@ func TestSocketClientEventStream(t *testing.T) {
 	close(push)
 }
 
+// TestSubscribeSurvivesALateWatcher is R1-C03: the acknowledgement's cancellation watcher may
+// not be scheduled until after the acknowledgement is read. Subscribe then cancels its
+// acknowledgement context; a watcher that wakes to find both its cases ready must not close the
+// live subscription.
+func TestSubscribeSurvivesALateWatcher(t *testing.T) {
+	previous := watcherStarting
+	watcherStarting = func() { time.Sleep(20 * time.Millisecond) }
+	t.Cleanup(func() { watcherStarting = previous })
+	path := filepath.Join(shortSocketDir(t), "h.sock")
+	var pushes []chan string
+	var mu sync.Mutex
+	startScripted(t, path, func(req scriptedRequest) ([]string, <-chan string) {
+		push := make(chan string, 1)
+		mu.Lock()
+		pushes = append(pushes, push)
+		mu.Unlock()
+		return []string{result(req.ID, `{"type":"subscription_started"}`)}, push
+	})
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, push := range pushes {
+			close(push)
+		}
+	})
+	client := NewSocketClient(path)
+	// Each run has an even chance of losing the stream without the fix; 16 runs make a pass
+	// by luck one in 65536.
+	for run := range 16 {
+		stream, err := client.Subscribe(context.Background(), []Subscription{{Type: "tab.created"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(40 * time.Millisecond) // let a stray watcher do its damage
+		mu.Lock()
+		pushes[run] <- `{"event":"tab_created","data":{"tab":{"tab_id":"w1:t2","workspace_id":"w1"}}}`
+		mu.Unlock()
+		select {
+		case _, ok := <-stream.Events():
+			if !ok {
+				t.Fatalf("run %d: the subscription was closed after it was acknowledged: %v", run, stream.Err())
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("run %d: no event", run)
+		}
+		_ = stream.Close()
+	}
+}
+
 func TestSocketClientSubscribeRefused(t *testing.T) {
 	path := filepath.Join(shortSocketDir(t), "h.sock")
 	startScripted(t, path, func(req scriptedRequest) ([]string, <-chan string) {
@@ -454,6 +516,17 @@ func TestScrubEnvAndSessionNames(t *testing.T) {
 	if strings.Join(got, ",") != "HOME=/h,PATH=/bin,XHERDR_KEEP=1" {
 		t.Fatalf("ScrubEnv = %v", got)
 	}
+	// R1 H1: secrets and auth switches never reach a child; the pane variables do. SUPPRESS_AUTH
+	// is a generic name other projects use, so it is not scrubbed from children here; serve
+	// removes it from its own environment after loading the config (config.UnsetSecretEnv).
+	got = ScrubEnv([]string{
+		"CROWSNEST_PASSWORD=s3cret", "CROWSNEST_PASSWORD_FILE=/p", "CROWSNEST_NO_AUTH=1", "SUPPRESS_AUTH=true",
+		"ELEVENLABS_API_KEY=sk-1", "ELEVENLABS_OTHER=x", "CROWSNEST_ANYTHING_NEW=y",
+		"CROWSNEST=1", "CROWSNEST_SESSION=s", "CROWSNEST_SOCKET=/s", "CROWSNEST_JOB=j_1", "HOME=/h",
+	})
+	if strings.Join(got, ",") != "SUPPRESS_AUTH=true,CROWSNEST=1,CROWSNEST_SESSION=s,CROWSNEST_SOCKET=/s,CROWSNEST_JOB=j_1,HOME=/h" {
+		t.Fatalf("ScrubEnv kept or dropped the wrong variables: %v", got)
+	}
 	for _, tc := range []struct {
 		name  string
 		allow bool
@@ -464,6 +537,20 @@ func TestScrubEnvAndSessionNames(t *testing.T) {
 	} {
 		if err := ValidateSessionName(tc.name, tc.allow); (err == nil) != tc.ok {
 			t.Errorf("ValidateSessionName(%q, %v) = %v", tc.name, tc.allow, err)
+		}
+	}
+}
+
+// TestServerEnvironmentCarriesNoSecret is R1 H1 for the herdr server, which spawns every pane
+// and agent: its environment (from os.Environ by default) must hold no secret.
+func TestServerEnvironmentCarriesNoSecret(t *testing.T) {
+	t.Setenv("CROWSNEST_PASSWORD", "s3cret")
+	t.Setenv("ELEVENLABS_API_KEY", "sk-test")
+	t.Setenv("HERDR_SOCKET_PATH", "/must/not/leak")
+	opts := SessionOptions{Name: "crowsnest-test-env"}.withDefaults()
+	for _, entry := range opts.Environ {
+		if strings.Contains(entry, "s3cret") || strings.Contains(entry, "sk-test") || strings.HasPrefix(entry, "HERDR_") {
+			t.Fatalf("the herdr server would inherit %q", entry)
 		}
 	}
 }

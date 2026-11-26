@@ -72,7 +72,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--username` | `CROWSNEST_USERNAME` | none | Login name |
 | `--password` | `CROWSNEST_PASSWORD` | none | Login password. Prefer env or `--password-file`; a flag is visible in `ps` |
 | `--password-file` | `CROWSNEST_PASSWORD_FILE` | none | File holding the password (first line) |
-| `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured) | false | No login. For a trusted tailnet or localhost |
+| `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured, but only on a loopback-only bind: R1 L4) | false | No login. For a trusted tailnet or localhost |
 | `--bind` | `CROWSNEST_BIND` | `localhost` | `localhost`, `tailnet`, an interface name, an IP, or `ip:port`. Repeatable |
 | `--port` | `CROWSNEST_PORT` | `2769` | Port (C-R-O-W on a keypad) |
 | `--session` | `CROWSNEST_SESSION` | `crowsnest` | herdr session to create or connect to |
@@ -86,7 +86,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--elevenlabs-api-key` | `ELEVENLABS_API_KEY` | none | Enables talk mode |
 | `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id | TTS voice |
 | `--notify-url` | `CROWSNEST_NOTIFY_URL` | none | POST a one-line notice here when something needs Jeff (ntfy-style) |
-| `--demo` | `CROWSNEST_DEMO` | false | In-memory fake herdr and scripted orchestrator: UI work, hermetic E2E, screenshots |
+| `--demo` | `CROWSNEST_DEMO` | false | In-memory fake herdr and scripted orchestrator: UI work, hermetic E2E, screenshots. All its state (database, state dir, orchestrator dir) lives in a temporary directory removed on exit, never the real ones (R1 L2) |
 | `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs base URL (section 13; tests point it at a fake) |
 | `--i-know-this-is-open` | `CROWSNEST_I_KNOW_THIS_IS_OPEN` | false | Allow `--no-auth` on an open bind (startup rules) |
 | `--allow-default-session` | `CROWSNEST_ALLOW_DEFAULT_SESSION` | false | Allow `--session default` (startup rules) |
@@ -103,7 +103,8 @@ one plain validated `Config` struct that nothing else re-reads. Durations must c
 Startup rules (all fail closed, with a message that says what to pass):
 
 - Neither credentials nor `--no-auth`: refuse to start.
-- `--no-auth` with a bind that is not loopback and not a tailnet address: refuse unless `--i-know-this-is-open` is also given.
+- `--no-auth` with a bind that is not loopback and not a tailnet address: refuse unless `--i-know-this-is-open` is also given. `--no-auth` on `tailnet` counts as not open, but it gives a shell to **every tailnet peer the ACL lets reach the port, including nodes other people have shared into the tailnet** and tagged servers; the startup warning says so (R1 I7).
+- The login turned off through `SUPPRESS_AUTH` (the generic dev bypass of Jeff's other projects, which some other project's environment may well export) on any bind that is not loopback-only: refuse, naming `CROWSNEST_NO_AUTH` as the deliberate switch (R1 L4). `--i-know-this-is-open` does not lift this.
 - `--session default`: refuse unless `--allow-default-session`. Crowsnest is never pointed at Jeff's main herdr session by accident.
 - `tailnet` resolves the local address in 100.64.0.0/10 (and the fd7a:115c:a1e0::/48 one); if there is none, refuse rather than fall back to all interfaces.
 - `--no-auth` together with a username and password: refuse and ask for one or the other (added in M1; an ambiguous auth setting should not silently pick the open one).
@@ -120,19 +121,33 @@ a malicious web page driving a logged-in browser (CSRF, cross-site WebSocket hij
 rebinding against `--no-auth` on localhost); secrets leaking into logs; agent output attacking the UI (XSS).
 
 1. **Bind**: loopback by default. Never `0.0.0.0` unless the user types it (the container image does, with auth required).
-2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session`, `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; `X-Forwarded-For` is never trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. `X-Forwarded-Proto: https` is honoured only from loopback, and only to add `Secure` to the cookie.
-3. **Host check** on every request: `Host` must be loopback, a bound IP, the machine hostname, a detected MagicDNS name, or an `--allowed-host`. This is what stops DNS rebinding, and it applies with `--no-auth` too.
+2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Admission and counting are one step: an admitted attempt is counted as a failure at once and taken back if the credentials match, so a burst of parallel guesses cannot slip past either cap before the first failure is recorded (R1-C10/M1). Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session` over plain HTTP and `__Host-crowsnest_session` over HTTPS (Secure, `Path=/`, no `Domain`, so nothing on another subdomain can set or shadow it; over HTTPS only the prefixed name is read), `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Each session is bound to the `Host:port` it was issued for (lower-cased, default port filled in) and is refused anywhere else: browsers send a host's cookies to every port on it, so this stops a cookie that reached a sibling port from working here, though not a replay that forges `Host` (R1 M2; see residual risk). Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; `X-Forwarded-For` is never trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. `X-Forwarded-Proto: https` is honoured only from loopback, and only to add `Secure` to the cookie.
+3. **Host check** on every request: `Host` must be loopback, a bound IP, the machine hostname (only when a non-loopback address is bound: on loopback it adds nothing but DNS-rebinding surface, R1 I4), a detected MagicDNS name, or an `--allowed-host`. This is what stops DNS rebinding, and it applies with `--no-auth` too.
 4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host` (host and port, default ports normalised). `null` counts as missing. Non-GET calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set). A failed host check is `403` with a message naming `--allowed-host`. MagicDNS names are not auto-detected yet (M1); pass them with `--allowed-host`.
 5. **WebSockets** authenticate with the same cookie at upgrade, check Origin, and are closed when the session is revoked. No tokens in URLs.
 6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions are the authentication; it serves only the agent API (ask, say, notify, hook), never terminals.
 7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'`. (`unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
 8. **Rendering untrusted text**: transcripts, pane text and question bodies are data. Markdown renders without raw HTML; mermaid runs with `securityLevel: 'strict'`; links open with `rel="noopener noreferrer"`; no `dangerouslySetInnerHTML` outside the sanitised mermaid SVG.
-9. **Secrets**: the password, session ids and the ElevenLabs key are never logged, never returned by any endpoint, never placed in argv of a child process. Request logs record method, path, status, duration and client IP only. A `redact` helper scrubs token-shaped strings from anything echoed from panes into logs or notices.
-10. **Child processes** get a scrubbed environment: every `HERDR_*` variable is removed and the session is always addressed by its explicit socket path, so crowsnest started from inside a herdr pane cannot drive the pane's session.
-11. **TLS**: optional built-in cert/key; the documented path for a phone is `tailscale serve`, which also gives the secure context the microphone needs.
+9. **Secrets**: the password, session ids and the ElevenLabs key are never logged, never returned by any endpoint, never placed in argv or the environment of a child process. Once the config is loaded, `serve` removes `CROWSNEST_PASSWORD`, `CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY`, `CROWSNEST_NO_AUTH`, `SUPPRESS_AUTH` and `CROWSNEST_I_KNOW_THIS_IS_OPEN` from its own environment (R1 H1). Request logs record method, path, status, duration and client IP only. Error responses, the orchestrator's status detail and a terminal's start failure carry a sentence that says what to do, never herdr's or the orchestrator's own error text (which can hold paths and internals); that goes to the server log (R1 I2). A terminal's exit reason is still herdr's (`detached`, `terminal attach taken over`), because the browser acts on it. A `redact` helper scrubs token-shaped strings from anything echoed from panes into logs or notices.
+10. **Child processes** get a scrubbed environment: every `HERDR_*` variable is removed and the session is always addressed by its explicit socket path, so crowsnest started from inside a herdr pane cannot drive the pane's session. Every `CROWSNEST_*` variable except the pane variables (`CROWSNEST`, `CROWSNEST_SESSION`, `CROWSNEST_SOCKET`, `CROWSNEST_JOB`) and every `ELEVENLABS_*` one is removed too. That covers the herdr server crowsnest starts (which spawns every pane and agent, so a prompt-injected `env` in any pane finds no secret), the TUI client and each pane-control process (R1 H1). **A herdr session crowsnest did not start keeps whatever environment its server was started with**: if that shell exported the password or the ElevenLabs key, every pane in it can read them. Start the session through crowsnest, or from a shell without them.
+11. **Resource limits** (R1 L3): request headers are capped at 32 KiB and must arrive within 10 s; a login body must arrive within 5 s; at most 128 connections are open at once across all listeners. Past the cap, new connections wait in the kernel's backlog until one closes rather than being refused, so the event stream and terminal sockets (which stay open for hours and so cannot have a request timeout) keep working, and the header and body deadlines make a slow or silent client give its slot back within seconds.
+12. **Files** (R1 L5): the data and state directories are made `0700` at start even when they already existed with looser modes, and the database is created (or tightened to) `0600`; SQLite gives its `-wal` and `-shm` files the same mode. A `--password-file` that its group or others can read or write is refused (`chmod 600` it). A config file that holds `password` and is readable by others is a startup warning (move the password to `CROWSNEST_PASSWORD` or `--password-file`, or `chmod 600` the file).
+13. **TLS**: optional built-in cert/key; the documented path for a phone is `tailscale serve`, which also gives the secure context the microphone needs.
 
 Residual risk, stated plainly: anyone with the password has a shell as the user. Basic password
 login over plain HTTP on a tailnet relies on WireGuard for confidentiality.
+
+**Cookies are shared across ports (R1 M2).** A browser sends `crowsnest_session` to every
+server on the same host name, whatever the port, and `SameSite=Strict` treats `localhost:5173`
+and `localhost:2769` as the same site. Over plain HTTP on `localhost`, the tailnet IP or the
+machine name, any other HTTP service you open in the same browser (a cloned project's dev
+server, a container's published port, a tool's local web UI) receives the session token, and
+can replay it against crowsnest with a forged `Host`. Binding sessions to `Host:port` stops a
+cookie set or received on a sibling port from being accepted as is, but not that replay. The
+remedy is a host name of crowsnest's own: give it a dedicated MagicDNS or `tailscale serve`
+name (HTTPS, so the cookie is `__Host-` prefixed and Secure) and open nothing else under that
+name. On a shared host name over plain HTTP, treat every other local web service you visit as
+able to take your session.
 
 ## 5. Driving herdr
 
@@ -386,8 +401,11 @@ Claude Code 2.1.332 by `mise run test:claude`):
   fallback, and switches to the transcript (a reset page) when the file appears. After "New
   conversation" the new session id has no file yet, so the old conversation is dropped at once.
 - **The orchestrator's own session id wins** for its pane: right after a restart herdr can still
-  report the previous session. The watch adopts herdr's value only when it changes outside a
-  launch (`/clear`).
+  report the previous session, or none yet. A successful start publishes and stores the id it
+  passed to Claude, and remembers the ids herdr may go on reporting (the previous conversation's
+  and whatever herdr showed when the launch finished). The watch ignores those; the first other
+  id herdr reports (it caught up, or a `/clear` moved the conversation) is adopted and stored
+  (R1-C02).
 - **States** (`GET /orchestrator`, `orchestrator` events): `idle` (herdr idle or done),
   `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed`, `disabled`.
 - **Watch**: every 2 s, and at once whenever the fleet cache publishes a `fleet` event (herdr's
@@ -406,16 +424,23 @@ Claude Code 2.1.332 by `mise run test:claude`):
 - **Messages**: each has a stable `id` and `index` and a `seq` that grows when it is added or
   changed (a tool card gains its result). A cursor is `<generation>.<seq>`; the generation
   changes when the conversation starts over (new session, truncated or replaced file, the switch
-  between transcript and pane text), and a stale cursor gets a `reset` page of the newest
-  messages. Text blocks of one reply merge; thinking is kept only when it has text (2.1.332
+  between transcript and pane text, a new session id even while neither session has a
+  transcript yet), and a stale cursor gets a `reset` page of the newest messages. Generations
+  start at a random 48-bit point in each process, so a cursor a browser kept across a crowsnest
+  restart never matches a different conversation (R1-C05). Text blocks of one reply merge; thinking is kept only when it has text (2.1.332
   writes it redacted, so usually it has none); tool input is cut to 2 KB and results to 4 KB
   with ANSI removed. Unpinned conversations are followed for 10 minutes after their last read
-  and polled every second; the orchestrator's is pinned.
+  and polled every second, and dropped at once when their agent is gone; the orchestrator's is
+  pinned, and the pin moves with it when it is restarted in another pane (R1-C06). A change is
+  announced with a `message` event whoever found it, the timer or a browser's read (R1-C07).
 - **Send** (7.3): the result is `{pane_id, status, queued, started, note}`. A dialog (herdr
   `blocked`, or one on screen) is `409 BLOCKED` with the dialog in `error.detail`; a draft is
   `409 DRAFT` with the draft; nothing is typed in either case. A draft check that cannot find the
   input box does not block. `agent_prompt_stalled` or a wait timeout is still `200` with
-  `started: false` and a note, because the text was typed and resending would duplicate it.
+  `started: false` and a note, because the text was typed and resending would duplicate it. So
+  is a send whose request reached herdr but whose answer was lost (crowsnest's own 35 s deadline,
+  a dropped connection: `herdr.ErrNoResponse`); the note says delivery is uncertain and to check
+  the terminal. Only a send that never reached herdr is an error (R1-C09).
 
 ## 8. Needs-you: questions and dialogs
 
@@ -580,7 +605,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft}` → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
-| `POST /agents/{target}/keys` | `{keys:[…], screen_hash}` for dialogs and Esc/Ctrl+C. The screen is re-read and the keys are sent only if its hash still matches, else `409 CONFLICT` and nothing is sent. Only `esc`/`escape`/`ctrl+c` may omit the hash (an interrupt is for a screen that is changing). 1–16 keys of at most 32 characters |
+| `POST /agents/{target}/keys` | `{keys:[…], screen_hash}` for dialogs and Esc/Ctrl+C. The screen is re-read and the keys are sent only if its hash still matches, else `409 CONFLICT` and nothing is sent. Only `esc`/`escape`/`ctrl+c` may omit the hash (an interrupt is for a screen that is changing). 1–16 keys, each a single letter or digit or one of `enter`, `esc`, `escape`, `tab`, `space`, `backspace`, `up`, `down`, `left`, `right`, `ctrl+c` (case-insensitive; R1 I3) |
 | `GET /agents/{target}/screen` | `{target, pane_id, name, kind, status, text, ansi, screen_hash, revision, dialog:{present, options:[{key, label, selected, warning?}], form, warnings}, draft:{input_found, present, text}}` from one ANSI read. `{target}` is an agent name or a pane id; a plain pane (no agent) works too |
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, budget?}`); detail with timeline (state changes, nudges, questions, restarts) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent, stop it, push it, retry after a failure, raise a cap |
@@ -624,6 +649,9 @@ The client sends a resize first; the server starts the process on that first res
   with close code 1013 ("not keeping up") rather than buffered without limit, and its client
   reconnects to a fresh redraw. A process that ends sends `{"type":"exit","reason"}` and then a
   normal close (1000).
+- **How many**: at most 8 terminal sockets are open at once (each spawns a herdr process). One
+  more is upgraded and closed at once with 1008 and the reason "too many terminals open (8);
+  close one and reconnect", which the browser shows without reconnecting by itself (R1 I5).
 - **Keepalive**: a ping every heartbeat (20 s) that also re-checks the session cookie, as SSE
   does; a logout or password change closes open terminals with 1008 ("signed out") within one
   heartbeat. Server shutdown closes them with 1001.
@@ -640,7 +668,7 @@ The client sends a resize first; the server starts the process on that first res
 
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
-- `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent)`
+- `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host)` (`host` added by migration `0003_session_host.sql`, R1 M2: the `Host:port` the session is valid at)
 - `questions(id, title, body_md, kind, multi, options_json, recommend, context_json, urgency, files_json, status, answer_value_json, answer_note, source_pane, created_at, expires_at, settled_at)`
 - `jobs(…)`: the record in section 6.1
 - `job_events(id, job_id, at, kind, summary, detail_json)`: state change, progress, nudge, hook, restart, question, message: the job's timeline
@@ -787,7 +815,7 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 
 - **GitHub**: private repo `jclement/crowsnest`. CI on push and PR: `jdx/mise-action`, `mise run check`, hermetic E2E.
 - **Release** on `v*` tags: GoReleaser builds linux and darwin, amd64 and arm64 (windows is skipped: PTYs and unix sockets make it a different product), tar.gz archives, sha256 checksums, attached to the GitHub release. `mise run release` is the interactive tag bump and is Jeff's to run. `mise run snapshot` proves the packaging locally.
-  - As built (M10a): `.github/workflows/release.yml` runs on `v*` tags with `contents: write` and only `GITHUB_TOKEN`: `jdx/mise-action`, `mise run setup`, `mise run check`, then `goreleaser/goreleaser-action` pinned to the same GoReleaser version as `mise.toml`. A tag with a prerelease suffix (`v0.1.0-rc.1`) becomes a GitHub prerelease.
+  - As built (M10a, split in R1 M3): `.github/workflows/release.yml` runs on `v*` tags with only `GITHUB_TOKEN`, in two jobs. `check` (`contents: read`) runs `mise run setup` and `mise run check`, builds the web app and uploads `web/dist` as an artifact; npm install scripts and the tests run only here. `release` (`needs: check`, `contents: write`) checks out with `persist-credentials: false`, installs only Go through `jdx/mise-action` with `cache: false`, downloads `web/dist`, and runs `goreleaser/goreleaser-action` (pinned to the same GoReleaser version as `mise.toml`) with `--skip=before`, so nothing from npm runs beside the write token. Every action in both workflows is pinned to a full commit SHA with its tag in a comment. A tag with a prerelease suffix (`v0.1.0-rc.1`) becomes a GitHub prerelease.
   - `.goreleaser.yml`: a before-hook runs `npm --prefix web run build` so the binary embeds the real web app (decision 15); `CGO_ENABLED=0`, `-trimpath`, and the ldflags `mise run build` stamps (`main.version`, `main.commit`, `main.buildDate`). The version is stamped as `v{{.Version}}` so a release binary prints `v1.2.3` like a local `git describe` build. Archives are `crowsnest_<version>_<os>_<arch>.tar.gz` with README and LICENSE; the changelog comes from commits.
   - Snapshots are versioned `<next patch>-snapshot-<commit>` (no `+`, which is awkward in file names and URLs).
   - Cosign signing and the Homebrew tap are in `.goreleaser.yml` commented out, per section 19 item 4; switching them on also needs `id-token: write`, the cosign installer step and the `HOMEBREW_TAP_TOKEN` secret.
@@ -912,4 +940,6 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - The long-poll's waiter state is in memory: after a crowsnest restart, an asker blocked on `ask --wait` gets its answer from its next poll and also typed into its pane.
 - One controller per pane: two browsers on the same pane view take turns (the one that lost the pane says so and offers Reconnect).
 - The Terminal view is herdr's own TUI, which shows every machine the user's herdr config names, remote ones included; anyone who can open it reaches those machines as well (M5). The pane view is limited to the session's own panes.
+- **Login lockout by a peer** (R1 L1): anyone who can reach the port can make 20 failed logins a minute and so keep every new login refused, the real user's included, for as long as they keep it up. Sessions that already exist keep working; only signing in on a new device is blocked. This is the trade DESIGN 4.2 states (a global cap stops a guesser that rotates IPs); a loopback exemption or a delay instead of a refusal are the options if it bites.
+- **Open from the R1 review**: there is no "sign out everywhere" (I6): revoking a stolen session means changing the password, which ends every session. (I1, the missing `redact` helper, was closed by M6's `internal/redact`, which `--notify-url` notices go through; the `POST /keys` log line can now carry only allowlisted key names, R1 I3.)
 - Paste from the key bar needs the Clipboard API, which browsers give only to a secure context (localhost or HTTPS); over a plain-HTTP tailnet address it falls back to the system's long-press paste.

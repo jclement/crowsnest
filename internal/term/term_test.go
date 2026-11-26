@@ -21,7 +21,8 @@ import (
 )
 
 // fakeEnv selects what the re-executed test binary pretends to be.
-const fakeEnv = "CROWSNEST_TERM_FAKE"
+// It is deliberately not a CROWSNEST_* name: the bridges scrub those from children (R1 H1).
+const fakeEnv = "CN_TEST_TERM_FAKE"
 
 func TestMain(m *testing.M) {
 	switch os.Getenv(fakeEnv) {
@@ -29,6 +30,8 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	case "tui":
 		fakeTUI()
+	case "tui-deaf":
+		fakeDeafTUI()
 	default:
 		fakeControl(os.Getenv(fakeEnv))
 	}
@@ -146,6 +149,8 @@ func fakeLauncher(t *testing.T, mode string) HerdrLauncher {
 	t.Helper()
 	t.Setenv(fakeEnv, mode)
 	t.Setenv("HERDR_SOCKET_PATH", "/must/not/leak") // the bridge must scrub this
+	t.Setenv("CROWSNEST_PASSWORD", "s3cret")        // and these (R1 H1)
+	t.Setenv("ELEVENLABS_API_KEY", "sk-test")
 	return HerdrLauncher{Binary: os.Args[0], Session: "crowsnest-test-unit"}
 }
 
@@ -219,6 +224,60 @@ func TestPaneBridgeCloseBeforeStart(t *testing.T) {
 	}
 }
 
+// fillUntilBlocked writes to bridge from a goroutine until one write has been stuck for a
+// while, which means the child's input buffer is full. It returns once that is so.
+func fillUntilBlocked(t *testing.T, bridge Bridge) {
+	t.Helper()
+	progress := make(chan struct{}, 1)
+	go func() {
+		chunk := bytes.Repeat([]byte("x"), 16<<10)
+		for {
+			if _, err := bridge.Write(chunk); err != nil {
+				return
+			}
+			select {
+			case progress <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case <-progress:
+		case <-time.After(300 * time.Millisecond):
+			return // no write finished for 300 ms: the writer is blocked
+		case <-deadline:
+			t.Fatal("writes never blocked; the fake is reading after all")
+		}
+	}
+}
+
+// assertCloseUnblocks checks Close returns at once and the child is gone soon after, even
+// though a write is stuck on a child that never reads (R1-C01).
+func assertCloseUnblocks(t *testing.T, bridge Bridge) {
+	t.Helper()
+	fillUntilBlocked(t, bridge)
+	closed := make(chan struct{})
+	go func() { _ = bridge.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close blocked behind a write to a child that does not read")
+	}
+	waitClosed(t, bridge)
+}
+
+func TestPaneBridgeCloseWithBlockedWrite(t *testing.T) {
+	bridge := fakeLauncher(t, "deaf").Pane("w1:p1")
+	if err := bridge.Start(80, 24); err != nil {
+		t.Fatal(err)
+	}
+	var seen bytes.Buffer
+	waitFor(t, bridge, &seen, "deaf")
+	assertCloseUnblocks(t, bridge)
+}
+
 // fakeControl is the re-executed test binary standing in for `herdr terminal session control`.
 func fakeControl(mode string) {
 	args := strings.Join(os.Args[1:], " ")
@@ -238,6 +297,10 @@ func fakeControl(mode string) {
 		frame("hello")
 		closed("terminal attach taken over")
 		os.Exit(0)
+	case "deaf":
+		// Never reads stdin, so the bridge's writes fill the pipe and block.
+		frame("deaf")
+		time.Sleep(time.Hour)
 	}
 	var pane, cols, rows, session string
 	_, _ = fmt.Sscanf(strings.Replace(args, "--takeover ", "", 1), "--session %s terminal session control %s --cols %s --rows %s", &session, &pane, &cols, &rows)
@@ -265,10 +328,12 @@ func fakeControl(mode string) {
 	os.Exit(0)
 }
 
+// countHerdrEnv counts what a child of crowsnest must never inherit: HERDR_* (DESIGN.md 4.10)
+// and the secrets the tests plant (R1 H1).
 func countHerdrEnv() int {
 	count := 0
 	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, "HERDR_") {
+		if strings.HasPrefix(entry, "HERDR_") || strings.HasPrefix(entry, "CROWSNEST_PASSWORD=") || strings.HasPrefix(entry, "ELEVENLABS_") {
 			count++
 		}
 	}
@@ -310,6 +375,27 @@ func TestTUIBridgeClientExits(t *testing.T) {
 		t.Errorf("reason = %q, want detached (a clean client exit)", reason)
 	}
 	_ = bridge.Close()
+}
+
+func TestTUIBridgeCloseWithBlockedWrite(t *testing.T) {
+	bridge := fakeLauncher(t, "tui-deaf").TUI()
+	if err := bridge.Start(80, 24); err != nil {
+		t.Fatal(err)
+	}
+	var seen bytes.Buffer
+	waitFor(t, bridge, &seen, "deaf")
+	go func() { // keep draining output so only the input side is stuck
+		for range bridge.Output() {
+		}
+	}()
+	assertCloseUnblocks(t, bridge)
+}
+
+// fakeDeafTUI is a client in raw mode that never reads its terminal.
+func fakeDeafTUI() {
+	_, _ = xterm.MakeRaw(int(os.Stdin.Fd()))
+	fmt.Print("deaf\r\n")
+	time.Sleep(time.Hour)
 }
 
 // fakeTUI stands in for the herdr client: it reports what it was given and echoes lines.

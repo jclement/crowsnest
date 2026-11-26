@@ -82,6 +82,9 @@ type Service struct {
 	sessions       SessionStore
 	limiter        *Limiter
 	now            func() time.Time
+	// admitted, when set, runs between admission and the credential check; tests use it to
+	// line concurrent logins up at that point.
+	admitted func()
 }
 
 // Session is an authenticated browser session.
@@ -133,22 +136,25 @@ func (s *Service) Limiter() *Limiter { return s.limiter }
 
 // ---- Login and logout --------------------------------------------------------
 
-// Login checks credentials for a client and, on success, creates a session and returns its
-// token (the cookie value). It returns *RateLimitedError while locked out and ErrBadCredentials
-// on a wrong username or password.
-func (s *Service) Login(ctx context.Context, clientIP, username, password, userAgent string) (string, Session, error) {
+// Login checks credentials for a client and, on success, creates a session bound to host (the
+// Host:port the browser used) and returns its token (the cookie value). It returns
+// *RateLimitedError while locked out and ErrBadCredentials on a wrong username or password.
+func (s *Service) Login(ctx context.Context, clientIP, username, password, userAgent, host string) (string, Session, error) {
 	if s.noAuth {
 		return "", Session{}, errors.New("auth: login is disabled with --no-auth")
 	}
-	if retryAfter, ok := s.limiter.Allow(clientIP); !ok {
+	attempt, retryAfter, ok := s.limiter.Admit(clientIP)
+	if !ok {
 		return "", Session{}, &RateLimitedError{RetryAfter: retryAfter}
 	}
-	if !s.credentialsMatch(username, password) {
-		s.limiter.RecordFailure(clientIP)
-		return "", Session{}, ErrBadCredentials
+	if s.admitted != nil {
+		s.admitted()
 	}
-	s.limiter.Reset(clientIP)
-	return s.createSession(ctx, userAgent)
+	if !s.credentialsMatch(username, password) {
+		return "", Session{}, ErrBadCredentials // Admit already counted it
+	}
+	s.limiter.Succeeded(attempt)
+	return s.createSession(ctx, userAgent, host)
 }
 
 // credentialsMatch compares SHA-256 digests in constant time. Both comparisons always run, so
@@ -162,7 +168,7 @@ func (s *Service) credentialsMatch(username, password string) bool {
 	return usernameOK&passwordOK == 1
 }
 
-func (s *Service) createSession(ctx context.Context, userAgent string) (string, Session, error) {
+func (s *Service) createSession(ctx context.Context, userAgent, host string) (string, Session, error) {
 	token, err := newToken()
 	if err != nil {
 		return "", Session{}, err
@@ -175,6 +181,7 @@ func (s *Service) createSession(ctx context.Context, userAgent string) (string, 
 		LastSeenAt: now,
 		ExpiresAt:  now.Add(SessionTTL),
 		UserAgent:  truncate(userAgent, 256),
+		Host:       host,
 	}
 	if err := s.sessions.CreateSession(ctx, row); err != nil {
 		return "", Session{}, err
@@ -192,10 +199,17 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 
 // ---- Session checks ----------------------------------------------------------
 
-// Authenticate resolves a token to a session, enforcing expiry and the credential digest, and
-// slides the expiry forward at most once per touchInterval. Any failure is ErrNoSession (or a
-// store error); a dead session is deleted on the way out.
-func (s *Service) Authenticate(ctx context.Context, token string) (Session, error) {
+// Authenticate resolves a token presented at host (the request's Host:port) to a session,
+// enforcing expiry, the credential digest and the host the session was issued for, and slides
+// the expiry forward at most once per touchInterval. Any failure is ErrNoSession (or a store
+// error); a dead session is deleted on the way out.
+//
+// The host check is R1 M2: browsers send a host's cookies to every port on it, so another
+// server on the same name receives the cookie. A session is accepted only at the Host:port it
+// was issued for. That does not stop a replay that forges Host, but it does stop a cookie
+// issued to (or tossed by) a sibling port from working here. A mismatch does not delete the
+// session: whoever presents it at the wrong place should not be able to sign the real one out.
+func (s *Service) Authenticate(ctx context.Context, token, host string) (Session, error) {
 	if s.noAuth {
 		return Session{}, nil
 	}
@@ -213,6 +227,9 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Session, erro
 	now := s.now()
 	if subtle.ConstantTimeCompare([]byte(row.CredDigest), []byte(s.credDigest)) != 1 || !now.Before(row.ExpiresAt) {
 		_ = s.sessions.DeleteSession(ctx, idHash)
+		return Session{}, ErrNoSession
+	}
+	if row.Host != host {
 		return Session{}, ErrNoSession
 	}
 	session := Session{Username: s.username, ExpiresAt: row.ExpiresAt}

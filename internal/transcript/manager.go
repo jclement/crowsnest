@@ -64,6 +64,9 @@ type Manager struct {
 	opts     ManagerOptions
 	mu       sync.Mutex
 	watchers map[string]*watcher // pane id → watcher
+	// pins maps a pinned target (the orchestrator's name) to the pane it last resolved to, so
+	// when the target moves to another pane its pin moves with it instead of piling up (R1-C06).
+	pins map[string]string
 }
 
 // watcher is one followed conversation.
@@ -91,7 +94,7 @@ func NewManager(opts ManagerOptions) *Manager {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Manager{opts: opts, watchers: map[string]*watcher{}}
+	return &Manager{opts: opts, watchers: map[string]*watcher{}, pins: map[string]string{}}
 }
 
 // Messages returns a page of target's conversation after cursor (see Conversation.Page). The
@@ -102,15 +105,39 @@ func (m *Manager) Messages(ctx context.Context, target, after string, limit int)
 	if err != nil {
 		return Page{}, err
 	}
-	m.poll(ctx, w, false)
+	m.poll(ctx, w, true)
 	return w.conv.Page(after, limit), nil
 }
 
 // Pin follows target's conversation for as long as the manager runs (the orchestrator's), so
-// `message` events flow even when no browser has asked for it yet.
+// `message` events flow even when no browser has asked for it yet. Pinning a target again after
+// it moved to another pane moves the pin; the old pane's conversation is then unpinned and is
+// dropped once idle or once its agent is gone.
 func (m *Manager) Pin(ctx context.Context, target string) error {
-	_, err := m.watcherFor(ctx, target, true)
-	return err
+	w, err := m.watcherFor(ctx, target, true)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previous, had := m.pins[target]
+	m.pins[target] = w.origin.PaneID
+	if had && previous != w.origin.PaneID && !m.pinnedLocked(previous) {
+		if old, ok := m.watchers[previous]; ok {
+			old.pinned = false
+		}
+	}
+	return nil
+}
+
+// pinnedLocked reports whether any pin points at paneID; called with m.mu held.
+func (m *Manager) pinnedLocked(paneID string) bool {
+	for _, pinned := range m.pins {
+		if pinned == paneID {
+			return true
+		}
+	}
+	return false
 }
 
 // Run polls every followed conversation until ctx ends, and drops the idle ones.
@@ -141,8 +168,28 @@ func (m *Manager) PollAll(ctx context.Context) {
 		active = append(active, w)
 	}
 	m.mu.Unlock()
+	var gone []*watcher
 	for _, w := range active {
-		m.poll(ctx, w, true)
+		if !m.poll(ctx, w, false) {
+			gone = append(gone, w)
+		}
+	}
+	m.dropGone(gone)
+}
+
+// dropGone stops following unpinned conversations whose agent no longer exists. A browser that
+// asks again simply starts a new one; a pinned one waits for its pin to move (R1-C06).
+func (m *Manager) dropGone(gone []*watcher) {
+	if len(gone) == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, w := range gone {
+		paneID := w.paneID()
+		if current, ok := m.watchers[paneID]; ok && current == w && !w.pinned {
+			delete(m.watchers, paneID)
+		}
 	}
 }
 
@@ -164,13 +211,28 @@ func (m *Manager) watcherFor(ctx context.Context, target string, pin bool) (*wat
 	return w, nil
 }
 
-// poll refreshes one watcher: re-resolve its origin, switch transcript when the session moved,
-// read appended lines (or refresh the fallback), and notify on change when asked to.
-func (m *Manager) poll(ctx context.Context, w *watcher, notify bool) {
+// paneID is the watcher's key, read under its own lock (poll rewrites origin).
+func (w *watcher) paneID() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if origin, err := m.opts.Lookup(ctx, w.origin.PaneID); err == nil {
+	return w.origin.PaneID
+}
+
+// poll refreshes one watcher: re-resolve its origin, switch transcript when the session moved,
+// read appended lines (or refresh the fallback), and notify on any change. A change is
+// announced whoever found it: a browser's read advances the shared tailer, so a change it
+// found and kept quiet about would never be announced to the other browsers (R1-C07).
+// reading is true for a browser's read, which also refreshes the pane-text fallback. poll
+// reports false when the agent is gone (Lookup said there is no such agent).
+func (m *Manager) poll(ctx context.Context, w *watcher, reading bool) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	origin, err := m.opts.Lookup(ctx, w.origin.PaneID)
+	switch {
+	case err == nil:
 		w.origin = origin
+	case errors.Is(err, ErrNoAgent):
+		return false
 	}
 	changed := m.follow(w)
 	if w.tailer != nil {
@@ -179,14 +241,15 @@ func (m *Manager) poll(ctx context.Context, w *watcher, notify bool) {
 		if err != nil {
 			m.opts.Logger.Debug("transcript poll failed", "pane", w.origin.PaneID, "path", w.tailer.Path(), "err", err)
 		}
-	} else if m.opts.Fallback != nil && !notify {
+	} else if m.opts.Fallback != nil && reading {
 		// The fallback is refreshed only when someone reads it: pane text has no events of
 		// its own, and reading every pane every second for nobody is waste.
 		changed = m.refreshFallback(ctx, w) || changed
 	}
-	if changed && notify && m.opts.Notify != nil {
+	if changed && m.opts.Notify != nil {
 		m.opts.Notify(w.origin.PaneID, w.conv.Cursor())
 	}
+	return true
 }
 
 // follow points the watcher at the right transcript, resetting the conversation when the file
@@ -195,13 +258,18 @@ func (m *Manager) poll(ctx context.Context, w *watcher, notify bool) {
 // A new session id whose transcript does not exist yet (Claude writes it on the first prompt, so
 // a fresh conversation has none) drops the old transcript and goes back to the pane fallback, so
 // "New conversation" does not keep showing the old one. The same session's file vanishing keeps
-// what was read.
+// what was read. A session change while on the fallback (neither session has a transcript yet)
+// resets too, so the new session gets its own id and cursors (R1-C11).
 func (m *Manager) follow(w *watcher) bool {
 	path := ""
 	if w.origin.SessionID != "" {
 		path, _ = Locate(m.opts.ConfigDir, w.origin.Cwd, w.origin.SessionID)
 	}
 	switch {
+	case path == "" && w.tailer == nil && w.origin.SessionID != "" && w.origin.SessionID != w.conv.SessionID():
+		w.paneText = ""
+		w.conv.Reset(SourcePane, w.origin.SessionID)
+		return true
 	case path == "" && w.tailer == nil:
 		return false
 	case path == "" && w.tailer.sessionID == w.origin.SessionID:

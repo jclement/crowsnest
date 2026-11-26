@@ -45,6 +45,10 @@ const (
 	termPingTimeout = 10 * time.Second
 	// termStartTimeout is how long a socket may stay open without sending its first resize.
 	termStartTimeout = 30 * time.Second
+	// DefaultMaxTerminals caps open terminal sockets. Each spawns a herdr process (a TUI in a
+	// PTY or a pane controller); a person needs a few, and a runaway reconnect loop in a
+	// browser should hit a wall rather than fill the process table (R1 I5).
+	DefaultMaxTerminals = 8
 )
 
 // paneIDPattern is herdr's pane id shape ("w1:p2"). The fleet check is the real guard; this only
@@ -120,6 +124,16 @@ func (s *Server) serveTerminal(w http.ResponseWriter, r *http.Request, what stri
 	conn, err := websocket.Accept(w, r, nil) // the Origin check already ran in the middleware
 	if err != nil {
 		s.deps.Logger.Warn("terminal upgrade failed", "terminal", what, "err", err)
+		return
+	}
+	select {
+	case s.terminalSlots <- struct{}{}:
+		defer func() { <-s.terminalSlots }()
+	default:
+		// A policy close: the browser shows the reason and does not reconnect by itself.
+		limit := cap(s.terminalSlots)
+		s.deps.Logger.Warn("terminal refused: too many open", "terminal", what, "limit", limit)
+		_ = conn.Close(websocket.StatusPolicyViolation, fmt.Sprintf("too many terminals open (%d); close one and reconnect", limit))
 		return
 	}
 	conn.SetReadLimit(termReadLimit)
@@ -224,7 +238,7 @@ func (t *termSession) resize(cols, rows int) {
 		first = true
 		if err := t.bridge.Start(cols, rows); err != nil {
 			t.server.deps.Logger.Warn("terminal did not start", "terminal", t.what, "err", err)
-			t.exit("could not start: " + err.Error())
+			t.exit("could not start the terminal; the server log has the detail") // logged above (R1 I2)
 			return
 		}
 		t.server.deps.Logger.Info("terminal started", "terminal", t.what, "cols", cols, "rows", rows)

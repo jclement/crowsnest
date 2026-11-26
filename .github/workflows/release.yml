@@ -2,6 +2,20 @@
 # GoReleaser builds the linux and darwin archives and checksums and attaches them to a GitHub
 # release (DESIGN.md section 16, .goreleaser.yml). Only GITHUB_TOKEN is used: cosign and the
 # Homebrew tap are deferred while the repo is private (DESIGN.md section 19 item 4).
+#
+# Two jobs, so the write-scoped token never meets third-party code (R1 M3):
+#
+#   - check (contents: read) installs everything, runs the gate, builds the web app and hands
+#     web/dist on as an artifact. npm install scripts and the test suite run here, where the
+#     token can only read.
+#   - release (contents: write) checks out without persisting credentials, installs only Go,
+#     takes the built web app, and runs GoReleaser with its before-hook (the web build) skipped.
+#     No npm install, no tests, no restored cache that another ref could have written.
+#
+# Every action is pinned to a full commit SHA with its tag in a comment; a tag can be moved by
+# whoever controls the action's repository, a SHA cannot. To update one, look up the new tag's
+# commit (`gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, resolving an annotated tag to its
+# commit) and change both.
 name: release
 
 on:
@@ -10,21 +24,23 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          fetch-depth: 0 # the changelog and version come from tags and history
-      - uses: jdx/mise-action@v3
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           install: true
           cache: true
@@ -32,12 +48,43 @@ jobs:
         run: mise run setup
       - name: Check
         run: mise run check
+      - name: Build the web app
+        run: npm --prefix web run build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0 # the changelog and version come from tags and history
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          install: true
+          install_args: go # GoReleaser needs only Go; node and the rest stay out of this job
+          cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-dist
+          path: web/dist
       - name: Release
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: v2.18.0 # keep in step with goreleaser in mise.toml, which `mise run snapshot` uses
-          args: release --clean
+          # The before-hook builds the web app; the check job already did, so it is skipped here
+          # and nothing from npm runs next to the write token.
+          args: release --clean --skip=before
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -53,7 +100,9 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Version
         id: version
         # The same stamps the binaries carry: the tag as the version, short commit, build time.
@@ -63,16 +112,16 @@ jobs:
             echo "commit=$(git rev-parse --short HEAD)"
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Tags and labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository }}
           # v1.2.3 and latest; a prerelease tag (v0.1.0-rc.1) gets its own tag but not latest.
@@ -84,7 +133,7 @@ jobs:
             org.opencontainers.image.title=crowsnest
             org.opencontainers.image.description=crowsnest devbox: herdr, mise and Claude Code behind a web UI
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: deploy/Dockerfile

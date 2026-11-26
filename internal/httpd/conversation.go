@@ -189,7 +189,7 @@ func (s *Server) relaunchOrchestrator(w http.ResponseWriter, r *http.Request, wh
 		writeError(w, http.StatusConflict, codeConflict, "The orchestrator is disabled (--no-orchestrator).")
 	case err != nil:
 		s.deps.Logger.Warn("orchestrator operation failed", "operation", what, "err", err)
-		writeError(w, http.StatusBadGateway, codeUnavailable, "Could not "+what+" the orchestrator: "+err.Error())
+		writeError(w, http.StatusBadGateway, codeUnavailable, "Could not "+what+" the orchestrator. Open its terminal to see what Claude is doing; the server log has the detail.")
 	default:
 		s.deps.Logger.Info("orchestrator relaunched", "operation", what, "session", status.SessionID)
 		writeData(w, http.StatusOK, status)

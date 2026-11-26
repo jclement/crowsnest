@@ -40,6 +40,22 @@ var targetPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$`)
 // agent whose screen is changing every second, so binding them to a hash would make them useless.
 var interruptKeys = []string{"esc", "escape", "ctrl+c"}
 
+// namedKeys are the key names POST /keys accepts besides a single letter or digit (matched
+// without regard to case): what answering a dialog, moving through a list and interrupting
+// need, and nothing that edits or ends a shell (ctrl+d, ctrl+z). The endpoint is not a
+// privilege boundary today, since any signed-in user can open a full terminal, but an
+// allowlist keeps it narrow if it is ever given to a narrower principal (R1 I3).
+var namedKeys = []string{"enter", "esc", "escape", "tab", "space", "backspace", "up", "down", "left", "right", "ctrl+c"}
+
+// allowedKey reports whether key is on the allowlist.
+func allowedKey(key string) bool {
+	if len(key) == 1 {
+		c := key[0]
+		return '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+	}
+	return slices.Contains(namedKeys, strings.ToLower(key))
+}
+
 // ---- Fleet ---------------------------------------------------------------------------
 
 func (s *Server) handleFleet(w http.ResponseWriter, r *http.Request) {
@@ -204,8 +220,8 @@ func validateKeys(body KeysRequest) string {
 		return "Send between 1 and 16 keys."
 	}
 	for _, key := range body.Keys {
-		if key == "" || len(key) > maxKeyLength || strings.ContainsFunc(key, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
-			return "Each key is a key name such as \"1\", \"esc\" or \"ctrl+c\"."
+		if len(key) > maxKeyLength || !allowedKey(key) {
+			return "Each key is a letter, a digit, or one of " + strings.Join(namedKeys, ", ") + "."
 		}
 	}
 	if body.ScreenHash == "" && !onlyInterrupts(body.Keys) {
@@ -233,17 +249,20 @@ func (s *Server) sendKeys(ctx context.Context, target screenTarget, keys []strin
 }
 
 // herdrError maps a herdr failure to a response: a vanished target is 404, a rejected request
-// (an unknown key name) is 400, anything else means herdr is unwell.
+// (an unknown key name) is 400, anything else means herdr is unwell. herdr's own message is
+// logged, never sent: it can carry paths and internals, and the response says what to do
+// rather than what the code hit (R1 I2).
 func (s *Server) herdrError(w http.ResponseWriter, r *http.Request, doing string, err error) {
 	var herdrErr *herdr.Error
 	switch {
 	case herdr.IsNotFound(err):
 		writeError(w, http.StatusNotFound, codeNotFound, "That agent or pane is gone.")
 	case errors.As(err, &herdrErr) && herdrErr.Code == herdr.CodeInvalidRequest:
-		writeError(w, http.StatusBadRequest, codeValidation, "herdr rejected the request: "+herdrErr.Message)
+		s.deps.Logger.Warn("herdr rejected a request", "doing", doing, "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusBadRequest, codeValidation, "herdr did not accept that request; the server log says why.")
 	case errors.As(err, &herdrErr):
 		s.deps.Logger.Warn("herdr call failed", "doing", doing, "path", r.URL.Path, "err", err)
-		writeError(w, http.StatusBadGateway, codeUnavailable, "herdr refused: "+herdrErr.Message)
+		writeError(w, http.StatusBadGateway, codeUnavailable, "herdr refused to do that; the server log says why. Open the terminal to see the pane.")
 	default:
 		s.deps.Logger.Warn("herdr call failed", "doing", doing, "path", r.URL.Path, "err", err)
 		writeHerdrUnavailable(w)

@@ -56,7 +56,9 @@ named by `--session` (default `crowsnest`) and, if nothing answers, starts
 agents outlive crowsnest. `--demo` needs no herdr at all; it serves an in-memory fake fleet that
 changes every few seconds; its terminals are a built-in toy that echoes what you type (no
 shell ever runs in demo mode), and a scripted orchestrator answers in Chat after a short
-"working" period (its transcripts are written under the state directory, never `~/.claude`).
+"working" period. A demo keeps all its state (database, transcripts, the orchestrator's files)
+in a fresh temporary directory that is removed when it exits: it never touches the real
+database, state directory or `~/.claude`, and a login it hands out is no good anywhere else.
 
 Unless `--no-orchestrator` is given, crowsnest then makes sure a Claude agent named
 `orchestrator` runs in the session: it adopts a live one, or starts `claude` in a workspace
@@ -204,8 +206,8 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 |---|---|---|---|
 | `--username` | `CROWSNEST_USERNAME` | none | Login name |
 | `--password` | `CROWSNEST_PASSWORD` | none | Login password. Prefer the env var or `--password-file`: a flag is visible in `ps` |
-| `--password-file` | `CROWSNEST_PASSWORD_FILE` | none | File holding the password (first line) |
-| `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured) | `false` | No login. For a trusted localhost or tailnet only |
+| `--password-file` | `CROWSNEST_PASSWORD_FILE` | none | File holding the password (first line). Refused if its group or others can read or write it: `chmod 600` |
+| `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured, on a localhost-only bind) | `false` | No login. For a trusted localhost or tailnet only; on a tailnet, every peer your ACL lets reach the port has a shell, including nodes shared into your tailnet |
 | `--bind` | `CROWSNEST_BIND` | `localhost` | `localhost`, `tailnet`, an interface name, an IP, or `ip:port`. Repeatable |
 | `--port` | `CROWSNEST_PORT` | `2769` | Port for binds that do not name one (C-R-O-W on a keypad) |
 | `--session` | `CROWSNEST_SESSION` | `crowsnest` | herdr session to create or connect to |
@@ -242,6 +244,9 @@ Crowsnest refuses to start, and says what to pass instead, when:
 - there are neither credentials nor `--no-auth` (or both are given);
 - `--no-auth` is combined with a bind that is not loopback or a Tailscale address (including
   `0.0.0.0`), unless `--i-know-this-is-open` is also given;
+- the login is off through `SUPPRESS_AUTH` (rather than `--no-auth` or `CROWSNEST_NO_AUTH`) on a
+  bind that is not localhost-only: that generic variable is often exported by other projects'
+  environments, so it never opens anything beyond this machine;
 - `--session default` is given without `--allow-default-session`;
 - `--bind tailnet` finds no Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48); it never
   falls back to all interfaces.
@@ -324,7 +329,7 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` (M7 adds hooks) |
 | `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server and its `CROWSNEST_SOCKET` |
 | `~/.local/state/crowsnest/<session>/agent.sock` | The agent API socket (when `XDG_RUNTIME_DIR` is unset) |
-| `~/.local/state/crowsnest/<session>/demo-claude/` | `--demo` only: the demo agents' transcripts |
+| `$TMPDIR/crowsnest-demo-*/` | `--demo` only: the demo's database, state (the demo agents' transcripts, its agent socket) and orchestrator directory, removed on exit |
 | `~/.local/state/crowsnest/mise-install.log` | Devbox image only: the entrypoint's last `mise install` |
 
 ## License

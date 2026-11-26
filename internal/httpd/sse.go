@@ -7,6 +7,7 @@ package httpd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -17,6 +18,12 @@ import (
 
 // sseRetryMillis tells EventSource how soon to reconnect after a drop.
 const sseRetryMillis = 3000
+
+// sseWriteTimeout bounds one event's write and flush. A client that stops reading fills its
+// socket buffer and would otherwise block the handler in Flush for as long as the TCP
+// connection lives, where it can notice neither a hub overflow nor logout nor shutdown
+// (R1-C04). Expiry counts as a disconnect; EventSource reconnects and refetches.
+const sseWriteTimeout = 10 * time.Second
 
 // HelloEvent is the first event on every stream.
 type HelloEvent struct {
@@ -35,6 +42,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	header.Set("Content-Type", "text/event-stream")
 	header.Set("Cache-Control", "no-store")
 	header.Set("X-Accel-Buffering", "no") // ask any buffering proxy to pass events straight through
+	s.openStreams.Add(1)
+	defer s.openStreams.Add(-1)
+	if s.extendWriteDeadline(controller) != nil {
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 
 	subscription := s.deps.Hub.Subscribe(hub.DefaultBuffer)
@@ -85,7 +97,7 @@ func (s *Server) sessionStillValid(r *http.Request) bool {
 	if !s.deps.Auth.Enabled() {
 		return true
 	}
-	_, err := s.deps.Auth.Authenticate(r.Context(), sessionToken(r))
+	_, err := s.deps.Auth.Authenticate(r.Context(), sessionToken(r), sessionHost(r))
 	return err == nil
 }
 
@@ -101,8 +113,21 @@ func (s *Server) writeEvent(w http.ResponseWriter, controller *http.ResponseCont
 		s.deps.Logger.Error("dropping SSE event that does not encode", "type", event.Type, "err", err)
 		return nil
 	}
+	if err := s.extendWriteDeadline(controller); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, payload); err != nil {
 		return err
 	}
 	return controller.Flush()
+}
+
+// extendWriteDeadline gives the next write sseWriteTimeout to complete. A writer that cannot
+// take a deadline (httptest's recorder) is fine: it cannot block either.
+func (s *Server) extendWriteDeadline(controller *http.ResponseController) error {
+	err := controller.SetWriteDeadline(time.Now().Add(s.sseWriteTimeout))
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
+	return err
 }

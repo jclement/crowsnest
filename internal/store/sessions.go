@@ -19,15 +19,16 @@ type AuthSession struct {
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
 	UserAgent  string
+	Host       string // the Host:port the session was issued for; it is valid only there
 }
 
 // CreateSession inserts a session.
 func (s *Store) CreateSession(ctx context.Context, session AuthSession) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO auth_sessions (id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO auth_sessions (id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		session.IDHash, session.CredDigest, session.CreatedAt.Unix(), session.LastSeenAt.Unix(),
-		session.ExpiresAt.Unix(), session.UserAgent)
+		session.ExpiresAt.Unix(), session.UserAgent, session.Host)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
@@ -40,9 +41,9 @@ func (s *Store) GetSession(ctx context.Context, idHash string) (AuthSession, err
 	var session AuthSession
 	var created, lastSeen, expires int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent
+		`SELECT id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host
 		 FROM auth_sessions WHERE id_hash = ?`, idHash).
-		Scan(&session.IDHash, &session.CredDigest, &created, &lastSeen, &expires, &session.UserAgent)
+		Scan(&session.IDHash, &session.CredDigest, &created, &lastSeen, &expires, &session.UserAgent, &session.Host)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthSession{}, ErrNotFound
 	}

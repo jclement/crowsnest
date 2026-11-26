@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/creack/pty"
@@ -30,14 +31,20 @@ type tuiBridge struct {
 	*stream
 	binary, session string
 
-	// mu guards cmd and pty. Write and Resize hold it shared while they use the PTY, and the
-	// PTY is closed (and set to nil) only under the exclusive lock, so neither can use a closed
+	// mu guards pty. Write and Resize hold it shared while they use the PTY, and the PTY is
+	// closed (and set to nil) only under the exclusive lock, so neither can use a closed
 	// descriptor.
-	mu      sync.RWMutex
+	mu  sync.RWMutex
+	pty *os.File
+	// procMu guards cmd and the start transition, and is never held across I/O. Close takes
+	// only procMu: a write blocked on a client that stopped reading holds mu shared, and Close
+	// must still be able to signal that client (R1-C01). Once it dies the blocked write fails.
+	// started is atomic so Write can report "not started" without taking procMu (Start holds
+	// procMu while it takes mu; the reverse order would deadlock).
+	procMu  sync.Mutex
 	cmd     *exec.Cmd
-	pty     *os.File
 	exited  chan struct{}
-	started bool
+	started atomic.Bool
 }
 
 func newTUIBridge(binary, session string) *tuiBridge {
@@ -49,23 +56,26 @@ func (b *tuiBridge) Start(cols, rows int) error {
 	if err := ValidSize(cols, rows); err != nil {
 		return err
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.started {
+	b.procMu.Lock()
+	defer b.procMu.Unlock()
+	if b.started.Load() {
 		return ErrStarted
 	}
 	if b.stopping() {
 		return ErrClosed
 	}
-	b.started = true
+	b.started.Store(true)
 	cmd := exec.Command(b.binary, "--session", b.session) //nolint:gosec // fixed argv; session name is validated at startup
 	cmd.Env = childEnv(tuiTerm)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}) //nolint:gosec // ValidSize bounds both
 	if err != nil {
 		return fmt.Errorf("starting the herdr client in a terminal: %w", err)
 	}
-	b.cmd, b.pty = cmd, ptmx
-	go b.readOutput(ptmx)
+	b.cmd = cmd
+	b.mu.Lock()
+	b.pty = ptmx
+	b.mu.Unlock()
+	go b.readOutput(cmd, ptmx)
 	return nil
 }
 
@@ -73,7 +83,7 @@ func (b *tuiBridge) Start(cols, rows int) error {
 // and discards what it reads: on macOS a process exiting with unread output on its terminal
 // blocks in exit until that output drains (seen as state "E" in ps), so a reader that stopped
 // early would leave the killed client unreapable and this goroutine stuck in Wait.
-func (b *tuiBridge) readOutput(ptmx *os.File) {
+func (b *tuiBridge) readOutput(cmd *exec.Cmd, ptmx *os.File) {
 	buffer := make([]byte, readChunk)
 	delivering := true
 	for {
@@ -85,7 +95,7 @@ func (b *tuiBridge) readOutput(ptmx *os.File) {
 			break // EIO once the client has exited and the slave side is closed
 		}
 	}
-	waitErr := b.cmd.Wait()
+	waitErr := cmd.Wait()
 	close(b.exited)
 	b.mu.Lock()
 	_ = ptmx.Close()
@@ -139,7 +149,7 @@ func (b *tuiBridge) Resize(cols, rows int) error {
 
 // notRunning is the error for a call with no PTY: before Start, or after the client exited.
 func (b *tuiBridge) notRunning() error {
-	if b.started {
+	if b.started.Load() {
 		return ErrClosed
 	}
 	return ErrNotStarted
@@ -150,9 +160,9 @@ func (b *tuiBridge) Close() error {
 	if !b.stop() {
 		return nil
 	}
-	b.mu.Lock()
+	b.procMu.Lock()
 	cmd := b.cmd
-	b.mu.Unlock()
+	b.procMu.Unlock()
 	if cmd == nil {
 		close(b.out)
 		return nil

@@ -33,15 +33,39 @@ type Store struct {
 	db *sql.DB
 }
 
-// Open opens (creating if needed) the database at path, with its directory made 0700 because it
-// holds session hashes, and applies pending migrations.
+// Open opens (creating if needed) the database at path and applies pending migrations. The
+// database holds session hashes, the install salt and the credential digest, so its directory
+// is made 0700 and the file 0600 even when they already existed with looser modes: MkdirAll and
+// the SQLite driver leave an existing directory alone and would create the file under the
+// umask, typically 0644 (R1 L5). SQLite gives its -wal and -shm files the database's mode.
 func Open(ctx context.Context, path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating data directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // a directory needs its search bit; 0700 is owner-only
+		return nil, fmt.Errorf("making data directory %s private: %w", dir, err)
+	}
+	if err := createPrivateFile(path); err != nil {
+		return nil, err
 	}
 	// WAL lets the SSE readers and the writers overlap; busy_timeout absorbs the rest.
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 	return open(ctx, dsn)
+}
+
+// createPrivateFile creates path with mode 0600 if it is missing, and tightens it to 0600 if it
+// exists.
+func createPrivateFile(path string) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the path is configuration
+	if err != nil {
+		return fmt.Errorf("creating database %s: %w", path, err)
+	}
+	_ = file.Close()
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("making database %s private: %w", path, err)
+	}
+	return nil
 }
 
 // OpenMemory opens a private in-memory database, for tests.

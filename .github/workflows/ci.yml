@@ -1,5 +1,6 @@
 # CI: the same gate as local work. mise installs the pinned toolchain from mise.toml, setup
-# installs Go modules and web dependencies, and check runs lint and the full test suite.
+# installs Go modules and web dependencies, and check runs lint and the full test suite. Actions
+# are pinned to full commit SHAs with the tag in a comment (R1 M3; see release.yml).
 name: ci
 
 on:
@@ -18,8 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           install: true
           cache: true

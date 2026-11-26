@@ -282,6 +282,8 @@ func TestPasswordFile(t *testing.T) {
 	}
 	good := write("good", "hunter2 two\r\nsecond line ignored\n")
 	empty := write("empty", "\nsecond\n")
+	readable := write("readable", "hunter2\n")
+	_ = os.Chmod(readable, 0o644) // R1 L5: others can read it
 	tests := []struct {
 		name    string
 		args    []string
@@ -294,6 +296,7 @@ func TestPasswordFile(t *testing.T) {
 		{name: "empty first line", args: []string{"--username", "u", "--password-file", empty}, wantErr: "first line is empty"},
 		{name: "missing file", args: []string{"--username", "u", "--password-file", filepath.Join(dir, "nope")}, wantErr: "reading --password-file"},
 		{name: "both password and file", args: []string{"--username", "u", "--password-file", good}, env: []string{"CROWSNEST_PASSWORD", "x"}, wantErr: "pass only one"},
+		{name: "readable by others", args: []string{"--username", "u", "--password-file", readable}, wantErr: "chmod 600"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -415,6 +418,18 @@ func TestHostNames(t *testing.T) {
 			t.Errorf("an unbound LAN IP must not be an allowed host: %v", cfg.HostNames)
 		}
 	})
+	t.Run("loopback-only bind leaves the machine names out", func(t *testing.T) {
+		// R1 I4: on loopback the machine's names add only DNS-rebinding surface.
+		cfg := newHarness(t).mustLoad()
+		for _, name := range []string{"quark", "quark.local", "quark.example.lan"} {
+			if slices.Contains(cfg.HostNames, name) {
+				t.Errorf("host names %v include %q on a loopback-only bind", cfg.HostNames, name)
+			}
+		}
+		if !slices.Contains(cfg.HostNames, "localhost") {
+			t.Errorf("host names %v lost localhost", cfg.HostNames)
+		}
+	})
 	t.Run("unspecified bind allows every interface IP", func(t *testing.T) {
 		cfg := newHarness(t, "--bind", "0.0.0.0").mustLoad()
 		if !slices.Contains(cfg.HostNames, "192.168.1.20") || slices.Contains(cfg.HostNames, "0.0.0.0") {
@@ -447,6 +462,11 @@ func TestStartupRefusals(t *testing.T) {
 		{name: "default session refuses", args: []string{"--session", "default"}, env: creds, wantErr: "--allow-default-session"},
 		{name: "default session with override starts", args: []string{"--session", "default", "--allow-default-session"}, env: creds},
 		{name: "tailnet with no Tailscale refuses", args: []string{"--bind", "tailnet"}, env: creds, interfaces: noTailnetInterfaces, wantErr: "--bind localhost"},
+		// R1 L4: the generic SUPPRESS_AUTH turns auth off on loopback only.
+		{name: "SUPPRESS_AUTH on localhost starts", env: []string{"SUPPRESS_AUTH", "true"}},
+		{name: "SUPPRESS_AUTH on tailnet refuses", args: []string{"--bind", "tailnet"}, env: []string{"SUPPRESS_AUTH", "true"}, wantErr: "CROWSNEST_NO_AUTH"},
+		{name: "SUPPRESS_AUTH open refuses even with the override", args: []string{"--bind", "0.0.0.0", "--i-know-this-is-open"}, env: []string{"SUPPRESS_AUTH", "true"}, wantErr: "CROWSNEST_NO_AUTH"},
+		{name: "CROWSNEST_NO_AUTH on tailnet starts", args: []string{"--bind", "tailnet"}, env: []string{"CROWSNEST_NO_AUTH", "true"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -512,5 +532,43 @@ func assertErrorContains(t *testing.T, err error, want string) {
 	}
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("error %q does not contain %q", err, want)
+	}
+}
+
+// TestUnsetSecretEnv is R1 H1: once loaded, the secrets and auth switches leave the process
+// environment, so nothing started later inherits them.
+func TestUnsetSecretEnv(t *testing.T) {
+	for _, name := range []string{"CROWSNEST_PASSWORD", "CROWSNEST_PASSWORD_FILE", "ELEVENLABS_API_KEY", "CROWSNEST_NO_AUTH", "SUPPRESS_AUTH", "CROWSNEST_I_KNOW_THIS_IS_OPEN"} {
+		t.Setenv(name, "set")
+	}
+	t.Setenv("CROWSNEST_PORT", "2770")
+	UnsetSecretEnv()
+	for _, name := range secretEnv {
+		if _, ok := os.LookupEnv(name); ok {
+			t.Errorf("%s is still in the environment", name)
+		}
+	}
+	if os.Getenv("CROWSNEST_PORT") != "2770" {
+		t.Error("an ordinary setting was removed too")
+	}
+}
+
+// TestConfigFileWithAReadablePasswordWarns is R1 L5's other half: a config file holding the
+// password that other users can read starts, with a warning to log.
+func TestConfigFileWithAReadablePasswordWarns(t *testing.T) {
+	h := newHarness(t).writeConfig("username: jeff\npassword: hunter2\n")
+	path := filepath.Join(h.home, ".config", "crowsnest", "config.yaml")
+	if cfg := h.mustLoad(); len(cfg.Warnings) != 0 {
+		t.Fatalf("a 0600 config file warned: %v", cfg.Warnings)
+	}
+	_ = os.Chmod(path, 0o644)
+	cfg := h.mustLoad()
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "chmod 600") {
+		t.Fatalf("warnings = %v", cfg.Warnings)
+	}
+	noPassword := newHarness(t).writeConfig("port: 2770\n")
+	_ = os.Chmod(filepath.Join(noPassword.home, ".config", "crowsnest", "config.yaml"), 0o644)
+	if cfg := noPassword.withEnv("CROWSNEST_USERNAME", "u", "CROWSNEST_PASSWORD", "p").mustLoad(); len(cfg.Warnings) != 0 {
+		t.Fatalf("a readable config file without a password warned: %v", cfg.Warnings)
 	}
 }

@@ -91,6 +91,7 @@ type harnessOptions struct {
 	orchestrator  *orch.Orchestrator
 	terminals     term.Launcher // nil: the terminal routes answer 503
 	termQueue     int
+	maxTerminals  int
 	// M6: the question inbox (questions_test.go); nil: the routes answer 503
 	questions *questions.Service
 }
@@ -147,6 +148,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		HerdrVersion:   "0.9.5-test",
 		Terminals:      opts.terminals,
 		TermQueueBytes: opts.termQueue,
+		MaxTerminals:   opts.maxTerminals,
 
 		Conversations: opts.conversations,
 		Orchestrator:  opts.orchestrator,
@@ -192,14 +194,31 @@ func (h *harness) login() *http.Cookie {
 	return sessionCookieFrom(h.t, response)
 }
 
+// loginAt signs in through the Host a live test server is reached at (base is its URL): a
+// session is valid only at the Host:port it was issued for (R1 M2).
+func (h *harness) loginAt(base string) *http.Cookie {
+	h.t.Helper()
+	host := strings.TrimPrefix(base, "http://")
+	r := request(http.MethodPost, "/api/v1/auth/login", loginBody(testUser, testPassword))
+	r.Host = host
+	r.Header.Set("Origin", "http://"+host)
+	response := h.do(r)
+	if response.Code != http.StatusOK {
+		h.t.Fatalf("login at %s: %d %s", host, response.Code, response.Body)
+	}
+	return sessionCookieFrom(h.t, response)
+}
+
+// sessionCookieFrom returns the session cookie a response set, under either name (plain over
+// HTTP, __Host- over HTTPS).
 func sessionCookieFrom(t *testing.T, response *httptest.ResponseRecorder) *http.Cookie {
 	t.Helper()
 	for _, cookie := range response.Result().Cookies() {
-		if cookie.Name == SessionCookie {
+		if cookie.Name == SessionCookie || cookie.Name == SecureSessionCookie {
 			return cookie
 		}
 	}
-	t.Fatalf("no %s cookie in %v", SessionCookie, response.Header())
+	t.Fatalf("no session cookie in %v", response.Header())
 	return nil
 }
 
@@ -412,16 +431,58 @@ func TestCookieSecureFlag(t *testing.T) {
 			if tc.forwarded != "" {
 				r.Header.Set("X-Forwarded-Proto", tc.forwarded)
 			}
-			if cookie := sessionCookieFrom(t, h.do(r)); cookie.Secure != tc.wantSecure {
+			cookie := sessionCookieFrom(t, h.do(r))
+			if cookie.Secure != tc.wantSecure {
 				t.Fatalf("Secure=%v, want %v", cookie.Secure, tc.wantSecure)
+			}
+			// R1 M2: over HTTPS the cookie is __Host- prefixed (Secure, Path=/, no Domain).
+			if wantName := map[bool]string{true: SecureSessionCookie, false: SessionCookie}[tc.wantSecure]; cookie.Name != wantName || cookie.Path != "/" || cookie.Domain != "" {
+				t.Fatalf("cookie %s path %q domain %q, want %s on / with no domain", cookie.Name, cookie.Path, cookie.Domain, wantName)
 			}
 		})
 	}
 	h := newHarness(t, harnessOptions{})
 	r := request(http.MethodPost, "/api/v1/auth/login", loginBody(testUser, testPassword))
 	r.TLS = &tlsStateForTest
-	if cookie := sessionCookieFrom(t, h.do(r)); !cookie.Secure {
-		t.Fatal("cookie over direct TLS should be Secure")
+	if cookie := sessionCookieFrom(t, h.do(r)); !cookie.Secure || cookie.Name != SecureSessionCookie {
+		t.Fatalf("cookie over direct TLS should be Secure and __Host- prefixed: %+v", cookie)
+	}
+}
+
+// TestSessionCookieIsHostAndSchemeBound is R1 M2 at the HTTP layer: a session issued at one
+// Host:port is refused at another (a sibling port on the same name receives the cookie too),
+// and over HTTPS only the __Host- cookie is read.
+func TestSessionCookieIsHostAndSchemeBound(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	cookie := h.login() // issued at localhost:2769
+	me := withCookie(request(http.MethodGet, "/api/v1/auth/me", ""), cookie)
+	if response := h.do(me); response.Code != http.StatusOK {
+		t.Fatalf("at the issuing host: %d", response.Code)
+	}
+	sibling := withCookie(request(http.MethodGet, "/api/v1/auth/me", ""), cookie)
+	sibling.Host = "localhost:5173"
+	if response := h.do(sibling); response.Code != http.StatusUnauthorized {
+		t.Fatalf("a cookie presented at a sibling port was accepted: %d", response.Code)
+	}
+	if response := h.do(me); response.Code != http.StatusOK {
+		t.Fatalf("presenting the cookie elsewhere ended the session: %d", response.Code)
+	}
+
+	// Over HTTPS, a plain-named cookie (which anything on the host could have set) is ignored.
+	secure := request(http.MethodPost, "/api/v1/auth/login", loginBody(testUser, testPassword))
+	secure.TLS = &tlsStateForTest
+	issued := sessionCookieFrom(t, h.do(secure))
+	plain := request(http.MethodGet, "/api/v1/auth/me", "")
+	plain.TLS = &tlsStateForTest
+	plain.AddCookie(&http.Cookie{Name: SessionCookie, Value: issued.Value})
+	if response := h.do(plain); response.Code != http.StatusUnauthorized {
+		t.Fatalf("over HTTPS a plain-named cookie was read: %d", response.Code)
+	}
+	prefixed := request(http.MethodGet, "/api/v1/auth/me", "")
+	prefixed.TLS = &tlsStateForTest
+	prefixed.AddCookie(&http.Cookie{Name: SecureSessionCookie, Value: issued.Value})
+	if response := h.do(prefixed); response.Code != http.StatusOK {
+		t.Fatalf("over HTTPS the __Host- cookie was refused: %d %s", response.Code, response.Body)
 	}
 }
 
@@ -763,7 +824,7 @@ func TestEventsRequireAuth(t *testing.T) {
 func TestEventsStream(t *testing.T) {
 	h := newHarness(t, harnessOptions{heartbeat: 50 * time.Millisecond})
 	base := liveServer(t, h)
-	cookie := h.login()
+	cookie := h.loginAt(base)
 	response, events := openEvents(t, base, cookie)
 	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("events: %d %q", response.StatusCode, response.Header.Get("Content-Type"))
@@ -785,9 +846,11 @@ func TestEventsStream(t *testing.T) {
 func TestEventsEndWhenSessionIsRevoked(t *testing.T) {
 	h := newHarness(t, harnessOptions{heartbeat: 50 * time.Millisecond})
 	base := liveServer(t, h)
-	cookie := h.login()
+	cookie := h.loginAt(base)
 	_, events := openEvents(t, base, cookie)
-	events.next() // hello
+	if hello := events.next(); hello == nil || hello["event"] != "hello" {
+		t.Fatalf("the stream did not open: %v", hello)
+	}
 	h.do(withCookie(request(http.MethodPost, "/api/v1/auth/logout", ""), cookie))
 	timeout := time.After(5 * time.Second)
 	for {

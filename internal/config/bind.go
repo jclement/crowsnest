@@ -140,7 +140,8 @@ func resolveInterface(item Interface, bind string, at func(netip.Addr, bool) Lis
 
 // hostNames builds the set of names the Host header may carry (DESIGN.md 4.3): the loopback
 // names, every bound IP (every interface IP when bound to the unspecified address), this
-// machine's hostname in its full, short and .local forms, and the --allowed-host extras.
+// machine's hostname in its full, short and .local forms when anything but loopback is bound,
+// and the --allowed-host extras.
 func hostNames(listeners []Listener, interfaces []Interface, hostname string, extra []string) []string {
 	names := []string{"localhost", "127.0.0.1", "::1"}
 	add := func(name string) {
@@ -161,7 +162,10 @@ func hostNames(listeners []Listener, interfaces []Interface, hostname string, ex
 			}
 		}
 	}
-	if hostname != "" {
+	// The machine's own names only help a browser that reaches a non-loopback address. On a
+	// loopback-only bind they would only widen the DNS-rebinding surface (a LAN host winning an
+	// mDNS race for quark.local, say), so they are left out (R1 I4).
+	if hostname != "" && !loopbackOnly(listeners) {
 		short, _, _ := strings.Cut(hostname, ".")
 		add(hostname)
 		add(short)
@@ -171,6 +175,16 @@ func hostNames(listeners []Listener, interfaces []Interface, hostname string, ex
 		add(name)
 	}
 	return names
+}
+
+// loopbackOnly reports whether every listener is on a loopback address.
+func loopbackOnly(listeners []Listener) bool {
+	for _, listener := range listeners {
+		if !listener.Addr.Addr().Unmap().IsLoopback() {
+			return false
+		}
+	}
+	return true
 }
 
 // isOpenAddr reports whether a listen address is reachable beyond this machine and the

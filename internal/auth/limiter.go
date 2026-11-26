@@ -41,7 +41,11 @@ func NewLimiter(now func() time.Time) *Limiter {
 func (l *Limiter) Allow(clientIP string) (retryAfter time.Duration, ok bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := l.now()
+	return l.allowLocked(clientIP, l.now())
+}
+
+// allowLocked is Allow with l.mu held.
+func (l *Limiter) allowLocked(clientIP string, now time.Time) (retryAfter time.Duration, ok bool) {
 	l.prune(now)
 	var wait time.Duration
 	if failures := l.perClient[clientIP]; len(failures) >= PerClientFailures {
@@ -54,6 +58,45 @@ func (l *Limiter) Allow(clientIP string) (retryAfter time.Duration, ok bool) {
 		return 0, true
 	}
 	return max(wait.Round(time.Second), time.Second), false
+}
+
+// Attempt is one admitted login attempt, already counted as a failure until Succeeded says
+// otherwise.
+type Attempt struct {
+	clientIP string
+	at       time.Time
+}
+
+// Admit decides and counts in one step: when clientIP may try now, it records the attempt as a
+// failure straight away and returns it; otherwise it returns how long to wait, as Allow does.
+// Checking and counting separately (Allow, then RecordFailure after the credential compare) let
+// every request that arrived before the first failure was recorded through, so a burst of
+// parallel guesses could exceed both caps (R1-C10, M1). Counting pessimistically and taking the
+// count back on success closes that window.
+func (l *Limiter) Admit(clientIP string) (attempt Attempt, retryAfter time.Duration, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	if retryAfter, ok = l.allowLocked(clientIP, now); !ok {
+		return Attempt{}, retryAfter, false
+	}
+	l.perClient[clientIP] = append(l.perClient[clientIP], now)
+	l.global = append(l.global, now)
+	return Attempt{clientIP: clientIP, at: now}, 0, true
+}
+
+// Succeeded takes back the failure Admit counted for attempt, and forgets the client's other
+// failures as Reset does.
+func (l *Limiter) Succeeded(attempt Attempt) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for index := len(l.global) - 1; index >= 0; index-- {
+		if l.global[index].Equal(attempt.at) {
+			l.global = append(l.global[:index], l.global[index+1:]...)
+			break
+		}
+	}
+	delete(l.perClient, attempt.clientIP)
 }
 
 // RecordFailure counts one failed login from clientIP.

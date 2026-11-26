@@ -146,6 +146,13 @@ func promptOutcome(ctx context.Context, client herdr.Client, before, after herdr
 		result.Status, result.Started = before.AgentStatus, result.Queued
 		result.Note = "The text was typed, but Claude has not started a turn. Check its terminal before sending again."
 		return result, nil
+	case errors.Is(err, herdr.ErrNoResponse):
+		// The request reached herdr and then the answer was lost (our own deadline, a dropped
+		// connection). herdr may well have typed it, so this is uncertain delivery, not a
+		// failure: an error here would invite a retry that sends the instruction twice (R1-C09).
+		result.Status, result.Started = before.AgentStatus, false
+		result.Note = "crowsnest lost track of this send after handing it to herdr, so it may or may not have been typed. Check the agent's terminal before sending again."
+		return result, nil
 	default:
 		return PromptResult{}, fmt.Errorf("sending the prompt: %w", err)
 	}
