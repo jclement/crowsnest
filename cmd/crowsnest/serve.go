@@ -185,7 +185,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, refs.instructions, refs.projects.subjectOf, logger)
+		standingContext(cfg, refs, refs.questions.Load, jobService), files, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
@@ -193,7 +193,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	}
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.instructions, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
-	startJobs(ctx, jobService, client, logger)
+	var projectOf func(string) (int64, string)
+	if cfg.Demo {
+		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)
+	}
+	startJobs(ctx, jobService, client, projectOf, logger)
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
@@ -216,6 +220,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 			events.Publish(hub.Event{Type: "lead", Data: projects.LeadStatus{Status: status, ProjectID: project.ID, Slug: project.Slug, Running: true}})
 		},
 	})
+	if cfg.Demo {
+		go seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
+	}
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,

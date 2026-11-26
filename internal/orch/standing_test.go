@@ -147,3 +147,24 @@ func writeTranscript(t *testing.T, configDir, cwd, session string) {
 }
 
 func dirOf(path string) string { return path[:strings.LastIndex(path, "/")] }
+
+// TestInstructionsForALead: a lead's CROWSNEST.md names its project and keeps the orchestrator's
+// contracts word for word; the orchestrator's mentions the project tools, the lead's does not.
+func TestInstructionsForALead(t *testing.T) {
+	lead, err := RenderInstructions(InstructionData{Session: "s", Dir: "/w/alpha", Version: "v", Project: "alpha", ProjectName: "Alpha", Description: "the thing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orchestrator, err := RenderInstructions(InstructionData{Session: "s", Dir: "/w/o", Version: "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"lead of project Alpha", "`/w/alpha`", "the thing", "SAY contract", "[crowsnest poke", "The job protocol"} {
+		if !strings.Contains(lead, want) {
+			t.Errorf("lead instructions lack %q", want)
+		}
+	}
+	if strings.Contains(lead, "project_list") || !strings.Contains(orchestrator, "project_list") || strings.Contains(orchestrator, "lead of project") {
+		t.Error("the project tools paragraph is on the wrong agent")
+	}
+}
