@@ -6,6 +6,7 @@ package orch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -118,5 +119,28 @@ func TestPromptValidation(t *testing.T) {
 	}
 	if _, err := Prompt(context.Background(), f, "nobody", PromptRequest{Text: "hi"}); !herdr.IsNotFound(err) {
 		t.Fatalf("unknown agent: %v", err)
+	}
+}
+
+// lateAnswerClient types the prompt (the fake records it) and then fails the way the socket
+// client does when its own deadline passes before herdr answers.
+type lateAnswerClient struct{ *fake.Fake }
+
+func (c lateAnswerClient) AgentPrompt(ctx context.Context, target, text string, wait *herdr.PromptWait) (herdr.Agent, error) {
+	_, _ = c.Fake.AgentPrompt(ctx, target, text, wait)
+	return herdr.Agent{}, fmt.Errorf("%w: herdr agent.prompt: reading response: %w", herdr.ErrNoResponse, context.DeadlineExceeded)
+}
+
+// TestPromptLostAnswerIsUncertainNotFailed is R1-C09: herdr typed the prompt and then the
+// client's deadline passed. That must not look like a failed send (503), or a retry would send
+// the instruction twice.
+func TestPromptLostAnswerIsUncertainNotFailed(t *testing.T) {
+	f, _ := sendRig(t, herdr.StatusIdle, emptyInput)
+	result, err := Prompt(context.Background(), lateAnswerClient{f}, "builder", PromptRequest{Text: "deploy"})
+	if err != nil {
+		t.Fatalf("a send herdr may have delivered came back as a failure: %v", err)
+	}
+	if result.Started || !strings.Contains(result.Note, "terminal") || len(f.Prompts()) != 1 {
+		t.Fatalf("result = %+v, prompts %d", result, len(f.Prompts()))
 	}
 }

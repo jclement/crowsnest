@@ -98,7 +98,7 @@ func (c *SocketClient) call(ctx context.Context, method string, params, out any,
 	}
 	line, err := readLine(bufio.NewReader(conn))
 	if err != nil {
-		return wrapIO(ctx, method, "reading response", err)
+		return fmt.Errorf("%w: %w", ErrNoResponse, wrapIO(ctx, method, "reading response", err))
 	}
 	return decodeResponse(method, id, line, out)
 }

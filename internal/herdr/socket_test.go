@@ -298,8 +298,21 @@ func TestSocketClientHonoursContext(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want deadline exceeded", err)
 	}
+	// The request went out and no answer came: the caller is told herdr may have acted (R1-C09).
+	if !errors.Is(err, ErrNoResponse) {
+		t.Fatalf("err = %v, want ErrNoResponse", err)
+	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("call took %s after its context expired", elapsed)
+	}
+}
+
+// TestSocketClientUnreachableIsNotNoResponse: a call that never reached herdr is a plain
+// failure, safe to retry.
+func TestSocketClientUnreachableIsNotNoResponse(t *testing.T) {
+	_, err := NewSocketClient(filepath.Join(shortSocketDir(t), "absent.sock")).Ping(context.Background())
+	if err == nil || errors.Is(err, ErrNoResponse) {
+		t.Fatalf("err = %v, want a failure that is not ErrNoResponse", err)
 	}
 }
 

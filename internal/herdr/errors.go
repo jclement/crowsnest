@@ -60,6 +60,11 @@ var (
 	ErrInvalidRequest     = &Error{Code: CodeInvalidRequest, Message: "invalid request"}
 )
 
+// ErrNoResponse marks a call whose request was written to herdr but whose answer never came:
+// the connection failed or the deadline passed while waiting. herdr may have acted on it, so a
+// caller must not treat it as "nothing happened" (R1-C09: a prompt can have been typed).
+var ErrNoResponse = errors.New("the request reached herdr but no answer came back")
+
 // IsNotFound reports whether err says the addressed workspace, tab, pane or agent does not exist.
 func IsNotFound(err error) bool {
 	var herdrErr *Error

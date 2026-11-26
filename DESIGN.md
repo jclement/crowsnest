@@ -419,7 +419,10 @@ Claude Code 2.1.332 by `mise run test:claude`):
   `blocked`, or one on screen) is `409 BLOCKED` with the dialog in `error.detail`; a draft is
   `409 DRAFT` with the draft; nothing is typed in either case. A draft check that cannot find the
   input box does not block. `agent_prompt_stalled` or a wait timeout is still `200` with
-  `started: false` and a note, because the text was typed and resending would duplicate it.
+  `started: false` and a note, because the text was typed and resending would duplicate it. So
+  is a send whose request reached herdr but whose answer was lost (crowsnest's own 35 s deadline,
+  a dropped connection: `herdr.ErrNoResponse`); the note says delivery is uncertain and to check
+  the terminal. Only a send that never reached herdr is an error (R1-C09).
 
 ## 8. Needs-you: questions and dialogs
 
