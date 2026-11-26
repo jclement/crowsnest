@@ -108,4 +108,28 @@ describe("ConversationView", () => {
     expect(scroller.scrollTop).toBe(1400);
     await waitFor(() => expect(screen.queryByRole("button", { name: /new message/ })).not.toBeInTheDocument());
   });
+
+  it("shows the empty state, not pane text, for a Claude conversation with no transcript yet", async () => {
+    desktop();
+    stubApi((call) =>
+      call.path.startsWith("/agents/orchestrator/messages")
+        ? {
+            body: {
+              data: {
+                source: "pane", session_id: "fresh", cursor: "3.1", reset: true, earlier: false, more: false,
+                messages: [msg("pane", 0, { kind: "pane", text: "Claude Code v2.1.332" })],
+              },
+            },
+          }
+        : { body: { data: {} } },
+    );
+    const { unmount } = renderWithClient(
+      <ConversationView target="orchestrator" agentName="the orchestrator" state="idle" variant="page" paneFallback={false} />,
+    );
+    expect(await screen.findByText("No messages yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Claude Code v2/)).not.toBeInTheDocument();
+    unmount();
+    renderWithClient(<ConversationView target="orchestrator" agentName="the orchestrator" state="idle" variant="page" />);
+    expect(await screen.findByText(/Claude Code v2/)).toBeInTheDocument();
+  });
 });

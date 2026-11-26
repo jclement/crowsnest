@@ -25,12 +25,29 @@ export interface ConversationViewProps {
   variant: "page" | "embedded";
   showThinking?: boolean;
   onOpenTerminal?: () => void;
+  /**
+   * Show the pane's text when there is no transcript (Codex, or a Claude whose session herdr does
+   * not know). False for a Claude agent whose transcript simply does not exist yet (Claude writes
+   * it on the first prompt, so a fresh conversation has none): it gets the empty state instead.
+   */
+  paneFallback?: boolean;
 }
 
-export function ConversationView({ target, agentName, state, variant, showThinking = false, onOpenTerminal }: ConversationViewProps) {
+export function ConversationView({
+  target,
+  agentName,
+  state,
+  variant,
+  showThinking = false,
+  onOpenTerminal,
+  paneFallback = true,
+}: ConversationViewProps) {
   const query = useAgentMessages(target);
   const desktop = useMediaQuery(DESKTOP_QUERY);
-  const messages = useMemo(() => visibleMessages(query.data?.messages ?? [], showThinking), [query.data, showThinking]);
+  const messages = useMemo(() => {
+    const shown = visibleMessages(query.data?.messages ?? [], showThinking);
+    return paneFallback ? shown : shown.filter((message) => message.kind !== "pane");
+  }, [query.data, showThinking, paneFallback]);
   const revision = messages.reduce((highest, message) => Math.max(highest, message.seq), 0);
   const ownScroll = variant === "embedded" || desktop;
   const { anchorRef, unseen, scrollToBottom } = useStickToBottom(messages.length, revision, `${ownScroll}:${query.data?.sessionId}`);

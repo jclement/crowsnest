@@ -81,6 +81,7 @@ export function ChatView() {
           variant="page"
           showThinking={showThinking}
           onOpenTerminal={openTerminal}
+          paneFallback={false}
         />
       ) : (
         <EmptyState icon={MessageSquare} title="Starting the orchestrator">

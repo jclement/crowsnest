@@ -3,7 +3,7 @@
 // footer. It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
 // badge and the tab title count agents that need Jeff until questions arrive in M6.
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { endpoints, fixturesEnabled } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -20,6 +20,7 @@ import { UserMenu } from "./UserMenu";
 export function AppFrame() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const me = useMe();
   const stream = useLiveQueries();
   const fleet = useFleet();
@@ -86,7 +87,9 @@ export function AppFrame() {
           <div className="flex-1 md:min-h-0">
             <Outlet />
           </div>
-          <Footer className="border-t border-border px-3 py-2 md:hidden" />
+          {/* Not under Chat on a phone: its composer sticks to the bottom, and a footer below it
+              would show up under the composer at the end of the conversation. */}
+          {pathname !== "/chat" && <Footer className="border-t border-border px-3 py-2 md:hidden" />}
         </main>
       </div>
       <nav

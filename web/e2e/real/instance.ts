@@ -79,12 +79,15 @@ export async function startInstance(options: { demo: boolean; session?: string }
   const dataDir = mkdtempSync(join(tmpdir(), "crowsnest-e2e-"));
   const session = options.session ?? (options.demo ? "crowsnest-demo" : testSessionName());
   if (!options.demo && !TEST_SESSION_PATTERN.test(session)) throw new Error(`refusing to use session ${session}`);
-  const args = ["serve", "--no-auth", "--bind", "127.0.0.1", "--port", String(port), "--session", session, "--no-orchestrator"];
-  if (options.demo) args.push("--demo");
+  const args = ["serve", "--no-auth", "--bind", "127.0.0.1", "--port", String(port), "--session", session];
+  // A real-herdr instance never starts Claude (that is `mise run test:claude`, opt-in); the demo's
+  // orchestrator is the scripted fake, so Chat works there.
+  args.push(options.demo ? "--demo" : "--no-orchestrator");
   const home = options.demo ? undefined : throwawayHome();
   const env = scrubbedEnv(home ? { HOME: home, XDG_CONFIG_HOME: join(home, ".config") } : {});
   const child = spawn(BINARY, args, {
-    env: { ...env, CROWSNEST_DATA_DIR: dataDir },
+    // State (logs, the orchestrator's files, the demo's transcripts) goes to the throwaway dir too.
+    env: { ...env, CROWSNEST_DATA_DIR: dataDir, XDG_STATE_HOME: join(dataDir, "state") },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const log: string[] = [];
