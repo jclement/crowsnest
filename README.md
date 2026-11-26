@@ -575,6 +575,11 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | `false` | Start job agents with Remote Control too, named `<name> <job id> <title>` |
 | `--compact-at` | `CROWSNEST_COMPACT_AT` | `150000` | Compact the orchestrator (`/compact` with a focus) once its context passes this many tokens; `0` disables |
 | `--fresh-at` | `CROWSNEST_FRESH_AT` | off | `HH:MM`: once a day after this local time, when you have been quiet 20 minutes, the orchestrator writes a hand-over and starts a new conversation |
+| `--max-running-jobs` | `CROWSNEST_MAX_RUNNING_JOBS` | a quarter of the cores, at least 2 | Job agents running at once; more wait queued with the reason shown and start in order (the orchestrator and project leads are not counted). Changeable in the app, with per-project limits |
+| `--load-hold` | `CROWSNEST_LOAD_HOLD` | `2` | Hold new job starts while the load average per core stays above this for a minute (running work is never touched); `0` off |
+| `--heavy-slots` | `CROWSNEST_HEAVY_SLOTS` | `2` | Heavy commands (builds, test suites, typechecks) that may run at once through `crowsnest heavy` |
+| `--review` | `CROWSNEST_REVIEW` | `auto` | The review gate for builder jobs in a worktree: `auto` (the other engine when installed, else the same one), `same`, `claude`, `codex` or `off`. A job can ask for its own |
+| `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges a finished job's branch into its base: `merge` (a merge commit) or `ff` (fast-forward only) |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Largest file you can paste, drop or attach, and that an agent can attach to a question or a result, in MB |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Disk all attachments may take, in MB; past it the oldest files nobody needs any more are deleted, else an upload is refused |
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host no agent may reach unattended: the guard hook refuses a command that would reach it, and an approval naming it is dangerous. Repeatable; added to the file below |

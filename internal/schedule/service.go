@@ -91,6 +91,9 @@ type Options struct {
 	// Kick asks the poker to check now (a Run now of a poke task). Nil: the next check.
 	Kick func()
 	Now  func() time.Time
+	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): no
+	// `as: job` task is started meanwhile (Run now still works). Nil: never.
+	Paused func() bool
 }
 
 // state is the kv blob.
@@ -365,6 +368,9 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) Tick(ctx context.Context) {
 	tasks, problems := s.Load(ctx)
 	s.reportProblems(ctx, problems)
+	if s.opts.Paused != nil && s.opts.Paused() {
+		return // due tasks stay due and run at the first tick after the resume
+	}
 	now := s.opts.Now()
 	for _, task := range tasks {
 		if task.As != RunAsJob {

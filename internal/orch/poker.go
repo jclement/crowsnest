@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -123,6 +124,16 @@ type PokerOptions struct {
 	// NoAgentReasons drops the "another agent settled" reasons: they are the orchestrator's to
 	// hear, as the session's front door; a project's lead hears about its own project's jobs.
 	NoAgentReasons bool
+
+	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): no
+	// automatic poke, backstop nudge or upkeep is typed meanwhile; due reasons stay pending and
+	// go with the first poke after the resume. "Poke now" still works. Nil: never paused.
+	Paused func() bool
+	// Held journals, once per key while the pause lasts, what the pause held. Nil: nothing.
+	Held func(ctx context.Context, key, what string)
+	// Presence is the human's presence for the poke header (`human=here|maybe|away`, 6.14).
+	// Nil: no presence on the header.
+	Presence func() string
 }
 
 func (p *Poker) stateKey() string {
@@ -130,6 +141,13 @@ func (p *Poker) stateKey() string {
 		return p.opts.StateKey
 	}
 	return kvPokeState
+}
+
+func (p *Poker) presence() string {
+	if p.opts.Presence == nil {
+		return ""
+	}
+	return p.opts.Presence()
 }
 
 func (p *Poker) label() string {
@@ -300,14 +318,20 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 	defer p.step.Unlock()
 	now := p.opts.Now()
 	p.observe(ctx, now)
-	p.runBackstop(ctx, now)
+	paused := p.opts.Paused != nil && p.opts.Paused()
+	if !paused {
+		p.runBackstop(ctx, now)
+	}
 	p.timerReason(ctx, now)
 
 	status := p.opts.Status()
 	if status.State == StateDisabled {
 		return p.disabled(ctx, now, manual)
 	}
-	if !p.opts.ManualOnly && p.opts.Tender != nil && p.opts.Tender.Tend(ctx, now, status) {
+	if paused && !manual {
+		return p.heldForPause(ctx, now)
+	}
+	if !paused && !p.opts.ManualOnly && p.opts.Tender != nil && p.opts.Tender.Tend(ctx, now, status) {
 		// The check went on upkeep; due reasons stay and go with the next poke.
 		result := PokeResult{Outcome: OutcomeNothing, Reasons: []string{}, Manual: manual, At: now}
 		if manual {
@@ -340,6 +364,18 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 		return p.skipped(ctx, result, decision)
 	}
 	return p.send(ctx, result, status, due)
+}
+
+// heldForPause answers an automatic check while the automation is paused: nothing is typed, and
+// whatever is due stays pending for the first poke after the resume.
+func (p *Poker) heldForPause(ctx context.Context, now time.Time) PokeResult {
+	result := PokeResult{Outcome: OutcomeNothing, Reasons: []string{}, At: now}
+	input := p.precheckInput(now, false)
+	input.Tasks, input.RideAlong = p.dueTasks(ctx, now)
+	if due := Precheck(input); len(due.Reasons) > 0 && p.opts.Held != nil {
+		p.opts.Held(ctx, "poke:"+p.label(), fmt.Sprintf("a poke to %s (%d reason(s) wait for the resume)", p.label(), len(due.Reasons)))
+	}
+	return result
 }
 
 // disabled answers a check under --no-orchestrator: nothing to poke, nothing kept pending.
@@ -514,7 +550,7 @@ func (p *Poker) skipped(ctx context.Context, result PokeResult, decision GateDec
 func (p *Poker) send(ctx context.Context, result PokeResult, status Status, due PrecheckResult) PokeResult {
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pokeSendTimeout)
 	defer cancel()
-	sent, err := Prompt(sendCtx, p.opts.Client, status.PaneID, PromptRequest{Text: PokeText(result.At, due.Reasons), ExpectAgent: status.Name})
+	sent, err := Prompt(sendCtx, p.opts.Client, status.PaneID, PromptRequest{Text: PokeTextWith(result.At, due.Reasons, p.presence()), ExpectAgent: status.Name})
 	var blocked *BlockedError
 	var draft *DraftError
 	if errors.Is(err, ErrNotTyped) || errors.As(err, &blocked) || errors.As(err, &draft) {

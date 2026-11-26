@@ -67,7 +67,8 @@ export interface ParsedPoke {
 
 // The talk flag was dropped when the orchestrator began writing a SAY line on every reply; older
 // transcripts still carry it, so it stays optional here.
-const pokeHeader = /^\[crowsnest poke (\S+?)(?: talk=(on|off))?\]/;
+// Since presence (DESIGN.md 6.14) the header may also carry `human=here|maybe|away`.
+const pokeHeader = /^\[crowsnest poke (\S+?)(?: talk=(on|off))?(?: human=(here|maybe|away))?\]/;
 
 /** Splits `[crowsnest poke <time>]` and its `- reason` lines. Null when it is not a poke. */
 export function parsePoke(text: string): ParsedPoke | null {

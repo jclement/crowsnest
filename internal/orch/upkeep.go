@@ -39,6 +39,12 @@ func (o *Orchestrator) Watch(ctx context.Context) {
 	if state := o.Status().State; state == StateFailed || state == StateStopped {
 		return // waiting for a manual restart, or stopped on purpose
 	}
+	if o.opts.Paused != nil && o.opts.Paused() {
+		o.update(func(s *Status) {
+			s.Detail = "Claude exited; crowsnest's automation is paused, so it is not restarted until you resume or use Restart."
+		})
+		return
+	}
 	o.recover(ctx)
 }
 

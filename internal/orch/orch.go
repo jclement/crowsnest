@@ -145,6 +145,9 @@ type Options struct {
 	// orchestrator's conversation). It must not block.
 	OnStatus func(Status)
 	Now      func() time.Time
+	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): an agent
+	// that exits meanwhile is not restarted automatically (Restart still works). Nil: never.
+	Paused func() bool
 
 	// ---- A standing agent other than the session's orchestrator (DESIGN.md 21.2) ----
 	// The lifecycle is the same for every standing agent: the orchestrator, and each project's

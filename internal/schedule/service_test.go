@@ -238,3 +238,23 @@ func TestExamplesParse(t *testing.T) {
 		}
 	}
 }
+
+// TestJobTasksWaitWhilePaused: a due `as: job` task starts nothing while the automation is
+// paused and runs at the first tick after the resume (DESIGN.md 6.13).
+func TestJobTasksWaitWhilePaused(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.write(t, h.dir, "build.md", "---\nevery: 1h\nas: job\ndir: /tmp/repo\n---\n# Nightly build\nRun it.\n")
+	paused := true
+	service := h.service()
+	service.opts.Paused = func() bool { return paused }
+	service.Tick(ctx)
+	if len(h.jobs.created) != 0 {
+		t.Fatalf("a job task ran while paused: %+v", h.jobs.created)
+	}
+	paused = false
+	service.Tick(ctx)
+	if len(h.jobs.created) != 1 {
+		t.Fatalf("the job task did not run after the resume: %d", len(h.jobs.created))
+	}
+}
