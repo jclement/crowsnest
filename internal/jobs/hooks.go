@@ -110,6 +110,11 @@ func (s *Service) resolveHookJob(ctx context.Context, jobID, callerPane string) 
 	return s.jobInPane(ctx, callerPane)
 }
 
+// JobInPane is jobInPane for other packages: the live job held in a pane, or "".
+func (s *Service) JobInPane(ctx context.Context, paneID string) string {
+	return s.jobInPane(ctx, paneID)
+}
+
 // jobInPane returns the live job whose agent runs in paneID, preferring a running one, else the
 // newest (a job just reserved for the orchestrator is queued with its pane set while its brief is
 // typed, R2-C05). It asks the store by pane, not a page of the board (R2-C16).

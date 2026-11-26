@@ -6,6 +6,8 @@ import { Ban, Clock, RefreshCw } from "lucide-react";
 import { relativeTime } from "../../lib/format";
 import { answerSummary, kindLabels, statusLabels, type Question } from "../../lib/questions";
 import { useCancelQuestion, useMe, useQuestion } from "../../lib/queries";
+import { shownFromAttachment } from "../../lib/attachments";
+import { AttachmentList } from "../attach/AttachmentList";
 import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
@@ -46,6 +48,9 @@ export function QuestionBody({ question, onDone }: { question: Question; onDone?
       <QuestionMeta question={question} />
       {question.body_md.trim() && <Markdown className="text-sm">{question.body_md}</Markdown>}
       {question.files && question.files.length > 0 && <DiffView files={question.files} />}
+      {question.attachments && question.attachments.length > 0 && (
+        <AttachmentList files={question.attachments.map(shownFromAttachment)} label="Files the agent attached" />
+      )}
       {question.status === "open" ? (
         <>
           <AnswerForm question={question} onAnswered={onDone} />
@@ -95,6 +100,9 @@ function Outcome({ question }: { question: Question }) {
     <section aria-label="Outcome" className="flex flex-col gap-1 rounded-md border border-border bg-surface-raised p-3">
       <p className="text-sm font-medium text-heading">{answerSummary(question)}</p>
       {question.answer_note && question.kind !== "manual" && <p className="whitespace-pre-wrap text-xs text-body">Note: {question.answer_note}</p>}
+      {question.answer_attachments && question.answer_attachments.length > 0 && (
+        <AttachmentList files={question.answer_attachments.map(shownFromAttachment)} label="Files sent with the answer" />
+      )}
       {question.status === "expired" && <p className="text-xs text-muted">Expiry is not consent; the agent was told there is no answer.</p>}
       {delivered && <p className="text-2xs text-muted">{delivered}</p>}
     </section>

@@ -29,7 +29,7 @@ Kinds:
 - manual: the human writes a free-text answer. No options.
 - notice: information only; nothing comes back. No options.
 
-Write a one-line title that states the decision; put the reasoning, trade-offs and evidence in body_md. Use files to show a proposed change as a diff (filename, original, final; up to 20 files, 256 KB each side). urgency=blocking also notifies the human's phone; use it only when work is truly stopped.`
+Write a one-line title that states the decision; put the reasoning, trade-offs and evidence in body_md. Use files to show a proposed change as a diff (filename, original, final; up to 20 files, 256 KB each side). Use attachments to show files as they are (a screenshot of the UI you built, a log, a PDF): paths inside your working directory or job directory; images appear as pictures on the card. urgency=blocking also notifies the human's phone; use it only when work is truly stopped.`
 
 // AskArgs are the ask tool's arguments: the question, plus wait.
 type AskArgs struct {
@@ -45,6 +45,7 @@ type AskArgs struct {
 	Files          []questions.File   `json:"files,omitempty" jsonschema:"files to show as a diff: filename, original content and final content"`
 	Wait           bool               `json:"wait,omitempty" jsonschema:"block until the question is answered, expired or cancelled. Default false: return the id at once and keep working"`
 	JobID          string             `json:"job_id,omitempty" jsonschema:"the job this question is about (j_<n>); empty in a job's own session. The orchestrator passes the id of the job it holds"`
+	Attachments    []string           `json:"attachments,omitempty" jsonschema:"files to show with the question (a screenshot, a log, a report): paths inside your working directory or your job directory, at most 10. Images are shown as pictures"`
 }
 
 func init() {
@@ -64,7 +65,7 @@ func askTool(ctx context.Context, client *Client, args AskArgs) *mcp.CallToolRes
 	question, err := client.Ask(ctx, questions.AskInput{
 		Title: args.Title, BodyMD: args.BodyMD, Kind: questions.Kind(args.Kind), Multi: args.Multi, Options: args.Options,
 		Recommend: args.Recommend, Context: args.Context, Urgency: questions.Urgency(args.Urgency),
-		ExpiresInHours: args.ExpiresInHours, Files: args.Files, Wait: args.Wait, JobID: args.JobID,
+		ExpiresInHours: args.ExpiresInHours, Files: args.Files, Wait: args.Wait, JobID: args.JobID, Attachments: args.Attachments,
 	})
 	if err != nil {
 		return errorResult(toolError("The question was not posted", err))

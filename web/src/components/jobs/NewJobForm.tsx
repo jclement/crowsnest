@@ -1,11 +1,14 @@
 // NewJobForm: the one text box (DESIGN.md 6.2 and 12). "What needs doing?" is the brief; where,
 // role, done-when and engine sit behind one disclosure. With no directory the job goes to the
-// orchestrator. Cmd/Ctrl+Enter gives the job from the keyboard.
+// orchestrator. Cmd/Ctrl+Enter gives the job from the keyboard. Files (DESIGN.md 8.6) are pasted,
+// dropped on the form or picked with the paperclip; the agent finds them listed in its brief.
 import { ChevronDown, ChevronRight, Send } from "lucide-react";
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { onJobDraft, takeJobDraft } from "../../lib/jobDraft";
 import { useCreateJob, useDirs, useRoles } from "../../lib/queries";
 import type { Job } from "../../lib/jobs";
+import { AttachButtons, AttachmentTray, DropOverlay } from "../attach/AttachmentTray";
+import { uploadHold, useAttachments, useFileDrop, usePasteToAttach } from "../attach/useAttachments";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/toast-context";
 
@@ -28,6 +31,17 @@ export function NewJobForm({ onCreated }: NewJobFormProps) {
   const toast = useToast();
   const ids = useId();
   const briefRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const attachments = useAttachments();
+  const insertText = useCallback((text: string) => {
+    const box = briefRef.current;
+    const start = box?.selectionStart ?? Number.MAX_SAFE_INTEGER;
+    const end = box?.selectionEnd ?? start;
+    setBrief((current) => current.slice(0, start) + text + current.slice(end));
+  }, []);
+  const onPaste = usePasteToAttach(attachments, insertText);
+  const dropping = useFileDrop(formRef, attachments.add, attachments.enabled);
+  const hold = uploadHold(attachments);
 
   // A draft from the command palette ("Open the full form"): fill the box, open the options, focus.
   useEffect(() => {
@@ -49,13 +63,21 @@ export function NewJobForm({ onCreated }: NewJobFormProps) {
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
-    if (!brief.trim() || create.isPending) return;
+    if (!brief.trim() || hold || create.isPending) return;
     create.mutate(
-      { brief, dir: dir.trim() || undefined, role: role || undefined, done_when: doneWhen.trim() || undefined, engine },
+      {
+        brief,
+        dir: dir.trim() || undefined,
+        role: role || undefined,
+        done_when: doneWhen.trim() || undefined,
+        engine,
+        ...(attachments.ids.length > 0 ? { attachments: attachments.ids } : {}),
+      },
       {
         onSuccess: (job) => {
           setBrief("");
           setDoneWhen("");
+          attachments.clear();
           toast.show({ tone: "success", title: `Job ${job.id} given`, description: job.dir ? `Starting an agent in ${job.dir}` : "Sent to the orchestrator" });
           onCreated?.(job);
         },
@@ -69,7 +91,8 @@ export function NewJobForm({ onCreated }: NewJobFormProps) {
   };
 
   return (
-    <form onSubmit={submit} aria-label="New job" className="flex flex-col gap-2 border-b border-border p-3">
+    <form ref={formRef} onSubmit={submit} aria-label="New job" className="relative flex flex-col gap-2 border-b border-border p-3">
+      <DropOverlay active={dropping} label="Drop files to give with the job" />
       <label htmlFor={`${ids}-brief`} className="sr-only">
         What needs doing?
       </label>
@@ -79,10 +102,12 @@ export function NewJobForm({ onCreated }: NewJobFormProps) {
         value={brief}
         onChange={(event) => setBrief(event.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         rows={brief.includes("\n") ? 4 : 2}
         placeholder="What needs doing?"
         className={`${inputClass} resize-y py-2`}
       />
+      <AttachmentTray attachments={attachments} />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -94,9 +119,13 @@ export function NewJobForm({ onCreated }: NewJobFormProps) {
           {open ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
           {optionsSummary(dir, role, engine)}
         </button>
-        <Button type="submit" variant="primary" icon={Send} className="ml-auto" disabled={!brief.trim() || create.isPending}>
-          {create.isPending ? "Giving…" : "Give job"}
-        </Button>
+        <span className="ml-auto flex items-center gap-2">
+          {hold && <span className="text-2xs font-medium text-warning">{hold}</span>}
+          <AttachButtons attachments={attachments} />
+          <Button type="submit" variant="primary" icon={Send} disabled={!brief.trim() || !!hold || create.isPending}>
+            {create.isPending ? "Giving…" : "Give job"}
+          </Button>
+        </span>
       </div>
       {open && <Options ids={ids} dir={dir} setDir={setDir} role={role} setRole={setRole} doneWhen={doneWhen} setDoneWhen={setDoneWhen} engine={engine} setEngine={setEngine} />}
     </form>

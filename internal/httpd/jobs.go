@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 )
@@ -102,20 +103,44 @@ func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, detail)
 }
 
+// jobMessageRequest is the body of POST /jobs/{id}/message: the message, plus uploads (a_…)
+// copied into the job's inbox and named after the text (8.6).
+type jobMessageRequest struct {
+	jobs.MessageInput
+	Attachments []string `json:"attachments,omitempty"`
+}
+
 func (s *Server) handleJobMessage(w http.ResponseWriter, r *http.Request) {
 	service := s.jobService(w)
 	if service == nil {
 		return
 	}
-	var input jobs.MessageInput
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJobBody)).Decode(&input); err != nil {
+	var request jobMessageRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJobBody)).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, codeValidation, `Send JSON like {"text":"…"}.`)
 		return
 	}
+	input := request.MessageInput
 	ctx, cancel := context.WithTimeout(r.Context(), jobActionTimeout)
 	defer cancel()
+	var delivered []attach.Attachment
+	if len(request.Attachments) > 0 {
+		if _, err := service.Get(ctx, r.PathValue("id")); err != nil {
+			s.writeJobError(w, r, err)
+			return
+		}
+		var ok bool
+		if delivered, ok = s.deliverAttachments(w, r, request.Attachments, s.inboxForJob(ctx, r.PathValue("id")), attach.RoleMessage, ""); !ok {
+			return
+		}
+		input.Text = attach.WithLines(input.Text, delivered)
+	}
 	result, err := service.Message(ctx, r.PathValue("id"), input)
 	if err != nil {
+		if errors.Is(err, jobs.ErrNoAgent) && s.deps.Attachments != nil {
+			s.deps.Attachments.Undeliver(context.WithoutCancel(ctx), delivered) // no agent: nothing was typed
+		}
+		s.takeBack(ctx, delivered, err)
 		s.writeJobError(w, r, err)
 		return
 	}

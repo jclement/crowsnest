@@ -28,6 +28,7 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   say: [],
   schedule: [queryKeys.schedule],
   spend: [queryKeys.spend, queryKeys.jobs],
+  attachment: [queryKeys.attachments],
 };
 
 /**

@@ -209,6 +209,8 @@ type Features struct {
 	Session      string `json:"session"`       // herdr session name
 	HerdrVersion string `json:"herdr_version"` // version the herdr server reported at start
 	Name         string `json:"name"`          // this instance's name (--name, else the short hostname)
+	// Attachments are the upload limits; nil when attachments are off (8.6).
+	Attachments *AttachmentLimits `json:"attachments,omitempty"`
 }
 
 func (s *Server) me(ctx context.Context) MeResponse {
@@ -217,7 +219,7 @@ func (s *Server) me(ctx context.Context) MeResponse {
 		Username: s.deps.Auth.Username(ctx),
 		Features: Features{
 			Auth: s.deps.Auth.Enabled(), Voice: cfg.VoiceEnabled(), Demo: cfg.Demo, Session: cfg.Session,
-			HerdrVersion: s.deps.HerdrVersion, Name: s.instanceName(),
+			HerdrVersion: s.deps.HerdrVersion, Name: s.instanceName(), Attachments: s.attachmentLimits(),
 		},
 	}
 }

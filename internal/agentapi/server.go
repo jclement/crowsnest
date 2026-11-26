@@ -47,6 +47,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jclement/crowsnest/internal/agentid"
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
@@ -125,6 +126,9 @@ type Server struct {
 	says    *ratelimit.Limiter
 	creates *ratelimit.Limiter
 	waits   *waitCounter
+
+	attachments AgentAttacher
+	attachRoots func(ctx context.Context, caller questions.Caller) []string
 }
 
 // ServerOptions configure a Server. Questions is required.
@@ -143,6 +147,19 @@ type ServerOptions struct {
 	// job token (the orchestrator): its standing context (DESIGN.md 7.9). It returns "" for a
 	// pane that is not the orchestrator's.
 	SessionContext func(ctx context.Context, paneID, source string) string
+	// Attachments stores files agents attach to a question or a result (internal/attach). Nil:
+	// an ask or done naming files is refused.
+	Attachments AgentAttacher
+	// AttachRoots returns the directories a caller may attach files from: its working directory
+	// and its job directory (DESIGN.md 8.6). Nil or empty: the caller may attach nothing.
+	AttachRoots func(ctx context.Context, caller questions.Caller) []string
+}
+
+// AgentAttacher is what the socket needs of internal/attach.
+type AgentAttacher interface {
+	ImportAgentFiles(ctx context.Context, paths, roots []string, pane string) ([]attach.Attachment, error)
+	Adopt(ctx context.Context, ids []string, kind, ownerID, role string) error
+	Discard(ctx context.Context, id string) error
 }
 
 // NewServer wires the routes.
@@ -153,6 +170,7 @@ func NewServer(opts ServerOptions) *Server {
 	server := &Server{
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext,
+		attachments: opts.Attachments, attachRoots: opts.AttachRoots,
 		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
 		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
 		creates: ratelimit.New(createBurst, createRefill, opts.Now),
@@ -259,11 +277,17 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	files, ok := s.importFiles(w, r, caller, input.Attachments)
+	if !ok {
+		return
+	}
 	question, err := s.questions.Ask(r.Context(), input, caller)
 	if err != nil {
+		s.discardFiles(r.Context(), files)
 		s.writeQuestionError(w, r, err)
 		return
 	}
+	question.Attachments = s.adoptFiles(r.Context(), files, attach.OwnerQuestion, question.ID, attach.RoleAsk)
 	writeData(w, http.StatusCreated, question)
 }
 

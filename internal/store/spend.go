@@ -1,4 +1,4 @@
-// Spend rows (DESIGN.md 7.11, migration 0010): running token totals per subject (a job or the
+// Spend rows (DESIGN.md 7.11, migration 0011): running token totals per subject (a job or the
 // orchestrator) with the reader's state, per-day rollups by pricing key, and the latest model
 // calls for a job's chart. internal/spend owns what the numbers mean and how they are priced; the
 // store adds deltas in one transaction and reads them back.

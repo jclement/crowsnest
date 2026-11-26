@@ -20,7 +20,7 @@ const (
 	GroupDay   = "day"
 )
 
-// Note is the sentence every spend view carries (decision 62).
+// Note is the sentence every spend view carries (decision 66).
 const Note = "Estimated API-equivalent cost from the agents' transcripts at list prices. Subscription plans are not billed per token, so this is not a bill."
 
 // Row is one line of a report.

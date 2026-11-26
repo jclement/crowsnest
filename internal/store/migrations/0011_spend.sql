@@ -1,4 +1,4 @@
--- 0010: spend per job and for the orchestrator (DESIGN.md 7.11). Token counts are read from the
+-- 0011: spend per job and for the orchestrator (DESIGN.md 7.11). Token counts are read from the
 -- agents' Claude transcripts and persisted here, so they survive a crowsnest restart and a
 -- transcript that is rotated or deleted; costs are computed from them when read.
 --

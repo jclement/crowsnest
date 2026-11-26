@@ -99,7 +99,7 @@ run = [
 ]
 
 [tasks."test:claude"]
-description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API, calls the ask MCP tool, and answers a manual poke with one synthetic reason, does an `every: poke` scheduled task that rides a poke, starts with Remote Control and reports it active; and the stop test: three haiku job agents (an undeclared stop is refused, done stops cleanly and its spend equals the transcript's own sums, a non-blocking ask is answered and the job finishes)"
+description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API, calls the ask MCP tool, and answers a manual poke with one synthetic reason, does an `every: poke` scheduled task that rides a poke, starts with Remote Control and reports it active; reads a pasted image (a PNG with a word, uploaded and sent with a prompt) under the default permission mode and says the word; and the stop test: three haiku job agents (an undeclared stop is refused, done stops cleanly and its spend equals the transcript's own sums, a non-blocking ask is answered and the job finishes)"
 run = "CROWSNEST_E2E_CLAUDE=1 CGO_ENABLED=1 go test -count=1 -tags integration -run IntegrationClaude -v -timeout 15m ./internal/orch/... ./internal/jobs/..."
 
 [tasks."test:clone"]

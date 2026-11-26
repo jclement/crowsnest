@@ -3,8 +3,10 @@
 // list follows new messages only while the reader is at the bottom (useStickToBottom) and offers
 // a "new messages" pill otherwise.
 import { ArrowDown, MessagesSquare, RefreshCw } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
+import { DropOverlay } from "../attach/AttachmentTray";
+import { useFileDrop } from "../attach/useAttachments";
 import { visibleMessages, type ChatState } from "../../lib/conversation";
 import { useAgentMessages } from "../../lib/conversation-queries";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
@@ -60,9 +62,16 @@ export function ConversationView({
   const ownScroll = variant === "embedded" || desktop;
   const { anchorRef, unseen, scrollToBottom } = useStickToBottom(messages.length, revision, `${ownScroll}:${query.data?.sessionId}`);
   const page = variant === "page";
+  // The whole pane takes dropped files for the composer (DESIGN.md 8.6), which hands its "add
+  // files" over through dropHandleRef; with nothing registered (attachments off, a dialog in place
+  // of the composer) a drop does nothing and no overlay shows.
+  const paneRef = useRef<HTMLDivElement>(null);
+  const dropHandleRef = useRef<((files: File[]) => void) | null>(null);
+  const dropping = useFileDrop(paneRef, (files) => dropHandleRef.current?.(files));
 
   return (
-    <div className={cn("flex min-w-0 flex-col", page && "md:h-full md:min-h-0")}>
+    <div ref={paneRef} className={cn("relative flex min-w-0 flex-col", page && "md:h-full md:min-h-0")}>
+      <DropOverlay active={dropping} />
       <div
         data-scroll-container={ownScroll ? "" : undefined}
         className={cn(
@@ -93,7 +102,7 @@ export function ConversationView({
           </div>
         )}
         <div className={cn("mx-auto flex min-w-0 flex-col gap-2", page && "max-w-3xl")}>
-          {(renderComposer ?? ((props: ComposerProps) => <Composer {...props} />))({ target, agentName, state, onSent: scrollToBottom, onOpenTerminal })}
+          {(renderComposer ?? ((props: ComposerProps) => <Composer {...props} />))({ target, agentName, state, onSent: scrollToBottom, onOpenTerminal, dropHandleRef })}
         </div>
       </div>
     </div>

@@ -28,14 +28,14 @@ import (
 // and returns the service and a stop function. Everything stops when ctx ends or stop is called;
 // stop returns once the deliverer and the sweeper have finished, and serve calls it before the
 // database closes, so an attempt cut short by shutdown can still record its outcome (R1b-C08).
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, pusher *push.Watcher, socket string, sessionContext func(context.Context, string, string) string, logger *slog.Logger) (*questions.Service, func(), error) {
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, pusher *push.Watcher, socket string, sessionContext func(context.Context, string, string) string, files *attachWiring, logger *slog.Logger) (*questions.Service, func(), error) {
 	var deliverer *questions.Deliverer
 	var notifyAsked func(questions.Question)
 	if cfg.NotifyURL != "" {
 		notifyAsked = questions.NewURLNotifier(cfg.NotifyURL, nil, logger)
 	}
 	options := questions.Options{
-		Store: db, Hub: events, Logger: logger,
+		Store: db, Hub: events, Logger: logger, Attachments: files.service,
 		OnSettled: func(question questions.Question) {
 			deliverer.Kick()
 			jobQuestionChanged(ctx, jobService, question, string(question.Status))
@@ -55,7 +55,7 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	}
 	service := questions.New(options)
 	deliverer = questions.NewDeliverer(questions.DelivererOptions{
-		Store: db, Prompt: questions.HerdrPrompter(client), Logger: logger,
+		Store: db, Prompt: questions.HerdrPrompter(client), Logger: logger, AnswerFiles: files.answerFiles,
 		OnDelivered: func(id int64) {
 			if question, err := service.Get(ctx, questions.FormatID(id)); err == nil {
 				events.Publish(hub.Event{Type: "question", Data: questions.Event{
@@ -74,7 +74,8 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	if err != nil {
 		return nil, stop, err
 	}
-	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version, SessionContext: sessionContext})
+	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version, SessionContext: sessionContext,
+		Attachments: files.service, AttachRoots: files.roots})
 	go func() {
 		if err := server.Serve(ctx, listener); err != nil {
 			logger.Error("agent socket stopped", "err", err)
@@ -85,6 +86,9 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	if demo, ok := client.(*fake.Demo); ok {
 		if err := startDemoQuestions(ctx, service, demo, logger); err != nil {
 			return nil, stop, err
+		}
+		if err := seedDemoAttachments(ctx, files, service, cfg.StateDir); err != nil {
+			logger.Warn("seeding the demo attachments", "err", err)
 		}
 	}
 	return service, stop, nil

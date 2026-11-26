@@ -30,6 +30,7 @@ type DoneArgs struct {
 	ResultMD    string   `json:"result_md" jsonschema:"Markdown: what was done, where (files, branch, commits), and anything the human must know"`
 	Verified    []string `json:"verified" jsonschema:"what you checked and saw, each with the command or evidence. [] if nothing"`
 	NotVerified []string `json:"not_verified" jsonschema:"what you did not check or could not run. [] if nothing"`
+	Attachments []string `json:"attachments,omitempty" jsonschema:"files to attach to the result (a report, a screenshot of what you built): paths inside your working directory or job directory, at most 10"`
 }
 
 // FailArgs are fail's arguments.
@@ -92,7 +93,7 @@ func init() {
 		mcp.AddTool(server, &mcp.Tool{Name: "done", Title: "Finish the job", Description: doneDescription},
 			func(ctx context.Context, _ *mcp.CallToolRequest, args DoneArgs) (*mcp.CallToolResult, any, error) {
 				return jobCall(client, args.JobID, func(id string) (string, error) {
-					job, err := client.DoneJob(ctx, id, jobs.DoneInput{ResultMD: args.ResultMD, Verified: args.Verified, NotVerified: args.NotVerified})
+					job, err := client.DoneJob(ctx, id, jobs.DoneInput{ResultMD: args.ResultMD, Verified: args.Verified, NotVerified: args.NotVerified, Attachments: args.Attachments})
 					if err != nil {
 						return "", err
 					}

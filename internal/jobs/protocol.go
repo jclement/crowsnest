@@ -30,6 +30,9 @@ type CreateInput struct {
 	Model    string `json:"model,omitempty"`
 	// Isolate asks for a git worktree; nil means the role's default (builders isolate).
 	Isolate *bool `json:"isolate,omitempty"`
+	// Attachments are uploads (a_…) given with the job from the browser: copied into the job's
+	// inbox and listed in its brief. Agents cannot pass them (CreateForAgent refuses).
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // maxTitleRunes caps the title taken from the brief's first line.
@@ -50,6 +53,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput, parentID string
 	if err != nil {
 		return Job{}, err
 	}
+	if err := s.checkAttachments(ctx, input.Attachments); err != nil {
+		return Job{}, err
+	}
 	s.mu.Lock()
 	err = s.insertLocked(ctx, &record)
 	s.mu.Unlock()
@@ -60,12 +66,41 @@ func (s *Service) Create(ctx context.Context, input CreateInput, parentID string
 		s.rememberDir(ctx, record.Dir)
 	}
 	job := s.toJob(record, 0)
+	s.attachBrief(ctx, job, input.Attachments)
 	s.publish(job, "created")
 	if parentID != "" {
 		_ = s.Journal(ctx, parentID, EventChild, "Delegated "+job.ID+": "+job.Title, map[string]any{"child": job.ID})
 	}
 	s.goBackground(ctx, job.ID, func(ctx context.Context) { s.launch(ctx, job.ID) })
 	return job, nil
+}
+
+// checkAttachments refuses a job whose attachments cannot be given to it, before it is recorded.
+func (s *Service) checkAttachments(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if s.opts.Attachments == nil {
+		return invalid("attachments are not available on this server")
+	}
+	if err := s.opts.Attachments.CheckBrief(ctx, ids); err != nil {
+		return invalid("%v", err)
+	}
+	return nil
+}
+
+// attachBrief copies the job's files into its inbox before the launch writes the brief that
+// lists them. A failure is on the job's timeline; the job still runs, with the files it got.
+func (s *Service) attachBrief(ctx context.Context, job Job, ids []string) {
+	if len(ids) == 0 || s.opts.Attachments == nil {
+		return
+	}
+	if err := s.opts.Attachments.AttachBrief(ctx, job, ids); err != nil {
+		s.opts.Logger.Warn("giving a job its attachments failed", "job", job.ID, "err", err)
+		_ = s.Journal(ctx, job.ID, EventMessage, "Some attached files could not be given to the agent: "+oneLine(err.Error(), 200), nil)
+		return
+	}
+	_ = s.Journal(ctx, job.ID, EventMessage, fmt.Sprintf("You attached %d file(s) to the brief", len(ids)), nil)
 }
 
 // insertLocked stores a new job and its created event (s.mu held), setting record.ID.
@@ -313,6 +348,9 @@ type DoneInput struct {
 	ResultMD    string   `json:"result_md"`
 	Verified    []string `json:"verified"`
 	NotVerified []string `json:"not_verified"`
+	// Attachments are files the agent attaches to its result (absolute paths inside its working
+	// or job directory). The agent socket imports them; Done itself never reads a path.
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // Done declares the job finished with its evidence.

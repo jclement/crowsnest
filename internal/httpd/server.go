@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -100,6 +101,10 @@ type Deps struct {
 	Spend *spend.Meter
 	// Tender serves /orchestrator/context and /orchestrator/compact (7.9). Nil: 503.
 	Tender *orch.Tender
+	// Attachments stores pasted and dropped files and hands them to agents (8.6); AttachLayout
+	// says where each agent's copies go. Nil: the routes answer 503 and sends refuse files.
+	Attachments  *attach.Service
+	AttachLayout attach.Layout
 	// Setup makes this the locked first-run server (setup.go): only /health, the setup
 	// endpoints and the web app's files, nothing else. Nil for the normal server.
 	Setup *setup.Service
@@ -198,6 +203,7 @@ func (s *Server) routes() http.Handler {
 	s.registerVoiceRoutes(mux)
 	s.registerPushRoutes(mux)
 	s.registerSpendRoutes(mux)
+	s.registerAttachmentRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)

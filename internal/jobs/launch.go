@@ -33,6 +33,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/agentcfg"
 	"github.com/jclement/crowsnest/internal/agentid"
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
@@ -480,7 +481,10 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 			return jobFiles{}, fmt.Errorf("writing the job agent's token file: %w", err)
 		}
 	}
-	if err := writeJSON(files.settings, agentcfg.ClaudeSettings(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, tokenFile, withMCP)); err != nil {
+	// The job's attachment inbox is readable without a prompt (DESIGN.md 8.6).
+	settings := agentcfg.AllowRead(agentcfg.ClaudeSettings(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, tokenFile, withMCP),
+		attach.Layout{StateDir: s.opts.Launch.StateDir}.JobDir(job.ID))
+	if err := writeJSON(files.settings, settings); err != nil {
 		return jobFiles{}, err
 	}
 	if withMCP {

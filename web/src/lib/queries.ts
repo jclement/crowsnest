@@ -135,7 +135,7 @@ export function useJobAction(id: string) {
 export function useJobMessage(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ text, force }: { text: string; force?: boolean }) => endpoints.jobMessage(id, text, force),
+    mutationFn: ({ text, force, attachments }: { text: string; force?: boolean; attachments?: string[] }) => endpoints.jobMessage(id, text, force, attachments),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
   });
 }

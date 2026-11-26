@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/jclement/crowsnest/internal/attach"
 )
 
 // Kind is what sort of answer a question wants.
@@ -92,6 +94,10 @@ type AskInput struct {
 	// checks it against the caller's token: a job agent may name only its own job, and the
 	// orchestrator (whose token names no job) only a job it holds (R2-C06).
 	JobID string `json:"job_id,omitempty"`
+	// Attachments are files the agent attaches to the question (absolute paths, inside its
+	// working directory or job directory: DESIGN.md 8.6). The agent socket imports them before
+	// asking; the questions service itself never reads a path.
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // Caller identifies who asked: the herdr pane the answer is typed back into, and the job the
@@ -106,6 +112,9 @@ type Caller struct {
 type AnswerInput struct {
 	Value json.RawMessage `json:"answer_value,omitempty"`
 	Note  string          `json:"answer_note,omitempty"`
+	// Attachments are uploads (a_…) sent with the answer. The browser API copies them into the
+	// asker's inbox before answering; the line typed back names them (DESIGN.md 8.6).
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // Question is the full record as both APIs return it.
@@ -122,6 +131,10 @@ type Question struct {
 	// Files is omitted from lists (they can be large); FileCount says how many there are.
 	Files     []File `json:"files,omitempty"`
 	FileCount int    `json:"file_count"`
+	// Attachments are the asker's files; AnswerAttachments the human's, sent with the answer
+	// (with the path of the asker's copy). Filled by Get, not by lists.
+	Attachments       []attach.Attachment `json:"attachments,omitempty"`
+	AnswerAttachments []attach.Attachment `json:"answer_attachments,omitempty"`
 
 	Status      Status `json:"status"`
 	AnswerValue any    `json:"answer_value"` // null until answered; a key or an array of keys

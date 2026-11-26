@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jclement/crowsnest/internal/agentid"
@@ -44,7 +45,8 @@ func TestStartWiresTheAgentSocketAndMCP(t *testing.T) {
 		} `json:"permissions"`
 	}
 	readJSON(t, argValue(args, "--settings"), &settings)
-	if !slices.Equal(settings.Permissions.Allow, []string{MCPAllowRule}) {
+	allow := settings.Permissions.Allow
+	if len(allow) < 2 || allow[0] != MCPAllowRule || !strings.HasPrefix(allow[1], "Read(//") || !strings.HasSuffix(allow[1], "/orchestrator/attachments/**)") {
 		t.Fatalf("settings %+v", settings)
 	}
 	info, _ := os.Stat(argValue(args, "--mcp-config"))

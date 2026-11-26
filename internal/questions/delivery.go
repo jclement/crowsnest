@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/termtext"
 )
@@ -71,6 +72,9 @@ type DelivererOptions struct {
 	// OnDelivered runs after a delivery finished (delivered or given up), so the service can
 	// announce it. It must not block.
 	OnDelivered func(id int64)
+	// AnswerFiles lists the files sent with an answer, already copied into the asker's inbox, so
+	// the typed line can name them (DESIGN.md 8.6). Nil: answers carry no files.
+	AnswerFiles func(ctx context.Context, questionID string) []attach.Attachment
 }
 
 // Deliverer types answers back. Build with NewDeliverer, then Run.
@@ -185,7 +189,11 @@ func (d *Deliverer) deliver(ctx context.Context, record store.QuestionRecord) {
 	if err != nil || !claimed {
 		return
 	}
-	line := AnswerLine(fromRecord(record, false))
+	question := fromRecord(record, false)
+	if d.opts.AnswerFiles != nil && question.Status == StatusAnswered {
+		question.AnswerAttachments = d.opts.AnswerFiles(ctx, question.ID)
+	}
+	line := AnswerLine(question)
 	attemptCtx, cancel := context.WithTimeout(ctx, deliveryTimeout)
 	err = d.opts.Prompt(attemptCtx, record.SourcePane, line)
 	cancel()
@@ -284,7 +292,27 @@ func outcome(q Question) string {
 	if note := termtext.Clean(q.AnswerNote); note != "" && q.Kind != KindManual {
 		text += " (note: " + note + ")"
 	}
+	if files := attachedFiles(q.AnswerAttachments); files != "" {
+		text += " (" + files + ")"
+	}
 	return text
+}
+
+// attachedFiles names the files sent with an answer, as the asker reads them: "attached:
+// <path> (image/png, 240 KB), <path> (…)". Only files with a copy are named; the paths are
+// crowsnest's own, but pass through termtext like every other part of the line.
+func attachedFiles(files []attach.Attachment) string {
+	var parts []string
+	for _, file := range files {
+		if file.Path == "" {
+			continue
+		}
+		parts = append(parts, strings.TrimPrefix(attach.Line(file), attach.LinePrefix))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "attached: " + strings.Join(parts, ", ")
 }
 
 func quotedTitle(q Question) string {

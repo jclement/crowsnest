@@ -8,10 +8,12 @@
 import { Brain, ChevronRight, Loader2, Play, Volume2 } from "lucide-react";
 import { useState } from "react";
 import { endpoints } from "../../lib/api";
+import { parseAttachedLines, shownFromRef } from "../../lib/attachments";
 import { cn } from "../../lib/cn";
 import type { Message, MessageTag } from "../../lib/conversation";
 import { player } from "../../lib/voice/player";
 import { splitSay } from "../../lib/voice/say";
+import { AttachmentList } from "../attach/AttachmentList";
 import { Markdown } from "../Markdown";
 import { Chip, type ChipTone } from "../ui/Chip";
 import { PokeRow } from "./PokeRow";
@@ -104,18 +106,24 @@ function PlaySayButton({ target, messageId }: { target: string; messageId: strin
 
 function UserMessage({ message }: { message: Message }) {
   const tag = message.tag ? tagLabels[message.tag] : undefined;
+  // Files sent with the message were typed as "Attached: <path> (type, size)" lines; they show
+  // as pictures and chips through the attachment API, not as paths (DESIGN.md 8.6).
+  const { text, refs } = parseAttachedLines(message.tag === "voice" ? withoutHeader(message.text ?? "") : (message.text ?? ""));
   return (
     <div className="flex min-w-0 flex-col items-end gap-1">
       {tag && <Chip tone={tag.tone}>{tag.label}</Chip>}
-      <div
-        className={cn(
-          "max-w-[92%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words md:max-w-[80%]",
-          "bg-selected text-heading",
-          message.tag === "command" && "font-mono text-xs",
-        )}
-      >
-        {message.tag === "voice" ? withoutHeader(message.text ?? "") : message.text}
-      </div>
+      {text && (
+        <div
+          className={cn(
+            "max-w-[92%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words md:max-w-[80%]",
+            "bg-selected text-heading",
+            message.tag === "command" && "font-mono text-xs",
+          )}
+        >
+          {text}
+        </div>
+      )}
+      {refs.length > 0 && <AttachmentList files={refs.map(shownFromRef)} label="Attached files" className="max-w-[92%] justify-end md:max-w-[80%]" />}
     </div>
   );
 }

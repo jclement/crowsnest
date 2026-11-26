@@ -114,6 +114,8 @@ export interface CreateJobRequest {
   done_when?: string;
   engine?: string;
   model?: string;
+  /** Uploads (a_…) given with the job: copied into its inbox and listed in its brief (8.6). */
+  attachments?: string[];
 }
 
 export interface RoleInfo {

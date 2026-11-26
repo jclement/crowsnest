@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -103,6 +104,7 @@ func (c *Client) Health(ctx context.Context) (HealthResponse, error) {
 
 // Ask posts a question.
 func (c *Client) Ask(ctx context.Context, input questions.AskInput) (questions.Question, error) {
+	input.Attachments = AbsPaths(input.Attachments)
 	var out questions.Question
 	err := c.do(ctx, http.MethodPost, "/api/v1/questions", input, &out)
 	return out, err
@@ -248,4 +250,21 @@ func decodeResponse(response *http.Response, out any) error {
 		return fmt.Errorf("decoding crowsnest's answer: %w", err)
 	}
 	return nil
+}
+
+// AbsPaths makes attachment paths absolute against this process's working directory: the agent's
+// own (the CLI and the MCP server run where the agent runs), which the server cannot know. The
+// server still decides what may be read (DESIGN.md 8.6).
+func AbsPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return paths
+	}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if absolute, err := filepath.Abs(path); err == nil && !filepath.IsAbs(path) {
+			path = absolute
+		}
+		out = append(out, path)
+	}
+	return out
 }

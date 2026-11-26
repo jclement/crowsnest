@@ -101,6 +101,18 @@ type Options struct {
 	// DefaultModel is the model a Claude job agent gets when its job names none and does not
 	// inherit one from its parent (--job-model). Empty: Claude's own default.
 	DefaultModel string
+	// Attachments hands a job the files the human gave with it (internal/attach, wired in
+	// serve). Nil: a job given with attachments is refused.
+	Attachments BriefAttacher
+}
+
+// BriefAttacher is what the jobs service needs of attachments (DESIGN.md 8.6): to check the
+// files named with a new job before it is recorded, to copy them into its inbox once it has an
+// id (before its brief is written), and to list them in the brief.
+type BriefAttacher interface {
+	CheckBrief(ctx context.Context, ids []string) error
+	AttachBrief(ctx context.Context, job Job, ids []string) error
+	BriefLines(ctx context.Context, jobID string) []string
 }
 
 // SpendReader is the part of internal/spend the jobs service reads (a *spend.Meter in serve).
