@@ -22,7 +22,7 @@ import (
 
 // startQuestions builds the question service, starts its background work and the agent socket,
 // and returns the service and the socket path. Everything stops when ctx ends.
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, jobService *jobs.Service, socket string, logger *slog.Logger) (*questions.Service, error) {
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, socket string, logger *slog.Logger) (*questions.Service, error) {
 	var deliverer *questions.Deliverer
 	var notifyAsked func(questions.Question)
 	if cfg.NotifyURL != "" {
@@ -59,7 +59,7 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	if err != nil {
 		return nil, err
 	}
-	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Jobs: jobService, Hub: events, Logger: logger, Version: version})
+	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version})
 	go func() {
 		if err := server.Serve(ctx, listener); err != nil {
 			logger.Error("agent socket stopped", "err", err)

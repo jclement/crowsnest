@@ -117,6 +117,8 @@ export interface OrchestratorStatus {
 export interface PromptRequest {
   text: string;
   force_over_draft?: boolean;
+  /** Transcribed speech (talk mode): the server adds the voice header and the talk flag. */
+  voice?: boolean;
 }
 
 export interface PromptResult {

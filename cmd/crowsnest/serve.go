@@ -2,7 +2,7 @@
 // session, keep the fleet cache running, and run the HTTP server until SIGINT or SIGTERM. With
 // --demo the herdr session is the in-memory fake with its scripted demo fleet. The orchestrator
 // and the conversation tailer start here too (orchestrator.go), and so do the questions inbox and
-// the agent socket (questions.go); talk mode joins in a later milestone.
+// the agent socket (questions.go), and talk mode when an ElevenLabs key is set (voice.go).
 
 package main
 
@@ -110,14 +110,18 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	fleetCache := fleet.New(fleet.Options{Client: client, Hub: events, Session: cfg.Session, Logger: logger})
 	go fleetCache.Run(ctx)
-	agentSocket := agentapi.SocketPath(os.Getenv("XDG_RUNTIME_DIR"), cfg.StateDir, cfg.Session)
-	refs := &jobRefs{}
-	jobService := newJobService(cfg, client, db, events, agentSocket, refs, logger)
-	questionService, err := startQuestions(ctx, cfg, client, db, events, jobService, agentSocket, logger)
+	talk, err := startVoice(cfg, events, logger)
 	if err != nil {
 		return err
 	}
-	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, events, agentSocket, logger)
+	agentSocket := agentapi.SocketPath(os.Getenv("XDG_RUNTIME_DIR"), cfg.StateDir, cfg.Session)
+	refs := &jobRefs{}
+	jobService := newJobService(cfg, client, db, events, agentSocket, refs, logger)
+	questionService, err := startQuestions(ctx, cfg, client, db, events, jobService, speakerOf(talk), agentSocket, logger)
+	if err != nil {
+		return err
+	}
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, events, agentSocket, talk, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	startJobs(ctx, jobService, client, logger)
 
@@ -125,7 +129,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
 		Orchestrator: orchestrator, Conversations: conversations,
-		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService,
+		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

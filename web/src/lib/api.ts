@@ -161,7 +161,51 @@ export const endpoints = {
   jobAction: (id: string, action: "cancel" | "nudge" | "resume") => api<Job>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
   roles: () => api<RoleInfo[]>("/roles"),
   dirs: () => api<DirEntry[]>("/dirs"),
+  // ---- M11: talk mode (every route is 404 when voice is off) ----
+  /** Uploads one recording as it came from MediaRecorder; returns what was said. */
+  transcribe: (audio: Blob) => uploadAudio(audio),
+  /** Talk-mode heartbeat: this tab has talk mode on (or just turned it off). */
+  talk: (clientId: string, on: boolean) => api<TalkStatus>("/voice/talk", { method: "POST", body: { client_id: clientId, on } }),
+  /** A question's title and options, made speakable; play it through speechUrl. */
+  readAloud: (questionId: string) => api<{ text_id: string }>("/voice/read", { method: "POST", body: { question_id: questionId } }),
 };
+
+/** POST /voice/talk's answer. */
+export interface TalkStatus {
+  talk: boolean;
+  heartbeat_seconds: number;
+  max_recording_seconds: number;
+}
+
+/** Where an <audio> element fetches a server-held text's speech. */
+export function speechUrl(textId: string): string {
+  return `${API_BASE}/voice/tts?text_id=${encodeURIComponent(textId)}`;
+}
+
+/**
+ * POST /voice/stt: the body is the raw recording with its own content type, so it cannot go
+ * through api(), which sends JSON. The headers and error handling are the same.
+ */
+async function uploadAudio(audio: Blob): Promise<{ text: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/voice/stt`, {
+      method: "POST",
+      headers: { Accept: "application/json", "X-Crowsnest": "1", "Content-Type": audio.type || "audio/webm" },
+      credentials: "same-origin",
+      body: audio,
+    });
+  } catch {
+    throw new ApiError(0, "NETWORK_ERROR", "Cannot reach crowsnest. Check the connection.");
+  }
+  const payload = await readJSON(response);
+  if (!response.ok) {
+    if (response.status === 401) unauthorizedHandler?.();
+    const error = (payload as { error?: { code?: string; message?: string } } | null)?.error;
+    throw new ApiError(response.status, error?.code ?? "HTTP_" + response.status, error?.message ?? response.statusText);
+  }
+  return (payload as { data: { text: string } }).data;
+}
 
 /** The terminal WebSockets (lib/termSocket.ts opens them). */
 export const terminalPaths = {

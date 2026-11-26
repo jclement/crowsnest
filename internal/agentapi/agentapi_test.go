@@ -6,9 +6,12 @@ import (
 	"errors"
 	"io/fs"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -360,5 +363,32 @@ func TestSettledText(t *testing.T) {
 	}
 	if got := SettledText(questions.Question{ID: "q_1", Status: questions.StatusCancelled}); !strings.Contains(got, "not consent") {
 		t.Fatal(got)
+	}
+}
+
+// recordingSpeaker is a Speaker that remembers what it was asked to say.
+type recordingSpeaker struct {
+	mu   sync.Mutex
+	said []string
+}
+
+func (r *recordingSpeaker) Say(sentence, source, paneID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.said = append(r.said, source+"|"+paneID+"|"+sentence)
+	return "t_1"
+}
+
+func TestSayGoesToTheSpeakerWhenTalkModeIsOn(t *testing.T) {
+	speaker := &recordingSpeaker{}
+	server := NewServer(ServerOptions{Speaker: speaker})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/say", strings.NewReader(`{"text":"Build  green."}`))
+	r.Header.Set(HeaderPane, "w2:p1")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, r)
+	speaker.mu.Lock()
+	defer speaker.mu.Unlock()
+	if response.Code != http.StatusOK || len(speaker.said) != 1 || speaker.said[0] != "say|w2:p1|Build green." {
+		t.Fatalf("%d %v", response.Code, speaker.said)
 	}
 }
