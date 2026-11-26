@@ -89,11 +89,11 @@ type KV interface {
 
 // Options configure an Orchestrator. Client, KV, Dir and StateDir are required.
 type Options struct {
-	Client         herdr.Client
-	KV             KV
-	Hub            *hub.Hub // nil: no events (tests)
+	Client herdr.Client
+	KV     KV
+	Hub    *hub.Hub // nil: no events (tests)
 	// Journal records restarts (automatic and manual); nil records nothing.
-	Journal *journal.Journal
+	Journal        *journal.Journal
 	Logger         *slog.Logger
 	Session        string // herdr session name, for the pane env and the instructions
 	Dir            string // working directory (--dir), created if missing
