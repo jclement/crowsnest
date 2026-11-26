@@ -358,3 +358,50 @@ func TestURLNotifierPostsOnlyBlockingTitlesRedacted(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+// R2-L3: supervisor notices are cleaned and rate limited per job and in total.
+func TestTextNotifierIsCleanedAndRateLimited(t *testing.T) {
+	var mu sync.Mutex
+	var posted []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		posted = append(posted, string(body))
+		mu.Unlock()
+	}))
+	defer server.Close()
+	notify := NewTextNotifier(server.URL, server.Client(), nil)
+	for range notifyBurst + 3 {
+		notify("crowsnest: job j_7 is waiting at a dialog\n\x1b[31mFAKE‮")
+	}
+	for i := range textBurst + 2 {
+		notify(fmt.Sprintf("crowsnest: job j_%d failed", 100+i))
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		count := len(posted)
+		lines := append([]string(nil), posted...)
+		mu.Unlock()
+		if count >= textBurst || time.Now().After(deadline) {
+			time.Sleep(100 * time.Millisecond) // let any extra posts land
+			mu.Lock()
+			lines = append([]string(nil), posted...)
+			mu.Unlock()
+			about7 := 0
+			for _, line := range lines {
+				if strings.ContainsAny(line, "\n\x1b‮") {
+					t.Fatalf("an uncleaned notice: %q", line)
+				}
+				if strings.Contains(line, "j_7 ") {
+					about7++
+				}
+			}
+			if about7 != notifyBurst || len(lines) != textBurst {
+				t.Fatalf("posted %d notices (%d about j_7), want %d (%d)", len(lines), about7, textBurst, notifyBurst)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

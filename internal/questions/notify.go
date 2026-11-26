@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -93,8 +94,21 @@ func postNotice(ctx context.Context, client *http.Client, endpoint, line string)
 	return nil
 }
 
+// Job notices (R2-L3): per job, the same burst and refill as a question asker; across all of
+// them, textBurst then one every textRefill, so many jobs at once still cannot flood the phone.
+const (
+	textBurst  = 10
+	textRefill = time.Minute
+)
+
+// noticeJob finds the job a supervisor notice is about ("crowsnest: job j_7 …"), its rate-limit
+// key.
+var noticeJob = regexp.MustCompile(`\bjob (j_[0-9]+)\b`)
+
 // NewTextNotifier posts arbitrary one-line notices (the job supervisor's "tell Jeff") to url,
-// redacted and capped like question notices, in the background.
+// cleaned (internal/termtext), redacted and capped like question notices, in the background.
+// They are rate limited per job and in total (R2-L3): a job agent can make the supervisor send
+// notices (a hook, then job_update, and again), and the phone must not be its megaphone.
 func NewTextNotifier(url string, client *http.Client, logger *slog.Logger) func(string) {
 	if client == nil {
 		client = &http.Client{Timeout: notifyTimeout}
@@ -102,10 +116,21 @@ func NewTextNotifier(url string, client *http.Client, logger *slog.Logger) func(
 	if logger == nil {
 		logger = slog.Default()
 	}
+	perJob := ratelimit.New(notifyBurst, notifyRefill, nil)
+	overall := ratelimit.New(textBurst, textRefill, nil)
 	return func(text string) {
-		line := redact.String(strings.Join(strings.Fields(text), " "))
-		if runes := []rune(line); len(runes) > 200 {
-			line = string(runes[:199]) + "…"
+		line := termtext.Cap(redact.String(termtext.Clean(text)), notifyMaxRunes)
+		key := "crowsnest"
+		if match := noticeJob.FindStringSubmatch(line); match != nil {
+			key = match[1]
+		}
+		if ok, _ := perJob.Allow(key); !ok {
+			logger.Info("not notifying --notify-url: too many notices about one job", "job", key)
+			return
+		}
+		if ok, _ := overall.Allow("all"); !ok {
+			logger.Info("not notifying --notify-url: too many notices at once", "job", key)
+			return
 		}
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)

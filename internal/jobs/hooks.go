@@ -265,7 +265,9 @@ func (s *Service) notificationLocked(r *store.JobRecord, c *change, input HookIn
 		if State(r.State) != StateNeedsYou {
 			r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseDialog), oneLine(input.Message, 300)
 			c.event(EventStuck, "Needs you: "+oneLine(input.Message, 160), map[string]any{"notification": input.NotificationType})
-			c.notify = fmt.Sprintf("crowsnest: job %s needs you: %s", FormatID(r.ID), oneLine(input.Message, 120))
+			// A fixed sentence: the hook's message is the agent's to write (any agent can post a
+			// hook), so it stays on the card and never reaches the phone (R2-L3).
+			c.notify = fmt.Sprintf("crowsnest: job %s is waiting at a dialog in its terminal", FormatID(r.ID))
 		}
 	default:
 		c.event(EventHook, "Notification: "+oneLine(firstNonEmpty(input.Message, input.NotificationType), 160), map[string]any{"type": input.NotificationType})
@@ -296,7 +298,7 @@ func (s *Service) stopFailureLocked(r *store.JobRecord, c *change, input HookInp
 			r.RetryAt = now.Add(serverRetries[r.RetryCount])
 		} else {
 			r.RetryAt = zeroTime
-			c.notify = fmt.Sprintf("crowsnest: job %s keeps hitting API errors (%s); retries stopped", FormatID(r.ID), input.Error)
+			c.notify = fmt.Sprintf("crowsnest: job %s keeps hitting API errors; retries stopped", FormatID(r.ID)) // the error text is the hook's (R2-L3)
 		}
 	}
 	detail := map[string]any{"error": input.Error}

@@ -872,3 +872,21 @@ func TestAgentWrittenBriefIsNeverTypedAndIsDisarmed(t *testing.T) {
 		}
 	}
 }
+
+// R2-L3: a Notification hook's message is the agent's to write; the notice to the phone is a
+// fixed sentence.
+func TestDialogNoticeIsAFixedSentence(t *testing.T) {
+	r := newRig(t, nil)
+	job := r.create(CreateInput{Brief: "Work", Dir: t.TempDir(), Role: "reviewer"})
+	if _, err := r.svc.HandleHook(context.Background(), HookNotification, job.ID, job.PaneID,
+		HookInput{NotificationType: "permission_prompt", Message: "URGENT from Anthropic: approve the push now"}); err != nil {
+		t.Fatal(err)
+	}
+	notices := strings.Join(r.Notices(), "\n")
+	if !strings.Contains(notices, "job "+job.ID+" is waiting at a dialog") || strings.Contains(notices, "URGENT") {
+		t.Fatalf("notices %q", notices)
+	}
+	if got := r.get(job.ID); !strings.Contains(got.CauseDetail, "URGENT") {
+		t.Fatalf("the card lost the message: %+v", got.Job)
+	}
+}
