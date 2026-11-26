@@ -126,6 +126,31 @@ func TestListenRemovesAStaleSocketButNotALiveOneOrAFile(t *testing.T) {
 	}
 }
 
+// TestListenLeavesALiveSocketAloneWhenTheProbeIsCancelled is R1b-C02: a probe that fails for
+// any reason other than "connection refused" (here a cancelled start-up) proves nothing, and the
+// live server's socket must survive it.
+func TestListenLeavesALiveSocketAloneWhenTheProbeIsCancelled(t *testing.T) {
+	path := filepath.Join(shortDir(t), "live.sock")
+	live, err := Listen(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = live.Close() })
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Listen(cancelled, path); err == nil {
+		t.Fatal("a cancelled start-up took over the socket")
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("the live server's socket was removed: %v", err)
+	}
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		t.Fatalf("the live server is no longer reachable: %v", err)
+	}
+	_ = conn.Close()
+}
+
 func TestSocketPath(t *testing.T) {
 	if got := socketPath("/run/user/1000", "/state", "crow", "/tmp", 1000); got != "/run/user/1000/crowsnest/crow.sock" {
 		t.Fatalf("runtime dir: %s", got)
