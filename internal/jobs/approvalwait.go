@@ -14,12 +14,19 @@ import (
 )
 
 // SetApprovalWaiting records that a job's agent is (or is no longer) waiting on an approval.
-// summary is the call in one line, shown as the cause's detail.
+// summary is the call in one line, shown as the cause's detail. With Options.ApprovalPending set
+// (as in serve), waiting is read from the approvals store under the jobs lock and the argument is
+// only a hint: the approvals' change callbacks can run out of order (a supersession landing
+// between an approval's insert and its "requested" callback), and the last one to run must still
+// leave the job matching what is actually pending.
 func (s *Service) SetApprovalWaiting(ctx context.Context, jobID string, waiting bool, summary string) error {
 	if jobID == "" {
 		return nil
 	}
 	_, err := s.mutate(ctx, jobID, func(r *store.JobRecord, c *change) error {
+		if s.opts.ApprovalPending != nil {
+			waiting = s.opts.ApprovalPending(ctx, jobID)
+		}
 		return s.approvalWaitingLocked(r, c, waiting, summary)
 	})
 	if errors.Is(err, errSkip) {

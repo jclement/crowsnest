@@ -313,6 +313,8 @@ func newHookCommand() *cobra.Command {
 // hookFlags are `crowsnest hook`'s flags.
 type hookFlags struct {
 	job, socket, tokenFile, rules string
+	// timings overrides the permission-request hook's timings (tests); nil: the defaults.
+	timings *approvalTimings
 }
 
 // runHook does the hook's work and swallows every failure (fail open).
@@ -347,7 +349,11 @@ func runHook(ctx context.Context, stdin io.Reader, stdout io.Writer, getenv func
 		return
 	case "permission-request":
 		if client != nil {
-			runPermissionRequest(ctx, stdout, input, client)
+			timings := defaultApprovalTimings
+			if flags.timings != nil {
+				timings = *flags.timings
+			}
+			runPermissionRequest(ctx, stdout, input, client, timings)
 		}
 		return
 	}

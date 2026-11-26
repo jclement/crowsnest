@@ -76,13 +76,9 @@ func newApprovals(cfg config.Config, db *store.Store, events *hub.Hub, rules *gu
 		},
 		OnChange: func(ctx context.Context, approval approvals.Approval, change string) {
 			if service := wiring.jobs.Load(); service != nil && approval.JobID != "" {
-				waiting := change == "requested"
-				if !waiting {
-					if count, err := db.CountPendingApprovals(ctx, approval.JobID); err == nil && count > 0 {
-						waiting = true
-					}
-				}
-				if err := service.SetApprovalWaiting(context.WithoutCancel(ctx), approval.JobID, waiting, approval.Summary); err != nil {
+				// The job service reads what is pending itself (Options.ApprovalPending), under its
+				// lock, so callbacks that run out of order still leave the job right.
+				if err := service.SetApprovalWaiting(context.WithoutCancel(ctx), approval.JobID, change == "requested", approval.Summary); err != nil {
 					logger.Warn("recording a job's approval wait", "job", approval.JobID, "err", err)
 				}
 			}

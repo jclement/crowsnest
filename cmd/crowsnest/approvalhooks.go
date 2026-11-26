@@ -30,20 +30,29 @@ import (
 	"github.com/jclement/crowsnest/internal/guard"
 )
 
-// The permission-request hook's timings; tests shorten them.
-var (
-	approvalCreateTimeout = 10 * time.Second
-	approvalPoll          = 50 * time.Second
-	approvalGiveUp        = approvals.DefaultTTL + time.Minute
-	approvalRetryFor      = 2 * time.Minute
-	approvalRetryEvery    = 2 * time.Second
-	guardNotifyTimeout    = time.Second
-)
+// approvalTimings are the permission-request hook's timings. Tests pass their own through
+// hookFlags rather than changing package state, so a hook left running by one test cannot race
+// the next.
+type approvalTimings struct {
+	create     time.Duration // the create call's timeout
+	poll       time.Duration // one long-poll's wait
+	giveUp     time.Duration // the whole wait, a minute past the server's expiry
+	retryFor   time.Duration // how long polls may fail in a row before giving up
+	retryEvery time.Duration // the pause between failed polls
+}
 
-func runPermissionRequest(ctx context.Context, stdout io.Writer, input []byte, client *agentapi.Client) {
-	ctx, cancel := context.WithTimeout(ctx, approvalGiveUp)
+var defaultApprovalTimings = approvalTimings{
+	create: 10 * time.Second, poll: 50 * time.Second, giveUp: approvals.DefaultTTL + time.Minute,
+	retryFor: 2 * time.Minute, retryEvery: 2 * time.Second,
+}
+
+// guardNotifyTimeout caps the guard's report of a refusal.
+const guardNotifyTimeout = time.Second
+
+func runPermissionRequest(ctx context.Context, stdout io.Writer, input []byte, client *agentapi.Client, timings approvalTimings) {
+	ctx, cancel := context.WithTimeout(ctx, timings.giveUp)
 	defer cancel()
-	createCtx, cancelCreate := context.WithTimeout(ctx, approvalCreateTimeout)
+	createCtx, cancelCreate := context.WithTimeout(ctx, timings.create)
 	created, err := client.RequestApproval(createCtx, input)
 	cancelCreate()
 	if err != nil || created.ID == "" {
@@ -51,8 +60,8 @@ func runPermissionRequest(ctx context.Context, stdout io.Writer, input []byte, c
 	}
 	var failingSince time.Time
 	for ctx.Err() == nil {
-		pollCtx, cancelPoll := context.WithTimeout(ctx, approvalPoll+15*time.Second)
-		reply, err := client.WaitApproval(pollCtx, created.ID, approvalPoll)
+		pollCtx, cancelPoll := context.WithTimeout(ctx, timings.poll+15*time.Second)
+		reply, err := client.WaitApproval(pollCtx, created.ID, timings.poll)
 		cancelPoll()
 		if err != nil {
 			var apiErr *agentapi.APIError
@@ -62,13 +71,13 @@ func runPermissionRequest(ctx context.Context, stdout io.Writer, input []byte, c
 			if failingSince.IsZero() {
 				failingSince = time.Now()
 			}
-			if time.Since(failingSince) > approvalRetryFor {
+			if time.Since(failingSince) > timings.retryFor {
 				return
 			}
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(approvalRetryEvery):
+			case <-time.After(timings.retryEvery):
 			}
 			continue
 		}
