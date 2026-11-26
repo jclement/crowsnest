@@ -40,7 +40,7 @@ type jobRefs struct {
 
 // newJobService builds the jobs service. refs is filled in by serve once the orchestrator and
 // the transcript manager exist.
-func newJobService(cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, socket string, identity *agentid.Registry, refs *jobRefs, journalLog *journal.Journal, logger *slog.Logger) *jobs.Service {
+func newJobService(cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, socket string, identity *agentid.Registry, refs *jobRefs, journalLog *journal.Journal, meter jobs.SpendReader, logger *slog.Logger) *jobs.Service {
 	binDir, executable := executablePaths()
 	roles, problems := jobs.LoadRoles(rolesDir(cfg))
 	for _, problem := range problems {
@@ -62,7 +62,7 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	}
 	claudeDir := claudeConfigDir(cfg)
 	return jobs.New(jobs.Options{
-		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
+		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel, Spend: meter,
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,

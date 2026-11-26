@@ -27,6 +27,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
@@ -137,7 +138,10 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	agentSocket := agentSocketPath(cfg)
 	journalLog := journal.New(db, events, logger, nil)
 	refs := &jobRefs{}
-	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, logger)
+	var jobServiceRef atomic.Pointer[jobs.Service]
+	meter := newSpendMeter(cfg, db, events, refs, jobServiceRef.Load, logger)
+	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, meter, logger)
+	jobServiceRef.Store(jobService)
 	pushService, pusher, err := startPush(ctx, cfg, db, events, logger)
 	if err != nil {
 		return err
@@ -152,6 +156,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	startJobs(ctx, jobService, client, logger)
+	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
 	tender := newTender(cfg, client, db, journalLog, orchestrator, conversations, logger)
@@ -166,7 +171,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
 		Orchestrator: orchestrator, Conversations: conversations,
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
-		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
+		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender, Spend: meter,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

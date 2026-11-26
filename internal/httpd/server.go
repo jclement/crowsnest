@@ -30,6 +30,7 @@ import (
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
 	"github.com/jclement/crowsnest/internal/schedule"
+	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
 	"github.com/jclement/crowsnest/internal/voice"
@@ -94,6 +95,8 @@ type Deps struct {
 	Push *push.Service
 	// Schedule serves /schedule (scheduled tasks, 7.8). Nil: those routes answer 503.
 	Schedule *schedule.Service
+	// Spend serves /spend and /spend/summary (7.11). Nil: they answer 503.
+	Spend *spend.Meter
 	// Tender serves /orchestrator/context and /orchestrator/compact (7.9). Nil: 503.
 	Tender *orch.Tender
 	// Updater is self-update (16.1): /health reports what it found, POST /admin/update applies
@@ -176,6 +179,7 @@ func (s *Server) routes() http.Handler {
 	s.registerScheduleRoutes(mux)
 	s.registerVoiceRoutes(mux)
 	s.registerPushRoutes(mux)
+	s.registerSpendRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)

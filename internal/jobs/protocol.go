@@ -14,6 +14,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/termtext"
 )
@@ -413,7 +414,16 @@ func (s *Service) GetForAgent(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ContextBlock(detail), nil
+	return ContextBlock(detail) + SpendBlock(detail.Spend), nil
+}
+
+// SpendBlock is the job's spend as job_get shows it: so an agent can see what it has used.
+// Empty when the server measures nothing.
+func SpendBlock(summary *spend.Summary) string {
+	if summary == nil {
+		return ""
+	}
+	return "\n## Spend so far\n\n" + spend.Describe(*summary) + "\n"
 }
 
 // ContextBlock renders a job for an agent: the SessionStart re-injection and job_get.

@@ -18,6 +18,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/questions"
+	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -95,9 +96,17 @@ type Options struct {
 	AskHuman func(ctx context.Context, input questions.AskInput, caller questions.Caller) (questions.Question, error)
 	// Delegation bounds what agents may create; zero fields take the defaults (delegate.go).
 	Delegation DelegationLimits
+	// Spend reads what jobs have used (internal/spend); nil: jobs carry no spend.
+	Spend SpendReader
 	// DefaultModel is the model a Claude job agent gets when its job names none and does not
 	// inherit one from its parent (--job-model). Empty: Claude's own default.
 	DefaultModel string
+}
+
+// SpendReader is the part of internal/spend the jobs service reads (a *spend.Meter in serve).
+type SpendReader interface {
+	Summaries(ctx context.Context, jobs []spend.JobInfo) (map[string]spend.Summary, error)
+	Turns(ctx context.Context, subject string) ([]spend.Turn, error)
 }
 
 // Service holds the jobs.
@@ -161,6 +170,14 @@ func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
 	for _, event := range events {
 		detail.Timeline = append(detail.Timeline, toEvent(event))
 	}
+	jobsWithSpend := []Job{detail.Job}
+	s.attachSpend(ctx, jobsWithSpend)
+	detail.Job = jobsWithSpend[0]
+	if s.opts.Spend != nil && detail.Spend != nil && detail.Spend.Measured {
+		if turns, err := s.opts.Spend.Turns(ctx, detail.ID); err == nil {
+			detail.SpendTurns = turns
+		}
+	}
 	return detail, nil
 }
 
@@ -189,7 +206,52 @@ func (s *Service) List(ctx context.Context, states []State) ([]Job, error) {
 		}
 		out = append(out, s.toJob(record, open))
 	}
+	s.attachSpend(ctx, out)
 	return out, nil
+}
+
+// ---- Spend ---------------------------------------------------------------------------------
+
+// spendInfo is what internal/spend needs to know about a job.
+func spendInfo(job Job) spend.JobInfo {
+	return spend.JobInfo{ID: job.ID, Engine: job.Engine, Orchestrated: job.AgentName == OrchestratorName,
+		StartedAt: job.StartedAt, SettledAt: job.SettledAt}
+}
+
+// attachSpend fills each job's Spend. A failed read leaves them without: spend is information,
+// never a reason to fail the board.
+func (s *Service) attachSpend(ctx context.Context, list []Job) {
+	if s.opts.Spend == nil || len(list) == 0 {
+		return
+	}
+	infos := make([]spend.JobInfo, len(list))
+	for i, job := range list {
+		infos[i] = spendInfo(job)
+	}
+	summaries, err := s.opts.Spend.Summaries(ctx, infos)
+	if err != nil {
+		s.opts.Logger.Debug("reading spend failed", "err", err)
+		return
+	}
+	for i := range list {
+		if summary, ok := summaries[list[i].ID]; ok {
+			list[i].Spend = &summary
+		}
+	}
+}
+
+// SpendOf is a job's own spend so far: what job_get shows the agent, and the hook budgets will
+// hang off (6.7). ok is false when this server measures nothing.
+func (s *Service) SpendOf(ctx context.Context, job Job) (spend.Summary, bool, error) {
+	if s.opts.Spend == nil {
+		return spend.Summary{}, false, nil
+	}
+	summaries, err := s.opts.Spend.Summaries(ctx, []spend.JobInfo{spendInfo(job)})
+	if err != nil {
+		return spend.Summary{}, false, err
+	}
+	summary, ok := summaries[job.ID]
+	return summary, ok, nil
 }
 
 // eachLive calls fn for every live job, oldest first, a page at a time (R2-C16: the supervisor
@@ -474,4 +536,41 @@ func oneLine(text string, limit int) string {
 		return string(runes[:limit-1]) + "…"
 	}
 	return text
+}
+
+// SpendSources lists the jobs the spend meter reads: the board's newest jobs whose own Claude
+// agent has a session. Orchestrator-held jobs are left out (their use is the orchestrator's
+// line), and so are Codex jobs (not measured). A finished job is still listed; the meter marks
+// it final after one last read.
+func (s *Service) SpendSources(ctx context.Context) ([]spend.Source, error) {
+	records, err := s.opts.Store.ListJobs(ctx, nil, listLimit)
+	if err != nil {
+		return nil, err
+	}
+	var out []spend.Source
+	for _, record := range records {
+		job := s.toJob(record, 0)
+		if job.Engine == EngineCodex || job.AgentName == OrchestratorName || job.SessionID == "" {
+			continue
+		}
+		source := spend.Source{Subject: job.ID, Sessions: []spend.Session{{ID: job.SessionID, Cwd: firstNonEmptyDir(job.WorkDir, job.Dir)}}}
+		if job.State.Terminal() {
+			source.Settled = job.SettledAt
+			if source.Settled == nil {
+				settled := job.CreatedAt
+				source.Settled = &settled
+			}
+		}
+		out = append(out, source)
+	}
+	return out, nil
+}
+
+func firstNonEmptyDir(dirs ...string) string {
+	for _, dir := range dirs {
+		if dir != "" {
+			return dir
+		}
+	}
+	return ""
 }

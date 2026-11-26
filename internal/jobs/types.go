@@ -12,6 +12,8 @@ package jobs
 import (
 	"fmt"
 	"time"
+
+	"github.com/jclement/crowsnest/internal/spend"
 )
 
 // State is a job's declared state (6.1).
@@ -176,6 +178,8 @@ type Job struct {
 	Isolate        bool       `json:"isolate"`
 	// Origin is who created it: "" the human, "agent" a job agent, "orchestrator" (R2-H1).
 	Origin string `json:"origin"`
+	// Spend is what the job's agent has used so far (7.11); nil when the server measures nothing.
+	Spend *spend.Summary `json:"spend,omitempty"`
 
 	isolate   bool // the job asked for a worktree (Isolated)
 	briefSent bool // the brief reached the agent (a restart resumes rather than briefs again)
@@ -215,6 +219,8 @@ type Detail struct {
 	Job
 	Timeline  []Event    `json:"timeline"`
 	Questions []Question `json:"questions"`
+	// SpendTurns are the job's latest model calls, oldest first, for its chart (7.11).
+	SpendTurns []spend.Turn `json:"spend_turns,omitempty"`
 }
 
 // Question is the part of a question a job detail shows; the web app fetches the full one from
