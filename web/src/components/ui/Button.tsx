@@ -17,7 +17,7 @@ const variants: Record<ButtonVariant, string> = {
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   icon?: LucideIcon;
-  /** Compact: 32 px on mobile too. Only for controls that are not primary tap targets. */
+  /** Compact: smaller text and padding, 28 px tall from md (still 44 px on a phone). */
   compact?: boolean;
   children?: ReactNode;
 }
@@ -32,7 +32,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       className={cn(
         "inline-flex select-none items-center justify-center gap-1.5 rounded px-3 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
-        compact ? "h-8 text-xs" : "min-h-11 md:min-h-8",
+        compact ? "min-h-11 px-2 text-xs md:min-h-7" : "min-h-11 md:min-h-8",
         variants[variant],
         className,
       )}

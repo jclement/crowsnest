@@ -385,8 +385,9 @@ four non-blank lines matches `Enter to (select|confirm|submit)|Esc to cancel` an
 option line exists), appears in the inbox as a dialog card: the screen text verbatim, a button per
 numbered option that sends that digit, and "open terminal". The human is reading the real screen,
 so the front door's refuse and deny lists are not needed for delivery; they are kept as a
-**warning badge** on options that match ("always allow", "don't ask again", force-push, `rm -rf`,
-…). A press is bound to the screen hash it was rendered from: if the screen changed, the press is
+**warning badge** on options that match ("always allow", "don't ask again", "allow all", bypass
+permissions, force-push, `rm -rf`, `reset --hard`, `git clean -f`, drop/truncate table; the
+patterns live in `web/src/lib/dialog.ts`). The badge warns; it never blocks the press. A press is bound to the screen hash it was rendered from: if the screen changed, the press is
 rejected and the card refreshes. Multi-question forms get "open terminal" only.
 
 **8.3 Telling Jeff.** The tab title and nav badge show the open count; the page uses the browser
@@ -425,11 +426,11 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /health` | Unauthenticated: `{status, version, update_available:false}` |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name) |
 | `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `say` events. On connect the client refetches state, so no replay |
-| `GET /fleet` | Snapshot: workspaces → tabs → panes, agents with status, cwd, title, has-dialog, has-transcript |
+| `GET /fleet` | Snapshot: workspaces → tabs → panes, agents with status, cwd, title, has-dialog, has-transcript (shape below) |
 | `GET /agents/{target}/messages?after=` | Normalised conversation (orchestrator is target `orchestrator`) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft}` |
-| `POST /agents/{target}/keys` | `{keys:[…], screen_hash}` for dialogs and Esc/Ctrl+C |
-| `GET /agents/{target}/screen` | Current screen text, dialog parse, draft state, hash |
+| `POST /agents/{target}/keys` | `{keys:[…], screen_hash}` for dialogs and Esc/Ctrl+C. `409 CONFLICT` when the screen's hash is no longer `screen_hash`; nothing is sent |
+| `GET /agents/{target}/screen` | Current screen text, dialog parse, draft state, hash (shape below) |
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, budget?}`); detail with timeline (state changes, nudges, questions, restarts) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent, stop it, push it, retry after a failure, raise a cap |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
@@ -438,6 +439,37 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /journal` | Pokes, sends, answers, restarts |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
+
+**Fleet and screen shapes** (M3 builds against these; the herdr objects pass through in herdr's
+own snake_case with crowsnest's additions marked). `{target}` is the agent's **pane id**
+(`w1:p1`, URL-encoded as `w1%3Ap1`); the server may also accept an agent name, but the web app
+always sends the pane id because names are not guaranteed unique.
+
+```jsonc
+// GET /api/v1/fleet
+{"data": {"session": "crowsnest", "herdr_version": "0.9.5", "workspaces": [
+  {"workspace_id": "w1", "label", "number", "active_tab_id", "agent_status", "focused", "pane_count", "tab_count",
+   "tabs": [
+     {"tab_id": "w1:t1", "workspace_id", "label", "number", "agent_status", "focused", "pane_count",
+      "panes": [
+        {"pane_id": "w1:p1", "tab_id", "workspace_id", "terminal_id", "cwd", "foreground_cwd", "agent_status",
+         "focused", "revision",
+         "agent": null | {"name", "agent": "claude" | "codex" | …,
+                          "agent_status": "idle" | "done" | "working" | "blocked" | "unknown",
+                          "pane_id", "tab_id", "workspace_id", "cwd", "terminal_title_stripped",
+                          "agent_session": {"value"} | null, "state_change_seq",
+                          "has_dialog": bool,       // crowsnest: section 8.2 detection
+                          "has_transcript": bool}}  // crowsnest: a transcript was found
+      ]}]}]}}
+
+// GET /api/v1/agents/{target}/screen
+{"data": {"text": "…verbatim…", "hash": "…", "status": "blocked",
+          "dialog": null | {"options": [{"digit": "1", "text": "Yes"}], "multi_form": false},
+          "draft": "empty" | "draft" | "unknown"}}
+```
+
+The TypeScript mirror is `web/src/lib/types.ts`; `web/src/lib/fixtures.ts` holds a fleet and
+screens in exactly this shape.
 
 **Terminal WebSocket protocol**: binary frames are terminal bytes in both directions. Text frames
 are JSON control: client `{"type":"resize","cols":N,"rows":N}`, server `{"type":"exit","reason":…}`.
@@ -477,8 +509,36 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 | **Fleet** | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal | Tree at left, selected agent at right with Conversation/Terminal toggle |
 | **Terminal** | Full-screen xterm on the herdr TUI, with a key bar (Esc, Tab, Ctrl, arrows, Enter, paste) | Full-height xterm |
 
-Bottom nav on mobile, left rail from `md`. A web app manifest and icons make it installable to a
-home screen. Footer: `(C) 2026 Jeff Clement, v<version>` and a tagline from the embedded set.
+Bottom nav on mobile, left rail from `md`, in the order Jobs, Chat, Inbox, Fleet, Terminal. Jobs
+is the default route (`/`); the others are `/chat`, `/inbox`, `/fleet` (`?agent=<pane id>`
+selects an agent, so links and reloads land on it) and `/terminal`. A web app manifest and icons
+make it installable to a home screen.
+
+**Web app structure (M3).** `web/src/components/ui/` is the design system: Button, IconButton,
+Chip, StatusDot/StatusChip, Card, Sheet (full-screen on mobile, modal from `md`), Tabs, Toast,
+EmptyState, Skeleton, Banner. Colours are semantic tokens in `index.css` (`@theme` for light,
+`.dark` overrides), including one token per agent state; each state also has its own marker
+shape (working pulses, blocked is a diamond, done a dot, idle a ring, unknown a dash) so colour is
+never the only cue. Inter and JetBrains Mono are self-hosted through `@fontsource` (the CSP allows
+no font CDN). Data comes only through `lib/queries.ts` hooks (`useFleet`, `useAgentScreen`,
+`useSendKeys`, …) over `lib/api.ts`; `lib/live.ts` maps each SSE event name to the query keys it
+invalidates (`fleet` refetches the fleet and every agent's queries; `hello` refetches everything).
+`components/Markdown.tsx` is the one renderer for untrusted markdown (section 4.8), with mermaid
+loaded lazily. The Fleet view's Conversation and Terminal bodies are the exported slots
+`components/agent/AgentConversation.tsx` and `AgentTerminal.tsx`: later milestones replace their
+bodies and keep their names and props (`{agent}`). Until questions exist (M6), the Inbox badge
+and the tab-title count are the number of agents that need you (blocked, or a dialog on screen).
+
+**Fixtures mode.** On the Vite dev server, `?fixtures=1` answers every API call in memory from
+`lib/fixtures.ts` and skips the event stream; it is kept for the tab in sessionStorage and turned
+off with `?fixtures=0`. The same fixtures back the unit tests and the Playwright screenshots
+(`mise run screenshots` → `web/screenshots/`). It is gated on `import.meta.env.DEV`, so a
+production build contains neither the switch nor the fixtures.
+
+**Reconnects.** The SSE client does its own backoff rather than the browser's fixed `retry`: on
+any error it closes the stream and reopens it after 1, 2, 4 … 30 s, checking `/auth/me` first so
+an expired session goes to the login page. The banner counts down to the next attempt and offers
+"Retry now". Footer: `(C) 2026 Jeff Clement, v<version>` and a tagline from the embedded set.
 Connection loss shows a banner and reconnects with backoff; terminals reconnect and redraw.
 
 ## 13. Talk mode
@@ -573,6 +633,15 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
     `crowsnest version`; Vite imports it raw for the login page and footer. A test pins the count
     at 200, each under 60 characters, no duplicates.
 17. **TypeScript is pinned to 6.0.x**, not 7: typescript-eslint 8.x supports `<6.1`.
+18. **The web app's fixtures live in one typed module and only in development builds** (M3). One
+    fleet serves tests, `?fixtures=1` and screenshots, so they cannot drift apart, and the M3 UI
+    could be built before M2's API existed. A compile-time `import.meta.env.DEV` gate keeps the
+    switch out of production rather than a runtime flag someone could flip.
+19. **Agents are addressed by pane id in the UI** (M3). herdr agent names are labels, not keys;
+    the pane id is unique in the session and is what the dialog press and the URL carry.
+20. **Risky dialog options are badged, not blocked** (M3). Jeff is reading the real screen; a
+    refusal list would be wrong in both directions, while a badge costs nothing and catches the
+    autopilot tap.
 
 ## 18. Milestones
 

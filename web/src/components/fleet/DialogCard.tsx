@@ -131,7 +131,7 @@ export function ScreenText({ text, className }: { text: string; className?: stri
       ref={ref}
       aria-label="Screen text"
       className={cn(
-        "max-h-72 overflow-auto rounded border border-border bg-surface-sunken p-2.5 font-mono text-2xs leading-4 text-heading",
+        "max-h-72 overflow-auto rounded border border-border bg-surface-sunken p-2.5 font-mono text-2xs leading-tight text-heading",
         className,
       )}
     >

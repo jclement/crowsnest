@@ -1,6 +1,6 @@
 // Chip (a small label), StatusDot and StatusChip. Agent states must be told apart at a glance in
 // both themes and without colour vision, so each state has its own shape as well as colour:
-// working pulses, blocked is a diamond, done is a solid dot, idle a ring, unknown a dashed ring.
+// working pulses, blocked is a diamond, done is a solid dot, idle a ring, unknown a dash.
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { statusHints, statusLabels } from "../../lib/status";
@@ -45,7 +45,7 @@ const dotShape: Record<AgentStatus, string> = {
   blocked: "rotate-45 rounded-[1px] bg-status-blocked scale-90",
   done: "rounded-full bg-status-done",
   idle: "rounded-full border-2 border-status-idle",
-  unknown: "rounded-full border-2 border-dashed border-status-unknown",
+  unknown: "my-[3.5px] h-[3px]! rounded-full bg-status-unknown",
 };
 
 /** A 10 px state marker. It carries its state as an accessible label and a tooltip. */

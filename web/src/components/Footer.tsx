@@ -5,15 +5,16 @@ import { endpoints, queryKeys } from "../lib/api";
 import { formatVersion } from "../lib/format";
 import { randomTagline } from "../lib/taglines";
 
-export function Footer({ className = "" }: { className?: string }) {
+/** `stacked` puts the tagline on its own line, for the narrow desktop rail. */
+export function Footer({ className = "", stacked = false }: { className?: string; stacked?: boolean }) {
   const health = useQuery({ queryKey: queryKeys.health, queryFn: endpoints.health, staleTime: 60_000 });
   const [tagline] = useState(randomTagline);
   const version = formatVersion(health.data?.version);
   return (
     <footer className={`text-xs text-muted ${className}`}>
       <span>(C) 2026 Jeff Clement{version && `, ${version}`}</span>
-      <span className="mx-1.5 hidden sm:inline">·</span>
-      <span className="block truncate italic sm:inline">{tagline}</span>
+      {!stacked && <span className="mx-1.5 hidden sm:inline">·</span>}
+      <span className={stacked ? "block italic" : "block truncate italic sm:inline"}>{tagline}</span>
     </footer>
   );
 }

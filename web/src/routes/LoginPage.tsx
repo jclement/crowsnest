@@ -22,7 +22,7 @@ export function LoginPage({ redirect }: { redirect?: string }) {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex h-10 shrink-0 items-center gap-2 bg-chrome pl-3 pr-1 text-chrome-fg">
+      <header className="flex h-11 shrink-0 items-center gap-2 bg-chrome pl-3 pr-1 text-chrome-fg md:h-10">
         <img src="/icons/crowsnest.svg" alt="" className="h-5 w-5" />
         <span className="text-sm font-semibold">crowsnest</span>
         <div className="ml-auto">

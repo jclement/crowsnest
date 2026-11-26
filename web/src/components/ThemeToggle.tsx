@@ -2,6 +2,7 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { applyTheme, nextTheme, readTheme, type ThemeChoice } from "../lib/theme";
+import { IconButton } from "./ui/Button";
 
 const labels: Record<ThemeChoice, string> = { system: "System theme", light: "Light theme", dark: "Dark theme" };
 const icons = { system: Monitor, light: Sun, dark: Moon };
@@ -18,16 +19,13 @@ export function ThemeToggle() {
     return () => media.removeEventListener("change", follow);
   }, [choice]);
 
-  const Icon = icons[choice];
   return (
-    <button
-      type="button"
+    <IconButton
+      icon={icons[choice]}
+      tone="chrome"
       onClick={() => setChoice(nextTheme(choice))}
+      label={labels[choice]}
       title={`${labels[choice]} (click to change)`}
-      aria-label={labels[choice]}
-      className="inline-flex h-10 w-10 items-center justify-center rounded text-chrome-muted hover:bg-chrome-hover hover:text-chrome-fg"
-    >
-      <Icon className="h-4 w-4" />
-    </button>
+    />
   );
 }

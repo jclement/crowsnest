@@ -40,7 +40,7 @@ export function AppFrame() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="box-content flex h-10 shrink-0 items-center gap-2 border-b border-chrome-border bg-chrome pl-3 pr-1 pt-[env(safe-area-inset-top)] text-chrome-fg">
+      <header className="box-content flex h-11 shrink-0 items-center gap-2 border-b border-chrome-border bg-chrome pl-3 pr-1 pt-[env(safe-area-inset-top)] text-chrome-fg md:h-10">
         <img src="/icons/crowsnest.svg" alt="" className="h-5 w-5" />
         <span className="hidden text-sm font-semibold tracking-tight sm:inline">crowsnest</span>
         {me.data && (
@@ -78,10 +78,12 @@ export function AppFrame() {
               {item.badge && <Badge count={needsYou} className="ml-auto" />}
             </Link>
           ))}
-          <Footer className="mt-auto px-2 pt-2" />
+          <Footer stacked className="mt-auto px-2 pt-2" />
         </nav>
         <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="min-h-0 flex-1">
+          {/* min-h-0 only from md: on a phone the view grows with its content and the footer
+              follows it; on desktop views like Fleet fill the height and scroll inside. */}
+          <div className="flex-1 md:min-h-0">
             <Outlet />
           </div>
           <Footer className="border-t border-border px-3 py-2 md:hidden" />

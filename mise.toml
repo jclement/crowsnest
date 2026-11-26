@@ -86,6 +86,10 @@ depends = ["lint", "test"]
 description = "Playwright end-to-end suite against crowsnest --demo"
 run = "echo 'e2e: not built until M9 (DESIGN.md section 17)' >&2; exit 1"
 
+[tasks.screenshots]
+description = "Fleet view with fixtures at 375 and 1440 px, light and dark, into web/screenshots; plus the 375 px layout checks"
+run = "npm --prefix web run screenshots"
+
 # ---- Ship --------------------------------------------------------------------
 
 [tasks.snapshot]

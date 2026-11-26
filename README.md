@@ -27,6 +27,12 @@ CROWSNEST_PASSWORD='something long' ./bin/crowsnest --username jeff
 For development, `mise run dev` runs the Go server with `--no-auth` on :2769 and Vite on :5173
 (open http://localhost:5173; Vite proxies `/api` to Go).
 
+To work on the UI with no server at all, open http://localhost:5173/fleet?fixtures=1 on the Vite
+dev server: every API call is answered in memory from `web/src/lib/fixtures.ts` (a fleet with
+agents in every state and two dialogs), and a "fixtures" chip shows in the header. `?fixtures=0`
+turns it off. Fixtures mode exists only in development builds; it is compiled out of
+`mise run build`.
+
 On a phone over Tailscale, bind the tailnet address, or keep localhost and use `tailscale serve`,
 which also gives the HTTPS secure context the microphone needs later:
 
@@ -122,6 +128,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
 | `mise run e2e` | Playwright suite (not built until M9; fails with a message) |
+| `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run snapshot` | GoReleaser snapshot (needs `.goreleaser.yml`, written in M10) |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |
 | `mise run dev:reset` | Remove build output, web dist, Vite cache and the dev database |

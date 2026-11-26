@@ -21,6 +21,9 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     assetsDir: "assets", // fingerprinted; httpd serves these with an immutable cache header
+    // Never inline assets as data: URIs. The CSP's default-src 'self' blocks data: fonts, and
+    // Vite would otherwise inline the smallest @fontsource subsets (found in M3).
+    assetsInlineLimit: 0,
   },
   test: {
     environment: "jsdom",
