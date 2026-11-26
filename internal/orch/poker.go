@@ -108,7 +108,7 @@ type PokerOptions struct {
 	Tasks TaskSource
 	// Tender keeps the orchestrator's context small (7.9): it runs first at every check and may
 	// spend the check on a compaction or a hand-over, holding the poke to the next one. Nil: none.
-	Tender Tender
+	Tender Upkeep
 	// CheckInterval overrides DefaultPokeCheckInterval.
 	CheckInterval time.Duration
 	Now           func() time.Time
@@ -128,9 +128,9 @@ type TaskSource interface {
 	Delivered(ctx context.Context, at time.Time, names []string)
 }
 
-// Tender is upkeep that shares the orchestrator's input box with the pokes (compaction, the
+// Upkeep is what shares the orchestrator's input box with the pokes (the Tender: compaction, the
 // daily new conversation). Tend reports whether it typed something this check.
-type Tender interface {
+type Upkeep interface {
 	Tend(ctx context.Context, now time.Time, status Status) bool
 }
 
