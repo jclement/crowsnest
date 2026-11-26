@@ -6,8 +6,8 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync/atomic"

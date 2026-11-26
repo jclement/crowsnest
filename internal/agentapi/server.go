@@ -147,7 +147,7 @@ func NewServer(opts ServerOptions) *Server {
 	server := &Server{
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version,
-		asks:  ratelimit.New(askBurst, askRefill, opts.Now),
+		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
 		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
 		creates: ratelimit.New(createBurst, createRefill, opts.Now),
 		waits:   &waitCounter{active: map[string]int{}},
