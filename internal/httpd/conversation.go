@@ -16,12 +16,14 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/transcript"
+	"github.com/jclement/crowsnest/internal/voice"
 )
 
 const (
@@ -98,6 +100,23 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 // ---- Prompt --------------------------------------------------------------------------
 
+// promptRequest is the body of POST /prompt: orch's request, plus Voice for text that came from
+// speech (talk mode), which gets the voice header so the agent reads it charitably.
+type promptRequest struct {
+	orch.PromptRequest
+	Voice bool `json:"voice"`
+}
+
+// voicePrompt puts the voice header and the talk flag on a transcribed prompt (DESIGN.md 7.1). An
+// empty transcript stays empty, so the send path refuses it as it would any empty prompt.
+func voicePrompt(text string, talkOn bool) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	return VoiceHeader + " " + voice.TalkFlag(talkOn) + "\n" + text
+}
+
 // BlockedDetail is the detail of a BLOCKED refusal: the dialog to answer instead.
 type BlockedDetail struct {
 	PaneID     string       `json:"pane_id"`
@@ -115,10 +134,18 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, "The agent target must be an agent name or a pane id.")
 		return
 	}
-	var body orch.PromptRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPromptBody)).Decode(&body); err != nil {
+	var request promptRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPromptBody)).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, codeValidation, `Send JSON like {"text":"…","force_over_draft":false}, at most 32 KB of text.`)
 		return
+	}
+	body := request.PromptRequest
+	if request.Voice {
+		if s.deps.Voice == nil {
+			writeError(w, http.StatusNotFound, codeNotFound, "Talk mode is off: start crowsnest with an ElevenLabs API key to use it.")
+			return
+		}
+		body.Text = voicePrompt(body.Text, s.deps.Voice.TalkOn())
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), promptTimeout)
 	defer cancel()

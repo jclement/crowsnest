@@ -91,7 +91,7 @@ func projectDirName(cwd string) string {
 // orchestratorTurn records the prompt, shows the orchestrator working, and answers after the
 // delay.
 func (d *Demo) orchestratorTurn(paneID, text string) {
-	d.working(paneID, "Working on: "+firstLine(text), 0)
+	d.working(paneID, "Working on: "+firstLine(promptBody(text)), 0)
 	d.scribe.mu.Lock()
 	defer d.scribe.mu.Unlock()
 	w, err := d.writerFor(paneID)
@@ -110,10 +110,10 @@ func (d *Demo) finishTurn(paneID, prompt string, reply cannedReply) {
 	if err == nil {
 		w.at = time.Now()
 		w.tool(reply.tool, reply.input, reply.result, false)
-		w.text(strings.ReplaceAll(reply.markdown, "{{prompt}}", firstLine(prompt)))
+		w.text(demoSay(prompt, reply) + strings.ReplaceAll(reply.markdown, "{{prompt}}", firstLine(promptBody(prompt))))
 	}
 	d.scribe.mu.Unlock()
-	d.idle(paneID, "Answered: "+firstLine(prompt))
+	d.idle(paneID, "Answered: "+firstLine(promptBody(prompt)))
 	_ = d.SetStatus(paneID, herdr.StatusIdle)
 }
 
@@ -207,22 +207,46 @@ type cannedReply struct {
 	input    map[string]any
 	result   string
 	markdown string
+	say      string // the SAY line used when talk mode is on (DESIGN.md 7.1)
+}
+
+// demoSay follows the SAY contract the way a real orchestrator is told to: a prompt whose header
+// says talk=on gets a spoken first line, so talk mode can be exercised without Claude.
+func demoSay(prompt string, reply cannedReply) string {
+	header, _, _ := strings.Cut(prompt, "\n") // not firstLine: it shortens the line, and the flag is at its end
+	if !strings.HasPrefix(header, "[crowsnest ") || !strings.Contains(header, "talk=on") {
+		return ""
+	}
+	return "SAY: " + reply.say + "\n\n"
+}
+
+// promptBody drops crowsnest's header line (voice, poke) so the reply quotes what was said.
+func promptBody(prompt string) string {
+	if strings.HasPrefix(prompt, "[crowsnest ") {
+		if _, rest, ok := strings.Cut(prompt, "\n"); ok && strings.TrimSpace(rest) != "" {
+			return rest
+		}
+	}
+	return prompt
 }
 
 var cannedReplies = []cannedReply{
 	{
 		tool: "Bash", input: map[string]any{"command": "git log --oneline -5", "description": "Recent commits"},
 		result:   "a26b6f1 Merge branch 'wip/m2-herdr'\n4252245 M2: README and DESIGN\n8e1218b STATUS: M1 and M3 merged",
+		say:      "M1 to M3 are merged and nothing needs you except one dialog.",
 		markdown: "On **{{prompt}}**: here is where things stand.\n\n- M1 and M3 are merged; M2 merged an hour ago.\n- The builder is on the fleet SSE event.\n- Nothing is waiting on you except the docs writer's dialog.\n\nWant me to start the next milestone?",
 	},
 	{
 		tool: "Read", input: map[string]any{"file_path": "DESIGN.md"},
 		result:   "## 7. The orchestrator\n\nThe orchestrator is the session's standing lead…",
+		say:      "Yes, with one caveat about drafts.",
 		markdown: "I checked `DESIGN.md` for that. Short answer: **yes**, with one caveat.\n\n```go\n// the send path refuses to type over a draft\nif draft.Present && !force {\n\treturn &DraftError{Draft: draft}\n}\n```\n\nThe caveat: a draft is only detected when the input box is visible.",
 	},
 	{
 		tool: "Grep", input: map[string]any{"pattern": "TODO", "path": "internal"},
 		result:   "internal/fleet/cache.go:142: // TODO: name the debounce\ninternal/httpd/sse.go:61: // TODO: replay",
+		say:      "Two small TODOs are left, and neither blocks you.",
 		markdown: "Two TODOs left in `internal/`:\n\n| File | Line | Note |\n|---|---|---|\n| `fleet/cache.go` | 142 | name the debounce |\n| `httpd/sse.go` | 61 | replay |\n\nNeither blocks **{{prompt}}**.",
 	},
 }

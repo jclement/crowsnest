@@ -8,6 +8,7 @@ import { queryKeys } from "./api";
 import { notifyQuestion } from "./notifications";
 import type { QuestionEvent } from "./questions";
 import { useEventStream, type StreamState } from "./sse";
+import { onSayEvent } from "./voice/talk";
 import type { EventName, Fleet } from "./types";
 
 /**
@@ -35,8 +36,12 @@ export const payloads: Partial<Record<EventName, { key: QueryKey; accept: (data:
   fleet: { key: queryKeys.fleet, accept: isFleet },
 };
 
-/** Effects beyond the cache: a newly asked question raises a browser notification when the tab is hidden. */
+/**
+ * Effects beyond the cache: a newly asked question raises a browser notification when the tab is
+ * hidden; a `say` is spoken (or chimes) when talk mode is on in this tab.
+ */
 export const sideEffects: Partial<Record<EventName, (data: unknown) => void>> = {
+  say: onSayEvent,
   question: (data) => {
     if (data && typeof data === "object" && "change" in data) notifyQuestion(data as QuestionEvent);
   },

@@ -58,8 +58,14 @@ const (
 	maxIdentityLen = 128
 )
 
-// SayEvent is the data of a `say` hub event: a sentence an agent wants spoken (M11 speaks it when
-// talk mode is on in a browser; until then the event is simply published).
+// Speaker voices a `say` (M11: *voice.Service). It is an interface so this package does not
+// depend on talk mode.
+type Speaker interface {
+	Say(sentence, source, paneID string) string
+}
+
+// SayEvent is the data of the `say` hub event published when no Speaker is configured (talk mode
+// off): nothing plays it, but the event still shows an agent said something.
 type SayEvent struct {
 	Text   string    `json:"text"`
 	PaneID string    `json:"pane_id,omitempty"`
@@ -75,6 +81,7 @@ type SayRequest struct {
 type Server struct {
 	questions *questions.Service
 	hub       *hub.Hub
+	speaker   Speaker
 	logger    *slog.Logger
 	version   string
 	handler   http.Handler
@@ -84,8 +91,10 @@ type Server struct {
 type ServerOptions struct {
 	Questions *questions.Service
 	Hub       *hub.Hub // nil: say is accepted and dropped
-	Logger    *slog.Logger
-	Version   string
+	// Speaker, when set (talk mode on), voices `say` instead of the plain hub event.
+	Speaker Speaker
+	Logger  *slog.Logger
+	Version string
 }
 
 // NewServer wires the routes.
@@ -93,7 +102,7 @@ func NewServer(opts ServerOptions) *Server {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	server := &Server{questions: opts.Questions, hub: opts.Hub, logger: opts.Logger, version: opts.Version}
+	server := &Server{questions: opts.Questions, hub: opts.Hub, speaker: opts.Speaker, logger: opts.Logger, version: opts.Version}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", server.handleHealth)
 	mux.HandleFunc("POST /api/v1/questions", server.handleAsk)
@@ -202,7 +211,10 @@ func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, "text is longer than "+strconv.Itoa(MaxSayRunes)+" characters; say one sentence")
 		return
 	}
-	if s.hub != nil {
+	switch {
+	case s.speaker != nil:
+		s.speaker.Say(text, "say", callerOf(r).PaneID)
+	case s.hub != nil:
 		s.hub.Publish(hub.Event{Type: "say", Data: SayEvent{Text: text, PaneID: callerOf(r).PaneID, At: time.Now().UTC()}})
 	}
 	writeData(w, http.StatusOK, map[string]bool{"accepted": true})

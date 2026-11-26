@@ -2,15 +2,17 @@
 // choice are large option buttons (one press answers, with the note typed above it); multi-select
 // is checkboxes plus Submit; ack is one button; manual is free text; a notice is dismissed. The
 // agent's recommended option is marked, never preselected: the human decides.
+// With voice on, the note can be dictated.
 import { Check, CheckCheck, Send, Star, X } from "lucide-react";
 import { useId, useState } from "react";
 import { ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { buildAnswer, canSubmit, type Question, type QuestionOption } from "../../lib/questions";
-import { useAnswerQuestion } from "../../lib/queries";
+import { useAnswerQuestion, useMe } from "../../lib/queries";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/toast-context";
+import { DictateButton } from "../voice/VoiceButtons";
 
 interface AnswerFormProps {
   question: Question;
@@ -23,6 +25,7 @@ export function AnswerForm({ question, onAnswered }: AnswerFormProps) {
   const noteId = useId();
   const [picked, setPicked] = useState<string[]>([]);
   const [note, setNote] = useState("");
+  const voice = useMe().data?.features.voice ?? false;
   const [error, setError] = useState<string | null>(null);
   const manual = question.kind === "manual";
 
@@ -56,9 +59,12 @@ export function AnswerForm({ question, onAnswered }: AnswerFormProps) {
         </Banner>
       )}
       <div className="flex flex-col gap-1">
-        <label htmlFor={noteId} className="text-xs font-medium text-heading">
-          {manual ? "Your answer" : "Note (optional; it outranks the choice)"}
-        </label>
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor={noteId} className="text-xs font-medium text-heading">
+            {manual ? "Your answer" : "Note (optional; it outranks the choice)"}
+          </label>
+          {voice && <DictateButton onText={(spoken) => setNote((current) => (current.trim() ? `${current.trimEnd()} ${spoken}` : spoken))} />}
+        </div>
         <textarea
           id={noteId}
           value={note}
