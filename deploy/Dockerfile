@@ -80,7 +80,7 @@ ARG MISE_SHA256_ARM64=7bd3b2d5ffff077a7662ba186c09600e5b40c1eee9df0c264ed67642ce
 # publishes (https://github.com/cli/cli/blob/trunk/docs/install_linux.md, checked 2026-11-26),
 # so a keyring swapped on the way in fails the build instead of signing what apt installs.
 ARG GH_VERSION=2.106.0
-ARG GH_KEY_FINGERPRINTS="2C6106201985B60E6C7AC87323F3D4EA75716059 7F38BBB59D064DBCB3D84D725612B36462313325"
+ARG GH_APT_FINGERPRINTS="2C6106201985B60E6C7AC87323F3D4EA75716059 7F38BBB59D064DBCB3D84D725612B36462313325"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -103,7 +103,7 @@ RUN install -d -m 0755 /etc/apt/keyrings \
       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
  && got="$(gpg --show-keys --with-colons /etc/apt/keyrings/githubcli-archive-keyring.gpg 2>/dev/null \
       | awk -F: '$1 == "pub" { want = 1; next } $1 == "fpr" && want { print $10; want = 0 }' | sort | xargs)" \
- && expected="$(echo "$GH_KEY_FINGERPRINTS" | tr ' ' '\n' | sort | xargs)" \
+ && expected="$(echo "$GH_APT_FINGERPRINTS" | tr ' ' '\n' | sort | xargs)" \
  && { [ "$got" = "$expected" ] || { echo "gh keyring fingerprints are [$got], expected [$expected]" >&2; exit 1; }; } \
  && chmod 0644 /etc/apt/keyrings/githubcli-archive-keyring.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
