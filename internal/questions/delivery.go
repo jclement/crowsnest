@@ -146,16 +146,17 @@ func (d *Deliverer) DeliverPending(ctx context.Context) {
 		}
 		return
 	}
-	if len(ids) < pendingScanLimit {
-		d.cursor = 0 // the end of the backlog: the next pass starts over
-	} else {
-		d.cursor = ids[len(ids)-1]
-	}
+	// The cursor moves only past ids this pass actually looked at (R3-C07): when the attempt
+	// budget runs out mid-page, the next pass resumes right after the last one examined, so the
+	// tail of a page is never skipped in favour of a held prefix that is due again by then.
+	examined := d.cursor
+	defer func() { d.cursor = examined }()
 	attempted := 0
 	for _, id := range ids {
 		if ctx.Err() != nil || attempted == deliveryBatch {
 			return
 		}
+		examined = id
 		if !d.due(id) {
 			continue
 		}
@@ -165,6 +166,9 @@ func (d *Deliverer) DeliverPending(ctx context.Context) {
 		}
 		attempted++
 		d.deliver(ctx, record)
+	}
+	if len(ids) < pendingScanLimit {
+		examined = 0 // the end of the backlog: the next pass starts over
 	}
 }
 

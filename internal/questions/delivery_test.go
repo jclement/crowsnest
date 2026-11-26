@@ -454,3 +454,54 @@ func TestHeldBacklogDoesNotStarveNewAnswers(t *testing.T) {
 		t.Fatalf("%s was never delivered behind the held backlog", fresh)
 	}
 }
+
+// R3-C07: when the attempt budget runs out mid-page, the next pass resumes after the last id it
+// examined, not after the whole page: a held prefix that is due again every pass must not hide
+// the answer right behind it.
+func TestCursorResumesAfterTheLastExaminedAnswer(t *testing.T) {
+	db, err := store.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	clock := &fakeClock{now: time.Date(2026, 11, 26, 3, 0, 0, 0, time.UTC)}
+	service := New(Options{Store: db, Now: clock.Now})
+	ctx := context.Background()
+	answer := func(pane, title string) string {
+		q, err := service.Ask(ctx, AskInput{Title: title, Kind: KindAck}, Caller{PaneID: pane})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Answer(ctx, q.ID, AnswerInput{}); err != nil {
+			t.Fatal(err)
+		}
+		return q.ID
+	}
+	for i := range deliveryBatch {
+		answer("w1:p1", fmt.Sprintf("held %d", i))
+	}
+	fresh := answer("w2:p2", "deliverable")
+	for i := range pendingScanLimit {
+		answer("w1:p1", fmt.Sprintf("held tail %d", i))
+	}
+	var mu sync.Mutex
+	delivered := false
+	deliverer := NewDeliverer(DelivererOptions{Store: db, Now: clock.Now, Prompt: func(_ context.Context, pane, _ string) error {
+		if pane == "w1:p1" {
+			return ErrHold
+		}
+		mu.Lock()
+		delivered = true
+		mu.Unlock()
+		return nil
+	}})
+	for range 10 {
+		deliverer.DeliverPending(ctx)
+		clock.Advance(2 * time.Minute) // every held answer's back-off has passed by the next pass
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !delivered {
+		t.Fatalf("%s, right behind %d held answers, was skipped on every pass", fresh, deliveryBatch)
+	}
+}
