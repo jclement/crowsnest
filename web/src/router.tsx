@@ -1,11 +1,13 @@
-// Routes (TanStack Router, code-based). /login is public; everything else sits under the "app"
-// layout, whose beforeLoad makes sure there is a session (or --no-auth) before rendering, and
-// sends the browser to /login otherwise.
+// Routes (TanStack Router, code-based). /login and /setup are public; everything else sits under
+// the "app" layout, whose beforeLoad makes sure there is a session (or --no-auth) before
+// rendering, and sends the browser to /login otherwise, or to /setup while crowsnest is locked
+// waiting for first-run setup.
 import type { QueryClient } from "@tanstack/react-query";
 import { Outlet, createRootRouteWithContext, createRoute, createRouter, redirect } from "@tanstack/react-router";
 import { AppFrame } from "./components/AppFrame";
-import { ApiError, endpoints, queryKeys } from "./lib/api";
+import { ApiError, endpoints, isSetupRequired, queryKeys } from "./lib/api";
 import { LoginPage } from "./routes/LoginPage";
+import { SetupPage } from "./routes/SetupPage";
 import { NotFound } from "./routes/NotFound";
 import { FleetView } from "./routes/FleetView";
 import { ChatView } from "./routes/ChatView";
@@ -30,12 +32,33 @@ const loginRoute = createRoute({
   }),
   // Already signed in, or no login configured: skip the form.
   beforeLoad: async ({ context }) => {
-    const me = await context.queryClient.fetchQuery({ queryKey: queryKeys.me, queryFn: endpoints.me }).catch(() => null);
+    let setupRequired = false;
+    const me = await context.queryClient.fetchQuery({ queryKey: queryKeys.me, queryFn: endpoints.me }).catch((error: unknown) => {
+      setupRequired = isSetupRequired(error);
+      return null;
+    });
+    if (setupRequired) throw redirect({ to: "/setup" });
     if (me) throw redirect({ to: "/" });
   },
   component: function LoginRoute() {
     const { redirect: target } = loginRoute.useSearch();
     return <LoginPage redirect={target} />;
+  },
+});
+
+// First-run setup. Once setup is done (or with a configured login) there is nothing here, and
+// the app decides between the login page and the views.
+const setupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/setup",
+  loader: async () => {
+    const info = await endpoints.setupInfo();
+    if (!info.required) throw redirect({ to: "/" });
+    return info;
+  },
+  component: function SetupRoute() {
+    const info = setupRoute.useLoaderData();
+    return <SetupPage defaultName={info.default_name ?? ""} minLength={info.min_password_length} />;
   },
 });
 
@@ -49,6 +72,7 @@ const appRoute = createRoute({
       if (error instanceof ApiError && error.status === 401) {
         throw redirect({ to: "/login", search: { redirect: location.href } });
       }
+      if (isSetupRequired(error)) throw redirect({ to: "/setup" });
       throw error;
     }
   },
@@ -87,7 +111,7 @@ const fleetRoute = createRoute({
 });
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 
-const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([jobsRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, appRoute.addChildren([jobsRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });
