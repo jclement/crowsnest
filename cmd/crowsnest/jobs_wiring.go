@@ -18,6 +18,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
@@ -36,6 +37,8 @@ type jobRefs struct {
 	// notify tells Jeff something (the log, and the --notify-url POST when set); the poker's
 	// draft alert goes through it too.
 	notify func(text string)
+	// instructions is the instruction layers (DESIGN.md 21.3), built before the jobs service.
+	instructions *instructions.Service
 }
 
 // newJobService builds the jobs service. refs is filled in by serve once the orchestrator and
@@ -63,7 +66,7 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	claudeDir := claudeConfigDir(cfg)
 	return jobs.New(jobs.Options{
 		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
-		Attachments: files, Spend: meter,
+		Attachments: files, Spend: meter, Instructions: jobInstructions(refs.instructions),
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,
@@ -86,6 +89,15 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 			return service.Ask(ctx, input, caller)
 		},
 	})
+}
+
+// jobInstructions keeps a nil service a nil interface, so the jobs service falls back to the
+// bare role prompt rather than calling through a nil pointer.
+func jobInstructions(service *instructions.Service) jobs.InstructionLayers {
+	if service == nil {
+		return nil
+	}
+	return service
 }
 
 // transcriptActivity reports when a job agent's transcript last grew (its file's mtime) and the

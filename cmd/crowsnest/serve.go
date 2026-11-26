@@ -27,6 +27,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
@@ -165,7 +166,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
 	journalLog := journal.New(db, events, logger, nil)
-	refs := &jobRefs{}
+	refs := &jobRefs{instructions: instructions.New(instructions.Options{Store: db, RolesDir: rolesDir(cfg), Hub: events, Logger: logger})}
 	files, err := newAttachments(cfg, db, events, refs, logger)
 	if err != nil {
 		return err
@@ -183,7 +184,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, logger)
+		standingContext(cfg, refs, refs.questions.Load, jobService), files, refs.instructions, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
@@ -209,7 +210,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
 		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
-		Names: db,
+		Names: db, Instructions: refs.instructions,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

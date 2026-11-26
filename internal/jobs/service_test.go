@@ -222,7 +222,7 @@ func assertJobFiles(t *testing.T, args []string, jobID string) {
 	if len(allow) < 2 || allow[0] != "mcp__crowsnest__*" || !strings.HasPrefix(allow[1], "Read(//") || !strings.HasSuffix(allow[1], "/jobs/"+jobID+"/attachments/**)") {
 		t.Fatalf("allow %v", allow)
 	}
-	for _, event := range []string{"Stop", "SessionStart", "Notification", "StopFailure", "PermissionDenied", "SessionEnd", "PostToolUse"} {
+	for _, event := range []string{"Stop", "SessionStart", "Notification", "StopFailure", "PermissionDenied", "SessionEnd", "PostToolUse", "InstructionsLoaded"} {
 		hooks := settings.Hooks[event]
 		if len(hooks) != 1 || !strings.Contains(hooks[0].Hooks[0].Command, "--job '"+jobID+"'") || !strings.Contains(hooks[0].Hooks[0].Command, "--socket '/run/crowsnest/test.sock'") {
 			t.Fatalf("hook %s: %+v", event, hooks)

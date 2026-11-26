@@ -24,6 +24,7 @@ import (
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
@@ -123,6 +124,8 @@ type harnessOptions struct {
 	// R2-L2: --trusted-proxy
 	trustedProxies     []netip.Prefix
 	trustedProxyHeader string // default x-forwarded-for
+	// Instruction layers (instructions_test.go); nil: the routes answer 503
+	instructions *instructions.Service
 }
 
 var testWeb = fstest.MapFS{
@@ -199,6 +202,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Tender:        opts.tender,
 		Attachments:   opts.attachments,
 		AttachLayout:  opts.attachLayout,
+		Instructions:  opts.instructions,
 	})
 	if err != nil {
 		t.Fatal(err)

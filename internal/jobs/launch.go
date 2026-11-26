@@ -224,7 +224,7 @@ func markDialogLocked(r *store.JobRecord, c *change, detail string) {
 // a crash while typing is known to be one: at most once). A typing that provably did nothing
 // leaves the brief unsent for the tick to try again.
 func (s *Service) sendBrief(ctx context.Context, cl claim, job Job) error {
-	path, err := s.writeBrief(job)
+	path, err := s.writeBrief(ctx, job)
 	if err != nil {
 		return err
 	}
@@ -461,7 +461,9 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 		return jobFiles{}, err
 	}
 	files := jobFiles{prompt: filepath.Join(dir, "prompt.md"), settings: filepath.Join(dir, "settings.json")}
-	prompt, err := s.opts.Roles.Prompt(job.Role, job.ID, true)
+	// Every start (a restart too) records the layers it was given: this is the start that
+	// "instructions changed since start" compares against.
+	prompt, err := s.agentPrompt(ctx, job, true, true)
 	if err != nil {
 		return jobFiles{}, err
 	}
@@ -494,6 +496,26 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 		}
 	}
 	return files, nil
+}
+
+// agentPrompt is what a job agent is told before its brief: the role prompt (or, with the
+// instruction layers wired, the global, role and project layers; DESIGN.md 21.3) followed by
+// the job protocol. mcp chooses the protocol's wording; record asks the layers to note this
+// start. A failure to compose the layers fails the start rather than dropping the human's
+// standing instructions without a word.
+func (s *Service) agentPrompt(ctx context.Context, job Job, mcp, record bool) (string, error) {
+	if s.opts.Instructions == nil {
+		return s.opts.Roles.Prompt(job.Role, job.ID, mcp)
+	}
+	layers, err := s.opts.Instructions.JobLayers(ctx, job, record)
+	if err != nil {
+		return "", fmt.Errorf("composing the instructions of %s: %w", job.ID, err)
+	}
+	protocol, err := ProtocolText(job.ID, mcp)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(layers) + "\n\n" + protocol, nil
 }
 
 func writeJSON(path string, value any) error {
@@ -578,7 +600,7 @@ func (s *Service) DispatchOrchestrator(ctx context.Context) {
 	if !ok {
 		return
 	}
-	path, err := s.writeBrief(job)
+	path, err := s.writeBrief(ctx, job)
 	if err != nil {
 		s.opts.Logger.Warn("writing a brief for the orchestrator", "job", job.ID, "err", err)
 		s.finishQuietly(ctx, cl, func(r *store.JobRecord, _ *change) {

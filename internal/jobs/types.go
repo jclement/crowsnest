@@ -178,6 +178,8 @@ type Job struct {
 	Isolate        bool       `json:"isolate"`
 	// Origin is who created it: "" the human, "agent" a job agent, "orchestrator" (R2-H1).
 	Origin string `json:"origin"`
+	// ProjectID is the project the job belongs to (migration 0012); 0 is "Unfiled".
+	ProjectID int64 `json:"project_id"`
 	// Spend is what the job's agent has used so far (7.11); nil when the server measures nothing.
 	Spend *spend.Summary `json:"spend,omitempty"`
 

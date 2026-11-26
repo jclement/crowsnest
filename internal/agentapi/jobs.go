@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/jclement/crowsnest/internal/attach"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 )
 
@@ -202,6 +203,10 @@ func (s *Server) handleJobFail(w http.ResponseWriter, r *http.Request) {
 // handleHook takes a hook's input as Claude Code wrote it. Unknown fields are expected (the
 // input grows with Claude Code releases), so this decoder is not strict.
 func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("event") == jobs.HookInstructionsLoaded {
+		s.handleInstructionsLoaded(w, r)
+		return
+	}
 	service := s.jobService(w)
 	if service == nil {
 		return
@@ -223,6 +228,37 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeData(w, http.StatusOK, reply)
+}
+
+// handleInstructionsLoaded records an instruction file Claude loaded (DESIGN.md 21.3). It never
+// fails the hook: Claude ignores the exit code anyway, and a lost record costs only a line in
+// the agent's Instructions view. The subject is the token's job, else what SubjectOf says for
+// the token's pane, else the orchestrator; an unidentified caller is not recorded at all.
+func (s *Server) handleInstructionsLoaded(w http.ResponseWriter, r *http.Request) {
+	var input instructions.LoadedInput
+	decodeErr := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxHookBody)).Decode(&input)
+	if subject := s.instructionSubject(r); decodeErr == nil && subject != "" && s.instructions != nil {
+		if err := s.instructions.RecordLoaded(r.Context(), subject, input); err != nil {
+			s.logger.Warn("recording a loaded instruction file failed", "subject", subject, "err", err)
+		}
+	}
+	writeData(w, http.StatusOK, jobs.HookReply{})
+}
+
+// instructionSubject is whose instruction files a hook reports: "" for an unidentified caller.
+func (s *Server) instructionSubject(r *http.Request) string {
+	caller := s.callerOf(r)
+	switch {
+	case caller.JobID != "":
+		return caller.JobID
+	case caller.PaneID == "":
+		return ""
+	case s.subjectOf != nil:
+		if subject := s.subjectOf(r.Context(), caller.PaneID); subject != "" {
+			return subject
+		}
+	}
+	return instructions.KindOrchestrator
 }
 
 // mayActOnJob reports whether the caller may change the job in the path: its token was issued for
