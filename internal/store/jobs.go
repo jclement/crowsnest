@@ -74,6 +74,8 @@ type JobRecord struct {
 	// RootDir is the resolved directory the job's children may use without asking (migration
 	// 0008, R3-H1), recorded when crowsnest created its pane; "" grants nothing.
 	RootDir string
+	// ProjectID is the project the job belongs to (migration 0012); 0 is "Unfiled".
+	ProjectID int64
 }
 
 // JobEventRecord is one row of job_events.
@@ -116,7 +118,7 @@ func jobColumns(r *JobRecord) []column {
 		timeCol("last_stop_at", &r.LastStopAt),
 		textCol("lifecycle_op", &r.LifecycleOp), textCol("lifecycle_owner", &r.LifecycleOwner),
 		timeCol("lifecycle_at", &r.LifecycleAt), int64Col("lifecycle_gen", &r.LifecycleGen),
-		textCol("origin", &r.Origin), textCol("root_dir", &r.RootDir),
+		textCol("origin", &r.Origin), textCol("root_dir", &r.RootDir), int64Col("project_id", &r.ProjectID),
 	}
 	return cols
 }
@@ -281,9 +283,9 @@ func (s *Store) CountJobsHeldBy(ctx context.Context, agentName string, states []
 
 // OldestUnassignedQueued returns the oldest queued job with no directory and no agent: the next
 // one the orchestrator takes. A job held for the human's approval (cause 'approval', R2-H1) is
-// not offered. ok is false when there is none.
+// not offered, nor a project's job (its lead takes those). ok is false when there is none.
 func (s *Store) OldestUnassignedQueued(ctx context.Context) (JobRecord, bool, error) {
-	jobs, err := s.queryJobs(ctx, jobSelect+" WHERE state = 'queued' AND dir = '' AND agent_name = '' AND cause != 'approval' ORDER BY id LIMIT 1")
+	jobs, err := s.queryJobs(ctx, jobSelect+" WHERE state = 'queued' AND dir = '' AND agent_name = '' AND cause != 'approval' AND project_id = 0 ORDER BY id LIMIT 1")
 	if err != nil || len(jobs) == 0 {
 		return JobRecord{}, false, err
 	}
