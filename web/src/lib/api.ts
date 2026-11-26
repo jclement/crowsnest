@@ -12,6 +12,7 @@ import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } fro
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
+import type { PushDevice, PushKind, PushSettings, PushSubscriptionJSON, PushTestResult } from "./push";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
 export class ApiError extends Error {
@@ -180,6 +181,17 @@ export const endpoints = {
   talk: (clientId: string, on: boolean) => api<TalkStatus>("/voice/talk", { method: "POST", body: { client_id: clientId, on } }),
   /** A question's title and options, made speakable; play it through speechUrl. */
   readAloud: (questionId: string) => api<{ text_id: string }>("/voice/read", { method: "POST", body: { question_id: questionId } }),
+  // ---- Web Push (DESIGN.md 8.5) ----
+  pushKey: () => api<{ public_key: string }>("/push/key"),
+  pushSettings: () => api<PushSettings>("/push/settings"),
+  updatePushSettings: (kinds: Partial<Record<PushKind, boolean>>) => api<PushSettings>("/push/settings", { method: "PUT", body: { kinds } }),
+  pushSubscribe: (subscription: PushSubscriptionJSON) => api<PushDevice>("/push/subscriptions", { method: "POST", body: subscription }),
+  /** This browser turning notifications off (by its endpoint). */
+  pushUnsubscribe: (endpoint: string) => api<{ removed: boolean }>("/push/subscriptions", { method: "DELETE", body: { endpoint } }),
+  /** Removes a device from the list (any device). */
+  pushRemoveDevice: (id: number) => api<{ removed: boolean }>(`/push/subscriptions/${id}`, { method: "DELETE" }),
+  /** A test notification: to this browser when endpoint is given, else to every device. */
+  pushTest: (endpoint?: string) => api<PushTestResult>("/push/test", { method: "POST", body: endpoint ? { endpoint } : {} }),
 };
 
 /** POST /voice/talk's answer. */

@@ -7,6 +7,11 @@
     <title>crowsnest</title>
     <link rel="icon" type="image/svg+xml" href="/icons/crowsnest.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- iOS reads its home-screen icon and title from these, not the manifest. Installing to the
+         home screen is what lets iOS deliver Web Push at all (16.4+). -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="crowsnest" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <!-- Sets the theme class before first paint (no flash). A file, not inline: the CSP has no
          'unsafe-inline' for scripts. Deliberately blocking. -->
     <script src="/theme-init.js"></script>

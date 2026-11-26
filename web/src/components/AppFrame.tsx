@@ -3,11 +3,12 @@
 // footer. It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
 // badge and the tab title count what needs Jeff: open questions plus agents at a terminal dialog.
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { endpoints, fixturesEnabled } from "../lib/api";
 import { cn } from "../lib/cn";
 import { inboxCount, needsYouCount } from "../lib/fleet";
+import { listenForNavigation, registerServiceWorker } from "../lib/push";
 import { useLiveQueries } from "../lib/live";
 import { useFleet, useInboxSummary, useMe } from "../lib/queries";
 import type { StreamStatus } from "../lib/sse";
@@ -30,6 +31,14 @@ export function AppFrame() {
   useEffect(() => {
     document.title = needsYou > 0 ? `(${needsYou}) crowsnest` : "crowsnest";
   }, [needsYou]);
+
+  // Web Push (DESIGN.md 8.5): keep the service worker registered (it caches nothing; it only shows
+  // pushes), and follow a tapped notification to its item without a reload.
+  const router = useRouter();
+  useEffect(() => {
+    if (!fixturesEnabled()) void registerServiceWorker();
+    return listenForNavigation((path) => router.history.push(path));
+  }, [router]);
 
   const signOut = async () => {
     try {
