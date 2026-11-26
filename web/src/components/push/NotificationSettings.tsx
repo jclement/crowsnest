@@ -221,8 +221,8 @@ function Kinds({ settings }: { settings: PushSettings }) {
                   <span className={cn("h-4 w-4 rounded-full bg-surface shadow transition-transform", on && "translate-x-4")} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block font-medium text-heading">{kindLabels[kind].label}</span>
-                  <span className="block text-xs text-muted">{kindLabels[kind].detail}</span>
+                  <span className="block font-medium text-heading">{kindLabels[kind]?.label ?? kind}</span>
+                  <span className="block text-xs text-muted">{kindLabels[kind]?.detail ?? ""}</span>
                 </span>
               </button>
             </li>

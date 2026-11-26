@@ -14,7 +14,7 @@
 // devices with an endpoint hash that endpointHash() computes the same way.
 
 /** What the server pushes, each switchable. Mirrors internal/push Kind. */
-export type PushKind = "question" | "dialog" | "job" | "done" | "orchestrator";
+export type PushKind = "approval" | "question" | "dialog" | "job" | "done" | "orchestrator";
 
 /** A subscribed browser as the server lists it (internal/push Device). */
 export interface PushDevice {
@@ -51,6 +51,7 @@ export interface PushSubscriptionJSON {
 
 /** Words for each kind in the Settings sheet. */
 export const kindLabels: Record<PushKind, { label: string; detail: string }> = {
+  approval: { label: "Approvals", detail: "A tool call waits for your approval (low-risk ones get Allow and Deny buttons where the browser shows them)" },
   question: { label: "Questions", detail: "An agent asks something (blocking or normal; low-urgency ones are not pushed)" },
   dialog: { label: "Terminal dialogs", detail: "An agent waits at a permission or question dialog" },
   job: { label: "Jobs stuck or failed", detail: "A job stopped moving, failed, or needs a login or fix" },

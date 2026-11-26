@@ -175,8 +175,8 @@ export function TrayBar() {
         data-tray="bar"
         onClick={() => setOpen(true)}
         className={cn(
-          "flex h-10 w-full shrink-0 items-center gap-2 border-t border-border bg-surface-raised px-3 text-left md:hidden",
-          fresh.size > 0 && "animate-tray-in",
+          "flex min-h-11 w-full shrink-0 items-center gap-2 border-t border-border bg-surface-raised px-3 text-left md:hidden",
+          fresh.size > 0 && "animate-tray-pulse",
         )}
       >
         <TrayCount count={items.length} />
@@ -195,7 +195,7 @@ export function TrayBar() {
 
 function TrayCount({ count }: { count: number }) {
   return (
-    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-blocked px-1.5 text-2xs font-semibold tabular-nums text-white">
+    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-blocked px-1.5 text-2xs font-semibold tabular-nums text-white dark:text-surface">
       {count > 99 ? "99+" : count}
     </span>
   );
@@ -271,7 +271,7 @@ function TrayRow({
   }, [open, item.kind]);
   const who = item.kind === "approval" ? item.approval.agent_name : item.kind === "dialog" ? item.agent.workspace : item.kind === "question" ? item.question.context.worker : undefined;
   return (
-    <li className={cn(fresh && "animate-tray-in")} data-tray-item={item.id}>
+    <li className={cn(fresh && "animate-tray-pulse")} data-tray-item={item.id}>
       <div className="flex items-start gap-1 pr-1">
         <button
           type="button"
