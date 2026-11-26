@@ -164,6 +164,11 @@ func TestKeysValidation(t *testing.T) {
 		{"no keys", `{"keys":[],"screen_hash":"x"}`, http.StatusBadRequest},
 		{"too many", keysBody(t, make([]string, 17), "x"), http.StatusBadRequest},
 		{"control character", keysBody(t, []string{"a\nb"}, "x"), http.StatusBadRequest},
+		// R1 I3: only letters, digits and a short list of named keys.
+		{"a word", keysBody(t, []string{"rm"}, "x"), http.StatusBadRequest},
+		{"ctrl+d", keysBody(t, []string{"ctrl+d"}, "x"), http.StatusBadRequest},
+		{"punctuation", keysBody(t, []string{";"}, "x"), http.StatusBadRequest},
+		{"an unknown name", keysBody(t, []string{"f13"}, "x"), http.StatusBadRequest},
 		{"digit without a hash", keysBody(t, []string{"1"}, ""), http.StatusBadRequest},
 		{"esc without a hash", keysBody(t, []string{"esc"}, ""), http.StatusOK},
 		{"ctrl+c without a hash", keysBody(t, []string{"ctrl+c"}, ""), http.StatusOK},
@@ -184,6 +189,19 @@ func TestKeysValidation(t *testing.T) {
 	shellScreen := decodeData[ScreenResponse](t, h.do(request(http.MethodGet, "/api/v1/agents/"+shellPane+"/screen", "")).Body.Bytes())
 	if response := h.do(request(http.MethodPost, "/api/v1/agents/"+shellPane+"/keys", keysBody(t, []string{"q"}, shellScreen.Hash))); response.Code != http.StatusOK {
 		t.Fatalf("keys to a plain pane = %d %s", response.Code, response.Body)
+	}
+}
+
+func TestAllowedKeys(t *testing.T) {
+	for _, key := range []string{"1", "9", "a", "Z", "Enter", "esc", "ESCAPE", "tab", "space", "backspace", "up", "down", "left", "right", "ctrl+c", "Ctrl+C"} {
+		if !allowedKey(key) {
+			t.Errorf("%q refused", key)
+		}
+	}
+	for _, key := range []string{"", "10", "ab", "ctrl+d", "ctrl+z", "alt+f4", "!", " ", "é", "enter\n"} {
+		if allowedKey(key) {
+			t.Errorf("%q allowed", key)
+		}
 	}
 }
 
