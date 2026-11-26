@@ -196,7 +196,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 	var listeners []net.Listener
 	var listenConfig net.ListenConfig
-	limiter := newConnLimiter(maxConnections)
+	limiter := newConnLimiter(maxConnections, maxConnectionsPerPeer)
 	for _, target := range s.deps.Config.Listeners {
 		listener, err := listenConfig.Listen(ctx, "tcp", target.Addr.String())
 		if err != nil && target.Optional {
