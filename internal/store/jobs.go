@@ -61,6 +61,13 @@ type JobRecord struct {
 	RetryCount      int
 	// LastStopAt is when the agent's Stop hook last ran (migration 0005); the backstop reads it.
 	LastStopAt time.Time
+	// The lifecycle claim (migration 0006): the step acting outside crowsnest right now ("" for
+	// none), the crowsnest process that holds it, when it was claimed, and the generation every
+	// claim and every terminal transition bumps (internal/jobs/lifecycle.go).
+	LifecycleOp    string
+	LifecycleOwner string
+	LifecycleAt    time.Time
+	LifecycleGen   int64
 }
 
 // JobEventRecord is one row of job_events.
@@ -101,6 +108,8 @@ func jobColumns(r *JobRecord) []column {
 		intCol("denials", &r.Denials), intCol("restarts", &r.Restarts), textCol("restart_times", &r.RestartTimes),
 		timeCol("retry_at", &r.RetryAt), intCol("retry_count", &r.RetryCount),
 		timeCol("last_stop_at", &r.LastStopAt),
+		textCol("lifecycle_op", &r.LifecycleOp), textCol("lifecycle_owner", &r.LifecycleOwner),
+		timeCol("lifecycle_at", &r.LifecycleAt), int64Col("lifecycle_gen", &r.LifecycleGen),
 	}
 	return cols
 }
@@ -216,6 +225,63 @@ func (s *Store) ListJobs(ctx context.Context, states []string, limit int) ([]Job
 	return s.queryJobs(ctx, query, args...)
 }
 
+// ListJobsPage returns jobs in states with an id above afterID, oldest first, at most limit.
+// The supervisor pages through every live job with it: the board's newest-first page is not a
+// work set (R2-C16).
+func (s *Store) ListJobsPage(ctx context.Context, states []string, afterID int64, limit int) ([]JobRecord, error) {
+	query := jobSelect + " WHERE id > ?"
+	args := []any{afterID}
+	if len(states) > 0 {
+		query += " AND state IN (?" + strings.Repeat(", ?", len(states)-1) + ")"
+		for _, state := range states {
+			args = append(args, state)
+		}
+	}
+	query += " ORDER BY id LIMIT ?"
+	args = append(args, limit)
+	return s.queryJobs(ctx, query, args...)
+}
+
+// ListJobsByPane returns the jobs in states whose agent runs in paneID, newest first.
+func (s *Store) ListJobsByPane(ctx context.Context, paneID string, states []string) ([]JobRecord, error) {
+	query := jobSelect + " WHERE pane_id = ?"
+	args := []any{paneID}
+	if len(states) > 0 {
+		query += " AND state IN (?" + strings.Repeat(", ?", len(states)-1) + ")"
+		for _, state := range states {
+			args = append(args, state)
+		}
+	}
+	return s.queryJobs(ctx, query+" ORDER BY id DESC", args...)
+}
+
+// CountJobsHeldBy counts the jobs in states held by the agent named agentName.
+func (s *Store) CountJobsHeldBy(ctx context.Context, agentName string, states []string) (int, error) {
+	if len(states) == 0 {
+		return 0, errors.New("counting held jobs needs at least one state")
+	}
+	args := []any{agentName}
+	for _, state := range states {
+		args = append(args, state)
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE agent_name = ? AND state IN (?"+strings.Repeat(", ?", len(states)-1)+")", args...).Scan(&count) //nolint:gosec // placeholders only
+	if err != nil {
+		return 0, fmt.Errorf("counting the jobs %s holds: %w", agentName, err)
+	}
+	return count, nil
+}
+
+// OldestUnassignedQueued returns the oldest queued job with no directory and no agent: the next
+// one the orchestrator takes. ok is false when there is none.
+func (s *Store) OldestUnassignedQueued(ctx context.Context) (JobRecord, bool, error) {
+	jobs, err := s.queryJobs(ctx, jobSelect+" WHERE state = 'queued' AND dir = '' AND agent_name = '' ORDER BY id LIMIT 1")
+	if err != nil || len(jobs) == 0 {
+		return JobRecord{}, false, err
+	}
+	return jobs[0], true, nil
+}
+
 func (s *Store) queryJobs(ctx context.Context, query string, args ...any) ([]JobRecord, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -300,7 +366,36 @@ func (s *Store) HasJobEvent(ctx context.Context, jobID int64, kind, marker strin
 }
 
 // ListQuestionsByJob returns the questions asked under a job (questions.job_id = "j_<id>"),
-// oldest first.
+// oldest first, without their attachments (FileCount says how many; R2-C12).
 func (s *Store) ListQuestionsByJob(ctx context.Context, jobID string) ([]QuestionRecord, error) {
-	return s.queryQuestions(ctx, `SELECT `+questionColumns+` FROM questions WHERE job_id = ? ORDER BY id`, jobID)
+	return s.queryQuestions(ctx, `SELECT `+listColumns+` FROM questions WHERE job_id = ? ORDER BY id`, jobID)
+}
+
+// JobQuestionSummary is what the supervisor needs from a job's questions, in one aggregate
+// query (R2-C12).
+type JobQuestionSummary struct {
+	Open     int // open questions
+	Blocking int // open questions asked with wait=true
+	// AnswerIncomingAt is the newest moment an outcome was typed back into the agent, or is still
+	// on its way: for each settled question whose outcome is typed, its delivery time, else (not
+	// delivered and not failed) when it was claimed or settled. A delivery that failed or was
+	// abandoned counts for nothing (R2-C04). Zero: none.
+	AnswerIncomingAt time.Time
+}
+
+// SummarizeJobQuestions returns the summary of the questions asked under jobID.
+func (s *Store) SummarizeJobQuestions(ctx context.Context, jobID string) (JobQuestionSummary, error) {
+	var summary JobQuestionSummary
+	var incoming int64
+	err := s.db.QueryRowContext(ctx, `SELECT
+		  COALESCE(SUM(status = 'open'), 0),
+		  COALESCE(SUM(status = 'open' AND wait), 0),
+		  COALESCE(MAX(CASE WHEN status != 'open' AND delivery = 'type' AND delivery_error = ''
+		      THEN COALESCE(delivered_at, delivery_claimed_at, settled_at) END), 0)
+		FROM questions WHERE job_id = ?`, jobID).Scan(&summary.Open, &summary.Blocking, &incoming)
+	if err != nil {
+		return JobQuestionSummary{}, fmt.Errorf("summarising the questions of job %s: %w", jobID, err)
+	}
+	summary.AnswerIncomingAt = unixToTime(incoming)
+	return summary, nil
 }

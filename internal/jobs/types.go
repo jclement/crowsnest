@@ -170,7 +170,8 @@ type Job struct {
 	OpenQuestions  int        `json:"open_questions"`
 	Isolate        bool       `json:"isolate"`
 
-	isolate bool // the job asked for a worktree (Isolated)
+	isolate   bool // the job asked for a worktree (Isolated)
+	briefSent bool // the brief reached the agent (a restart resumes rather than briefs again)
 }
 
 // Event is one timeline entry.

@@ -8,22 +8,23 @@ import (
 	"context"
 
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/store"
 )
 
 // BackstopJobs lists running jobs that hold an agent and are not waiting on questions: the jobs
 // whose agent must not sit idle with nothing declared. Every other state either lets the agent
-// rest (blocked, needs_you, in_review, queued, terminal) or has no agent yet.
+// rest (blocked, needs_you, in_review, queued, terminal) or has no agent yet. A job whose own
+// recovery owns it (a limit or API error on its retry schedule, an agent being restarted) is left
+// to that recovery (R2-C09), and one crowsnest is acting on right now is skipped. Every running
+// job is considered, not a page of the board (R2-C16).
 func (s *Service) BackstopJobs(ctx context.Context) ([]orch.BackstopJob, error) {
-	records, err := s.opts.Store.ListJobs(ctx, []string{string(StateRunning)}, listLimit)
-	if err != nil {
-		return nil, err
-	}
 	var out []orch.BackstopJob
-	for _, r := range records {
-		if r.PaneID == "" || r.Waiting || !r.BriefSent {
-			continue
+	err := s.eachLive(ctx, []State{StateRunning}, func(r store.JobRecord) {
+		recovering := r.Stuck && (Cause(r.Cause) == CauseLimit || Cause(r.Cause) == CauseServerError || Cause(r.Cause) == CauseExited)
+		if r.PaneID == "" || r.Waiting || !r.BriefSent || recovering || s.claimLive(r) {
+			return
 		}
 		out = append(out, orch.BackstopJob{ID: FormatID(r.ID), PaneID: r.PaneID, LastStopAt: r.LastStopAt})
-	}
-	return out, nil
+	})
+	return out, err
 }

@@ -61,13 +61,10 @@ func init() {
 }
 
 func askTool(ctx context.Context, client *Client, args AskArgs) *mcp.CallToolResult {
-	if args.JobID != "" {
-		client = client.WithJob(args.JobID)
-	}
 	question, err := client.Ask(ctx, questions.AskInput{
 		Title: args.Title, BodyMD: args.BodyMD, Kind: questions.Kind(args.Kind), Multi: args.Multi, Options: args.Options,
 		Recommend: args.Recommend, Context: args.Context, Urgency: questions.Urgency(args.Urgency),
-		ExpiresInHours: args.ExpiresInHours, Files: args.Files, Wait: args.Wait,
+		ExpiresInHours: args.ExpiresInHours, Files: args.Files, Wait: args.Wait, JobID: args.JobID,
 	})
 	if err != nil {
 		return errorResult(toolError("The question was not posted", err))
