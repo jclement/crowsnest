@@ -142,7 +142,7 @@ export const ApprovalCard = forwardRef<HTMLElement, ApprovalCardProps>(function 
             <p id={`${titleId}-confirm`} className="text-sm font-semibold text-danger">
               This is dangerous. Allow it anyway?
             </p>
-            <p className="text-xs text-body">{approval.risk_reasons.join(". ") || "It matched a dangerous rule."} It runs as you, now, once.</p>
+            <p className="text-xs text-body">{(approval.risk_reasons.join(". ") || "It matched a dangerous rule") + ". It runs as you, now, once."}</p>
             <div className="flex flex-wrap gap-2">
               <Button variant="danger" icon={Check} disabled={decide.isPending} onClick={() => send(true, true)}>
                 Yes, allow it

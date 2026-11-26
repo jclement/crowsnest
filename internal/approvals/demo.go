@@ -9,7 +9,7 @@ import (
 
 // DemoPanes are the demo fleet's panes the seeded approvals come from.
 type DemoPanes struct {
-	Builder, Reviewer, Docs string
+	Builder, Reviewer, Linter string
 }
 
 // demoRequests are the scripted approvals: one of each kind the card renders, and one dangerous.
@@ -22,7 +22,7 @@ func demoRequests(panes DemoPanes) []RequestInput {
 	return []RequestInput{
 		{PaneID: panes.Builder, AgentName: "builder", Cwd: "/home/crow/src/crowsnest", ToolName: "Bash",
 			ToolInput: json.RawMessage(`{"command":"go test ./internal/fleet/...","description":"Run the fleet package tests"}`)},
-		{PaneID: panes.Docs, AgentName: "docs-writer", Cwd: "/home/crow/src/crowsnest", ToolName: "Edit", ToolInput: edit},
+		{PaneID: panes.Linter, AgentName: "linter", Cwd: "/home/crow/src/crowsnest", ToolName: "Edit", ToolInput: edit},
 		{PaneID: panes.Reviewer, AgentName: "reviewer", Cwd: "/home/crow/src/crowsnest", ToolName: "Bash",
 			ToolInput: json.RawMessage(`{"command":"git push --force origin main","description":"Force-push the rebased branch"}`)},
 	}
@@ -33,7 +33,7 @@ func demoRotation(panes DemoPanes) []RequestInput {
 	return []RequestInput{
 		{PaneID: panes.Builder, AgentName: "builder", Cwd: "/home/crow/src/crowsnest", ToolName: "WebFetch",
 			ToolInput: json.RawMessage(`{"url":"https://pkg.go.dev/github.com/coder/websocket","prompt":"How do I set a read limit?"}`)},
-		{PaneID: panes.Docs, AgentName: "docs-writer", Cwd: "/home/crow/src/crowsnest", ToolName: "mcp__github__create_issue",
+		{PaneID: panes.Linter, AgentName: "linter", Cwd: "/home/crow/src/crowsnest", ToolName: "mcp__github__create_issue",
 			ToolInput: json.RawMessage(`{"owner":"jclement","repo":"crowsnest","title":"Tray covers the composer on iPad","labels":["ui"]}`)},
 		{PaneID: panes.Builder, AgentName: "builder", Cwd: "/home/crow/src/crowsnest", ToolName: "Bash",
 			ToolInput: json.RawMessage(`{"command":"npm install --save-dev @axe-core/playwright","description":"Add axe for the a11y checks"}`)},

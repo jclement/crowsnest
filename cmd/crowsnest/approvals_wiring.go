@@ -99,7 +99,7 @@ func newApprovals(cfg config.Config, db *store.Store, events *hub.Hub, rules *gu
 func runApprovals(ctx context.Context, service *approvals.Service, cache *fleet.Cache, client herdr.Client, logger *slog.Logger) {
 	service.RecoverAtStart(ctx)
 	if demo, ok := client.(*fake.Demo); ok {
-		panes := approvals.DemoPanes{Builder: demo.PaneOf(fake.DemoBuilder), Reviewer: demo.PaneOf(fake.DemoReviewer), Docs: demo.PaneOf(fake.DemoDocs)}
+		panes := approvals.DemoPanes{Builder: demo.PaneOf(fake.DemoBuilder), Reviewer: demo.PaneOf(fake.DemoReviewer), Linter: demo.PaneOf(fake.DemoLinter)}
 		if err := approvals.SeedDemo(ctx, service, panes); err != nil {
 			logger.Warn("seeding the demo approvals", "err", err)
 		}

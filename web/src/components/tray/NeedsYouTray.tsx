@@ -107,10 +107,9 @@ export function TrayPanel() {
           "fixed right-4 z-30 hidden items-center gap-2 rounded-full border border-border-strong bg-surface-raised px-3 py-1.5 text-sm font-medium text-heading shadow-lg hover:bg-hover md:inline-flex",
           bump && "animate-tray-in",
         )}
-        aria-label={`${items.length} need you: show the tray`}
       >
         <TrayCount count={items.length} />
-        Needs you
+        Needs you<span className="sr-only">: show the tray</span>
         <ChevronUp className="h-4 w-4 text-muted" aria-hidden />
       </button>
     );
@@ -179,9 +178,9 @@ export function TrayBar() {
           "flex h-10 w-full shrink-0 items-center gap-2 border-t border-border bg-surface-raised px-3 text-left md:hidden",
           fresh.size > 0 && "animate-tray-in",
         )}
-        aria-label={`${items.length} need you: open the tray`}
       >
         <TrayCount count={items.length} />
+        <span className="sr-only">need you: open the tray. First: </span>
         <span className="min-w-0 flex-1 truncate text-sm text-heading">{top ? trayTitle(top) : ""}</span>
         <ChevronUp className="h-4 w-4 shrink-0 text-muted" aria-hidden />
       </button>
@@ -205,7 +204,7 @@ function TrayCount({ count }: { count: number }) {
 export function TrayList({ items, fresh, onNavigate }: { items: TrayItem[]; fresh: Set<string>; onNavigate?: () => void }) {
   const [openId, setOpenId] = useState<string | null>(null);
   return (
-    <ul aria-label="Needs you items" className="divide-y divide-border">
+    <ul aria-label="Waiting on you" className="divide-y divide-border">
       {items.map((item) => (
         <TrayRow
           key={item.id}

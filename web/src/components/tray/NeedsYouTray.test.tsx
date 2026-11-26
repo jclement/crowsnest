@@ -53,7 +53,7 @@ describe("NeedsYouTray", () => {
     const user = userEvent.setup();
     const calls = stubTray();
     renderTray(<List />);
-    const list = await screen.findByRole("list", { name: "Needs you items" });
+    const list = await screen.findByRole("list", { name: "Waiting on you" });
     await waitFor(() => expect(within(list).getAllByRole("button", { expanded: false }).length).toBeGreaterThan(3));
     const rows = within(list).getAllByRole("button", { expanded: false });
     expect(rows[0]).toHaveTextContent("git push --force origin main");
@@ -90,7 +90,7 @@ describe("NeedsYouTray", () => {
     const panel = await screen.findByRole("complementary", { name: "Needs you" });
     await waitFor(() => expect(within(panel).getByText("Show all", { exact: false })).toBeInTheDocument());
     await user.click(within(panel).getByRole("button", { name: "Fold the tray" }));
-    const pill = await screen.findByRole("button", { name: /need you: show the tray/ });
+    const pill = await screen.findByRole("button", { name: /Needs you: show the tray/ });
     window.dispatchEvent(new Event(FOCUS_TRAY_EVENT));
     await waitFor(() => expect(document.activeElement?.hasAttribute("data-tray-row")).toBe(true));
     expect(pill).not.toBeInTheDocument();
