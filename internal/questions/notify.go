@@ -32,6 +32,9 @@ func NewURLNotifier(url string, client *http.Client, logger *slog.Logger) func(Q
 	if client == nil {
 		client = &http.Client{Timeout: notifyTimeout}
 	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(q Question) {
 		if q.Urgency != UrgencyBlocking {
 			return

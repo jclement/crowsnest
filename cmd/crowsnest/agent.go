@@ -73,7 +73,7 @@ func newAskCommand() *cobra.Command {
 }
 
 func readAskInput(stdin io.Reader, file string) (questions.AskInput, error) {
-	var reader io.Reader = stdin
+	reader := stdin
 	if file != "-" {
 		opened, err := os.Open(file) //nolint:gosec // the agent names its own question file
 		if err != nil {

@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -252,8 +253,15 @@ func labelOf(options []Option, key string) string {
 	return key
 }
 
-// clean flattens text to one line of printable characters with single spaces.
+// clean flattens text to one line of printable characters with single spaces, with any ANSI
+// escape sequences removed (they would be keystrokes in the asker's terminal).
 func clean(text string) string {
+	text = fleet.StripANSI(strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' ' // before stripping, which drops tabs and line breaks rather than spacing them
+		}
+		return r
+	}, text))
 	var out strings.Builder
 	space := false
 	for _, r := range text {

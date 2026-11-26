@@ -38,7 +38,7 @@ func Listen(ctx context.Context, path string) (net.Listener, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating the agent socket directory %s: %w", dir, err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // a directory needs x to be entered; 0700 is owner-only
 		return nil, fmt.Errorf("restricting the agent socket directory %s to its owner: %w", dir, err)
 	}
 	if err := removeStale(ctx, path); err != nil {

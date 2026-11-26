@@ -28,7 +28,7 @@ func HerdrPrompter(client herdr.Client) Prompter {
 		case errors.As(err, &draft):
 			return fmt.Errorf("%w: the agent's input box holds a draft typed at the terminal", ErrHold)
 		case errors.Is(err, orch.ErrNotTyped):
-			return fmt.Errorf("%w: %v", ErrHold, err)
+			return fmt.Errorf("%w: %w", ErrHold, err)
 		default:
 			return err
 		}

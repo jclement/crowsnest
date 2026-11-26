@@ -32,19 +32,26 @@ func (e usageError) Unwrap() error { return e.err }
 func main() {
 	root := newRootCommand()
 	if err := root.Execute(); err != nil {
-		var exit exitCodeError
-		if errors.As(err, &exit) {
-			if exit.message != "" {
-				printError(err)
-			}
-			os.Exit(exit.code)
+		if err.Error() != "" {
+			printError(err)
 		}
-		printError(err)
-		var usage usageError
-		if errors.As(err, &usage) {
-			os.Exit(2)
-		}
-		os.Exit(1)
+		os.Exit(exitCodeFor(err))
+	}
+}
+
+// exitCodeFor maps a command's error to the process exit code.
+func exitCodeFor(err error) int {
+	var exit exitCodeError
+	var usage usageError
+	switch {
+	case err == nil:
+		return 0
+	case errors.As(err, &exit):
+		return exit.code
+	case errors.As(err, &usage):
+		return 2
+	default:
+		return 1
 	}
 }
 
