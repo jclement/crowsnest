@@ -73,7 +73,7 @@ func TestIntegrationClaudeRemoteControl(t *testing.T) {
 		read, err := session.Client.PaneRead(ctx, status.PaneID, herdr.ReadOptions{Source: herdr.SourceRecent, Lines: 200})
 		if err == nil {
 			screen = read.Text
-			if strings.Contains(strings.ToLower(screen), "remote control") || strings.Contains(screen, name) {
+			if strings.Contains(strings.ToLower(screen), "remote-control is active") {
 				break
 			}
 		}
