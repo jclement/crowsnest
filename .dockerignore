@@ -1,0 +1,27 @@
+# The devbox image (deploy/Dockerfile) builds web/ and the Go binary itself, so the context needs
+# only sources. Keeping out node_modules, build output and local state makes the context small
+# and keeps a developer's .env or database from ever reaching an image layer.
+.git
+.github
+.dev
+bin
+dist
+coverage.out
+coverage.html
+REPORT.md
+STATUS.md
+**/.DS_Store
+.env
+**/.env
+deploy/.env
+mise.local.toml
+*.db
+*.db-shm
+*.db-wal
+web/node_modules
+web/dist
+!web/dist/.gitkeep
+web/coverage
+web/test-results
+web/playwright-report
+web/screenshots
