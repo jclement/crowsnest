@@ -458,43 +458,50 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
 
-**Fleet and screen shapes** (M3 builds against these; the herdr objects pass through in herdr's
-own snake_case with crowsnest's additions marked). `{target}` is the agent's **pane id**
-(`w1:p1`, URL-encoded as `w1%3Ap1`); the server may also accept an agent name, but the web app
-always sends the pane id because names are not guaranteed unique.
-
-```jsonc
-// GET /api/v1/fleet
-{"data": {"session": "crowsnest", "herdr_version": "0.9.5", "workspaces": [
-  {"workspace_id": "w1", "label", "number", "active_tab_id", "agent_status", "focused", "pane_count", "tab_count",
-   "tabs": [
-     {"tab_id": "w1:t1", "workspace_id", "label", "number", "agent_status", "focused", "pane_count",
-      "panes": [
-        {"pane_id": "w1:p1", "tab_id", "workspace_id", "terminal_id", "cwd", "foreground_cwd", "agent_status",
-         "focused", "revision",
-         "agent": null | {"name", "agent": "claude" | "codex" | …,
-                          "agent_status": "idle" | "done" | "working" | "blocked" | "unknown",
-                          "pane_id", "tab_id", "workspace_id", "cwd", "terminal_title_stripped",
-                          "agent_session": {"value"} | null, "state_change_seq",
-                          "has_dialog": bool,       // crowsnest: section 8.2 detection
-                          "has_transcript": bool}}  // crowsnest: a transcript was found
-      ]}]}]}}
-
-// GET /api/v1/agents/{target}/screen
-{"data": {"text": "…verbatim…", "hash": "…", "status": "blocked",
-          "dialog": null | {"options": [{"digit": "1", "text": "Yes"}], "multi_form": false},
-          "draft": "empty" | "draft" | "unknown"}}
-```
-
-The TypeScript mirror is `web/src/lib/types.ts`; `web/src/lib/fixtures.ts` holds a fleet and
-screens in exactly this shape.
+**Addressing and the TypeScript mirror.** The table rows above are the authority for every shape.
+The web app addresses an agent by its **pane id** (`w1:p1`, URL-encoded as `w1%3Ap1`) even though
+the server also accepts an agent name, because names are not guaranteed unique. The TypeScript
+mirror of the Go structs is `web/src/lib/types.ts` (the tree's agent is `PaneAgent`; an entry of
+the flat `agents` list, with its pane, tab and workspace, is `Agent`); `web/src/lib/fixtures.ts`
+holds a fleet and screens in exactly that shape, with `agents` and `counts` derived the way
+`internal/fleet/view.go` derives them. (M2 and M3 were built in parallel against an earlier draft
+of these shapes; M5 reconciled the web app to the server and removed the draft.)
 
 **Terminal WebSocket protocol**: binary frames are terminal bytes in both directions. Text frames
 are JSON control: client `{"type":"resize","cols":N,"rows":N}`, server `{"type":"exit","reason":…}`.
 The client sends a resize first; the server starts the process on that first resize.
 
-- `/term/tui` **(verified approach)**: a PTY running `herdr --session <name>` (the full TUI, sidebar and tabs). One PTY per connection; closing the socket detaches (kills the client process, not the server).
-- `/term/pane/{id}` **(verified)**: `herdr --session <name> terminal session control <pane> --takeover --cols N --rows N`. stdout is NDJSON `{"type":"terminal.frame","encoding":"ansi","full":bool,"bytes":"<base64>"}` then `terminal.closed`; stdin takes `{"type":"terminal.input","bytes":"<base64>"}` and `terminal.resize`. One controller per pane, so a second browser takes over and the first is told. This is the phone-friendly view: one pane, full width.
+- `/term/tui` **(verified)**: a PTY running `herdr --session <name>` (the full TUI, sidebar and tabs), `TERM=xterm-256color`, `HERDR_*` scrubbed, its own session and process group. One PTY per connection; closing the socket kills that client process alone (SIGHUP, then SIGTERM, then SIGKILL after 2 s), never the server or an agent; the integration test checks the session and its pane survive both a close and herdr's own detach key (ctrl+b q, exit reason `detached`).
+- `/term/pane/{id}` **(verified)**: `herdr --session <name> terminal session control <pane> --takeover --cols N --rows N`. stdout is NDJSON `{"type":"terminal.frame","encoding":"ansi","full":bool,"width","height","seq","bytes":"<base64>"}` then `{"type":"terminal.closed","reason"}`; stdin takes `{"type":"terminal.input","bytes":"<base64>"}`, `{"type":"terminal.resize","cols":N,"rows":N}` (verified: `width`/`height` are refused with "missing field `cols`") and `{"type":"terminal.release"}` (herdr answers `terminal.closed` `detached` and exits). herdr also accepts `terminal.scroll` and `terminal.mouse`, unused. Option order matters: `--takeover` and the sizes come after the pane id. One controller per pane: a second controller's start ends the first with reason `terminal attach taken over` (verified); without `--takeover` the second is refused. This is the phone-friendly view: one pane, full width.
+
+**Terminal sockets as built (M5).** `internal/term` holds the bridges behind one interface
+(`Start(cols, rows)`, `Write`, `Resize`, `Output()` channel, `Reason()`, `Close`) and
+`internal/httpd/term.go` the socket side:
+
+- **Who**: `requireAuth` runs before the upgrade (401 without a session) and the middleware's
+  Origin check on every upgrade (403 for a missing, `null` or foreign Origin). A pane id must
+  match `^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$` (else 400) and name a pane in the current fleet
+  (else 404) before any bridge is built, so no arbitrary string reaches argv.
+- **Start**: binary frames before the first valid resize are dropped; an invalid resize
+  (outside 1×1 to 1000×500) or an unknown control type is ignored; no resize within 30 s closes
+  the socket (1008). Browser messages are capped at 256 KiB.
+- **Output** goes through a byte-bounded queue (1 MiB): a browser that stops reading is dropped
+  with close code 1013 ("not keeping up") rather than buffered without limit, and its client
+  reconnects to a fresh redraw. A process that ends sends `{"type":"exit","reason"}` and then a
+  normal close (1000).
+- **Keepalive**: a ping every heartbeat (20 s) that also re-checks the session cookie, as SSE
+  does; a logout or password change closes open terminals with 1008 ("signed out") within one
+  heartbeat. Server shutdown closes them with 1001.
+- **`--demo`** serves a built-in toy on both routes (a coloured banner, line editing, `colors`,
+  `size`, `exit`), written in Go: no process is spawned, let alone a shell.
+- **The browser** (`web/src/lib/termSocket.ts`) reconnects after a drop with 1, 2, 4 … 30 s
+  backoff and resets the screen on every open so the server's redraw lands clean. It does
+  **not** reconnect after an `exit` or a 1008: reconnecting after "taken over" would steal the
+  pane straight back and the two browsers would fight; after "detached" the user left on
+  purpose. The status line offers Reconnect instead.
+- macOS detail found while building: a killed client with unread output on its PTY blocks in
+  exit until that output drains (`ps` state `E`), so the TUI bridge keeps reading (and
+  discarding) after Close until the PTY reports EIO.
 
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
@@ -525,7 +532,7 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 | **Chat** | Conversation, sticky composer, push-to-talk button when voice is on, orchestrator status chip (idle/working/blocked), "Poke now" in a menu | Same, centred column, fleet rail at left |
 | **Inbox** (badge) | Cards: questions, dialogs and stuck jobs, newest blocking first; full-screen sheet to answer | List and detail side by side |
 | **Fleet** | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal | Tree at left, selected agent at right with Conversation/Terminal toggle |
-| **Terminal** | Full-screen xterm on the herdr TUI, with a key bar (Esc, Tab, Ctrl, arrows, Enter, paste) | Full-height xterm |
+| **Terminal** | Full-screen xterm on the herdr TUI, with a key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Full-height xterm, font size in the status line |
 
 Bottom nav on mobile, left rail from `md`, in the order Jobs, Chat, Inbox, Fleet, Terminal. Jobs
 is the default route (`/`); the others are `/chat`, `/inbox`, `/fleet` (`?agent=<pane id>`
@@ -546,6 +553,20 @@ loaded lazily. The Fleet view's Conversation and Terminal bodies are the exporte
 `components/agent/AgentConversation.tsx` and `AgentTerminal.tsx`: later milestones replace their
 bodies and keep their names and props (`{agent}`). Until questions exist (M6), the Inbox badge
 and the tab-title count are the number of agents that need you (blocked, or a dialog on screen).
+
+**Terminals in the UI (M5).** `components/terminal/XTerm.tsx` is xterm.js with the fit and
+web-links addons (links open with `noopener,noreferrer`), the theme built from the app's colour
+tokens (and rebuilt when `.dark` flips), and the self-hosted JetBrains Mono; a ResizeObserver
+refits it and sends the new size. `TerminalPanel` adds a status line (connected, reconnecting
+with a countdown and "Retry now", or "Ended: <reason>" with Reconnect) and, on touch screens or
+below `md`, the key bar: Esc, Tab, a sticky Ctrl (the next typed character goes out as its
+control code), arrows (in the terminal's cursor-key mode), Enter, Paste (the Clipboard API, so
+a secure context; otherwise a toast says to long-press), and font size (9–24, remembered). Its
+buttons cancel pointerdown and mousedown and sit outside the tab order, so a tap never takes
+focus from the terminal and the phone keyboard stays up. The Terminal view sizes itself from
+its top to the bottom of `visualViewport` (capped at the bottom nav), so the on-screen keyboard
+never hides the cursor line. In the Fleet view the agent's Terminal tab is the pane bridge, and
+plain shell panes are selectable too (`PaneDetail`): any pane can be opened, not only agents.
 
 **Fixtures mode.** On the Vite dev server, `?fixtures=1` answers every API call in memory from
 `lib/fixtures.ts` and skips the event stream; it is kept for the tab in sessionStorage and turned
@@ -594,7 +615,7 @@ mise.toml  .goreleaser.yml  .github/workflows/{ci,release}.yml
 ```
 
 Go 1.27, `CGO_ENABLED=0`, `modernc.org/sqlite`, `github.com/coder/websocket`, `github.com/creack/pty`, `log/slog`.
-mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`), `lint`, `fmt`, `check`, `e2e`, `e2e:real`, `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
+mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`; M5 adds the terminal bridges), `lint`, `fmt`, `check`, `e2e`, `e2e:real` (M5: Playwright against the built binary), `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
 
 ## 15. Test strategy
 
@@ -602,10 +623,10 @@ mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`
 |---|---|---|
 | Go unit | Config precedence and refusals, auth and rate limit, host/origin middleware, transcript normaliser (golden files from real transcripts), dialog and draft detection (captured screens), poke precheck and gate, question lifecycle and long-poll, terminal frame codec, herdr client against a scripted NDJSON server. Table-driven, `-race` | `mise run test`, CI |
 | Supervisor unit | The disposition check as a pure function over (job state, open questions, hook input, nudge history): every row of the table in section 6.4, the three-nudge budget, progress resetting it, fail-open when the server is down, recovery schedules with a fake clock | `mise run test`, CI |
-| Go integration (`-tags integration`) | Real herdr in a session named `crowsnest-test-<random>`: start headless, snapshot, create workspace, run a command, events, pane control bridge, PTY bridge. Skipped with a clear message when herdr is absent. M2 covers the client half (`internal/herdr/integration_test.go`); the bridges come with M5 | Local (`mise run test:integration`); CI if herdr installs cleanly on the runner |
+| Go integration (`-tags integration`) | Real herdr in a session named `crowsnest-test-<random>`: start headless, snapshot, create workspace, run a command, events, pane control bridge, PTY bridge. Skipped with a clear message when herdr is absent. M2 covers the client (`internal/herdr/integration_test.go`), M5 the bridges (`internal/term/integration_test.go`: a pane runs a computed `echo`, the TUI renders and closes and detaches with the session alive, a takeover ends the first controller) | Local (`mise run test:integration`); CI if herdr installs cleanly on the runner |
 | Web unit | Vitest + Testing Library for the composer, question cards (single, multi, note), dialog card, markdown/mermaid safety | `mise run test`, CI |
 | E2E hermetic | Playwright against `crowsnest --demo`: login and lockout, chat send and live update, inbox answer flows, fleet navigation, theme, 375 px and desktop projects, no horizontal scroll, basic axe checks | `mise run e2e`, CI |
-| E2E real herdr | Playwright against a real instance on a throwaway session, no Claude: terminal WebSocket types a command and sees its output, pane view, fleet reflects a created tab, cross-origin WebSocket and POST are rejected, unauthenticated WebSocket is rejected | `mise run e2e:real`, local |
+| E2E real herdr | Playwright against a real instance on a throwaway session, no Claude: terminal WebSocket types a command and sees its output, pane view, fleet reflects a created tab, cross-origin WebSocket and POST are rejected, unauthenticated WebSocket is rejected. Built in M5 (`web/e2e/real`, `playwright.real.config.ts`): each spec starts the built binary on a random port and stops it; the `--demo` Fleet with no fixtures; both terminals on `--demo`; on real herdr the Terminal view and the pane view each run a computed `echo` and find its output in the xterm buffer, a second browser takes a pane over, and screenshots go to `web/screenshots/terminal-*.png`. The real-herdr instance gets a throwaway `HOME` under `/tmp` (herdr's TUI would otherwise show the user's own machines; `/tmp` because a unix socket path is limited to 104 bytes on macOS) seeded with `onboarding = false` so herdr skips its first-run screen. The cross-origin and unauthenticated cases are covered by the httptest suite (`internal/httpd/term_test.go`) | `mise run e2e:real`, local |
 | E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. **The stop test**: a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
 
 Test-safety rules, enforced in the helpers rather than by convention: a test session name must
@@ -660,6 +681,16 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 20. **Risky dialog options are badged, not blocked** (M3). Jeff is reading the real screen; a
     refusal list would be wrong in both directions, while a badge costs nothing and catches the
     autopilot tap.
+21. **The server's shapes are the API's authority** (M5). M2 and M3 were built in parallel against
+    a draft that drifted; the web app now mirrors the Go structs, and the option warnings the
+    server computes are shown alongside the client's own risk patterns (either one badges).
+22. **A terminal does not reconnect after it ended on purpose** (M5): after `exit` (taken over,
+    detached, the shell exited) or a policy close, only a person's Reconnect reopens it.
+    Automatic reconnection after a takeover would make two browsers steal the pane from each
+    other forever.
+23. **Any pane can be opened, not only agents** (M5). A plain shell row in Fleet opens a pane
+    terminal; the pane-control bridge needs no agent, and "a terminal in the browser" should not
+    depend on herdr having recognised one.
 
 ## 18. Milestones
 
@@ -704,4 +735,6 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - Web Push is the last milestone; until it lands a closed browser tab hears nothing unless `--notify-url` is set.
 - The never-stop guarantee is strongest for Claude agents crowsnest started (hooks). Codex agents and sessions started by hand get the herdr-side backstop only, which reacts in about a minute and cannot refuse a stop, only follow it with a nudge.
 - The supervisor depends on Claude Code hook behaviour (Stop, SessionStart, StopFailure, Notification) as documented and probed on 2.1.332.
-- One controller per pane: two browsers on the same pane view take turns.
+- One controller per pane: two browsers on the same pane view take turns (the one that lost the pane says so and offers Reconnect).
+- The Terminal view is herdr's own TUI, which shows every machine the user's herdr config names, remote ones included; anyone who can open it reaches those machines as well (M5). The pane view is limited to the session's own panes.
+- Paste from the key bar needs the Clipboard API, which browsers give only to a secure context (localhost or HTTPS); over a plain-HTTP tailnet address it falls back to the system's long-press paste.

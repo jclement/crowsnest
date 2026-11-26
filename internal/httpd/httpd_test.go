@@ -23,6 +23,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/term"
 )
 
 const (
@@ -82,6 +83,8 @@ type harnessOptions struct {
 	heartbeat time.Duration
 	herdr     herdr.Client // nil: the herdr routes answer 503
 	fleet     *fleet.Cache
+	terminals term.Launcher // nil: the terminal routes answer 503
+	termQueue int
 }
 
 var testWeb = fstest.MapFS{
@@ -124,16 +127,18 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	logs := &syncBuffer{}
 	events := hub.New()
 	server, err := New(Deps{
-		Config:       cfg,
-		Auth:         service,
-		Hub:          events,
-		Logger:       slog.New(slog.NewTextHandler(logs, nil)),
-		Version:      "v9.9.9-test",
-		Web:          testWeb,
-		Heartbeat:    opts.heartbeat,
-		Herdr:        opts.herdr,
-		Fleet:        opts.fleet,
-		HerdrVersion: "0.9.5-test",
+		Config:         cfg,
+		Auth:           service,
+		Hub:            events,
+		Logger:         slog.New(slog.NewTextHandler(logs, nil)),
+		Version:        "v9.9.9-test",
+		Web:            testWeb,
+		Heartbeat:      opts.heartbeat,
+		Herdr:          opts.herdr,
+		Fleet:          opts.fleet,
+		HerdrVersion:   "0.9.5-test",
+		Terminals:      opts.terminals,
+		TermQueueBytes: opts.termQueue,
 	})
 	if err != nil {
 		t.Fatal(err)

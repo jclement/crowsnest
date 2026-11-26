@@ -4,7 +4,7 @@
 // milestones fill), and the screen preview.
 import { MessagesSquare, SquareTerminal, X } from "lucide-react";
 import { useState } from "react";
-import { cleanTitle, needsYou } from "../../lib/fleet";
+import { cleanTitle } from "../../lib/fleet";
 import { useAgentScreen } from "../../lib/queries";
 import type { Agent, Tab, Workspace } from "../../lib/types";
 import { AgentConversation } from "../agent/AgentConversation";
@@ -31,7 +31,7 @@ export function AgentDetail({ agent, workspace, tab, onClose, hideHeading }: Age
   const target = agent.pane_id;
   const screen = useAgentScreen(target);
   const [view, setView] = useState<DetailView>(agent.has_transcript ? "conversation" : "terminal");
-  const showDialog = !!screen.data && (screen.data.dialog !== null || needsYou(agent));
+  const showDialog = !!screen.data && (screen.data.dialog.present || agent.needs_you);
   const tabsId = `agent-${target.replace(/[^a-zA-Z0-9]/g, "-")}`;
 
   return (
@@ -39,14 +39,14 @@ export function AgentDetail({ agent, workspace, tab, onClose, hideHeading }: Age
       <header className="flex flex-col gap-1.5">
         {!hideHeading && (
           <div className="flex items-center gap-2">
-            <StatusDot status={agent.agent_status} />
+            <StatusDot status={agent.status} />
             <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-heading">{agent.name}</h2>
             {onClose && <IconButton icon={X} label="Close agent" onClick={onClose} />}
           </div>
         )}
         <div className="flex flex-wrap items-center gap-1.5">
-          <StatusChip status={agent.agent_status} />
-          <Chip mono>{agent.agent}</Chip>
+          <StatusChip status={agent.status} />
+          <Chip mono>{agent.kind}</Chip>
           <Chip mono title="Pane id">
             {agent.pane_id}
           </Chip>
@@ -54,9 +54,9 @@ export function AgentDetail({ agent, workspace, tab, onClose, hideHeading }: Age
             {workspace.label} › {tab.label}
           </span>
         </div>
-        {agent.terminal_title_stripped && (
+        {agent.title && (
           <p className="text-xs text-body" title="Terminal title">
-            {cleanTitle(agent.terminal_title_stripped)}
+            {cleanTitle(agent.title)}
           </p>
         )}
         <p className="break-all font-mono text-2xs text-muted" title="Working directory">

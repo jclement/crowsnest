@@ -25,6 +25,7 @@ import (
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/web"
 )
 
@@ -86,6 +87,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
+		Terminals: terminals(cfg),
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
@@ -120,6 +122,15 @@ func connectHerdr(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 			"herdr_protocol", session.Pong.Protocol, "expected", herdr.ProtocolVersion)
 	}
 	return session.Client, session.Pong.Version, nil
+}
+
+// terminals picks the bridges behind the terminal routes. --demo gets the built-in toy: the fake
+// herdr has no terminals, and a demo instance must never hand out a real shell.
+func terminals(cfg config.Config) term.Launcher {
+	if cfg.Demo {
+		return term.DemoLauncher{}
+	}
+	return term.HerdrLauncher{Session: cfg.Session}
 }
 
 // cleanSessions deletes expired sessions every hour until ctx ends.

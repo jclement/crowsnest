@@ -1,7 +1,9 @@
 // The views that are still empty states. Each later milestone replaces one: Jobs (M7), Chat
-// (M4), Inbox (M6), Terminal (M5). Fleet is real (routes/FleetView.tsx).
-import { Inbox, ListTodo, MessageSquare, SquareTerminal } from "lucide-react";
+// (M4), Inbox (M6). Fleet is real (routes/FleetView.tsx), and so is Terminal (M5), below.
+import { Inbox, ListTodo, MessageSquare } from "lucide-react";
+import { TerminalPanel } from "../components/terminal/TerminalPanel";
 import { EmptyState } from "../components/ui/EmptyState";
+import { terminalPaths } from "../lib/api";
 
 export function JobsView() {
   return (
@@ -29,10 +31,7 @@ export function InboxView() {
   );
 }
 
+/** The whole herdr session (the TUI in a PTY) in a terminal that fills the visible screen. */
 export function TerminalView() {
-  return (
-    <EmptyState icon={SquareTerminal} title="No terminal attached">
-      A live terminal on the herdr session opens here.
-    </EmptyState>
-  );
+  return <TerminalPanel path={terminalPaths.tui} label="herdr session terminal" fill="viewport" />;
 }

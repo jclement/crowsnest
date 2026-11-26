@@ -5,13 +5,14 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { MousePointerClick, RefreshCw, Ship } from "lucide-react";
 import { AgentDetail } from "../components/fleet/AgentDetail";
 import { FleetTree } from "../components/fleet/FleetTree";
+import { PaneDetail } from "../components/fleet/PaneDetail";
 import { Banner } from "../components/ui/Banner";
 import { Button } from "../components/ui/Button";
 import { StatusDot } from "../components/ui/Chip";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Sheet } from "../components/ui/Sheet";
 import { SkeletonRows } from "../components/ui/Skeleton";
-import { findAgent } from "../lib/fleet";
+import { findAgent, findPane } from "../lib/fleet";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { useFleet } from "../lib/queries";
 
@@ -48,21 +49,26 @@ export function FleetView() {
   }
 
   const found = selected ? findAgent(fleet.data, selected) : null;
-  const detail = found && (
+  // A plain shell pane (no agent) opens a terminal on it instead of the agent panel.
+  const shell = selected && !found ? findPane(fleet.data, selected) : null;
+  const close = desktop ? () => select(undefined) : undefined;
+  const detail = found ? (
     <AgentDetail
       key={found.agent.pane_id}
       agent={found.agent}
       workspace={found.workspace}
       tab={found.tab}
-      onClose={desktop ? () => select(undefined) : undefined}
+      onClose={close}
       hideHeading={!desktop}
     />
-  );
+  ) : shell ? (
+    <PaneDetail key={shell.pane.id} pane={shell.pane} workspace={shell.workspace} tab={shell.tab} onClose={close} hideHeading={!desktop} />
+  ) : null;
 
   return (
     <div className="md:flex md:h-full md:min-h-0">
       <div className="md:w-[22rem] md:shrink-0 md:overflow-y-auto md:border-r md:border-border lg:w-[26rem]">
-        <FleetTree fleet={fleet.data} selected={found?.agent.pane_id} onSelect={select} />
+        <FleetTree fleet={fleet.data} selected={found?.agent.pane_id ?? shell?.pane.id} onSelect={select} />
       </div>
       {desktop ? (
         <div className="min-w-0 flex-1 overflow-y-auto bg-surface-raised/40">
@@ -74,14 +80,16 @@ export function FleetView() {
         </div>
       ) : (
         <Sheet
-          open={!!found}
+          open={!!found || !!shell}
           onClose={() => select(undefined)}
           title={
-            found && (
+            found ? (
               <>
-                <StatusDot status={found.agent.agent_status} />
+                <StatusDot status={found.agent.status} />
                 <span className="truncate">{found.agent.name}</span>
               </>
+            ) : (
+              shell && <span className="truncate font-mono">shell {shell.pane.id}</span>
             )
           }
         >

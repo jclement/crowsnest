@@ -4,8 +4,8 @@
 import { ChevronRight, Search, SearchX, Terminal as TerminalIcon, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
-import { allAgents, cleanTitle, cwdTail, filterFleet, needsYou, sortFleet } from "../../lib/fleet";
-import type { Agent, Fleet, Pane, Tab, Workspace } from "../../lib/types";
+import { cleanTitle, cwdTail, filterFleet, needsYou, needsYouCount, sortFleet } from "../../lib/fleet";
+import type { Fleet, Pane, PaneAgent, Tab, Workspace } from "../../lib/types";
 import { Chip, StatusDot } from "../ui/Chip";
 import { EmptyState } from "../ui/EmptyState";
 
@@ -19,8 +19,8 @@ export function FleetTree({ fleet, selected, onSelect }: FleetTreeProps) {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const workspaces = useMemo(() => filterFleet(sortFleet(fleet.workspaces), query), [fleet, query]);
-  const agents = allAgents(fleet);
-  const urgent = agents.filter(needsYou).length;
+  const agents = fleet.agents;
+  const urgent = needsYouCount(fleet);
   const filtering = query.trim() !== "";
 
   const toggle = (workspaceId: string) =>
@@ -52,10 +52,10 @@ export function FleetTree({ fleet, selected, onSelect }: FleetTreeProps) {
         <ul aria-label="Workspaces" className="flex flex-col pb-4">
           {workspaces.map((workspace) => (
             <WorkspaceGroup
-              key={workspace.workspace_id}
+              key={workspace.id}
               workspace={workspace}
-              open={filtering || !collapsed.has(workspace.workspace_id)}
-              onToggle={() => toggle(workspace.workspace_id)}
+              open={filtering || !collapsed.has(workspace.id)}
+              onToggle={() => toggle(workspace.id)}
               selected={selected}
               onSelect={onSelect}
               hideShells={filtering}
@@ -155,7 +155,7 @@ function WorkspaceGroup({
       {open && (
         <ul aria-label={`Tabs in ${workspace.label}`}>
           {workspace.tabs.map((tab) => (
-            <TabGroup key={tab.tab_id} tab={tab} {...rest} />
+            <TabGroup key={tab.id} tab={tab} {...rest} />
           ))}
         </ul>
       )}
@@ -175,12 +175,12 @@ function TabGroup({ tab, selected, onSelect, hideShells }: GroupProps & { tab: T
       <ul aria-label={`Panes in ${tab.label}`}>
         {panes.map((pane) =>
           pane.agent ? (
-            <li key={pane.pane_id}>
-              <AgentRow agent={pane.agent} selected={selected === pane.pane_id} onSelect={() => onSelect(pane.pane_id)} />
+            <li key={pane.id}>
+              <AgentRow agent={pane.agent} cwd={pane.cwd} selected={selected === pane.id} onSelect={() => onSelect(pane.id)} />
             </li>
           ) : (
-            <li key={pane.pane_id}>
-              <ShellRow pane={pane} />
+            <li key={pane.id}>
+              <ShellRow pane={pane} selected={selected === pane.id} onSelect={() => onSelect(pane.id)} />
             </li>
           ),
         )}
@@ -192,9 +192,19 @@ function TabGroup({ tab, selected, onSelect, hideShells }: GroupProps & { tab: T
 // ---- Rows --------------------------------------------------------------------
 
 /** One agent: state dot, name, kind; terminal title and cwd tail on the second line. */
-export function AgentRow({ agent, selected, onSelect }: { agent: Agent; selected: boolean; onSelect: () => void }) {
+export function AgentRow({
+  agent,
+  cwd,
+  selected,
+  onSelect,
+}: {
+  agent: PaneAgent;
+  cwd: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
   const urgent = needsYou(agent);
-  const title = cleanTitle(agent.terminal_title_stripped);
+  const title = cleanTitle(agent.title);
   return (
     <button
       type="button"
@@ -214,31 +224,42 @@ export function AgentRow({ agent, selected, onSelect }: { agent: Agent; selected
         )}
       />
       <span className="flex min-w-0 items-center gap-2">
-        <StatusDot status={agent.agent_status} />
+        <StatusDot status={agent.status} />
         <span className="min-w-0 truncate text-sm font-medium text-heading md:text-xs">{agent.name}</span>
-        <Chip mono>{agent.agent}</Chip>
+        <Chip mono>{agent.kind}</Chip>
         {urgent && <Chip tone="danger">needs you</Chip>}
       </span>
       <span className="flex min-w-0 items-center gap-2 pl-[18px] text-2xs text-muted">
-        <span className="min-w-0 flex-1 truncate" title={agent.terminal_title_stripped}>
+        <span className="min-w-0 flex-1 truncate" title={agent.title}>
           {title || <span className="italic">no title</span>}
         </span>
-        <span className="max-w-[45%] shrink-0 truncate font-mono" title={agent.cwd}>
-          {cwdTail(agent.cwd)}
+        <span className="max-w-[45%] shrink-0 truncate font-mono" title={cwd}>
+          {cwdTail(cwd)}
         </span>
       </span>
     </button>
   );
 }
 
-function ShellRow({ pane }: { pane: Pane }) {
+/** A plain shell pane: one quiet line. Selecting it opens a terminal on the pane. */
+function ShellRow({ pane, selected, onSelect }: { pane: Pane; selected: boolean; onSelect: () => void }) {
   return (
-    <div className="flex h-7 min-w-0 items-center gap-2 pl-8 pr-3 text-2xs text-muted">
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-current={selected ? "true" : undefined}
+      aria-label={`Shell ${pane.id} in ${pane.cwd}`}
+      className={cn(
+        "relative flex min-h-11 w-full min-w-0 items-center gap-2 pl-8 pr-3 text-left text-2xs text-muted hover:bg-hover md:min-h-7",
+        selected && "bg-selected hover:bg-selected",
+      )}
+    >
+      <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-r", selected ? "bg-accent" : "bg-transparent")} />
       <TerminalIcon className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
       <span>shell</span>
       <span className="ml-auto max-w-[60%] truncate font-mono" title={pane.cwd}>
         {cwdTail(pane.cwd)}
       </span>
-    </div>
+    </button>
   );
 }

@@ -4,11 +4,12 @@ One Go binary that starts a [herdr](https://herdr.dev) session and a Claude Code
 it, and serves a mobile-friendly web app for running that session from a browser: chat with the
 orchestrator, answer questions from agents, drive a terminal, and see every agent in the fleet.
 
-> **Status: M2 (herdr and the fleet).** crowsnest serves the login, the API health and auth
-> endpoints, the event stream and the web app shell; it connects to (or starts) its herdr
-> session and serves the fleet, agent screens and dialog key presses. The orchestrator,
-> questions, terminals and talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md)
-> section 18 and [STATUS.md](STATUS.md).
+> **Status: M5 (terminals).** crowsnest serves the login, the API health and auth endpoints,
+> the event stream and the web app; it connects to (or starts) its herdr session and serves the
+> fleet, agent screens, dialog key presses, and live terminals: the whole herdr session (its TUI)
+> in the Terminal view, and any one pane from the Fleet view. The orchestrator, questions and
+> talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
+> [STATUS.md](STATUS.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
 default, refuses to start without a login (or an explicit `--no-auth`), and checks Host and
@@ -30,7 +31,17 @@ named by `--session` (default `crowsnest`) and, if nothing answers, starts
 `herdr --session <name> server` detached, logging to
 `~/.local/state/crowsnest/<session>/herdr-server.log`. It never stops that server: herdr and its
 agents outlive crowsnest. `--demo` needs no herdr at all; it serves an in-memory fake fleet that
-changes every few seconds.
+changes every few seconds, and its terminals are a built-in toy that echoes what you type (no
+shell ever runs in demo mode).
+
+**Terminals.** The Terminal view is the herdr TUI for the whole session (`herdr --session
+<name>` in a PTY; closing the tab kills only that client, never the server or an agent). In the
+Fleet view, an agent's Terminal tab, or any plain shell pane, opens just that pane through
+herdr's pane-control stream, which fits a phone. One browser controls a pane at a time: opening
+it elsewhere takes it over and the first browser says so and offers Reconnect. On phones a key
+bar under the terminal supplies Esc, Tab, a sticky Ctrl, arrows, Enter, Paste and the font size.
+Note that herdr's TUI shows every machine your herdr config names, remote ones included, so the
+Terminal view reaches those too.
 
 For development, `mise run dev` runs the Go server with `--no-auth --demo` on :2769 and Vite on
 :5173 (open http://localhost:5173; Vite proxies `/api` to Go).
@@ -127,6 +138,8 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
+| `GET /term/tui` (WebSocket) | session | The herdr TUI in a PTY. Binary frames are terminal bytes both ways; text frames are JSON control: the browser sends `{"type":"resize","cols","rows"}` first (the process starts on it), the server ends with `{"type":"exit","reason"}` |
+| `GET /term/pane/{pane_id}` (WebSocket) | session | One pane through `herdr terminal session control --takeover`, same protocol. `404` unless the pane is in the fleet |
 
 ## Tasks
 
@@ -136,11 +149,12 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run dev` | Go server (`--no-auth`, `--web-dev`, `--demo`) on :2769 and Vite on :5173. Long-running |
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
-| `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests) |
+| `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, and the pane and TUI terminal bridges |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
 | `mise run e2e` | Playwright suite (not built until M9; fails with a message) |
+| `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures, and the terminals on a throwaway `crowsnest-test-*` herdr session. Each spec starts and stops its own instance on a random localhost port |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run snapshot` | GoReleaser snapshot (needs `.goreleaser.yml`, written in M10) |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |

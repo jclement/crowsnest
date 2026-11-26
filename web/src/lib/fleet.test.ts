@@ -10,10 +10,16 @@ const agentNames = (workspaces: Workspace[]) =>
 describe("needsYou", () => {
   it("is true for blocked agents and for agents whose screen shows a dialog", () => {
     const agent = allAgents(makeFleet())[0]!;
-    expect(needsYou({ ...agent, agent_status: "blocked", has_dialog: false })).toBe(true);
-    expect(needsYou({ ...agent, agent_status: "idle", has_dialog: true })).toBe(true);
-    expect(needsYou({ ...agent, agent_status: "working", has_dialog: false })).toBe(false);
+    expect(needsYou({ ...agent, status: "blocked", has_dialog: false })).toBe(true);
+    expect(needsYou({ ...agent, status: "idle", has_dialog: true })).toBe(true);
+    expect(needsYou({ ...agent, status: "working", has_dialog: false })).toBe(false);
     expect(needsYou(null)).toBe(false);
+  });
+
+  it("agrees with the server's needs_you flag on the flat list", () => {
+    const fleet = makeFleet();
+    expect(fleet.agents.filter((agent) => agent.needs_you).map((agent) => agent.name)).toEqual(["head-loss", "head-loss-tests"]);
+    expect(fleet.counts).toMatchObject({ agents: 6, blocked: 2, dialogs: 2, working: 1, ready: 2, unknown: 1 });
   });
 
   it("counts the fixture's two blocked agents", () => {
@@ -36,15 +42,15 @@ describe("sortFleet", () => {
     const fleet = makeFleet();
     const tab = fleet.workspaces[1]!.tabs[0]!; // m3-builder (done) then a shell
     tab.panes.reverse(); // shell first in herdr's order
-    const sorted = sortFleet(fleet.workspaces).find((w) => w.workspace_id === "w2")!.tabs[0]!;
+    const sorted = sortFleet(fleet.workspaces).find((w) => w.id === "w2")!.tabs[0]!;
     expect(sorted.panes.map((pane) => pane.agent?.name ?? "shell")).toEqual(["m3-builder", "shell"]);
   });
 
   it("moves a tab holding a needs-you agent above its siblings, and ranks urgent workspaces by number", () => {
     const fleet = makeFleet();
-    fleet.workspaces[1]!.tabs[1]!.panes[0]!.agent!.agent_status = "blocked"; // m3-review, in w2's second tab
+    fleet.workspaces[1]!.tabs[1]!.panes[0]!.agent!.status = "blocked"; // m3-review, in w2's second tab
     const sorted = sortFleet(fleet.workspaces);
-    expect(sorted.map((w) => w.workspace_id)).toEqual(["w2", "w3", "w1", "w4"]);
+    expect(sorted.map((w) => w.id)).toEqual(["w2", "w3", "w1", "w4"]);
     expect(sorted[0]!.tabs.map((tab) => tab.label)).toEqual(["review", "build"]);
   });
 
