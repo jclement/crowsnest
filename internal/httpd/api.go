@@ -223,6 +223,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeData(w, http.StatusOK, s.me()) // nothing to log in to; the UI just proceeds
 		return
 	}
+	// The body must arrive promptly (R1 L3). A writer that cannot take a deadline (httptest's
+	// recorder) has no connection to hold open anyway.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.loginBodyTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		s.internalError(w, r, "setting the login read deadline", err)
+		return
+	}
 	var body loginRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxLoginBody)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, codeValidation, "Send JSON with a username and password.")

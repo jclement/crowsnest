@@ -79,6 +79,8 @@ type Server struct {
 	sseWriteTimeout time.Duration
 	// openStreams counts SSE handlers still running, so tests can see one return.
 	openStreams atomic.Int32
+	// loginBodyTimeout is loginBodyTimeout unless a test shortens it.
+	loginBodyTimeout time.Duration
 
 	// stopping is closed when shutdown begins, so long-lived SSE handlers return promptly
 	// instead of holding Shutdown open until its grace period runs out.
@@ -100,7 +102,8 @@ func New(deps Deps) (*Server, error) {
 		heartbeat: deps.Heartbeat,
 		stopping:  make(chan struct{}),
 
-		sseWriteTimeout: sseWriteTimeout,
+		sseWriteTimeout:  sseWriteTimeout,
+		loginBodyTimeout: loginBodyTimeout,
 	}
 	if server.heartbeat <= 0 {
 		server.heartbeat = DefaultHeartbeat
@@ -151,6 +154,7 @@ func (s *Server) Run(ctx context.Context) error {
 	httpServer := &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: readHeaderTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
 		IdleTimeout:       2 * time.Minute,
 		ErrorLog:          slog.NewLogLogger(s.deps.Logger.Handler(), slog.LevelWarn),
 	}
@@ -178,6 +182,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 	var listeners []net.Listener
 	var listenConfig net.ListenConfig
+	limiter := newConnLimiter(maxConnections)
 	for _, target := range s.deps.Config.Listeners {
 		listener, err := listenConfig.Listen(ctx, "tcp", target.Addr.String())
 		if err != nil && target.Optional {
@@ -190,7 +195,7 @@ func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 			}
 			return nil, fmt.Errorf("listening on %s (from --bind %s): %w", target.Addr, target.Source, err)
 		}
-		listeners = append(listeners, listener)
+		listeners = append(listeners, limiter.wrap(listener))
 		s.deps.Logger.Info("listening", "url", s.urlFor(listener.Addr()))
 	}
 	if len(listeners) == 0 {
