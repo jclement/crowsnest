@@ -36,7 +36,13 @@ func startRunningJobIn(t *testing.T, f *socketFixture) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record.State, record.WorkDir = string(jobs.StateRunning), dir
+	// As the launcher leaves a started job: running in dir, with its children's root recorded
+	// (resolved) when its pane was made (R3-H1).
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.State, record.WorkDir, record.RootDir = string(jobs.StateRunning), dir, root
 	if err := f.db.UpdateJob(ctx, record); err != nil {
 		t.Fatal(err)
 	}
