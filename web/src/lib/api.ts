@@ -13,7 +13,9 @@ import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } fro
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
-import type { ContextInfo, ScheduleView } from "./schedule";
+import type { ContextInfo, ScheduleInput, ScheduleView } from "./schedule";
+import type { LeadAction, LeadStatus, ProjectInput, ProjectList, ProjectView } from "./projects";
+import type { AgentInstructions, InstructionsList, LayerDetail, LayerScope } from "./instructions";
 import type { AttachmentLimits } from "./attachments";
 import type { PushDevice, PushKind, PushSettings, PushSubscriptionJSON, PushTestResult } from "./push";
 
@@ -232,8 +234,40 @@ export const endpoints = {
     const text = query.toString();
     return api<JournalPage>(`/journal${text ? `?${text}` : ""}`);
   },
+  /** "Restart with new instructions": the agent resumes with a fresh prompt file. */
+  jobRestartAgent: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/restart-agent`, { method: "POST" }),
+  // ---- Projects and their leads (21.1, 21.2) ----
+  projects: (archived = false) => api<ProjectList>(`/projects${archived ? "?archived=1" : ""}`),
+  /** One project by id or slug; `opened` when the human opens it (applies lead_start=open). */
+  project: (ref: string, opened = false) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}${opened ? "?open=1" : ""}`),
+  createProject: (input: ProjectInput) => api<ProjectView>("/projects", { method: "POST", body: input }),
+  updateProject: (ref: string, input: ProjectInput) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}`, { method: "PUT", body: input }),
+  leads: () => api<LeadStatus[]>("/leads"),
+  /** Start, stop, restart, new conversation: the lead's status. Poke: a PokeResult. */
+  leadAction: (ref: string, action: LeadAction) =>
+    api<LeadStatus | PokeResult>(`/projects/${encodeURIComponent(ref)}/lead/${action}`, { method: "POST" }),
+  // ---- Instruction layers (21.3) ----
+  instructions: () => api<InstructionsList>("/instructions"),
+  /** One layer with its revisions; key "-" for global, the project's id for a project. */
+  instructionLayer: (scope: LayerScope, key: string) => api<LayerDetail>(`/instructions/${scope}/${encodeURIComponent(key)}`),
+  /** 409 for a role that comes from a file (read-only). Empty text clears a global or project layer. */
+  saveInstruction: (scope: LayerScope, key: string, body: string) =>
+    api<LayerDetail>(`/instructions/${scope}/${encodeURIComponent(key)}`, { method: "PUT", body: { body_md: body } }),
+  /** Back to the built-in text (roles only). */
+  resetRole: (name: string) => api<LayerDetail>(`/instructions/role/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  restoreInstruction: (scope: LayerScope, key: string, revision: number) =>
+    api<LayerDetail>(`/instructions/${scope}/${encodeURIComponent(key)}/restore`, { method: "POST", body: { revision } }),
+  /** What an agent was started with: j_<n>, orchestrator or lead:<slug>. */
+  agentInstructions: (subject: string) => api<AgentInstructions>(`/agents-instructions/${encodeURIComponent(subject)}`),
   // ---- Scheduled work and the orchestrator's context (7.8, 7.9) ----
-  schedule: () => api<ScheduleView>("/schedule"),
+  /** Every task, or one project's (0: the orchestrator's and unfiled tasks). */
+  schedule: (projectId?: number) => api<ScheduleView>(`/schedule${projectId === undefined ? "" : `?project=${projectId}`}`),
+  /** A new app schedule; 409 when the name is taken. Answers with the full list. */
+  scheduleCreate: (input: ScheduleInput) => api<ScheduleView>("/schedule", { method: "POST", body: input }),
+  /** The full edit of an app schedule (files are 409), with its switch. */
+  scheduleUpdate: (name: string, input: ScheduleInput & { enabled?: boolean }) =>
+    api<ScheduleView>(`/schedule/${encodeURIComponent(name)}`, { method: "PUT", body: input }),
+  scheduleDelete: (name: string) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}`, { method: "DELETE" }),
   /** Run now: a poke task goes with the next poke, a job task starts its job. */
   scheduleRun: (name: string) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}/run`, { method: "POST" }),
   scheduleSet: (name: string, enabled: boolean) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}`, { method: "PUT", body: { enabled } }),
@@ -259,6 +293,9 @@ export const endpoints = {
   voiceSettings: () => api<VoiceSettings>("/voice/settings"),
   saveVoiceSettings: (settings: VoiceSettingsChange) => api<VoiceSettings>("/voice/settings", { method: "PUT", body: settings }),
   voices: () => api<VoiceInfo[]>("/voice/voices"),
+  /** The standing agents and the voice each speaks in ("" = the instance voice). */
+  voiceAgents: () => api<AgentVoices>("/voice/agents"),
+  setAgentVoice: (agent: string, voiceId: string) => api<AgentVoices>(`/voice/agents/${encodeURIComponent(agent)}`, { method: "PUT", body: { voice_id: voiceId } }),
   /** A sample sentence in a voice, speed and model not yet saved. */
   previewVoice: (settings: VoiceSettingsChange) => api<{ text_id: string; playback_rate: number }>("/voice/preview", { method: "POST", body: settings }),
   // ---- Web Push (DESIGN.md 8.5) ----
@@ -294,6 +331,21 @@ export interface VoiceSettingsChange {
   voice_id: string;
   speed: number;
   model: string;
+}
+
+/** GET /voice/agents: each standing agent's own voice. */
+export interface AgentVoices {
+  agents: AgentVoice[];
+  /** The instance voice, which an agent without its own speaks in. */
+  default_voice: string;
+}
+
+export interface AgentVoice {
+  /** "orchestrator" or "lead-<slug>". */
+  agent: string;
+  label: string;
+  /** "" means the instance voice. */
+  voice_id: string;
 }
 
 /** One ElevenLabs voice of the account. */
@@ -358,6 +410,19 @@ export const queryKeys = {
   /** Under ["orchestrator"], so an `orchestrator` event refreshes it too. */
   orchestratorContext: ["orchestrator", "context"] as const,
   schedule: ["schedule"] as const,
+  /** Under ["schedule"], so a `schedule` event refreshes it too. */
+  scheduleProject: (projectId: number) => ["schedule", "project", projectId] as const,
+  /** Everything about projects sits under ["projects"]; `project`, `lead` and `job` events refresh it. */
+  projects: ["projects"] as const,
+  projectList: (archived: boolean) => ["projects", "list", archived] as const,
+  project: (ref: string) => ["projects", "one", ref] as const,
+  leads: ["projects", "leads"] as const,
+  /** Everything about instruction layers sits under ["instructions"]; an `instructions` event refreshes it. */
+  instructions: ["instructions"] as const,
+  instructionList: ["instructions", "list"] as const,
+  instructionLayer: (scope: string, key: string) => ["instructions", "layer", scope, key] as const,
+  agentInstructions: (subject: string) => ["instructions", "agent", subject] as const,
+  voiceAgents: ["voice", "agents"] as const,
   /** Everything about jobs sits under ["jobs"], so one `job` event refreshes the board and the detail. */
   jobs: ["jobs"] as const,
   jobList: ["jobs", "list"] as const,

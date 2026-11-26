@@ -19,7 +19,7 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   hello: null,
   heartbeat: [],
   fleet: [queryKeys.fleet, queryKeys.agents],
-  job: [queryKeys.jobs, queryKeys.schedule],
+  job: [queryKeys.jobs, queryKeys.schedule, queryKeys.projects],
   message: [queryKeys.agents, queryKeys.orchestratorContext],
   question: [queryKeys.questions, queryKeys.fleet, queryKeys.jobs],
   orchestrator: [queryKeys.orchestrator, queryKeys.fleet, queryKeys.agents],
@@ -29,6 +29,11 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   schedule: [queryKeys.schedule],
   spend: [queryKeys.spend, queryKeys.jobs],
   attachment: [queryKeys.attachments],
+  // Projects (21.1): a project changed (its counts and lead ride along in the list), or a lead's
+  // status did (its conversation and pane are in the fleet and agent queries).
+  project: [queryKeys.projects, queryKeys.instructions, queryKeys.voiceAgents],
+  lead: [queryKeys.projects, queryKeys.fleet, queryKeys.agents],
+  instructions: [queryKeys.instructions],
 };
 
 /**

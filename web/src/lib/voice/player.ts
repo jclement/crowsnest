@@ -1,5 +1,7 @@
 // The speech player: one queue of server-held texts to play, in order, through one <audio>
-// element, plus the short local chime for a reply with nothing to say aloud.
+// element, plus the short local chime for a reply with nothing to say aloud. The queue's rules
+// (first come first served across agents, nothing older than two minutes spoken late, skip,
+// stop) are lib/voice/queue.ts; this class only plays what it says is current.
 //
 // Autoplay policy: browsers (Safari above all) let a page start audio only from a user gesture,
 // and an <audio> element that has played once inside a gesture may play again later without one.
@@ -9,6 +11,7 @@
 // on its Play button unlocks it again.
 import { useSyncExternalStore } from "react";
 import { speechUrl } from "../api";
+import { advanceQueue, clearQueue, emptyQueue, enqueueLine, playFirst, type QueueState, type QueueStep, type SpokenLine } from "./queue";
 
 export interface SpeechItem {
   textId: string;
@@ -16,10 +19,14 @@ export interface SpeechItem {
   text: string;
   /** Playback rate for this item (a preview); otherwise the saved settings' rate. */
   rate?: number;
+  /** Who is speaking ("orchestrator", "lead-<slug>", "" for a job agent or the app itself). */
+  agent?: string;
+  /** When it arrived (ms); now when omitted. */
+  at?: number;
 }
 
 export interface PlayerSnapshot {
-  current: SpeechItem | null;
+  current: SpokenLine | null;
   queued: number;
   /** The browser refused to start audio without a gesture; a tap on Play fixes it. */
   blocked: boolean;
@@ -27,15 +34,14 @@ export interface PlayerSnapshot {
   failed: boolean;
 }
 
-/** At most this many items wait; older ones are dropped rather than played minutes late. */
-const MAX_QUEUE = 8;
-
 export class SpeechPlayer {
   /** The saved settings' playback rate (the part of the chosen speed ElevenLabs cannot do). */
   rate = 1;
   private audio: HTMLAudioElement | null = null;
   private context: AudioContext | null = null;
-  private queue: SpeechItem[] = [];
+  private queue: QueueState = emptyQueue;
+  /** The clock, replaceable in tests. */
+  now: () => number = () => Date.now();
   private snapshot: PlayerSnapshot = { current: null, queued: 0, blocked: false, failed: false };
   private readonly listeners = new Set<() => void>();
   private silentUrl: string | null = null;
@@ -66,27 +72,26 @@ export class SpeechPlayer {
     }
   }
 
-  /** Adds an item to the queue and starts playing if idle. */
+  /** Adds an item to the queue; it plays when every line before it has (or now, if idle). */
   enqueue(item: SpeechItem): void {
-    this.queue.push(item);
-    if (this.queue.length > MAX_QUEUE) this.queue.splice(0, this.queue.length - MAX_QUEUE);
-    if (this.snapshot.current) {
-      this.update({ queued: this.queue.length });
-      return;
-    }
-    this.next();
+    this.apply(enqueueLine(this.queue, this.line(item), this.now()));
   }
 
-  /** Plays item now, ahead of anything queued (Read aloud). */
+  /** Plays item now, in place of what is playing (a play button, Read aloud, Preview). */
   playNow(item: SpeechItem): void {
-    this.queue.unshift(item);
     this.audio?.pause();
-    this.next();
+    this.apply(playFirst(this.queue, this.line(item)));
+  }
+
+  /** Skips what is playing: the next line that is still fresh plays. */
+  skip(): void {
+    this.audio?.pause();
+    this.apply(advanceQueue(this.queue, this.now()));
   }
 
   /** Stops what is playing and clears the queue. */
   stop(): void {
-    this.queue = [];
+    this.queue = clearQueue(this.queue).state;
     if (this.audio) {
       this.audio.pause();
       this.audio.removeAttribute("src");
@@ -113,13 +118,30 @@ export class SpeechPlayer {
     });
   }
 
-  private next(): void {
-    const item = this.queue.shift() ?? null;
-    this.update({ current: item, queued: this.queue.length, failed: false });
-    if (item) void this.start(item);
+  private line(item: SpeechItem): SpokenLine {
+    return { textId: item.textId, text: item.text, agent: item.agent ?? "", at: item.at ?? this.now(), rate: item.rate };
   }
 
-  private async start(item: SpeechItem): Promise<void> {
+  /** Takes a queue step: shows the new state and starts the line that became current. */
+  private apply(step: QueueStep): void {
+    this.queue = step.state;
+    if (step.started) {
+      this.update({ current: step.started, queued: step.state.waiting.length, failed: false, blocked: false });
+      void this.start(step.started);
+      return;
+    }
+    if (!step.state.current) {
+      this.update({ current: null, queued: 0 });
+      return;
+    }
+    this.update({ queued: step.state.waiting.length });
+  }
+
+  private next(): void {
+    this.apply(advanceQueue(this.queue, this.now()));
+  }
+
+  private async start(item: SpokenLine): Promise<void> {
     const audio = this.element();
     // Assigning src streams: the browser starts playing once the first MP3 frames have arrived,
     // while ElevenLabs is still generating the rest (the server flushes each chunk through).
@@ -151,8 +173,8 @@ export class SpeechPlayer {
     });
     audio.addEventListener("error", () => {
       if (!this.snapshot.current) return; // the src was cleared by stop()
-      this.update({ failed: true });
       this.next();
+      this.update({ failed: true });
     });
     document.body.appendChild(audio);
     this.audio = audio;
