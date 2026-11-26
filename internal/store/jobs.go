@@ -155,7 +155,8 @@ func (s *Store) InsertJob(ctx context.Context, record JobRecord) (int64, error) 
 	for i, c := range cols {
 		values[i] = c.value()
 	}
-	query := "INSERT INTO jobs (" + strings.Join(columnNames(cols), ", ") + ") VALUES (?" + strings.Repeat(", ?", len(cols)-1) + ")"
+	// Column names come from jobColumns (compile-time constants); every value is a parameter.
+	query := "INSERT INTO jobs (" + strings.Join(columnNames(cols), ", ") + ") VALUES (?" + strings.Repeat(", ?", len(cols)-1) + ")" //nolint:gosec // see above
 	result, err := s.db.ExecContext(ctx, query, values...)
 	if err != nil {
 		return 0, fmt.Errorf("inserting job: %w", err)
@@ -174,7 +175,8 @@ func (s *Store) UpdateJob(ctx context.Context, record JobRecord) error {
 		values = append(values, c.value())
 	}
 	values = append(values, record.ID)
-	result, err := s.db.ExecContext(ctx, "UPDATE jobs SET "+strings.Join(sets, ", ")+" WHERE id = ?", values...)
+	// Column names come from jobColumns (compile-time constants); every value is a parameter.
+	result, err := s.db.ExecContext(ctx, "UPDATE jobs SET "+strings.Join(sets, ", ")+" WHERE id = ?", values...) //nolint:gosec // see above
 	if err != nil {
 		return fmt.Errorf("updating job %d: %w", record.ID, err)
 	}

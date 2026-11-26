@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -34,7 +35,7 @@ func TestJobRoundTripAndTimeline(t *testing.T) {
 	if again.State != "running" || !again.Stuck || again.Nudges != 2 || !again.RetryAt.Equal(created.Add(time.Minute)) {
 		t.Fatalf("update: %+v", again)
 	}
-	if _, err := db.GetJob(ctx, 99); err != ErrNotFound {
+	if _, err := db.GetJob(ctx, 99); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing job: %v", err)
 	}
 	list, err := db.ListJobs(ctx, []string{"running"}, 10)

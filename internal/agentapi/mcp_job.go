@@ -77,9 +77,10 @@ func init() {
 						return "", err
 					}
 					text := fmt.Sprintf("Recorded. Job %s is %s.", job.ID, job.State)
-					if job.State == jobs.StateNeedsYou {
+					switch job.State {
+					case jobs.StateNeedsYou:
 						text += " It waits on the human; you may end your turn, and the answer will arrive as a message."
-					} else if job.State == jobs.StateRunning {
+					case jobs.StateRunning:
 						text += " Keep going."
 					}
 					return text, nil

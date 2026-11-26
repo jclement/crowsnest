@@ -342,7 +342,7 @@ func branchName(job Job) string {
 func isGitRepo(ctx context.Context, dir string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--is-inside-work-tree").Output()
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--is-inside-work-tree").Output() //nolint:gosec // dir is a validated absolute directory, passed as one argument, never through a shell
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
