@@ -6,9 +6,10 @@ orchestrator, answer questions from agents, drive a terminal, and see every agen
 
 > **Status: M2 (herdr and the fleet).** crowsnest serves the login, the API health and auth
 > endpoints, the event stream and the web app shell; it connects to (or starts) its herdr
-> session and serves the fleet, agent screens and dialog key presses. The orchestrator,
-> questions, terminals and talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md)
-> section 18 and [STATUS.md](STATUS.md).
+> session and serves the fleet, agent screens and dialog key presses. M4 adds the orchestrator
+> (started, adopted, watched and restarted in the session) and the Chat view, read live from
+> Claude's transcript. Questions, terminals and talk mode arrive in later milestones; see
+> [DESIGN.md](DESIGN.md) section 18 and [STATUS.md](STATUS.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
 default, refuses to start without a login (or an explicit `--no-auth`), and checks Host and
@@ -30,7 +31,15 @@ named by `--session` (default `crowsnest`) and, if nothing answers, starts
 `herdr --session <name> server` detached, logging to
 `~/.local/state/crowsnest/<session>/herdr-server.log`. It never stops that server: herdr and its
 agents outlive crowsnest. `--demo` needs no herdr at all; it serves an in-memory fake fleet that
-changes every few seconds.
+changes every few seconds, and a scripted orchestrator that answers in Chat after a short
+"working" period (its transcripts are written under the state directory, never `~/.claude`).
+
+Unless `--no-orchestrator` is given, crowsnest then makes sure a Claude agent named
+`orchestrator` runs in the session: it adopts a live one, or starts `claude` in a workspace
+labelled `orchestrator` (cwd `--dir`), resuming the stored conversation when its transcript
+exists. The first start in a new directory usually stops at Claude's folder-trust prompt; Chat
+then shows "Needs terminal" until it is answered in the pane. Conversations are read from
+Claude's JSONL transcripts in `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
 
 For development, `mise run dev` runs the Go server with `--no-auth --demo` on :2769 and Vite on
 :5173 (open http://localhost:5173; Vite proxies `/api` to Go).
@@ -96,9 +105,9 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 `--web-dev` (`CROWSNEST_WEB_DEV`) is a hidden development flag used by `mise run dev`: the UI is
 served by Vite, so the binary does not require embedded web assets.
 
-`--session`, `--allow-default-session` and `--demo` take effect now. The settings for the
-orchestrator, talk mode and notices are parsed and validated now and take effect in their
-milestones.
+`--session`, `--allow-default-session`, `--demo`, `--dir`, `--model`, `--permission-mode` and
+`--no-orchestrator` take effect now. `--poke-interval` (M8), talk mode and notices are parsed and
+validated now and take effect in their milestones.
 
 ### Startup refusals
 
@@ -123,10 +132,14 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
 | `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version}}` |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes; later `message`, `question`, … |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change; later `question`, … |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
+| `GET /agents/{target}/messages?after=&limit=` | session | A page of the agent's conversation from its Claude transcript: `{source, session_id, cursor, reset, earlier, more, messages}`. Without `after` (or with a stale cursor) the newest `limit` (200) messages and `reset: true`; with it, only what changed since. No transcript: one `pane` message with the pane's recent text |
+| `POST /agents/{target}/prompt` | session | `{text, force_over_draft}` → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
+| `GET /orchestrator` | session | `{state, pane_id, session_id, dir, detail, restarts}`; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed` or `disabled` |
+| `POST /orchestrator/restart`, `POST /orchestrator/new` | session | Restart Claude on the same conversation (`--resume`), or with a fresh one |
 
 ## Tasks
 
@@ -137,11 +150,13 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
 | `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests) |
+| `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
 | `mise run e2e` | Playwright suite (not built until M9; fails with a message) |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
+| `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
 | `mise run snapshot` | GoReleaser snapshot (needs `.goreleaser.yml`, written in M10) |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |
 | `mise run dev:reset` | Remove build output, web dist, Vite cache and the dev database |
@@ -153,6 +168,9 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `~/.config/crowsnest/config.yaml` | Optional config file |
 | `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed) and settings |
 | `~/.local/state/crowsnest/<session>/herdr-server.log` | Output of a herdr server crowsnest started |
+| `~/.local/state/crowsnest/<session>/CROWSNEST.md` | The orchestrator's instructions (`--append-system-prompt-file`), rewritten from the embedded template on every start |
+| `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file (empty until the jobs supervisor adds hooks) |
+| `~/.local/state/crowsnest/<session>/demo-claude/` | `--demo` only: the demo agents' transcripts |
 
 ## License
 

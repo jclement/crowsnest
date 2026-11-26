@@ -336,8 +336,9 @@ terminal is how the user clears it. (On Jeff's machines `new-project` records tr
 | `assistant` `thinking` | collapsed, off by default |
 | everything else (`attachment`, `api-request*`, `mode`, …) | ignored |
 
-Sidechain (subagent) records are folded into their parent tool card. Unknown shapes are skipped,
-never fatal: the transcript format is not a public contract, so the parser is tolerant and has
+Sidechain (subagent) records are skipped (as built in M4: Claude 2.1.x writes a subagent's
+conversation to its own file, and the parent's Task/Agent tool card already carries its result).
+Unknown shapes are skipped, never fatal: the transcript format is not a public contract, so the parser is tolerant and has
 golden-file tests from real transcripts. If no transcript can be found, the view falls back to
 `agent.read` text. The same tailer serves any Claude agent in the fleet; Codex agents get the terminal view only in v1.
 
@@ -363,6 +364,50 @@ stretch item; the precheck is built so they can be added as another reason sourc
 **7.5 Upkeep**: if the orchestrator pane is back at a shell, restart with `--resume`. "New
 conversation" in the UI sends `/exit`, waits for the shell, and starts with a fresh session id.
 Compaction is left to Claude's own auto-compact in v1.
+
+**7.6 As built in M4** (`internal/orch`, `internal/transcript`; checked against herdr 0.9.5 and
+Claude Code 2.1.332 by `mise run test:claude`):
+
+- **`agent.start` over the socket answers at once** with `launch_pending: true`, no session and
+  status `unknown`; it is the CLI that waits. Start-up therefore polls `agent.get` every 250 ms
+  until the agent is interactive-ready (about 3.5 to 4.5 s on quark). An agent that is blocked
+  before it was ever ready (folder trust, login), or not ready within 60 s, is
+  `needs_terminal`; the watch moves it on once someone answers the prompt in the pane.
+- **herdr keeps a named agent's record for a while after Claude exits**: `agent.get orchestrator`
+  still answers, and `agent.start` with the same name is refused with `agent_name_taken`. So an
+  agent whose pane shows only a bare shell (and is not mid-launch) counts as gone, and a start
+  refused for the name clears the stale record's name (`agent.rename` to empty) and retries for
+  up to 15 s.
+- **Claude writes the transcript on the first prompt**, not at start (in a fresh directory, no
+  file existed until the first turn). A conversation with no transcript shows the pane-text
+  fallback, and switches to the transcript (a reset page) when the file appears. After "New
+  conversation" the new session id has no file yet, so the old conversation is dropped at once.
+- **The orchestrator's own session id wins** for its pane: right after a restart herdr can still
+  report the previous session. The watch adopts herdr's value only when it changes outside a
+  launch (`/clear`).
+- **States** (`GET /orchestrator`, `orchestrator` events): `idle` (herdr idle or done),
+  `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed`, `disabled`.
+- **Restart budget**: at most 3 automatic restarts an hour, then `failed` until a manual Restart
+  (which also clears the budget). Restart and New send Esc if a dialog is up, then `/exit`, wait
+  15 s for the shell, then Ctrl+C twice and wait again.
+- **Start-up files**: `<state>/CROWSNEST.md` (rendered from `internal/orch/templates/`, with a
+  marked `crowsnest:job-protocol` section that M7 fills) and `<state>/claude-settings.json`
+  (`{}` until M7 adds the hooks). `--mcp-config` is not passed until M6. The pane env is
+  `CROWSNEST=1`, `CROWSNEST_SESSION` and `PATH` with the binary's directory first;
+  `CROWSNEST_SOCKET` joins with M6.
+- **Messages**: each has a stable `id` and `index` and a `seq` that grows when it is added or
+  changed (a tool card gains its result). A cursor is `<generation>.<seq>`; the generation
+  changes when the conversation starts over (new session, truncated or replaced file, the switch
+  between transcript and pane text), and a stale cursor gets a `reset` page of the newest
+  messages. Text blocks of one reply merge; thinking is kept only when it has text (2.1.332
+  writes it redacted, so usually it has none); tool input is cut to 2 KB and results to 4 KB
+  with ANSI removed. Unpinned conversations are followed for 10 minutes after their last read
+  and polled every second; the orchestrator's is pinned.
+- **Send** (7.3): the result is `{pane_id, status, queued, started, note}`. A dialog (herdr
+  `blocked`, or one on screen) is `409 BLOCKED` with the dialog in `error.detail`; a draft is
+  `409 DRAFT` with the draft; nothing is typed in either case. A draft check that cannot find the
+  input box does not block. `agent_prompt_stalled` or a wait timeout is still `200` with
+  `started: false` and a note, because the text was typed and resending would duplicate it.
 
 ## 8. Needs-you: questions and dialogs
 
@@ -443,16 +488,17 @@ browser reconnects, gets `hello`, and refetches.
 |---|---|
 | `GET /health` | Unauthenticated: `{status, version, update_available:false}` |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`) |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `say` events. On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `say` events. On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
-| `GET /agents/{target}/messages?after=` | Normalised conversation (orchestrator is target `orchestrator`) |
-| `POST /agents/{target}/prompt` | `{text, force_over_draft}` |
+| `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
+| `POST /agents/{target}/prompt` | `{text, force_over_draft}` → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
 | `POST /agents/{target}/keys` | `{keys:[…], screen_hash}` for dialogs and Esc/Ctrl+C. The screen is re-read and the keys are sent only if its hash still matches, else `409 CONFLICT` and nothing is sent. Only `esc`/`escape`/`ctrl+c` may omit the hash (an interrupt is for a screen that is changing). 1–16 keys of at most 32 characters |
 | `GET /agents/{target}/screen` | `{target, pane_id, name, kind, status, text, ansi, screen_hash, revision, dialog:{present, options:[{key, label, selected, warning?}], form, warnings}, draft:{input_found, present, text}}` from one ANSI read. `{target}` is an agent name or a pane id; a plain pane (no agent) works too |
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, budget?}`); detail with timeline (state changes, nudges, questions, restarts) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent, stop it, push it, retry after a failure, raise a cap |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
-| `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls |
+| `GET /orchestrator` | The orchestrator's status (added in M4; 7.6) |
+| `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox |
 | `GET /journal` | Pokes, sends, answers, restarts |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
@@ -547,6 +593,20 @@ loaded lazily. The Fleet view's Conversation and Terminal bodies are the exporte
 bodies and keep their names and props (`{agent}`). Until questions exist (M6), the Inbox badge
 and the tab-title count are the number of agents that need you (blocked, or a dialog on screen).
 
+**Chat (M4).** `routes/ChatView.tsx` is the orchestrator's conversation; the Fleet panel's
+`AgentConversation` slot shows any agent's with the same `components/chat/ConversationView`.
+Assistant text renders through `Markdown`; tool calls are one-line cards that expand to the input
+and truncated result; thinking is hidden unless the menu shows it; user messages crowsnest typed
+carry a `poke`, `voice`, `answer` or `command` label. The list follows new messages only while the
+reader is at the bottom, and otherwise offers an "N new messages" pill. The composer is sticky;
+Enter sends from `md` up (Shift+Enter for a line), the button sends on a phone. While the agent
+works, a send is labelled "queued"; at a dialog or a start-up prompt the composer becomes a note
+with a link to the agent; a `409 DRAFT` shows the draft and "Send anyway". The menu holds Show
+thinking, Restart and New conversation (both confirmed in a Sheet). Conversation types and hooks
+are in `lib/conversation.ts` and `lib/conversation-queries.ts`; a conversation query fetches only
+what changed after its cached cursor and merges it. Chat is photographed against the real binary
+in `--demo` (`mise run screenshots:chat`), not fixtures.
+
 **Fixtures mode.** On the Vite dev server, `?fixtures=1` answers every API call in memory from
 `lib/fixtures.ts` and skips the event stream; it is kept for the tab in sessionStorage and turned
 off with `?fixtures=0`. The same fixtures back the unit tests and the Playwright screenshots
@@ -594,7 +654,7 @@ mise.toml  .goreleaser.yml  .github/workflows/{ci,release}.yml
 ```
 
 Go 1.27, `CGO_ENABLED=0`, `modernc.org/sqlite`, `github.com/coder/websocket`, `github.com/creack/pty`, `log/slog`.
-mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`), `lint`, `fmt`, `check`, `e2e`, `e2e:real`, `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
+mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`), `test:claude` (M4: real Claude, opt-in), `lint`, `fmt`, `check`, `e2e`, `e2e:real`, `screenshots`, `screenshots:chat` (M4), `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
 
 ## 15. Test strategy
 
@@ -606,7 +666,7 @@ mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`
 | Web unit | Vitest + Testing Library for the composer, question cards (single, multi, note), dialog card, markdown/mermaid safety | `mise run test`, CI |
 | E2E hermetic | Playwright against `crowsnest --demo`: login and lockout, chat send and live update, inbox answer flows, fleet navigation, theme, 375 px and desktop projects, no horizontal scroll, basic axe checks | `mise run e2e`, CI |
 | E2E real herdr | Playwright against a real instance on a throwaway session, no Claude: terminal WebSocket types a command and sees its output, pane view, fleet reflects a created tab, cross-origin WebSocket and POST are rejected, unauthenticated WebSocket is rejected | `mise run e2e:real`, local |
-| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. **The stop test**: a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
+| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. **The stop test**: a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
 
 Test-safety rules, enforced in the helpers rather than by convention: a test session name must
 match `^crowsnest-test-`; helpers scrub `HERDR_*` from the environment; teardown stops and deletes
@@ -699,6 +759,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 
 ## 20. Known limitations (kept honest as the build proceeds)
 
+- After "New conversation", and before the first prompt in a fresh directory, the conversation shows the pane text: Claude has not written a transcript yet (7.6).
 - The transcript format and herdr's screen heuristics are not stable contracts; an upgrade of either can degrade the conversation view or dialog cards (never the terminal).
 - The agent API is local-socket only, so agents on other machines cannot ask through crowsnest yet.
 - Web Push is the last milestone; until it lands a closed browser tab hears nothing unless `--notify-url` is set.
