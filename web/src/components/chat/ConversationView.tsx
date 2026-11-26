@@ -39,6 +39,8 @@ export interface ConversationViewProps {
   /** When set (voice is on), replies with a SAY line get a play button that speaks it through
    * this API target. */
   playTarget?: string;
+  /** The agent a replayed reply is credited to in the now-playing strip. */
+  speaker?: string;
 }
 
 export function ConversationView({
@@ -51,6 +53,7 @@ export function ConversationView({
   paneFallback = true,
   renderComposer,
   playTarget,
+  speaker,
 }: ConversationViewProps) {
   const query = useAgentMessages(target);
   const desktop = useMediaQuery(DESKTOP_QUERY);
@@ -80,7 +83,7 @@ export function ConversationView({
         )}
       >
         <div className={cn("mx-auto flex min-w-0 flex-col gap-3", page && "max-w-3xl")}>
-          <ConversationBody query={query} messages={messages} agentName={agentName} playTarget={playTarget} />
+          <ConversationBody query={query} messages={messages} agentName={agentName} playTarget={playTarget} speaker={speaker} />
           <div ref={anchorRef} aria-hidden className="h-px" />
         </div>
       </div>
@@ -114,11 +117,13 @@ function ConversationBody({
   messages,
   agentName,
   playTarget,
+  speaker,
 }: {
   query: ReturnType<typeof useAgentMessages>;
   messages: ReturnType<typeof visibleMessages>;
   agentName: string;
   playTarget?: string;
+  speaker?: string;
 }) {
   if (query.isPending) return <SkeletonRows rows={5} label="Loading the conversation" />;
   if (query.isError) {
@@ -149,7 +154,7 @@ function ConversationBody({
       <ol aria-label="Conversation" className="flex min-w-0 flex-col gap-3">
         {messages.map((message) => (
           <li key={message.id} className="min-w-0">
-            <MessageItem message={message} playTarget={playTarget} />
+            <MessageItem message={message} playTarget={playTarget} speaker={speaker} />
           </li>
         ))}
       </ol>

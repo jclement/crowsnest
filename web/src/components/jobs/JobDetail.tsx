@@ -9,6 +9,7 @@ import { relativeTime } from "../../lib/format";
 import { actionFor, actionLabels, isFinished, jobAnswerText, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
 import { useFleet, useJob, useJobAction } from "../../lib/queries";
 import { AgentConversation } from "../agent/AgentConversation";
+import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
 import { AgentTerminal } from "../agent/AgentTerminal";
 import { QuestionDetail } from "../inbox/QuestionDetail";
 import { JobFiles, JobMessageBox } from "./JobMessageBox";
@@ -77,7 +78,7 @@ function JobHeader({ job }: { job: Detail }) {
         {job.restarts > 0 && <Chip tone="warning">{job.restarts} restarts</Chip>}
       </div>
       <p className="break-all font-mono text-2xs text-muted">
-        {job.work_dir || job.dir || "orchestrator"}
+        {job.work_dir || job.dir || (job.project_id ? "the project's lead" : "orchestrator")}
         {job.worktree_branch && ` · ${job.worktree_branch}`}
       </p>
       {!isFinished(job.state) && job.doing_now && (
@@ -118,6 +119,9 @@ function Overview({ job, openTerminal }: { job: Detail; openTerminal: () => void
       </Card>
       <JobFiles jobId={job.id} />
       <SpendSection spend={job.spend} turns={job.spend_turns} />
+      {job.pane_id && !job.agent_name.startsWith("lead-") && (
+        <AgentInstructionsCard subject={job.id} restart={{ kind: "job", id: job.id }} who={`${job.id}'s agent`} canRestart={!isFinished(job.state)} />
+      )}
       {settled.length > 0 && (
         <Card title="Answered questions">
           <ul className="flex flex-col gap-1 text-xs">

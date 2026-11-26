@@ -41,6 +41,9 @@ func (s *Server) registerJobRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/jobs/{id}/resume", s.requireAuth(http.HandlerFunc(s.handleJobAction(func(ctx context.Context, service *jobs.Service, id string) (jobs.Job, error) {
 		return service.Resume(ctx, id)
 	}))))
+	mux.Handle("POST /api/v1/jobs/{id}/restart-agent", s.requireAuth(http.HandlerFunc(s.handleJobAction(func(ctx context.Context, service *jobs.Service, id string) (jobs.Job, error) {
+		return service.RestartAgent(ctx, id) // "restart with new instructions" (DESIGN.md 21.3)
+	}))))
 	mux.Handle("GET /api/v1/roles", s.requireAuth(http.HandlerFunc(s.handleRoles)))
 	mux.Handle("GET /api/v1/dirs", s.requireAuth(http.HandlerFunc(s.handleDirs)))
 }

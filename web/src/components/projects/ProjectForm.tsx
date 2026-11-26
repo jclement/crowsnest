@@ -1,0 +1,217 @@
+// ProjectForm: a project's fields, for "New project" and "Edit project" (DESIGN.md 21.1). The
+// directory comes from the remembered ones (GET /dirs, tappable on a phone, where a datalist is
+// poor) or free text; on a new project the name follows the directory's basename until it is
+// typed over. The defaults its jobs get (role, engine, model, isolation, permission mode) and when
+// its lead starts sit behind one disclosure. The server checks the rest (the directory exists, is
+// not $HOME, does not overlap another project) and its message is shown as it comes.
+import { ChevronDown, ChevronRight, FolderOpen } from "lucide-react";
+import { useId, useState, type FormEvent } from "react";
+import { leadStartLabels, permissionModes, suggestName, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
+import { useDirs, useRoles } from "../../lib/queries";
+import { Banner } from "../ui/Banner";
+import { Button } from "../ui/Button";
+
+export const inputClass =
+  "min-h-11 w-full rounded border border-border-strong bg-surface px-2 text-sm text-heading placeholder:text-muted focus-visible:outline-2 focus-visible:outline-accent md:min-h-8";
+const labelClass = "flex flex-col gap-1 text-2xs font-medium text-muted";
+
+/** How many remembered directories are offered as buttons. */
+const DIR_CHOICES = 6;
+
+interface ProjectFormProps {
+  /** The project being edited; a new project when absent. */
+  project?: Project;
+  submitLabel: string;
+  pending: boolean;
+  /** The server's refusal, shown above the buttons. */
+  error?: string | null;
+  onSubmit: (input: ProjectInput) => void;
+  onCancel: () => void;
+}
+
+function isolateValue(value: boolean | null | undefined): "-1" | "0" | "1" {
+  return value === true ? "1" : value === false ? "0" : "-1";
+}
+
+export function ProjectForm({ project, submitLabel, pending, error, onSubmit, onCancel }: ProjectFormProps) {
+  const ids = useId();
+  const creating = !project;
+  const [dir, setDir] = useState(project?.dir ?? "");
+  const [name, setName] = useState(project?.name ?? "");
+  const [nameTouched, setNameTouched] = useState(!creating);
+  const [slug, setSlug] = useState("");
+  const [description, setDescription] = useState(project?.description ?? "");
+  const [role, setRole] = useState(project?.default_role ?? "");
+  const [engine, setEngine] = useState(project?.default_engine ?? "");
+  const [model, setModel] = useState(project?.default_model ?? "");
+  const [isolate, setIsolate] = useState(isolateValue(project?.default_isolate));
+  const [permission, setPermission] = useState(project?.permission_mode ?? "");
+  const [leadStart, setLeadStart] = useState<LeadStart>(project?.lead_start ?? "open");
+  const [open, setOpen] = useState(!creating);
+  const dirs = useDirs();
+  const roles = useRoles();
+
+  const pickDir = (value: string) => {
+    setDir(value);
+    if (!nameTouched) setName(suggestName(value));
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!dir.trim() || !name.trim() || pending) return;
+    onSubmit({
+      name: name.trim(),
+      dir: dir.trim(),
+      ...(creating && slug.trim() ? { slug: slug.trim() } : {}),
+      description: description.trim(),
+      default_role: role,
+      default_engine: engine,
+      default_model: model.trim(),
+      default_isolate: Number(isolate) as -1 | 0 | 1,
+      permission_mode: permission,
+      lead_start: leadStart,
+    });
+  };
+
+  const remembered = (dirs.data ?? []).slice(0, DIR_CHOICES);
+  return (
+    <form onSubmit={submit} aria-label={creating ? "New project" : "Edit project"} className="flex flex-col gap-3 p-4">
+      <label className={labelClass}>
+        Directory (where its jobs run)
+        <input
+          value={dir}
+          onChange={(event) => pickDir(event.target.value)}
+          list={`${ids}-dirs`}
+          placeholder="~/src/project"
+          required
+          autoFocus={creating}
+          className={`${inputClass} font-mono`}
+        />
+        <datalist id={`${ids}-dirs`}>
+          {(dirs.data ?? []).map((entry) => (
+            <option key={entry.path} value={entry.path}>
+              {entry.label}
+            </option>
+          ))}
+        </datalist>
+      </label>
+      {creating && remembered.length > 0 && (
+        <div className="-mt-1 flex flex-wrap gap-1" aria-label="Remembered directories" role="group">
+          {remembered.map((entry) => (
+            <Button key={entry.path} compact variant="ghost" icon={FolderOpen} onClick={() => pickDir(entry.path)} title={entry.path} className="max-w-full">
+              <span className="truncate font-mono">{entry.label || entry.path}</span>
+            </Button>
+          ))}
+        </div>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className={labelClass}>
+          Name
+          <input
+            value={name}
+            onChange={(event) => {
+              setName(event.target.value);
+              setNameTouched(true);
+            }}
+            placeholder="From the directory"
+            required
+            className={inputClass}
+          />
+        </label>
+        {creating ? (
+          <label className={labelClass}>
+            Short name (optional; for URLs and lead-&lt;name&gt;)
+            <input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="from the name" className={`${inputClass} font-mono`} />
+          </label>
+        ) : (
+          <div className={labelClass}>
+            Short name
+            <span className="flex min-h-11 items-center font-mono text-sm text-heading md:min-h-8">{project.slug}</span>
+          </div>
+        )}
+      </div>
+      <label className={labelClass}>
+        Description
+        <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} placeholder="What it is, in a line" className={`${inputClass} resize-y py-2`} />
+      </label>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={`${ids}-defaults`}
+        onClick={() => setOpen(!open)}
+        className="inline-flex min-h-11 items-center gap-1 self-start rounded px-1 text-xs text-muted hover:text-heading md:min-h-7"
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+        Defaults for its jobs and lead
+      </button>
+      {open && (
+        <div id={`${ids}-defaults`} className="grid gap-3 sm:grid-cols-2">
+          <label className={labelClass}>
+            Role
+            <select value={role} onChange={(event) => setRole(event.target.value)} className={inputClass}>
+              <option value="">Crowsnest's default</option>
+              {(roles.data ?? []).map((info) => (
+                <option key={info.name} value={info.name} title={info.summary}>
+                  {info.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={labelClass}>
+            Engine
+            <select value={engine} onChange={(event) => setEngine(event.target.value)} className={inputClass}>
+              <option value="">Default (Claude)</option>
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+            </select>
+          </label>
+          <label className={labelClass}>
+            Model
+            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Claude's default" className={`${inputClass} font-mono`} />
+          </label>
+          <label className={labelClass}>
+            Own worktree
+            <select value={isolate} onChange={(event) => setIsolate(event.target.value as "-1" | "0" | "1")} className={inputClass}>
+              <option value="-1">The role's default</option>
+              <option value="1">Yes, a worktree per job</option>
+              <option value="0">No, work in the directory</option>
+            </select>
+          </label>
+          <label className={labelClass}>
+            Permission mode
+            <select value={permission} onChange={(event) => setPermission(event.target.value)} className={inputClass}>
+              {permissionModes.map((mode) => (
+                <option key={mode} value={mode}>
+                  {mode || "Claude's default"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={labelClass}>
+            Start the lead
+            <select value={leadStart} onChange={(event) => setLeadStart(event.target.value as LeadStart)} className={inputClass}>
+              {(Object.keys(leadStartLabels) as LeadStart[]).map((value) => (
+                <option key={value} value={value}>
+                  {leadStartLabels[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+      {error && (
+        <Banner tone="danger" role="alert" className="rounded">
+          {error}
+        </Banner>
+      )}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" disabled={!dir.trim() || !name.trim() || pending}>
+          {pending ? "Saving…" : submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
+}

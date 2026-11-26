@@ -6,7 +6,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithClient } from "../../test/render";
 import { player } from "../../lib/voice/player";
-import { onSayEvent, resetSpeakModeForTests, setSpeakMode, speakModeOn } from "../../lib/voice/speak";
+import { setAgentSpeak, onSayEvent, resetSpeakModeForTests, speakModeOn } from "../../lib/voice/speak";
 import { NowPlaying, SpeakToggle } from "./SpeakMode";
 import { VoiceComposer } from "./VoiceComposer";
 
@@ -293,17 +293,21 @@ describe("speak mode", () => {
     );
     const toggle = screen.getByTestId("speak-toggle");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
-    act(() => onSayEvent({ kind: "speak", text_id: "t_x", text: "Ignored." }));
+    act(() => onSayEvent({ kind: "speak", text_id: "t_x", text: "Ignored.", agent: "orchestrator" }));
     expect(player.getSnapshot().current).toBeNull();
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(localStorage.getItem("crowsnest-speak-mode")).toBe("on");
+    // The master alone speaks no one: each agent is opted in on its own (off by default).
+    act(() => onSayEvent({ kind: "speak", text_id: "t_x2", text: "Not chosen.", agent: "orchestrator" }));
+    expect(player.getSnapshot().current).toBeNull();
+    act(() => setAgentSpeak("orchestrator", true));
     act(() => {
-      onSayEvent({ kind: "speak", text_id: "t_one", text: "First." });
-      onSayEvent({ kind: "speak", text_id: "t_two", text: "Second." });
+      onSayEvent({ kind: "speak", text_id: "t_one", text: "First.", agent: "orchestrator" });
+      onSayEvent({ kind: "speak", text_id: "t_two", text: "Second.", agent: "orchestrator" });
     });
     expect(audioElement().src).toContain("/api/v1/voice/tts?text_id=t_one");
-    expect(await screen.findByTestId("player-bar")).toHaveTextContent("First. (+1 more)");
+    expect(await screen.findByTestId("player-bar")).toHaveTextContent("Orchestrator: First. (+1 more)");
     act(() => {
       audioElement().dispatchEvent(new Event("ended"));
     });
@@ -313,9 +317,9 @@ describe("speak mode", () => {
   });
 
   it("plays at the saved rate, or an item's own (a preview)", () => {
-    act(() => setSpeakMode(true));
+    act(() => setAgentSpeak("orchestrator", true));
     player.rate = 1.25;
-    act(() => onSayEvent({ kind: "speak", text_id: "t_fast", text: "Quick." }));
+    act(() => onSayEvent({ kind: "speak", text_id: "t_fast", text: "Quick.", agent: "orchestrator" }));
     expect(audioElement().playbackRate).toBe(1.25);
     act(() => player.playNow({ textId: "t_preview", text: "Preview", rate: 0.9 }));
     expect(audioElement().playbackRate).toBe(0.9);
@@ -323,10 +327,10 @@ describe("speak mode", () => {
   });
 
   it("offers Play when autoplay is refused", async () => {
-    act(() => setSpeakMode(true));
+    act(() => setAgentSpeak("orchestrator", true));
     play.mockImplementationOnce(() => Promise.reject(new DOMException("no gesture", "NotAllowedError")));
     renderWithClient(<NowPlaying />);
-    act(() => onSayEvent({ kind: "speak", text_id: "t_y", text: "Hello." }));
+    act(() => onSayEvent({ kind: "speak", text_id: "t_y", text: "Hello.", agent: "orchestrator" }));
     expect(await screen.findByRole("button", { name: "Play" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument());

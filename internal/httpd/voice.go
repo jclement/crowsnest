@@ -54,6 +54,8 @@ func (s *Server) registerVoiceRoutes(mux *http.ServeMux) {
 	mux.Handle("PUT /api/v1/voice/settings", s.requireAuth(s.requireVoice(s.handleSaveVoiceSettings)))
 	mux.Handle("GET /api/v1/voice/voices", s.requireAuth(s.requireVoice(s.handleVoices)))
 	mux.Handle("POST /api/v1/voice/preview", s.requireAuth(s.requireVoice(s.handleVoicePreview)))
+	mux.Handle("GET /api/v1/voice/agents", s.requireAuth(s.requireVoice(s.handleAgentVoices)))
+	mux.Handle("PUT /api/v1/voice/agents/{agent}", s.requireAuth(s.requireVoice(s.handleSetAgentVoice)))
 }
 
 // requireVoice answers 404 when talk mode is off.

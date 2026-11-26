@@ -15,6 +15,8 @@ import (
 	"net/http"
 
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/transcript"
 	"github.com/jclement/crowsnest/internal/voice"
 )
@@ -179,7 +181,7 @@ func (s *Server) handleReplySay(w http.ResponseWriter, r *http.Request) {
 		if message.Kind != transcript.KindAssistant {
 			break
 		}
-		id, sentence, ok := s.deps.Voice.ReplySay(message.Text)
+		id, sentence, ok := s.deps.Voice.ReplySayFor(message.Text, s.standingName(ctx, body.Target))
 		if !ok {
 			break
 		}
@@ -187,4 +189,73 @@ func (s *Server) handleReplySay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeError(w, http.StatusNotFound, codeNotFound, "That reply has no SAY line to play, or is too old to find.")
+}
+
+// ---- Per-agent voices (DESIGN.md 13.5) ----------------------------------------------------
+
+// AgentVoicesResponse is GET /voice/agents: every standing agent (the orchestrator, then each
+// project's lead) with the voice it speaks in ("" for the instance's).
+type AgentVoicesResponse struct {
+	Agents       []AgentVoice `json:"agents"`
+	DefaultVoice string       `json:"default_voice"`
+}
+
+// AgentVoice is one standing agent's voice.
+type AgentVoice struct {
+	Agent   string `json:"agent"`
+	Label   string `json:"label"`
+	VoiceID string `json:"voice_id"`
+}
+
+func (s *Server) handleAgentVoices(w http.ResponseWriter, r *http.Request) {
+	writeData(w, http.StatusOK, s.agentVoices(r.Context()))
+}
+
+func (s *Server) agentVoices(ctx context.Context) AgentVoicesResponse {
+	voices := s.deps.Voice.AgentVoices(ctx)
+	out := AgentVoicesResponse{Agents: []AgentVoice{{Agent: orch.Name, Label: "Orchestrator", VoiceID: voices[orch.Name]}}, DefaultVoice: s.deps.Voice.Settings(ctx).VoiceID}
+	if s.deps.Projects != nil {
+		if list, err := s.deps.Projects.List(ctx, false); err == nil {
+			for _, project := range list {
+				name := projects.AgentName(project.Slug)
+				out.Agents = append(out.Agents, AgentVoice{Agent: name, Label: project.Name, VoiceID: voices[name]})
+			}
+		}
+	}
+	return out
+}
+
+func (s *Server) handleSetAgentVoice(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		VoiceID string `json:"voice_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, codeValidation, `Send JSON like {"voice_id":"…"}; an empty id means the instance's voice.`)
+		return
+	}
+	if _, err := s.deps.Voice.SetAgentVoice(r.Context(), r.PathValue("agent"), body.VoiceID); err != nil {
+		if errors.Is(err, voice.ErrBadSettings) {
+			writeError(w, http.StatusBadRequest, codeValidation, err.Error())
+			return
+		}
+		s.internalError(w, r, "storing an agent's voice", err)
+		return
+	}
+	writeData(w, http.StatusOK, s.agentVoices(r.Context()))
+}
+
+// standingName is the agent name of target (a name or a pane id) when it is a standing agent,
+// "" otherwise: a reply played from Chat is then spoken in that agent's own voice.
+func (s *Server) standingName(ctx context.Context, target string) string {
+	if voice.ValidAgent(target) {
+		return target
+	}
+	if s.deps.Herdr == nil {
+		return ""
+	}
+	agent, err := s.deps.Herdr.AgentGet(ctx, target)
+	if err != nil || !voice.ValidAgent(agent.Name) {
+		return ""
+	}
+	return agent.Name
 }

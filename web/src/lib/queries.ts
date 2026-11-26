@@ -5,7 +5,10 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { endpoints, queryKeys } from "./api";
 import type { CreateJobRequest } from "./jobs";
 import type { JournalKind } from "./journal";
-import type { ScheduleView } from "./schedule";
+import type { ScheduleInput, ScheduleView } from "./schedule";
+import type { LeadAction, LeadStatus, ProjectInput, ProjectView } from "./projects";
+import type { LayerScope } from "./instructions";
+import type { PokeResult } from "./journal";
 import type { AnswerRequest } from "./questions";
 import type { DecideRequest } from "./approvals";
 import type { SendKeysRequest } from "./types";
@@ -181,19 +184,55 @@ export function usePokeNow() {
 
 // ---- Scheduled work and the orchestrator's context (7.8, 7.9) ------------------------------
 
-/** The scheduled tasks; `schedule` and `job` events refresh them, a minute's poll keeps "next due" fresh. */
-export function useSchedule(enabled = true) {
-  return useQuery({ queryKey: queryKeys.schedule, queryFn: endpoints.schedule, enabled, refetchInterval: 60_000 });
+/**
+ * The scheduled tasks, or one project's (GET /schedule?project=id; 0 is the orchestrator's and
+ * unfiled ones); `schedule` and `job` events refresh them, a minute's poll keeps "next due" fresh.
+ */
+export function useSchedule(enabled = true, projectId?: number) {
+  return useQuery({
+    queryKey: projectId === undefined ? queryKeys.schedule : queryKeys.scheduleProject(projectId),
+    queryFn: () => endpoints.schedule(projectId),
+    enabled,
+    refetchInterval: 60_000,
+  });
+}
+
+/** Writes a full schedule list into the unfiltered cache and refreshes the filtered ones. */
+function useScheduleWrite() {
+  const queryClient = useQueryClient();
+  return {
+    onSuccess: (view: ScheduleView) => {
+      queryClient.setQueryData(queryKeys.schedule, view);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.schedule, predicate: (query) => query.queryKey.length > 1 });
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.journal }),
+  };
 }
 
 /** Run now, or the on/off switch. The answer is the new list, written straight into the cache. */
 export function useScheduleAction() {
-  const queryClient = useQueryClient();
+  const write = useScheduleWrite();
   return useMutation({
     mutationFn: (action: { name: string; run: true } | { name: string; enabled: boolean }) =>
       "run" in action ? endpoints.scheduleRun(action.name) : endpoints.scheduleSet(action.name, action.enabled),
-    onSuccess: (view: ScheduleView) => queryClient.setQueryData(queryKeys.schedule, view),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.journal }),
+    ...write,
+  });
+}
+
+/** Creates, edits or deletes an app schedule (task files are read-only: 409). */
+export function useScheduleEdit() {
+  const write = useScheduleWrite();
+  return useMutation({
+    mutationFn: async (
+      change: { kind: "create"; input: ScheduleInput; enabled: boolean } | { kind: "update"; input: ScheduleInput; enabled: boolean } | { kind: "delete"; name: string },
+    ): Promise<ScheduleView> => {
+      if (change.kind === "delete") return endpoints.scheduleDelete(change.name);
+      if (change.kind === "update") return endpoints.scheduleUpdate(change.input.name, { ...change.input, enabled: change.enabled });
+      const created = await endpoints.scheduleCreate(change.input);
+      // A new schedule starts switched on; one made switched off is switched off right after.
+      return change.enabled ? created : endpoints.scheduleSet(change.input.name, false);
+    },
+    ...write,
   });
 }
 
@@ -209,6 +248,134 @@ export function useCompactNow() {
     mutationFn: endpoints.orchestratorCompact,
     onSettled: () =>
       Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.orchestratorContext }), queryClient.invalidateQueries({ queryKey: queryKeys.journal })]),
+  });
+}
+
+// ---- Projects and their leads (21.1, 21.2) -----------------------------------------------------
+
+/** The projects with their leads and job counts; `project`, `lead` and `job` events refresh them. */
+export function useProjects(archived = false) {
+  return useQuery({ queryKey: queryKeys.projectList(archived), queryFn: () => endpoints.projects(archived), refetchInterval: 60_000 });
+}
+
+/** One project by slug or id. */
+export function useProject(ref: string | undefined) {
+  return useQuery({ queryKey: queryKeys.project(ref ?? ""), queryFn: () => endpoints.project(ref ?? ""), enabled: !!ref });
+}
+
+/** Creates a project; the list and the remembered directories refresh. */
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ProjectInput) => endpoints.createProject(input),
+    onSettled: () =>
+      Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.projects }), queryClient.invalidateQueries({ queryKey: queryKeys.dirs })]),
+  });
+}
+
+/** Edits, archives or unarchives a project. */
+export function useUpdateProject(ref: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ProjectInput) => endpoints.updateProject(ref, input),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.instructions }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.voiceAgents }),
+      ]),
+  });
+}
+
+/** Start, stop, restart, new conversation or poke a project's lead. */
+export function useLeadAction(ref: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: LeadAction): Promise<LeadStatus | PokeResult> => endpoints.leadAction(ref, action),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.fleet }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.journal }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.instructions }),
+      ]),
+  });
+}
+
+/** The lead of a project from the cached list, without a request of its own. */
+export function findProject(projects: ProjectView[] | undefined, slug: string | undefined): ProjectView | undefined {
+  return slug ? projects?.find((project) => project.slug === slug) : undefined;
+}
+
+// ---- Instruction layers (21.3) ---------------------------------------------------------------------
+
+/** Every layer, where its text comes from, and the size cap; `instructions` events refresh it. */
+export function useInstructions(enabled = true) {
+  return useQuery({ queryKey: queryKeys.instructionList, queryFn: endpoints.instructions, enabled });
+}
+
+/** One layer with its revisions. */
+export function useInstructionLayer(scope: LayerScope, key: string, enabled = true) {
+  return useQuery({ queryKey: queryKeys.instructionLayer(scope, key), queryFn: () => endpoints.instructionLayer(scope, key), enabled });
+}
+
+/** Save, reset to the built-in, or restore a revision. Every instruction query refreshes after. */
+export function useInstructionEdit(scope: LayerScope, key: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (change: { kind: "save"; body: string } | { kind: "reset" } | { kind: "restore"; revision: number }) => {
+      if (change.kind === "save") return endpoints.saveInstruction(scope, key, change.body);
+      if (change.kind === "reset") return endpoints.resetRole(key);
+      return endpoints.restoreInstruction(scope, key, change.revision);
+    },
+    onSuccess: (detail) => queryClient.setQueryData(queryKeys.instructionLayer(scope, key), detail),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.instructions }),
+  });
+}
+
+/** What an agent was started with, and whether its instructions changed since. */
+export function useAgentInstructions(subject: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.agentInstructions(subject ?? ""),
+    queryFn: () => endpoints.agentInstructions(subject ?? ""),
+    enabled: !!subject,
+    refetchInterval: 60_000,
+  });
+}
+
+/** "Restart with new instructions": a job's agent, a lead, or the orchestrator. */
+export function useRestartWithInstructions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (target: { kind: "job"; id: string } | { kind: "lead"; slug: string } | { kind: "orchestrator" }): Promise<unknown> => {
+      if (target.kind === "job") return endpoints.jobRestartAgent(target.id);
+      if (target.kind === "lead") return endpoints.leadAction(target.slug, "restart");
+      return endpoints.orchestratorRestart();
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.instructions }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.orchestrator }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents }),
+      ]),
+  });
+}
+
+// ---- Per-agent voices -----------------------------------------------------------------------------
+
+/** Each standing agent's voice. Only when the server has voice on (every /voice route 404s else). */
+export function useAgentVoices(enabled: boolean) {
+  return useQuery({ queryKey: queryKeys.voiceAgents, queryFn: endpoints.voiceAgents, enabled, staleTime: 60_000, retry: false });
+}
+
+export function useSetAgentVoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agent, voiceId }: { agent: string; voiceId: string }) => endpoints.setAgentVoice(agent, voiceId),
+    onSuccess: (voices) => queryClient.setQueryData(queryKeys.voiceAgents, voices),
   });
 }
 

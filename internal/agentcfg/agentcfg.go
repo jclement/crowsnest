@@ -45,6 +45,8 @@ var Hooks = []struct {
 	// PreToolUse is the guard (8.7): it decides locally from GuardRules, so it is fast, and only
 	// Bash is guarded.
 	{"PreToolUse", "pre-tool-use", 10, "Bash"},
+	// InstructionsLoaded reports each CLAUDE.md or rules file Claude loads (DESIGN.md 21.3).
+	{"InstructionsLoaded", "instructions-loaded", 10, ""},
 }
 
 // ClaudeSettings is the --settings file. With executable and socket set it carries the

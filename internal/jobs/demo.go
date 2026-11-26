@@ -18,6 +18,9 @@ import (
 // DemoPanes names the demo fleet's panes the seeded jobs sit in.
 type DemoPanes struct {
 	Orchestrator, Builder, Reviewer, Docs, Linter string
+	// ProjectOf files a demo job under a demo project by its directory (DESIGN.md 21.5): the
+	// project's id and the real directory to record instead of the made-up one. Nil: Unfiled.
+	ProjectOf func(dir string) (projectID int64, realDir string)
 }
 
 // demoStep is how often the demo loop moves things along.
@@ -49,6 +52,11 @@ func SeedDemo(ctx context.Context, s *Service, panes DemoPanes) error {
 			// supervisor's ExpectAgent check (a nudge, a message) accepts the demo's panes.
 			if agent, err := s.opts.Herdr.AgentGet(ctx, item.record.PaneID); err == nil && agent.Name != "" {
 				item.record.AgentName = agent.Name
+			}
+		}
+		if panes.ProjectOf != nil && item.record.Dir != "" {
+			if projectID, dir := panes.ProjectOf(item.record.Dir); projectID != 0 {
+				item.record.ProjectID, item.record.Dir = projectID, dir
 			}
 		}
 		id, err := s.opts.Store.InsertJob(ctx, item.record)

@@ -13,6 +13,7 @@ import { FleetView } from "./routes/FleetView";
 import { ChatView } from "./routes/ChatView";
 import { InboxView } from "./routes/InboxView";
 import { JobsView } from "./routes/JobsView";
+import { ProjectsView } from "./routes/ProjectsView";
 import { TerminalView } from "./routes/views";
 import { SystemView } from "./routes/SystemView";
 import { WelcomePage } from "./routes/WelcomePage";
@@ -103,13 +104,32 @@ const welcomeRoute = createRoute({
 const jobsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/",
-  // ?job=j_12 selects a job, so a link or a reload opens the same one.
-  validateSearch: (search: Record<string, unknown>): { job?: string } => ({
+  // ?job=j_12 selects a job, so a link or a reload opens the same one; ?project=<slug> (or
+  // "unfiled", or "all") picks the board's project.
+  validateSearch: (search: Record<string, unknown>): { job?: string; project?: string } => ({
     job: typeof search.job === "string" && search.job ? search.job : undefined,
+    project: typeof search.project === "string" && search.project ? search.project : undefined,
   }),
   component: JobsView,
 });
-const chatRoute = createRoute({ getParentRoute: () => appRoute, path: "/chat", component: ChatView });
+const chatRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/chat",
+  // ?target=orchestrator or lead-<slug>: who the conversation is with.
+  validateSearch: (search: Record<string, unknown>): { target?: string } => ({
+    target: typeof search.target === "string" && search.target ? search.target : undefined,
+  }),
+  component: ChatView,
+});
+const projectsRoute = createRoute({ getParentRoute: () => appRoute, path: "/projects", component: () => <ProjectsView /> });
+const projectRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/projects/$slug",
+  component: function ProjectRoute() {
+    const { slug } = projectRoute.useParams();
+    return <ProjectsView slug={slug} />;
+  },
+});
 const inboxRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/inbox",
@@ -133,7 +153,7 @@ const fleetRoute = createRoute({
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([jobsRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute, systemRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute, systemRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

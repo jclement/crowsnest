@@ -1,5 +1,5 @@
 // Wiring for scheduled work and the orchestrator's upkeep (DESIGN.md 7.8 to 7.10): the schedule
-// service that reads task files and feeds the poker, the tender that compacts the orchestrator
+// service that reads task files and app schedules and feeds the poker, the tender that compacts the orchestrator
 // and hands it over to a new conversation each day, the standing context its SessionStart hook
 // re-injects, and the Remote Control names built from the instance's name.
 
@@ -68,8 +68,27 @@ func taskSources(cfg config.Config) []schedule.Source {
 type scheduleJobs struct{ service *jobs.Service }
 
 func (a scheduleJobs) CreateJob(ctx context.Context, request schedule.JobRequest) (string, error) {
-	job, err := a.service.Create(ctx, jobs.CreateInput{Brief: request.Brief, Dir: request.Dir, Role: request.Role}, "")
+	job, err := a.service.Create(ctx, jobs.CreateInput{
+		Brief: request.Brief, Dir: request.Dir, Role: request.Role, Engine: request.Engine, ProjectID: request.ProjectID,
+	}, "")
 	return job.ID, err
+}
+
+// liveProjects lists the live projects, slug → id, for scheduled tasks' targets. A read error
+// is logged and reads as no projects: a task naming one is then a problem until the next check.
+func liveProjects(db *store.Store, logger *slog.Logger) func(context.Context) map[string]int64 {
+	return func(ctx context.Context) map[string]int64 {
+		projects, err := db.ListProjects(ctx, false)
+		if err != nil {
+			logger.Warn("listing projects for the schedule", "err", err)
+			return nil
+		}
+		bySlug := make(map[string]int64, len(projects))
+		for _, project := range projects {
+			bySlug[project.Slug] = project.ID
+		}
+		return bySlug
+	}
 }
 
 func (a scheduleJobs) JobState(ctx context.Context, id string) (string, bool, error) {
@@ -81,10 +100,15 @@ func (a scheduleJobs) JobState(ctx context.Context, id string) (string, bool, er
 }
 
 // scheduleTasks adapts the schedule service to the poker's TaskSource.
-type scheduleTasks struct{ service *schedule.Service }
+// scheduleTasks is one standing agent's scheduled tasks: projectID 0 for the orchestrator, else
+// that project's lead (DESIGN.md 7.8, 21.4).
+type scheduleTasks struct {
+	service   *schedule.Service
+	projectID int64
+}
 
 func (a scheduleTasks) DueTasks(ctx context.Context, now time.Time) []orch.ScheduledTask {
-	due := a.service.DueTasks(ctx, now)
+	due := a.service.DueTasksFor(ctx, now, a.projectID)
 	out := make([]orch.ScheduledTask, len(due))
 	for i, task := range due {
 		out[i] = orch.ScheduledTask{Name: task.Name, Text: task.Text, RideAlong: task.RideAlong}
@@ -101,6 +125,7 @@ func (a scheduleTasks) Delivered(ctx context.Context, at time.Time, names []stri
 func startSchedule(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, journalLog *journal.Journal, jobService *jobs.Service, client herdr.Client, kick *atomic.Pointer[orch.Poker], logger *slog.Logger) *schedule.Service {
 	options := schedule.Options{
 		KV: db, Sources: taskSources(cfg), Journal: journalLog, Hub: events, Logger: logger,
+		Store: db, StateDir: cfg.StateDir, Projects: liveProjects(db, logger),
 		Picture: fleetPicture(client, jobService),
 		Kick: func() {
 			if poker := kick.Load(); poker != nil {
@@ -178,17 +203,22 @@ func newTender(cfg config.Config, client herdr.Client, db *store.Store, journalL
 // it created or holds that are still live. It answers only for the orchestrator's own pane.
 func standingContext(cfg config.Config, refs *jobRefs, questionService func() *questions.Service, jobService *jobs.Service) func(context.Context, string, string) string {
 	return func(ctx context.Context, pane, source string) string {
-		if refs.orchestrator == nil || refs.orchestrator.Status().PaneID != pane {
-			return ""
-		}
+		origin := "orchestrator"
 		var parts []string
-		if notes := handoffNotes(filepath.Join(cfg.StateDir, HandoffFile)); notes != "" {
-			parts = append(parts, notes)
+		switch {
+		case refs.orchestrator != nil && refs.orchestrator.Status().PaneID == pane:
+			if notes := handoffNotes(filepath.Join(cfg.StateDir, HandoffFile)); notes != "" {
+				parts = append(parts, notes)
+			}
+		case refs.projects != nil && refs.projects.leadInPane(pane) != "":
+			origin = refs.projects.leadInPane(pane) // a project's lead: the same, less the hand-over
+		default:
+			return ""
 		}
 		if open := openQuestions(ctx, questionService(), pane); open != "" {
 			parts = append(parts, open)
 		}
-		if live := liveJobs(ctx, jobService, pane); live != "" {
+		if live := liveJobs(ctx, jobService, pane, origin); live != "" {
 			parts = append(parts, live)
 		}
 		if len(parts) == 0 {
@@ -235,7 +265,7 @@ func openQuestions(ctx context.Context, service *questions.Service, pane string)
 	return "## Questions you asked that are still open\n\nThe answers arrive as `[crowsnest answer q_N]` messages.\n\n" + strings.Join(lines, "\n")
 }
 
-func liveJobs(ctx context.Context, service *jobs.Service, pane string) string {
+func liveJobs(ctx context.Context, service *jobs.Service, pane, origin string) string {
 	if service == nil {
 		return ""
 	}
@@ -246,7 +276,7 @@ func liveJobs(ctx context.Context, service *jobs.Service, pane string) string {
 	var lines []string
 	for _, job := range list {
 		mine := job.PaneID == pane
-		if !mine && job.Origin != "orchestrator" {
+		if !mine && job.Origin != origin {
 			continue
 		}
 		who := "created by you"

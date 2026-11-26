@@ -84,6 +84,8 @@ type Options struct {
 	Launch LaunchOptions
 	// Orchestrator reports the orchestrator's pane; nil means no-dir jobs stay queued.
 	Orchestrator func() OrchestratorInfo
+	// Projects are the projects and their running leads (DESIGN.md 21); nil: no projects.
+	Projects ProjectSource
 	// ApprovalPending reports whether a job has a tool call waiting for approval (8.7); the tick
 	// uses it to bring back a job whose "settled" callback was lost. nil: never.
 	ApprovalPending func(ctx context.Context, jobID string) bool
@@ -111,6 +113,18 @@ type Options struct {
 	// Attachments hands a job the files the human gave with it (internal/attach, wired in
 	// serve). Nil: a job given with attachments is refused.
 	Attachments BriefAttacher
+	// Instructions composes the instruction layers a job agent is started with (global, role,
+	// project; DESIGN.md 21.3) and records them. Nil: the bare role prompt, as before layers.
+	Instructions InstructionLayers
+}
+
+// InstructionLayers is what the launcher needs of internal/instructions, as an interface so that
+// package can import this one (it reads the built-in roles) without a cycle.
+type InstructionLayers interface {
+	// JobLayers returns the markdown that takes the place of the bare role prompt for job's
+	// agent: the global, role and project layers in that order. With record set it also records
+	// what the agent is being started with, for "instructions changed since start".
+	JobLayers(ctx context.Context, job Job, record bool) (string, error)
 }
 
 // BriefAttacher is what the jobs service needs of attachments (DESIGN.md 8.6): to check the
@@ -235,7 +249,7 @@ func (s *Service) List(ctx context.Context, states []State) ([]Job, error) {
 
 // spendInfo is what internal/spend needs to know about a job.
 func spendInfo(job Job) spend.JobInfo {
-	return spend.JobInfo{ID: job.ID, Engine: job.Engine, Orchestrated: job.AgentName == OrchestratorName,
+	return spend.JobInfo{ID: job.ID, Engine: job.Engine, Orchestrated: IsStanding(job.AgentName),
 		StartedAt: job.StartedAt, SettledAt: job.SettledAt}
 }
 
@@ -494,7 +508,7 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 		LastActivityAt: timePtr(r.LastActivityAt), Nudges: r.Nudges, Restarts: r.Restarts,
 		RetryAt: timePtr(r.RetryAt), RetryCount: r.RetryCount, OpenQuestions: open,
 		Verified: decodeList(r.VerifiedJSON), NotVerified: decodeList(r.NotVerifiedJSON),
-		Isolate: r.Isolate, isolate: r.Isolate, briefSent: r.BriefSent, Origin: r.Origin,
+		Isolate: r.Isolate, isolate: r.Isolate, briefSent: r.BriefSent, Origin: r.Origin, ProjectID: r.ProjectID,
 	}
 	if r.ParentID > 0 {
 		job.ParentID = FormatID(r.ParentID)
@@ -571,7 +585,7 @@ func (s *Service) SpendSources(ctx context.Context) ([]spend.Source, error) {
 	var out []spend.Source
 	for _, record := range records {
 		job := s.toJob(record, 0)
-		if job.Engine == EngineCodex || job.AgentName == OrchestratorName || job.SessionID == "" {
+		if job.Engine == EngineCodex || IsStanding(job.AgentName) || job.SessionID == "" {
 			continue
 		}
 		source := spend.Source{Subject: job.ID, Sessions: []spend.Session{{ID: job.SessionID, Cwd: firstNonEmptyDir(job.WorkDir, job.Dir)}}}

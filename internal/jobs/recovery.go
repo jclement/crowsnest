@@ -76,7 +76,7 @@ func (s *Service) Tick(ctx context.Context) {
 	if s.opts.Herdr == nil {
 		return
 	}
-	s.DispatchOrchestrator(ctx)
+	s.DispatchStanding(ctx)
 	if err := s.eachLive(ctx, liveStates, func(record store.JobRecord) { s.tickJob(ctx, record) }); err != nil && ctx.Err() == nil {
 		s.opts.Logger.Warn("supervisor: listing jobs", "err", err)
 	}
@@ -113,14 +113,14 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		if r.Dir != "" && now.Sub(r.CreatedAt) > relaunchAfter {
 			s.goBackground(ctx, id, func(ctx context.Context) { s.launch(ctx, id) })
 		}
-		return // a no-directory job waits for DispatchOrchestrator
+		return // a no-directory job waits for its standing agent (DispatchStanding)
 	}
 	if r.PaneID == "" {
 		return
 	}
 	s.renotifyQuestions(ctx, r)
-	if r.AgentName == OrchestratorName {
-		s.checkActivity(ctx, r, now) // the orchestrator's own lifecycle is internal/orch's
+	if IsStanding(r.AgentName) {
+		s.checkActivity(ctx, r, now) // a standing agent's own lifecycle is internal/orch's
 		return
 	}
 	agent, seen := s.observeAgent(ctx, r.PaneID)

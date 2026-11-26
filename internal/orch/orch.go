@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,7 +31,8 @@ const Name = "orchestrator"
 // WorkspaceLabel is the label of the herdr workspace crowsnest creates for the orchestrator.
 const WorkspaceLabel = "orchestrator"
 
-// KV keys under which the orchestrator's identity survives a crowsnest restart.
+// KV key suffixes under which a standing agent's identity survives a crowsnest restart
+// ("orchestrator.session_id" for the orchestrator, "lead.<slug>.session_id" for a lead).
 const (
 	kvSessionID = "orchestrator.session_id" // Claude session id, for --resume
 	kvPaneID    = "orchestrator.pane_id"    // the pane it last ran in
@@ -151,7 +153,50 @@ type Options struct {
 	// Launch, when set, gives the launch settings at each start (engine, model, permission mode,
 	// Remote Control), so a change in the app's Settings applies on the next start.
 	Launch func() LaunchSettings
+
+	// ---- A standing agent other than the session's orchestrator (DESIGN.md 21.2) ----
+	// The lifecycle is the same for every standing agent: the orchestrator, and each project's
+	// lead. These name the agent; zero values mean the orchestrator's.
+
+	// AgentName is the herdr agent name (Name when empty), e.g. "lead-alpha".
+	AgentName string
+	// Workspace is the label of the herdr workspace it runs in (WorkspaceLabel when empty).
+	Workspace string
+	// KVPrefix prefixes the kv keys of its session id and pane ("orchestrator" when empty).
+	KVPrefix string
+	// Render writes the instructions file appended to its system prompt; nil renders the
+	// orchestrator's CROWSNEST.md.
+	Render func() (string, error)
+	// OnStart, when set, is called after the start-up files are written for a start (the
+	// instructions service records what the agent was started with). It must not block long.
+	OnStart func(ctx context.Context)
 }
+
+// agentName is the herdr name of the agent this Orchestrator keeps.
+func (o *Orchestrator) agentName() string {
+	if o.opts.AgentName != "" {
+		return o.opts.AgentName
+	}
+	return Name
+}
+
+func (o *Orchestrator) workspaceLabel() string {
+	if o.opts.Workspace != "" {
+		return o.opts.Workspace
+	}
+	return WorkspaceLabel
+}
+
+// kvKey is the orchestrator's key, or the same key under the standing agent's KVPrefix.
+func (o *Orchestrator) kvKey(key string) string {
+	if o.opts.KVPrefix == "" {
+		return key
+	}
+	return o.opts.KVPrefix + strings.TrimPrefix(key, "orchestrator")
+}
+
+// AgentName is the herdr name of the standing agent this keeps ("orchestrator" or "lead-<slug>").
+func (o *Orchestrator) AgentName() string { return o.agentName() }
 
 // Orchestrator owns the orchestrator agent's lifecycle.
 type Orchestrator struct {
@@ -172,6 +217,19 @@ type Orchestrator struct {
 	rcCheckUntil time.Time
 	// kick wakes a waiting orchestrator to ask its gate again (Kick).
 	kick chan struct{}
+	// launching is the pane a start is launching Claude in, before the status names it: hooks
+	// that fire during the launch (SessionStart, InstructionsLoaded) are matched to it.
+	launching string
+}
+
+// Pane is the pane the agent runs in, or the one it is being launched in right now.
+func (o *Orchestrator) Pane() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.status.PaneID != "" {
+		return o.status.PaneID
+	}
+	return o.launching
 }
 
 // launchBaseline is the session id Claude was started with and the ids herdr may go on
@@ -216,10 +274,17 @@ func New(opts Options) *Orchestrator {
 	if opts.Disabled {
 		state = StateDisabled
 	}
-	return &Orchestrator{opts: opts, kick: make(chan struct{}, 1), status: Status{State: state, Name: Name, Dir: opts.Dir, Model: opts.Model, UpdatedAt: opts.Now()}}
+	return &Orchestrator{opts: opts, kick: make(chan struct{}, 1), status: Status{State: state, Name: nameOr(opts.AgentName), Dir: opts.Dir, Model: opts.Model, UpdatedAt: opts.Now()}}
 }
 
 // Status returns the current status.
+func nameOr(name string) string {
+	if name == "" {
+		return Name
+	}
+	return name
+}
+
 func (o *Orchestrator) Status() Status {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -409,12 +474,12 @@ func sessionOf(agent herdr.Agent, fallback string) string {
 // correctness.
 func (o *Orchestrator) remember(ctx context.Context, paneID, sessionID string) {
 	if paneID != "" {
-		if err := o.opts.KV.SetKV(ctx, kvPaneID, paneID); err != nil {
+		if err := o.opts.KV.SetKV(ctx, o.kvKey(kvPaneID), paneID); err != nil {
 			o.opts.Logger.Warn("storing the orchestrator pane", "err", err)
 		}
 	}
 	if sessionID != "" {
-		if err := o.opts.KV.SetKV(ctx, kvSessionID, sessionID); err != nil {
+		if err := o.opts.KV.SetKV(ctx, o.kvKey(kvSessionID), sessionID); err != nil {
 			o.opts.Logger.Warn("storing the orchestrator session id", "err", err)
 		}
 	}
@@ -512,7 +577,7 @@ func (o *Orchestrator) liveAgent(ctx context.Context) (herdr.Agent, bool, error)
 func (o *Orchestrator) getAgent(ctx context.Context) (herdr.Agent, error) {
 	ctx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
 	defer cancel()
-	return o.opts.Client.AgentGet(ctx, Name)
+	return o.opts.Client.AgentGet(ctx, o.agentName())
 }
 
 // errNoShell means no pane at a bare shell could be found or made in time.

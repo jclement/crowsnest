@@ -129,6 +129,12 @@ func TestParse(t *testing.T) {
 		{"as job", "---\nevery: 4h\nas: job\ndir: /tmp/x\nrole: builder\n---\nBuild it.\n", func(task Task) bool {
 			return task.As == RunAsJob && task.Dir == "/tmp/x" && task.Role == "builder"
 		}},
+		{"project lead poke", "---\nevery: 1h\nproject: crowsnest\n---\nLook.\n", func(task Task) bool {
+			return task.Project == "crowsnest" && task.ProjectID == 0 && task.As == RunAsPoke // Load resolves the id
+		}},
+		{"project job", "---\nevery: 1h\nas: job\nproject: web-app\n---\nBuild.\n", func(task Task) bool {
+			return task.Project == "web-app" && task.As == RunAsJob
+		}},
 	}
 	for _, tc := range good {
 		task, err := Parse("/t/"+"ok.md", OriginUser, []byte(tc.content))
@@ -152,6 +158,7 @@ func TestParse(t *testing.T) {
 		{"/t/x.md", "---\nevery: 1d\nas: job\n---\n", "needs a body"},
 		{"/t/x.md", "---\n---\n", "every: is missing"},
 		{"/t/x.md", "---\nevery: 1d\nevery: 2d\n---\n", "twice"},
+		{"/t/x.md", "---\nevery: 1d\nproject: Not A Slug\n---\n", "not a project slug"},
 	}
 	for _, tc := range bad {
 		if _, err := Parse(tc.path, OriginDir, []byte(tc.content)); err == nil || !strings.Contains(err.Error(), tc.want) {

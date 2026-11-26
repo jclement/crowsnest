@@ -187,8 +187,8 @@ func (d *Demo) scheduleReblock(steps int) {
 }
 
 // startTurn is the demo's PromptHook: a prompted agent works for two steps, then goes idle.
-func (d *Demo) startTurn(_ *Fake, paneID, text string) {
-	if d.scribe != nil && paneID == d.panes[DemoOrchestrator] {
+func (d *Demo) startTurn(f *Fake, paneID, text string) {
+	if d.scribe != nil && (paneID == d.panes[DemoOrchestrator] || isDemoLead(f, paneID)) {
 		d.orchestratorTurn(paneID, text)
 		return
 	}
@@ -233,4 +233,11 @@ func (d *Demo) working(pane, task string, seconds int) {
 func (d *Demo) dialog(pane, command, description string) {
 	d.setANSI(pane, fmt.Sprintf("%s[1m⏺%s[22m Bash(%s)\n\n%s\n %s[1mBash command%s[22m\n\n   %s\n   %s\n\n Do you want to proceed?\n %s[36m❯ 1. Yes%s[39m\n   2. Yes, and don't ask again for this command\n   3. No, and tell Claude what to do differently %s[2m(esc)%s[22m\n\n %s[2mEsc to cancel · Tab to amend%s[22m\n",
 		esc, esc, command, demoRule, esc, esc, command, description, esc, esc, esc, esc, esc, esc))
+}
+
+// isDemoLead reports whether the agent in paneID is a project's lead (DESIGN.md 21.2): leads
+// answer prompts with canned replies, like the demo orchestrator, so Chat with a lead works.
+func isDemoLead(f *Fake, paneID string) bool {
+	agent, err := f.AgentGet(context.Background(), paneID)
+	return err == nil && strings.HasPrefix(agent.Name, "lead-")
 }

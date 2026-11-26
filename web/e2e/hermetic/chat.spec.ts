@@ -9,12 +9,13 @@
 // (support/agent.ts), the way Claude writes it, so the test does not wait on forty replies.
 import type { Page } from "@playwright/test";
 import { appendTurns } from "../support/agent";
-import { expect, test } from "../support/fixtures";
+import { expect, test, waitForOrchestratorSettled } from "../support/fixtures";
 
 async function openChat(page: Page) {
   await page.goto("/chat");
   await expect(page.getByRole("list", { name: "Conversation" })).toBeVisible();
   await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
+  await waitForOrchestratorSettled(page);
 }
 
 const composer = (page: Page) => page.getByRole("textbox", { name: "Message to the orchestrator" });

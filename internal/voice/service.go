@@ -66,12 +66,15 @@ const (
 
 // SayEvent is the data of a `say` hub event.
 type SayEvent struct {
-	Kind   string    `json:"kind"`              // speak or chime
-	Source string    `json:"source"`            // say or reply
-	TextID string    `json:"text_id,omitempty"` // speak only
-	Text   string    `json:"text,omitempty"`    // speak only: shown as a caption
-	PaneID string    `json:"pane_id,omitempty"` // who said it
-	At     time.Time `json:"at"`
+	Kind   string `json:"kind"`              // speak or chime
+	Source string `json:"source"`            // say or reply
+	TextID string `json:"text_id,omitempty"` // speak only
+	Text   string `json:"text,omitempty"`    // speak only: shown as a caption
+	PaneID string `json:"pane_id,omitempty"` // who said it
+	// Agent is the standing agent that said it ("orchestrator", "lead-<slug>"), so a browser
+	// speaks only the agents it opted into and queues them (DESIGN.md 13.5); "" when unknown.
+	Agent string    `json:"agent,omitempty"`
+	At    time.Time `json:"at"`
 }
 
 // Service is talk mode. Build it with NewService.
@@ -125,18 +128,27 @@ func NewService(opts Options) *Service {
 // Say makes sentence speakable and tells the browsers. It is the agent socket's `say` and the
 // target of a parsed SAY line; it returns the text id.
 func (s *Service) Say(sentence, source, paneID string) string {
+	return s.SayAs(sentence, source, paneID, "")
+}
+
+// SayAs is Say for a standing agent's words: spoken in that agent's voice, and labelled with it
+// so each browser can choose whom it hears.
+func (s *Service) SayAs(sentence, source, paneID, agent string) string {
 	sentence = cleanForSpeech(sentence)
 	if sentence == "" {
 		return ""
 	}
-	id := s.texts.Add(sentence)
-	s.publish(SayEvent{Kind: KindSpeak, Source: source, TextID: id, Text: sentence, PaneID: paneID, At: s.now().UTC()})
+	id := s.texts.AddFor(sentence, agent)
+	s.publish(SayEvent{Kind: KindSpeak, Source: source, TextID: id, Text: sentence, PaneID: paneID, Agent: agent, At: s.now().UTC()})
 	return id
 }
 
 // Chime tells the browsers a reply arrived with nothing to say aloud.
-func (s *Service) Chime(paneID string) {
-	s.publish(SayEvent{Kind: KindChime, Source: SourceReply, PaneID: paneID, At: s.now().UTC()})
+func (s *Service) Chime(paneID string) { s.ChimeAs(paneID, "") }
+
+// ChimeAs is Chime for a standing agent's reply.
+func (s *Service) ChimeAs(paneID, agent string) {
+	s.publish(SayEvent{Kind: KindChime, Source: SourceReply, PaneID: paneID, Agent: agent, At: s.now().UTC()})
 }
 
 // Speakable stores text for one browser to fetch (the Inbox's "Read aloud") without announcing
@@ -173,6 +185,9 @@ func (s *Service) Speech(ctx context.Context, session, textID string) (*Audio, e
 		return nil, ErrUnknownText
 	}
 	how := s.Settings(ctx)
+	if voice := s.AgentVoices(ctx)[text.Agent]; voice != "" && text.Agent != "" {
+		how.VoiceID = voice // the agent's own voice, so the human can tell who is talking
+	}
 	if text.Override != nil {
 		how = *text.Override
 	}
@@ -220,11 +235,16 @@ func (s *Service) Preview(how Effective) string {
 // ReplySay makes an assistant reply's SAY line speakable on demand (Chat's play button) and
 // returns its id and sentence, or ok false when the reply has nothing to say aloud.
 func (s *Service) ReplySay(reply string) (id, sentence string, ok bool) {
+	return s.ReplySayFor(reply, "")
+}
+
+// ReplySayFor is ReplySay for a standing agent's reply, spoken in its voice.
+func (s *Service) ReplySayFor(reply, agent string) (id, sentence string, ok bool) {
 	result := ParseSay(reply)
 	if result.Kind != SaySpeak {
 		return "", "", false
 	}
-	return s.texts.Add(result.Sentence), result.Sentence, true
+	return s.texts.AddFor(result.Sentence, agent), result.Sentence, true
 }
 
 // ---- Voices --------------------------------------------------------------------------

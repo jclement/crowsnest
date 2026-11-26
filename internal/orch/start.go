@@ -48,7 +48,7 @@ var shellNames = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": 
 // findShellPane returns a pane at a bare shell for the orchestrator: the pane it last ran in,
 // else a shell pane of the orchestrator workspace, else a new tab there, else a new workspace.
 func (o *Orchestrator) findShellPane(ctx context.Context) (string, error) {
-	if paneID, err := o.opts.KV.GetKV(ctx, kvPaneID); err == nil && o.atShell(ctx, paneID) {
+	if paneID, err := o.opts.KV.GetKV(ctx, o.kvKey(kvPaneID)); err == nil && o.atShell(ctx, paneID) {
 		return paneID, nil
 	}
 	workspaceID, err := o.findWorkspace(ctx)
@@ -75,7 +75,7 @@ func (o *Orchestrator) findWorkspace(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("listing workspaces: %w", err)
 	}
 	for _, workspace := range workspaces {
-		if workspace.Label == WorkspaceLabel {
+		if workspace.Label == o.workspaceLabel() {
 			return workspace.ID, nil
 		}
 	}
@@ -113,7 +113,7 @@ func (o *Orchestrator) createPane(ctx context.Context, workspaceID string) (stri
 	var paneID string
 	if workspaceID != "" {
 		created, err := o.opts.Client.TabCreate(ctx, herdr.TabCreateParams{
-			WorkspaceID: workspaceID, Label: WorkspaceLabel, Cwd: o.opts.Dir, Env: env,
+			WorkspaceID: workspaceID, Label: o.workspaceLabel(), Cwd: o.opts.Dir, Env: env,
 		})
 		if err != nil {
 			return "", fmt.Errorf("creating a tab for the orchestrator: %w", err)
@@ -121,7 +121,7 @@ func (o *Orchestrator) createPane(ctx context.Context, workspaceID string) (stri
 		paneID = created.RootPane.ID
 	} else {
 		created, err := o.opts.Client.WorkspaceCreate(ctx, herdr.WorkspaceCreateParams{
-			Label: WorkspaceLabel, Cwd: o.opts.Dir, Env: env,
+			Label: o.workspaceLabel(), Cwd: o.opts.Dir, Env: env,
 		})
 		if err != nil {
 			return "", fmt.Errorf("creating the orchestrator workspace: %w", err)
@@ -201,6 +201,9 @@ func (o *Orchestrator) waitForShell(ctx context.Context, paneID string) error {
 // start writes the start-up files and starts the orchestrator's agent (Claude, or Codex when the
 // engine says so) in paneID.
 func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (Status, error) {
+	o.mu.Lock()
+	o.launching = paneID
+	o.mu.Unlock()
 	files, err := o.writeFiles(ctx, paneID)
 	if err != nil {
 		return o.fail(err)
@@ -215,7 +218,7 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 	prior := o.knownSession
 	o.mu.Unlock()
 	o.opts.Logger.Info("starting the orchestrator", "pane", paneID, "session", sessionID, "resume", resuming)
-	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: Name, Kind: "claude", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
+	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: o.agentName(), Kind: "claude", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
 	if err == nil {
 		agent, err = o.waitForLaunch(ctx, agent)
 	}
@@ -368,7 +371,7 @@ func (o *Orchestrator) waitForLaunch(ctx context.Context, agent herdr.Agent) (he
 // chooseSession returns the session id to start with, and whether that is a resume: the stored
 // one when asked to resume and its transcript exists, else a new one.
 func (o *Orchestrator) chooseSession(ctx context.Context, resume bool) (string, bool) {
-	stored, err := o.opts.KV.GetKV(ctx, kvSessionID)
+	stored, err := o.opts.KV.GetKV(ctx, o.kvKey(kvSessionID))
 	if resume && err == nil && stored != "" && o.opts.ClaudeConfigDir != "" {
 		if _, locateErr := transcript.Locate(o.opts.ClaudeConfigDir, o.opts.Dir, stored); locateErr == nil {
 			return stored, true
@@ -421,7 +424,11 @@ func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFile
 		instructions: filepath.Join(o.opts.StateDir, InstructionsFile),
 		settings:     filepath.Join(o.opts.StateDir, SettingsFile),
 	}
-	body, err := o.Instructions()
+	render := o.Instructions
+	if o.opts.Render != nil {
+		render = o.opts.Render
+	}
+	body, err := render()
 	if err != nil {
 		return startFiles{}, err
 	}
@@ -448,6 +455,9 @@ func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFile
 	}
 	if err := writeJSONFile(files.settings, o.claudeSettings(tokenFile, guardRules)); err != nil {
 		return startFiles{}, err
+	}
+	if o.opts.OnStart != nil {
+		o.opts.OnStart(ctx)
 	}
 	if o.mcpEnabled() {
 		files.mcpConfig = filepath.Join(o.opts.StateDir, MCPConfigFile)
@@ -514,12 +524,26 @@ func writePrivate(path string, body []byte) error {
 
 // Instructions renders the embedded CROWSNEST.md template for this session.
 func (o *Orchestrator) Instructions() (string, error) {
+	return RenderInstructions(InstructionData{Session: o.opts.Session, Dir: o.opts.Dir, Version: o.opts.Version})
+}
+
+// InstructionData fills the CROWSNEST.md template. Project is empty for the orchestrator; a
+// project's lead gets the same file with its project named (DESIGN.md 21.2), so the SAY contract,
+// the pokes and the job protocol are word for word the orchestrator's.
+type InstructionData struct {
+	Session, Dir, Version string
+	Project               string // the project's short name ("" for the orchestrator)
+	ProjectName           string
+	Description           string
+}
+
+// RenderInstructions renders CROWSNEST.md for a standing agent.
+func RenderInstructions(data InstructionData) (string, error) {
 	tmpl, err := template.ParseFS(templates, "templates/"+InstructionsFile)
 	if err != nil {
 		return "", fmt.Errorf("parsing the instructions template: %w", err)
 	}
 	var out strings.Builder
-	data := map[string]string{"Session": o.opts.Session, "Dir": o.opts.Dir, "Version": o.opts.Version}
 	if err := tmpl.Execute(&out, data); err != nil {
 		return "", fmt.Errorf("rendering the instructions: %w", err)
 	}

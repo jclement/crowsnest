@@ -19,7 +19,7 @@
 // no real ElevenLabs call is ever made. `mise run e2e:voice` runs this file alone.
 import { spawn, type ChildProcess } from "node:child_process";
 import type { Page } from "@playwright/test";
-import { expect, test as base } from "../support/fixtures";
+import { expect, test as base, waitForOrchestratorSettled } from "../support/fixtures";
 import { freePort } from "../support/instance";
 
 /** The fake's key: not a secret, it only opens the fake. */
@@ -75,6 +75,7 @@ async function openChat(page: Page) {
   await page.goto("/chat");
   await expect(page.getByRole("list", { name: "Conversation" })).toBeVisible();
   await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
+  await waitForOrchestratorSettled(page);
 }
 
 /** Holds the push-to-talk button for ms with the mouse, as a person would. */
@@ -128,6 +129,11 @@ test("mic → transcribed → sent; with speak mode on the SAY reply is fetched 
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  // Speaking is per agent, off by default: the orchestrator's own switch in its Chat header.
+  const own = page.getByTestId("agent-speak-toggle");
+  await expect(own).toHaveAttribute("aria-pressed", "false");
+  await own.click();
+  await expect(own).toHaveAttribute("aria-pressed", "true");
 
   // The mic is in the composer without any switch, with the Space hint beside it.
   await expect(page.getByTestId("space-hint")).toContainText("Hold Space to talk");
@@ -180,8 +186,12 @@ test("speak mode off: replies are captioned and nothing is synthesised; the play
   await openChat(page);
   await holdToTalk(page, 900);
   await page.getByRole("button", { name: "Send now" }).click();
-  // The demo's seeded replies and the new one all carry SAY captions.
-  await expect(page.getByTestId("spoken-caption")).toHaveCount(3, { timeout: 20_000 });
+  // Every reply carries a SAY caption, the new one too (the demo's reply echoes the prompt). How
+  // many replies there are depends on what else the demo orchestrator was given at start-up.
+  const replies = page.getByRole("article", { name: "Reply" });
+  const answer = replies.filter({ hasText: "what is the status" }).last();
+  await expect(answer.getByTestId("spoken-caption")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("spoken-caption")).toHaveCount(await replies.count());
   await page.waitForTimeout(1_000);
   let upstream = await fakeRequests(page, fakeURL);
   expect(upstream.filter((request) => request.path?.startsWith("/v1/text-to-speech/"))).toHaveLength(0);
@@ -191,6 +201,8 @@ test("speak mode off: replies are captioned and nothing is synthesised; the play
   await page.getByRole("button", { name: "Play this reply aloud" }).first().click();
   expect((await tts).status()).toBe(200);
   await expect(page.getByTestId("player-bar")).toBeVisible();
+  // A replay names who is speaking, as a live line does.
+  await expect(page.getByTestId("speaker")).toHaveText(/orchestrator/i);
   upstream = await fakeRequests(page, fakeURL);
   expect(upstream.filter((request) => request.path?.startsWith("/v1/text-to-speech/"))).toHaveLength(1);
   await expect(page.getByTestId("speak-toggle")).toHaveAttribute("aria-pressed", "false");
@@ -334,7 +346,7 @@ test("Voice sheet: the account's voices, a preview, and a saved voice and speed 
   await page.getByRole("menuitem", { name: "Voice" }).click();
   const sheet = page.getByRole("dialog", { name: "Voice" });
   await expect(sheet.getByTestId("voice-source")).toContainText("stock voice");
-  const select = sheet.getByRole("combobox", { name: "Voice" });
+  const select = sheet.getByRole("combobox", { name: "Voice", exact: true });
   await expect(select.locator("option")).toHaveCount(3); // default + two voices
   await select.selectOption({ label: "Brian (american, male, middle aged)" });
   await sheet.getByRole("slider", { name: "Speed" }).fill("1.5");
@@ -352,8 +364,9 @@ test("Voice sheet: the account's voices, a preview, and a saved voice and speed 
   const saved = await (await page.request.get("/api/v1/voice/settings")).json();
   expect(saved.data).toMatchObject({ voice_id: "nPczCjzI2devNBz1zQrb", voice_source: "settings", speed: 1.5, playback_rate: 1.25 });
 
-  // The next reply is spoken in the new voice.
-  await page.getByTestId("speak-toggle").click();
+  // The next reply is spoken in the new voice (the orchestrator's own switch also unmutes).
+  await page.getByTestId("agent-speak-toggle").click();
+  await expect(page.getByTestId("speak-toggle")).toHaveAttribute("aria-pressed", "true");
   await holdToTalk(page, 900);
   await page.getByRole("button", { name: "Send now" }).click();
   await page.waitForResponse((response) => response.url().includes("/api/v1/voice/tts?text_id=t_"), { timeout: 20_000 });
@@ -361,6 +374,31 @@ test("Voice sheet: the account's voices, a preview, and a saved voice and speed 
   const replyCall = upstream.filter((request) => request.path?.startsWith("/v1/text-to-speech/")).at(-1);
   expect(replyCall?.path).toContain("/nPczCjzI2devNBz1zQrb/");
   await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.playbackRate)).toBe(1.25);
+});
+
+// ---- Per-agent voices ----------------------------------------------------------------------------
+
+test("the Voice sheet lists each standing agent with its own speak switch and voice", async ({ page, browserName }) => {
+  chromiumOnly(browserName);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Voice" }).click();
+  const agents = page.getByRole("dialog", { name: "Voice" }).getByRole("region", { name: "Agents" });
+  const leadSwitch = agents.getByRole("switch", { name: /Crowsnest.*replies/ });
+  await expect(leadSwitch).toHaveAttribute("aria-checked", "false");
+  await leadSwitch.click();
+  await expect(leadSwitch).toHaveAttribute("aria-checked", "true");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("crowsnest-speak-agents") ?? "{}"))).toEqual({ "lead-crowsnest": true });
+  await expect(page.getByTestId("speak-toggle")).toHaveAttribute("aria-pressed", "true");
+  const select = agents.getByRole("combobox", { name: /Crowsnest.* voice/ });
+  await expect(select.locator("option")).not.toHaveCount(1);
+  const voiceId = await select.locator("option").nth(1).getAttribute("value");
+  const saved = page.waitForResponse((response) => response.url().includes("/api/v1/voice/agents/lead-crowsnest") && response.request().method() === "PUT");
+  await select.selectOption(voiceId ?? "");
+  expect((await saved).status()).toBe(200);
+  const listed = await (await page.request.get("/api/v1/voice/agents")).json();
+  expect(listed.data.agents.find((entry: { agent: string }) => entry.agent === "lead-crowsnest")?.voice_id).toBe(voiceId);
 });
 
 // ---- The command palette ----------------------------------------------------------------------
@@ -381,7 +419,7 @@ test("the palette turns speak mode on and off and opens the Voice sheet", async 
   await palette("speak replies");
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await palette("voice settings");
-  await expect(page.getByRole("dialog", { name: "Voice" }).getByRole("combobox", { name: "Voice" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Voice" }).getByRole("combobox", { name: "Voice", exact: true })).toBeVisible();
 });
 
 // ---- Screenshots -------------------------------------------------------------------------------

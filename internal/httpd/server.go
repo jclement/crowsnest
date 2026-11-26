@@ -26,9 +26,11 @@ import (
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
@@ -98,6 +100,9 @@ type Deps struct {
 	Poker *orch.Poker
 	// Push serves the /push routes (Web Push, 8.5). Nil: they answer 503.
 	Push *push.Service
+	// Projects serves /projects and Leads the lead actions (DESIGN.md 21). Nil: 503.
+	Projects *projects.Service
+	Leads    *projects.Leads
 	// Schedule serves /schedule (scheduled tasks, 7.8). Nil: those routes answer 503.
 	Schedule *schedule.Service
 	// Spend serves /spend and /spend/summary (7.11). Nil: they answer 503.
@@ -134,6 +139,8 @@ type Deps struct {
 	// process trees for /system/agents. Nil: those answer 503 and an empty list.
 	Stats     *sysstat.Sampler
 	Processes *sysstat.Processes
+	// Instructions serves /instructions and /agents-instructions (DESIGN.md 21.3). Nil: 503.
+	Instructions *instructions.Service
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).
@@ -225,10 +232,12 @@ func (s *Server) routes() http.Handler {
 	s.registerJobRoutes(mux)
 	s.registerJournalRoutes(mux)
 	s.registerScheduleRoutes(mux)
+	s.registerProjectRoutes(mux)
 	s.registerVoiceRoutes(mux)
 	s.registerPushRoutes(mux)
 	s.registerSpendRoutes(mux)
 	s.registerAttachmentRoutes(mux)
+	s.registerInstructionRoutes(mux)
 	s.registerApprovalRoutes(mux)
 	s.registerSystemRoutes(mux)
 	s.registerStatsRoutes(mux)
@@ -300,9 +309,9 @@ func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 				_ = open.Close()
 			}
 			if errors.Is(err, syscall.EADDRINUSE) {
-				return nil, fmt.Errorf("port %d is already in use on %s: another program (or another crowsnest) has it. "+
+				return nil, fmt.Errorf("port %d is already in use on %s (from --bind %s): another program (or another crowsnest) has it. "+
 					"Stop it, or run on another port: `crowsnest --port %d` (or CROWSNEST_PORT). `crowsnest doctor` says who answers there",
-					target.Addr.Port(), target.Addr.Addr(), target.Addr.Port()+1)
+					target.Addr.Port(), target.Addr.Addr(), target.Source, target.Addr.Port()+1)
 			}
 			return nil, fmt.Errorf("listening on %s (from --bind %s): %w", target.Addr, target.Source, err)
 		}

@@ -105,7 +105,7 @@ func (s *Service) launch(ctx context.Context, id string) {
 		return
 	}
 	if detail.Dir == "" {
-		s.DispatchOrchestrator(ctx)
+		s.DispatchStanding(ctx)
 		return
 	}
 	cl, err := s.claimStep(ctx, id, opLaunch, func(r *store.JobRecord, _ *change) error {
@@ -228,7 +228,7 @@ func markDialogLocked(r *store.JobRecord, c *change, detail string) {
 // a crash while typing is known to be one: at most once). A typing that provably did nothing
 // leaves the brief unsent for the tick to try again.
 func (s *Service) sendBrief(ctx context.Context, cl claim, job Job) error {
-	path, err := s.writeBrief(job)
+	path, err := s.writeBrief(ctx, job)
 	if err != nil {
 		return err
 	}
@@ -465,7 +465,9 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 		return jobFiles{}, err
 	}
 	files := jobFiles{prompt: filepath.Join(dir, "prompt.md"), settings: filepath.Join(dir, "settings.json")}
-	prompt, err := s.opts.Roles.Prompt(job.Role, job.ID, true)
+	// Every start (a restart too) records the layers it was given: this is the start that
+	// "instructions changed since start" compares against.
+	prompt, err := s.agentPrompt(ctx, job, true, true)
 	if err != nil {
 		return jobFiles{}, err
 	}
@@ -505,6 +507,26 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 		}
 	}
 	return files, nil
+}
+
+// agentPrompt is what a job agent is told before its brief: the role prompt (or, with the
+// instruction layers wired, the global, role and project layers; DESIGN.md 21.3) followed by
+// the job protocol. mcp chooses the protocol's wording; record asks the layers to note this
+// start. A failure to compose the layers fails the start rather than dropping the human's
+// standing instructions without a word.
+func (s *Service) agentPrompt(ctx context.Context, job Job, mcp, record bool) (string, error) {
+	if s.opts.Instructions == nil {
+		return s.opts.Roles.Prompt(job.Role, job.ID, mcp)
+	}
+	layers, err := s.opts.Instructions.JobLayers(ctx, job, record)
+	if err != nil {
+		return "", fmt.Errorf("composing the instructions of %s: %w", job.ID, err)
+	}
+	protocol, err := ProtocolText(job.ID, mcp)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(layers) + "\n\n" + protocol, nil
 }
 
 func writeJSON(path string, value any) error {
@@ -578,34 +600,40 @@ func sessionOf(agent herdr.Agent) string {
 // A brief that provably was not typed releases the job back to the queue; one whose typing is
 // uncertain counts as sent (at most once).
 func (s *Service) DispatchOrchestrator(ctx context.Context) {
-	if s.opts.Orchestrator == nil || s.opts.Herdr == nil {
+	if s.opts.Orchestrator == nil {
 		return
 	}
 	info := s.opts.Orchestrator()
-	if info.PaneID == "" || !info.Ready {
+	s.dispatchTo(ctx, StandingAgent{Name: OrchestratorName, PaneID: info.PaneID, Ready: info.Ready})
+}
+
+// dispatchTo is DispatchOrchestrator for any standing agent: the orchestrator, or a project's
+// lead, which takes its own project's jobs the same way (DESIGN.md 21.2).
+func (s *Service) dispatchTo(ctx context.Context, agent StandingAgent) {
+	if s.opts.Herdr == nil || agent.PaneID == "" || !agent.Ready {
 		return
 	}
-	cl, job, ok := s.reserveForOrchestrator(ctx, info.PaneID)
+	cl, job, ok := s.reserveFor(ctx, agent)
 	if !ok {
 		return
 	}
-	path, err := s.writeBrief(job)
+	path, err := s.writeBrief(ctx, job)
 	if err != nil {
-		s.opts.Logger.Warn("writing a brief for the orchestrator", "job", job.ID, "err", err)
+		s.opts.Logger.Warn("writing a brief for a standing agent", "agent", agent.Name, "job", job.ID, "err", err)
 		s.finishQuietly(ctx, cl, func(r *store.JobRecord, _ *change) {
 			r.PaneID, r.AgentName = "", "" // back in the queue, untouched
 		})
 		return
 	}
 	var result orch.PromptResult
-	if claimErr := s.effect(ctx, cl, info.PaneID, func(ctx context.Context) {
-		result, err = orch.Prompt(ctx, s.opts.Herdr, info.PaneID, orch.PromptRequest{Text: orchestratorLine(job, path), ExpectAgent: OrchestratorName})
+	if claimErr := s.effect(ctx, cl, agent.PaneID, func(ctx context.Context) {
+		result, err = orch.Prompt(ctx, s.opts.Herdr, agent.PaneID, orch.PromptRequest{Text: standingLine(job, path), ExpectAgent: agent.Name})
 	}); claimErr != nil {
 		return
 	}
 	outcome := typedOutcome(result, err)
 	if outcome == typedNo {
-		s.opts.Logger.Info("the orchestrator could not take a job yet", "job", job.ID, "err", err)
+		s.opts.Logger.Info("a standing agent could not take a job yet", "agent", agent.Name, "job", job.ID, "err", err)
 		s.finishQuietly(ctx, cl, func(r *store.JobRecord, _ *change) {
 			r.PaneID, r.AgentName = "", "" // back in the queue, untouched
 		})
@@ -615,9 +643,12 @@ func (s *Service) DispatchOrchestrator(ctx context.Context) {
 		now := s.opts.Now()
 		r.BriefSent, r.StartedAt, r.LastActivityAt = true, now, now
 		if State(r.State) == StateQueued {
-			r.State = string(StateRunning) // not over a disposition the orchestrator declared meanwhile (R3-C04)
+			r.State = string(StateRunning) // not over a disposition the agent declared meanwhile (R3-C04)
 		}
 		summary := "Assigned to the orchestrator"
+		if agent.ProjectID != 0 {
+			summary = "Assigned to the project's lead (" + agent.Name + ")"
+		}
 		if outcome == typedMaybe {
 			summary += " (crowsnest lost track of the send; it is not typed again)"
 		}
@@ -625,17 +656,17 @@ func (s *Service) DispatchOrchestrator(ctx context.Context) {
 	})
 }
 
-// reserveForOrchestrator picks the oldest unassigned no-directory job and reserves it for the
-// orchestrator in paneID, unless the orchestrator already holds a running (or reserved) job. It
+// reserveFor picks the oldest unassigned no-directory job waiting for agent and reserves it in
+// its pane, unless the agent already holds a running (or reserved) job. It
 // reads the store directly, not a page of the board (R2-C16).
-func (s *Service) reserveForOrchestrator(ctx context.Context, paneID string) (claim, Job, bool) {
+func (s *Service) reserveFor(ctx context.Context, agent StandingAgent) (claim, Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	held, err := s.opts.Store.CountJobsHeldBy(ctx, OrchestratorName, []string{string(StateQueued), string(StateRunning)})
+	held, err := s.opts.Store.CountJobsHeldBy(ctx, agent.Name, []string{string(StateQueued), string(StateRunning)})
 	if err != nil || held > 0 {
 		return claim{}, Job{}, false
 	}
-	next, ok, err := s.opts.Store.OldestUnassignedQueued(ctx)
+	next, ok, err := s.oldestFor(ctx, agent)
 	if err != nil || !ok {
 		return claim{}, Job{}, false
 	}
@@ -645,7 +676,7 @@ func (s *Service) reserveForOrchestrator(ctx context.Context, paneID string) (cl
 			if State(r.State) != StateQueued || r.Dir != "" || r.AgentName != "" {
 				return errSkip
 			}
-			r.PaneID, r.AgentName = paneID, OrchestratorName
+			r.PaneID, r.AgentName = agent.PaneID, agent.Name
 			return nil
 		}, &cl)
 	})

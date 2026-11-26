@@ -30,6 +30,8 @@ export interface Job {
   brief_md: string;
   done_when: string;
   role: string;
+  /** The project it belongs to; 0 is Unfiled (DESIGN.md 21.1). Optional in fixtures. */
+  project_id?: number;
   dir: string;
   worktree_branch: string;
   work_dir: string;
@@ -117,6 +119,10 @@ export interface CreateJobRequest {
   model?: string;
   /** Uploads (a_…) given with the job: copied into its inbox and listed in its brief (8.6). */
   attachments?: string[];
+  /** The project it is for (21.1); its defaults fill the fields left unset. */
+  project_id?: number;
+  /** With a project: "lead" (no directory; the project's lead holds it) or "job" (a job agent). */
+  to?: "lead" | "job";
 }
 
 export interface RoleInfo {

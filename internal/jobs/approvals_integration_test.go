@@ -110,11 +110,7 @@ func newApprovalRig(t *testing.T) *approvalRig {
 		Store: db, Hub: events, Logger: logger,
 		RiskContext: func(context.Context, string) risk.Context { return risk.Context{ProtectedHosts: rules.ProtectedHosts} },
 		OnChange: func(ctx context.Context, a approvals.Approval, change string) {
-			waiting := change == "requested"
-			if count, _ := db.CountPendingApprovals(ctx, a.JobID); count > 0 {
-				waiting = true
-			}
-			_ = jobService.SetApprovalWaiting(context.WithoutCancel(ctx), a.JobID, waiting, a.Summary)
+			_ = jobService.SetApprovalWaiting(context.WithoutCancel(ctx), a.JobID, change == "requested", a.Summary)
 		},
 	})
 	questionService := questions.New(questions.Options{Store: db, Hub: events, Logger: logger})

@@ -170,3 +170,64 @@ func (s *Service) storedSettings(ctx context.Context) Settings {
 	}
 	return stored
 }
+
+// ---- Per-agent voices (DESIGN.md 13.5) ---------------------------------------------------
+
+// agentVoicesKey is the kv key of the per-agent voices: {"lead-alpha": "<voice id>", …}.
+const agentVoicesKey = "voice.agents"
+
+// agentPattern is what a standing agent's name looks like: the orchestrator or a project lead.
+var agentPattern = regexp.MustCompile(`^(orchestrator|lead-[a-z0-9][a-z0-9-]{0,31})$`)
+
+// ValidAgent reports whether name is a standing agent's name a voice can be given to.
+func ValidAgent(name string) bool { return agentPattern.MatchString(name) }
+
+// AgentVoices returns the voice chosen for each standing agent that has one; an agent not in
+// the map speaks in the instance's voice. Unreadable or invalid entries are dropped.
+func (s *Service) AgentVoices(ctx context.Context) map[string]string {
+	out := map[string]string{}
+	if s.settings == nil {
+		return out
+	}
+	raw, err := s.settings.GetKV(ctx, agentVoicesKey)
+	if err != nil || raw == "" {
+		return out
+	}
+	var stored map[string]string
+	if json.Unmarshal([]byte(raw), &stored) != nil {
+		return out
+	}
+	for agent, voice := range stored {
+		if ValidAgent(agent) && ValidVoiceID(voice) {
+			out[agent] = voice
+		}
+	}
+	return out
+}
+
+// SetAgentVoice gives a standing agent its own voice; an empty voiceID puts it back on the
+// instance's voice. It returns the map in force.
+func (s *Service) SetAgentVoice(ctx context.Context, agent, voiceID string) (map[string]string, error) {
+	if !ValidAgent(agent) {
+		return nil, fmt.Errorf("%w: %q is not the orchestrator or a project lead", ErrBadSettings, agent)
+	}
+	if voiceID != "" && !ValidVoiceID(voiceID) {
+		return nil, fmt.Errorf("%w: a voice id is letters and digits", ErrBadSettings)
+	}
+	if s.settings == nil {
+		return nil, errors.New("voice: no settings store")
+	}
+	voices := s.AgentVoices(ctx)
+	delete(voices, agent)
+	if voiceID != "" {
+		voices[agent] = voiceID
+	}
+	raw, err := json.Marshal(voices)
+	if err != nil {
+		return nil, fmt.Errorf("encoding the agents' voices: %w", err)
+	}
+	if err := s.settings.SetKV(ctx, agentVoicesKey, string(raw)); err != nil {
+		return nil, fmt.Errorf("storing the agents' voices: %w", err)
+	}
+	return voices, nil
+}

@@ -29,9 +29,11 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/sysstat"
 	"github.com/jclement/crowsnest/internal/system"
@@ -179,7 +181,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	identity := agentid.New(db, nil)
 	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
-	refs := &jobRefs{guard: guardRules(cfg, logger)}
+	refs := &jobRefs{guard: guardRules(cfg, logger), projects: newProjectWiring(cfg, db, events), instructions: instructions.New(instructions.Options{Store: db, RolesDir: rolesDir(cfg), Hub: events, Logger: logger})}
 	approvalLinks := &approvalWiring{}
 	approvalService, err := newApprovals(cfg, db, events, refs.guard, approvalLinks, logger)
 	if err != nil {
@@ -208,17 +210,21 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	approvalLinks.pusher.Store(pusher)
 	runApprovals(ctx, approvalService, fleetCache, client, logger)
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, sys, logger)
+		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err
 	}
-	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard,
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions,
 		orchGate{gate: sys.Gate, launch: sys.LaunchSettings(orchestratorRemoteControl)}, logger)
 	sys.SetOrchestrator(orchestrator)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
-	startJobs(ctx, jobService, client, logger)
+	var projectOf func(string) (int64, string)
+	if cfg.Demo {
+		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)
+	}
+	startJobs(ctx, jobService, client, projectOf, logger)
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
@@ -226,10 +232,33 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	live.tender.Store(tender)
 	poker := startPoker(ctx, cfg, db, events, pokeServices{
 		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
-		tasks: scheduleTasks{service: scheduleService}, tender: tender,
+		tasks: scheduleTasks{service: scheduleService}, tender: tender, leads: refs.projects.leads.Load,
 	}, client, logger)
 	pokerRef.Store(poker)
 	live.poker.Store(poker)
+	tasksFor := func(projectID int64) orch.TaskSource {
+		return scheduleTasks{service: scheduleService, projectID: projectID}
+	}
+	refs.projects.taskSource.Store(&tasksFor)
+	refs.projects.useInstructions(refs.instructions, logger)
+	leads := refs.projects.startLeads(ctx, leadDeps{
+		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, guard: refs.guard, logger: logger,
+		onStatus: func(project projects.Project, status orch.Status) {
+			if status.PaneID != "" {
+				go func() { _ = conversations.Pin(ctx, status.Name) }()
+			}
+			standingReplies.status(ctx, status.Name, status.State == orch.StateIdle, status.PaneID)
+			if status.State == orch.StateIdle || status.State == orch.StateWorking {
+				// A lead that just became ready takes the job waiting for it now, not at the
+				// supervisor's next tick (which --demo does not run at all).
+				go jobService.DispatchStanding(context.WithoutCancel(ctx))
+			}
+			events.Publish(hub.Event{Type: "lead", Data: projects.LeadStatus{Status: status, ProjectID: project.ID, Slug: project.Slug, Running: true}})
+		},
+	})
+	if cfg.Demo {
+		go seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
+	}
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
@@ -238,7 +267,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
 		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
-		Names: db, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
+		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(),
 	}

@@ -131,9 +131,9 @@ func (r *ReplyWatcher) checkOnce(ctx context.Context) {
 	result := ParseSay(final.Text)
 	switch result.Kind {
 	case SaySpeak:
-		r.service.Say(result.Sentence, SourceReply, paneID)
+		r.service.SayAs(result.Sentence, SourceReply, paneID, r.target)
 	case SayNone:
-		r.service.Chime(paneID)
+		r.service.ChimeAs(paneID, r.target)
 	case SaySilent:
 	}
 }

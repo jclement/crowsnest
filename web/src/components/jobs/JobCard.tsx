@@ -1,7 +1,7 @@
 // JobCard: one row of the board (DESIGN.md 12): title, state chip, the progress line, "active 2m
 // ago", open questions, nudges when there were any, the estimated spend, and the agent. A stuck
 // job says why in words, and a job waiting on a retry counts down to it.
-import { Bot, MessageCircleQuestion, RotateCcw, Zap } from "lucide-react";
+import { Bot, FolderKanban, MessageCircleQuestion, RotateCcw, Zap } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/format";
 import { cardLine, retryLabel, stateChip, type Job } from "../../lib/jobs";
@@ -12,9 +12,11 @@ interface JobCardProps {
   job: Job;
   selected?: boolean;
   onSelect: (id: string) => void;
+  /** The project's name, for a chip (the board shows it when it lists every project). */
+  projectName?: string;
 }
 
-export function JobCard({ job, selected, onSelect }: JobCardProps) {
+export function JobCard({ job, selected, onSelect, projectName }: JobCardProps) {
   const chip = stateChip(job);
   const line = cardLine(job);
   const retry = retryLabel(job);
@@ -50,6 +52,12 @@ export function JobCard({ job, selected, onSelect }: JobCardProps) {
             <Chip tone="warning">
               <RotateCcw className="h-3 w-3" aria-hidden />
               {retry}
+            </Chip>
+          )}
+          {projectName && (
+            <Chip tone="accent" title="Project">
+              <FolderKanban className="h-3 w-3" aria-hidden />
+              {projectName}
             </Chip>
           )}
           <SpendChip spend={job.spend} />

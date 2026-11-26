@@ -105,7 +105,7 @@ export function AppFrame() {
             <Link
               key={item.to}
               to={item.to}
-              activeOptions={{ exact: true, includeSearch: false }}
+              activeOptions={{ exact: item.to === "/", includeSearch: false }}
               className="flex h-8 items-center gap-2 rounded px-2 text-sm text-body hover:bg-hover data-[status=active]:bg-selected data-[status=active]:font-medium data-[status=active]:text-heading"
             >
               <item.icon className="h-4 w-4" aria-hidden />
@@ -136,7 +136,7 @@ export function AppFrame() {
           <Link
             key={item.to}
             to={item.to}
-            activeOptions={{ exact: true, includeSearch: false }}
+            activeOptions={{ exact: item.to === "/", includeSearch: false }}
             className="relative flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 text-2xs text-muted data-[status=active]:font-medium data-[status=active]:text-accent"
           >
             <span className="relative">

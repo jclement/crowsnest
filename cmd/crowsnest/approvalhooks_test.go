@@ -30,28 +30,28 @@ type approvalRig struct {
 	other     string // a token for another pane
 	jobID     string
 	stop      func() // stops the agent socket's server
+	// timings are this rig's hook timings (a 1 s long-poll), passed to each hook it runs.
+	timings approvalTimings
 }
 
 // newApprovalRig serves the agent API with jobs and approvals, wired as serve wires them (a
 // change moves the job's state), and a running job held in pane w2:p3.
 func newApprovalRig(t *testing.T, ttl time.Duration) *approvalRig {
 	t.Helper()
-	oldPoll := approvalPoll
-	approvalPoll = time.Second
-	t.Cleanup(func() { approvalPoll = oldPoll })
 	db, err := store.OpenMemory(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	rig := &approvalRig{db: db}
-	rig.jobs = jobs.New(jobs.Options{Store: db})
+	rig := &approvalRig{db: db, timings: defaultApprovalTimings}
+	rig.timings.poll = time.Second
+	rig.jobs = jobs.New(jobs.Options{Store: db, ApprovalPending: func(ctx context.Context, jobID string) bool {
+		count, err := db.CountPendingApprovals(ctx, jobID)
+		return err == nil && count > 0
+	}})
+	// Wired as serve wires it: the job reads what is pending itself (jobs.Options.ApprovalPending).
 	rig.approvals = approvals.New(approvals.Options{Store: db, TTL: ttl, OnChange: func(ctx context.Context, a approvals.Approval, change string) {
-		waiting := change == "requested"
-		if count, _ := db.CountPendingApprovals(ctx, a.JobID); count > 0 {
-			waiting = true
-		}
-		_ = rig.jobs.SetApprovalWaiting(ctx, a.JobID, waiting, a.Summary)
+		_ = rig.jobs.SetApprovalWaiting(ctx, a.JobID, change == "requested", a.Summary)
 	}})
 	identity := agentid.New(db, nil)
 	rig.token, err = identity.Mint(context.Background(), agentid.Binding{PaneID: "w2:p3", Kind: agentid.KindPane})
@@ -100,15 +100,41 @@ const bashRequest = `{"session_id":"s1","cwd":"/tmp","hook_event_name":"Permissi
 	`"permission_suggestions":[{"type":"setMode","mode":"acceptEdits","destination":"session"}]}`
 
 // runRequestHook runs `crowsnest hook permission-request` in the background; its output arrives
-// on the returned channel.
-func runRequestHook(rig *approvalRig, getenv func(string) string) <-chan string {
+// on the returned channel. The hook belongs to t: at t's cleanup (before the rig's) it is
+// cancelled and waited for, so a test that fails early never leaves a hook running into the next.
+func runRequestHook(t *testing.T, rig *approvalRig, getenv func(string) string) <-chan string {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
 	out := make(chan string, 1)
+	finished := make(chan struct{})
+	timings := rig.timings
 	go func() {
+		defer close(finished)
 		var stdout bytes.Buffer
-		runHook(context.Background(), strings.NewReader(bashRequest), &stdout, getenv, "permission-request", hookFlags{})
+		runHook(ctx, strings.NewReader(bashRequest), &stdout, getenv, "permission-request", hookFlags{timings: &timings})
 		out <- stdout.String()
 	}()
+	t.Cleanup(func() {
+		cancel()
+		<-finished
+	})
 	return out
+}
+
+// jobIs waits for the job to reach state and cause: the job is moved by the approvals' change
+// callback, which runs after the approval is stored, so a poll can see the approval first.
+func jobIs(t *testing.T, rig *approvalRig, state jobs.State, cause jobs.Cause) {
+	t.Helper()
+	var job jobs.Detail
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		job, _ = rig.jobs.Get(context.Background(), rig.jobID)
+		if job.State == state && job.Cause == cause {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the job is %s/%s, want %s/%s", job.State, job.Cause, state, cause)
 }
 
 // pendingApproval waits for the hook's approval to appear.
@@ -139,7 +165,7 @@ func hookResult(t *testing.T, out <-chan string, within time.Duration) string {
 
 func TestPermissionRequestHoldsThenAllows(t *testing.T) {
 	rig := newApprovalRig(t, 0)
-	out := runRequestHook(rig, rig.env)
+	out := runRequestHook(t, rig, rig.env)
 	approval := pendingApproval(t, rig)
 	if approval.JobID != rig.jobID || approval.PaneID != "w2:p3" || approval.ToolName != "Bash" || approval.Cwd != "/tmp" || approval.SessionID != "s1" {
 		t.Fatalf("approval %+v", approval)
@@ -147,10 +173,7 @@ func TestPermissionRequestHoldsThenAllows(t *testing.T) {
 	if !strings.Contains(string(approval.Suggestions), "acceptEdits") {
 		t.Fatalf("the suggestions are kept for the card: %s", approval.Suggestions)
 	}
-	job, _ := rig.jobs.Get(context.Background(), rig.jobID)
-	if job.State != jobs.StateNeedsYou || job.Cause != jobs.CauseApprovalTool {
-		t.Fatalf("while waiting the job is %s/%s, want needs_you/approval-tool", job.State, job.Cause)
-	}
+	jobIs(t, rig, jobs.StateNeedsYou, jobs.CauseApprovalTool) // while waiting
 	// Held across several long-polls (each 1 s here).
 	time.Sleep(2500 * time.Millisecond)
 	select {
@@ -171,15 +194,12 @@ func TestPermissionRequestHoldsThenAllows(t *testing.T) {
 	if err := json.Unmarshal([]byte(result), &decoded); err != nil || decoded.HookSpecificOutput.HookEventName != "PermissionRequest" || decoded.HookSpecificOutput.Decision["behavior"] != "allow" {
 		t.Fatalf("hook printed %q", result)
 	}
-	job, _ = rig.jobs.Get(context.Background(), rig.jobID)
-	if job.State != jobs.StateRunning || job.Cause != "" {
-		t.Fatalf("after the decision the job is %s/%s, want running", job.State, job.Cause)
-	}
+	jobIs(t, rig, jobs.StateRunning, "") // after the decision
 }
 
 func TestPermissionRequestDenyCarriesTheNote(t *testing.T) {
 	rig := newApprovalRig(t, 0)
-	out := runRequestHook(rig, rig.env)
+	out := runRequestHook(t, rig, rig.env)
 	approval := pendingApproval(t, rig)
 	if _, err := rig.approvals.Decide(context.Background(), approval.ID, approvals.Decision{Note: "use printf instead"}); err != nil {
 		t.Fatal(err)
@@ -192,7 +212,7 @@ func TestPermissionRequestDenyCarriesTheNote(t *testing.T) {
 
 func TestPermissionRequestExpiryPrintsNothing(t *testing.T) {
 	rig := newApprovalRig(t, 300*time.Millisecond)
-	out := runRequestHook(rig, rig.env)
+	out := runRequestHook(t, rig, rig.env)
 	pendingApproval(t, rig)
 	stop := make(chan struct{})
 	defer close(stop)
@@ -213,7 +233,7 @@ func TestPermissionRequestExpiryPrintsNothing(t *testing.T) {
 
 func TestPermissionRequestSupersededPrintsNothing(t *testing.T) {
 	rig := newApprovalRig(t, 0)
-	out := runRequestHook(rig, rig.env)
+	out := runRequestHook(t, rig, rig.env)
 	pendingApproval(t, rig)
 	// The agent's turn ended: a "No" in the terminal, or an interrupt.
 	var stdout bytes.Buffer
@@ -221,10 +241,7 @@ func TestPermissionRequestSupersededPrintsNothing(t *testing.T) {
 	if result := hookResult(t, out, 5*time.Second); result != "" {
 		t.Fatalf("a superseded approval must print nothing, got %q", result)
 	}
-	job, _ := rig.jobs.Get(context.Background(), rig.jobID)
-	if job.State == jobs.StateNeedsYou {
-		t.Fatalf("superseded: the job is back from needs_you, got %s/%s", job.State, job.Cause)
-	}
+	jobIs(t, rig, jobs.StateRunning, "") // superseded: back from needs_you
 }
 
 func TestPermissionRequestServerDownPrintsNothing(t *testing.T) {
@@ -244,11 +261,9 @@ func TestPermissionRequestServerDownPrintsNothing(t *testing.T) {
 }
 
 func TestPermissionRequestServerGoneMidWaitGivesUp(t *testing.T) {
-	oldRetry, oldEvery := approvalRetryFor, approvalRetryEvery
-	approvalRetryFor, approvalRetryEvery = 300*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { approvalRetryFor, approvalRetryEvery = oldRetry, oldEvery })
 	rig := newApprovalRig(t, 0)
-	out := runRequestHook(rig, rig.env)
+	rig.timings.retryFor, rig.timings.retryEvery = 300*time.Millisecond, 50*time.Millisecond
+	out := runRequestHook(t, rig, rig.env)
 	pendingApproval(t, rig)
 	rig.stop() // crowsnest goes away while the hook waits
 	if result := hookResult(t, out, 10*time.Second); result != "" {
@@ -328,7 +343,7 @@ func TestGuardHook(t *testing.T) {
 
 func TestAnotherPaneCannotPollAnApproval(t *testing.T) {
 	rig := newApprovalRig(t, 0)
-	out := runRequestHook(rig, rig.env)
+	out := runRequestHook(t, rig, rig.env)
 	approval := pendingApproval(t, rig)
 	for _, token := range []string{rig.other, ""} {
 		_, err := agentapi.NewClient(rig.socket, token).WaitApproval(context.Background(), approval.ID, 0)
