@@ -147,7 +147,7 @@ func (s *Service) Resume(ctx context.Context, id string) (Job, error) {
 	switch {
 	case detail.Stuck && (detail.Cause == CauseLimit || detail.Cause == CauseServerError):
 		s.RetryNow(ctx, id)
-	case detail.AgentName != OrchestratorName && s.gone(ctx, detail.PaneID):
+	case !IsStanding(detail.AgentName) && s.gone(ctx, detail.PaneID):
 		record, err := s.opts.Store.GetJob(ctx, mustParse(id))
 		if err != nil {
 			return Job{}, err

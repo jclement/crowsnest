@@ -83,6 +83,8 @@ type Options struct {
 	Launch LaunchOptions
 	// Orchestrator reports the orchestrator's pane; nil means no-dir jobs stay queued.
 	Orchestrator func() OrchestratorInfo
+	// Projects are the projects and their running leads (DESIGN.md 21); nil: no projects.
+	Projects ProjectSource
 	// Activity reads transcript activity for the heartbeat; nil disables it.
 	Activity ActivityFunc
 	// Notify tells Jeff something (serve wires --notify-url). It must not block.
@@ -226,7 +228,7 @@ func (s *Service) List(ctx context.Context, states []State) ([]Job, error) {
 
 // spendInfo is what internal/spend needs to know about a job.
 func spendInfo(job Job) spend.JobInfo {
-	return spend.JobInfo{ID: job.ID, Engine: job.Engine, Orchestrated: job.AgentName == OrchestratorName,
+	return spend.JobInfo{ID: job.ID, Engine: job.Engine, Orchestrated: IsStanding(job.AgentName),
 		StartedAt: job.StartedAt, SettledAt: job.SettledAt}
 }
 
@@ -485,7 +487,7 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 		LastActivityAt: timePtr(r.LastActivityAt), Nudges: r.Nudges, Restarts: r.Restarts,
 		RetryAt: timePtr(r.RetryAt), RetryCount: r.RetryCount, OpenQuestions: open,
 		Verified: decodeList(r.VerifiedJSON), NotVerified: decodeList(r.NotVerifiedJSON),
-		Isolate: r.Isolate, isolate: r.Isolate, briefSent: r.BriefSent, Origin: r.Origin,
+		Isolate: r.Isolate, isolate: r.Isolate, briefSent: r.BriefSent, Origin: r.Origin, ProjectID: r.ProjectID,
 	}
 	if r.ParentID > 0 {
 		job.ParentID = FormatID(r.ParentID)
@@ -562,7 +564,7 @@ func (s *Service) SpendSources(ctx context.Context) ([]spend.Source, error) {
 	var out []spend.Source
 	for _, record := range records {
 		job := s.toJob(record, 0)
-		if job.Engine == EngineCodex || job.AgentName == OrchestratorName || job.SessionID == "" {
+		if job.Engine == EngineCodex || IsStanding(job.AgentName) || job.SessionID == "" {
 			continue
 		}
 		source := spend.Source{Subject: job.ID, Sessions: []spend.Session{{ID: job.SessionID, Cwd: firstNonEmptyDir(job.WorkDir, job.Dir)}}}

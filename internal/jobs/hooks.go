@@ -134,7 +134,7 @@ func (s *Service) jobInPane(ctx context.Context, paneID string) string {
 // touchLocked records activity and adopts a changed session id.
 func (s *Service) touchLocked(r *store.JobRecord, c *change, input HookInput) {
 	r.LastActivityAt = s.opts.Now()
-	if input.SessionID != "" && r.Engine == EngineClaude && r.AgentName != OrchestratorName && input.SessionID != r.ClaudeSessionID {
+	if input.SessionID != "" && r.Engine == EngineClaude && !IsStanding(r.AgentName) && input.SessionID != r.ClaudeSessionID {
 		if r.ClaudeSessionID != "" {
 			c.event(EventSession, "Claude session changed", map[string]any{"from": r.ClaudeSessionID, "to": input.SessionID})
 		}
@@ -247,7 +247,7 @@ func (s *Service) applyHookLocked(r *store.JobRecord, c *change, event string, i
 		case "clear", "resume":
 			// The conversation continues in a new session; SessionStart follows.
 		default:
-			if r.AgentName != OrchestratorName {
+			if !IsStanding(r.AgentName) {
 				r.Stuck, r.Cause, r.CauseDetail = true, string(CauseExited), "The agent process left ("+input.Reason+"); crowsnest restarts it when its pane is back at a shell."
 			}
 		}

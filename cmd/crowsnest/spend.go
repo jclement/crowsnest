@@ -81,7 +81,7 @@ func seedDemoSpend(ctx context.Context, meter *spend.Meter, service *jobs.Servic
 	now := time.Now()
 	var subjects []spend.DemoSubject
 	for i, job := range list {
-		if job.StartedAt == nil || job.AgentName == jobs.OrchestratorName || job.Engine == jobs.EngineCodex {
+		if job.StartedAt == nil || jobs.IsStanding(job.AgentName) || job.Engine == jobs.EngineCodex {
 			continue
 		}
 		end := now
