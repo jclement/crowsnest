@@ -77,6 +77,7 @@ type Config struct {
 	AllowDefaultSession bool   // allow --session default
 	WebDev              bool   // UI is served by Vite; do not require embedded assets
 	DataDir             string // where the SQLite database lives
+	StateDir            string // logs and runtime state for this session: ~/.local/state/crowsnest/<session>
 	ConfigFile          string // the config file that was read, empty if none
 }
 
@@ -117,6 +118,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("session", c.Session),
 		slog.String("dir", c.Dir),
 		slog.String("data_dir", c.DataDir),
+		slog.String("state_dir", c.StateDir),
 		slog.Bool("voice", c.VoiceEnabled()),
 		slog.Bool("demo", c.Demo),
 		slog.Bool("no_orchestrator", c.NoOrchestrator),

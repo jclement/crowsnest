@@ -116,6 +116,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.DataDir != wantData || cfg.Dir != filepath.Join(wantData, "orchestrator") {
 		t.Errorf("data dir %q, dir %q", cfg.DataDir, cfg.Dir)
 	}
+	if want := filepath.Join(h.home, ".local/state/crowsnest/crowsnest"); cfg.StateDir != want {
+		t.Errorf("state dir %q, want %q", cfg.StateDir, want)
+	}
 	if cfg.DatabasePath() != filepath.Join(wantData, "crowsnest.db") {
 		t.Errorf("database path %q", cfg.DatabasePath())
 	}

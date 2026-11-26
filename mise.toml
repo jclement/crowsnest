@@ -27,13 +27,13 @@ run = [
 # ---- Run ---------------------------------------------------------------------
 
 [tasks.dev]
-description = "Go server (no auth, localhost) on :2769 plus Vite on :5173 proxying /api to it. Long-running"
+description = "Go server (no auth, localhost, --demo fake herdr) on :2769 plus Vite on :5173 proxying /api to it. Long-running"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
 trap 'kill 0' EXIT INT TERM
 CROWSNEST_DATA_DIR="${CROWSNEST_DATA_DIR:-$PWD/.dev}" \
-  go run ./cmd/crowsnest serve --no-auth --web-dev --port "${CROWSNEST_PORT:-2769}" &
+  go run ./cmd/crowsnest serve --no-auth --web-dev --demo --port "${CROWSNEST_PORT:-2769}" &
 npm --prefix web run dev
 """
 
@@ -59,6 +59,13 @@ description = "Go tests with -race, then the web unit tests (Vitest, single run)
 run = [
   "CGO_ENABLED=1 go test -race -count=1 $GO_PACKAGES",
   "npm --prefix web run test",
+]
+
+[tasks."test:integration"]
+description = "Go integration tests against real herdr, in throwaway crowsnest-test-* sessions. Needs herdr installed"
+run = [
+  "go vet -tags integration ./internal/herdr/...",
+  "CGO_ENABLED=1 go test -race -count=1 -tags integration -run Integration -v ./internal/herdr/...",
 ]
 
 [tasks.lint]
