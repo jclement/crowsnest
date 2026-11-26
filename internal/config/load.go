@@ -311,6 +311,10 @@ func (l *loader) loadAuth(cfg *Config) error {
 // it with one they know (R1 L5).
 const othersMayAccess fs.FileMode = 0o066
 
+// ReadPasswordFile is readPasswordFile for other commands (`crowsnest reset-password`): the first
+// line of path, refused when its group or others may read or write it.
+func ReadPasswordFile(path string) (string, error) { return readPasswordFile(path) }
+
 // readPasswordFile returns the first line of path without its line ending. It refuses a file
 // that its group or others may read or write.
 func readPasswordFile(path string) (string, error) {

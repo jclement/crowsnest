@@ -62,6 +62,11 @@ func NameFromHostname(host string) string {
 	return name
 }
 
+// ValidName reports whether name may be an instance name (1 to 32 letters, digits, '-' or '_',
+// starting with a letter or digit): the rule --name follows, applied to a name chosen in the web
+// app too.
+func ValidName(name string) bool { return namePattern.MatchString(name) }
+
 // RemoteControlName is the orchestrator's Remote Control session name: "<name> crowsnest", plus
 // the herdr session when it is not the default one.
 func (c Config) RemoteControlName() string {
@@ -73,6 +78,7 @@ func (c Config) RemoteControlName() string {
 
 func (l *loader) loadUpkeep(cfg *Config) error {
 	cfg.Name = l.str(optName)
+	cfg.NameExplicit = cfg.Name != ""
 	if cfg.Name == "" {
 		cfg.Name = NameFromHostname(l.hostname())
 	} else if !namePattern.MatchString(cfg.Name) {

@@ -5,6 +5,7 @@
 package httpd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -175,7 +176,9 @@ func sessionToken(r *http.Request) string {
 // HealthResponse is GET /api/v1/health. LatestVersion and ReleaseURL are set only when a newer
 // release has been found.
 type HealthResponse struct {
-	Status          string `json:"status"`
+	Status string `json:"status"`
+	// SetupRequired is true while crowsnest is locked waiting for first-run setup (4.14).
+	SetupRequired   bool   `json:"setup_required"`
 	Version         string `json:"version"`
 	UpdateAvailable bool   `json:"update_available"`
 	LatestVersion   string `json:"latest_version,omitempty"`
@@ -183,7 +186,7 @@ type HealthResponse struct {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	health := HealthResponse{Status: "ok", Version: s.deps.Version}
+	health := HealthResponse{Status: "ok", Version: s.deps.Version, SetupRequired: s.deps.Setup != nil && s.deps.Setup.Required()}
 	if s.deps.Updater != nil {
 		if latest, ok := s.deps.Updater.Available(); ok {
 			health.UpdateAvailable, health.LatestVersion, health.ReleaseURL = true, latest.TagName, latest.URL
@@ -210,19 +213,19 @@ type Features struct {
 	Attachments *AttachmentLimits `json:"attachments,omitempty"`
 }
 
-func (s *Server) me() MeResponse {
+func (s *Server) me(ctx context.Context) MeResponse {
 	cfg := s.deps.Config
 	return MeResponse{
-		Username: s.deps.Auth.Username(),
+		Username: s.deps.Auth.Username(ctx),
 		Features: Features{
 			Auth: s.deps.Auth.Enabled(), Voice: cfg.VoiceEnabled(), Demo: cfg.Demo, Session: cfg.Session,
-			HerdrVersion: s.deps.HerdrVersion, Name: cfg.Name, Attachments: s.attachmentLimits(),
+			HerdrVersion: s.deps.HerdrVersion, Name: s.instanceName(), Attachments: s.attachmentLimits(),
 		},
 	}
 }
 
-func (s *Server) handleMe(w http.ResponseWriter, _ *http.Request) {
-	writeData(w, http.StatusOK, s.me())
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	writeData(w, http.StatusOK, s.me(r.Context()))
 }
 
 type loginRequest struct {
@@ -232,7 +235,7 @@ type loginRequest struct {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.deps.Auth.Enabled() {
-		writeData(w, http.StatusOK, s.me()) // nothing to log in to; the UI just proceeds
+		writeData(w, http.StatusOK, s.me(r.Context())) // nothing to log in to; the UI just proceeds
 		return
 	}
 	// The body must arrive promptly (R1 L3). A writer that cannot take a deadline (httptest's
@@ -261,7 +264,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, "logging in", err)
 	default:
 		setSessionCookie(w, r, token, session.ExpiresAt)
-		writeData(w, http.StatusOK, s.me())
+		writeData(w, http.StatusOK, s.me(r.Context()))
 	}
 }
 

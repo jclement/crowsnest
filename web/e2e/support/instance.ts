@@ -43,6 +43,11 @@ export interface InstanceOptions {
   session?: string;
   /** Turn the login on with these credentials (passed through the environment, never argv). */
   auth?: Credentials;
+  /**
+   * Neither credentials nor --no-auth: the instance starts locked in first-run setup mode and
+   * prints a setup link with a one-time token to its log (`setupLink`).
+   */
+  setup?: boolean;
   /** Start the orchestrator on real herdr (only the real-Claude suite does). Default off. */
   orchestrator?: boolean;
   /** Use the caller's real HOME (real Claude needs its login). Default: a throwaway HOME. */
@@ -65,6 +70,8 @@ export interface Instance {
   log: () => string;
   /** The agent API's unix socket, read from the start-up log. */
   agentSocket: () => string;
+  /** The newest first-run setup link (with its #token=) from the log; a `setup` instance only. */
+  setupLink: () => string;
   /** Kills the process (SIGKILL: the server dies without a goodbye) and leaves the port free. */
   kill: () => Promise<void>;
   /** Starts the process again on the same port. A demo instance starts from fresh seeds. */
@@ -125,7 +132,7 @@ export async function startInstance(options: InstanceOptions): Promise<Instance>
   if (!options.demo && !TEST_SESSION_PATTERN.test(session)) throw new Error(`refusing to use session ${session}`);
 
   const args = ["serve", "--bind", "127.0.0.1", "--port", String(port), "--session", session];
-  if (!options.auth) args.push("--no-auth");
+  if (!options.auth && !options.setup) args.push("--no-auth");
   if (options.demo) args.push("--demo");
   else if (!options.orchestrator) args.push("--no-orchestrator");
   args.push(...(options.args ?? []));
@@ -180,6 +187,12 @@ export async function startInstance(options: InstanceOptions): Promise<Instance>
       const matches = [...log.join("").matchAll(/"msg":"agent API listening","socket":"([^"]+)"/g)];
       const last = matches.at(-1)?.[1];
       if (!last) throw new Error("the agent socket is not in the log yet");
+      return last;
+    },
+    setupLink: () => {
+      const matches = [...log.join("").matchAll(/"url":"(http:\/\/[^"]+\/setup#token=[A-Za-z0-9_-]+)"/g)];
+      const last = matches.at(-1)?.[1];
+      if (!last) throw new Error("no setup link in the log");
       return last;
     },
     kill,

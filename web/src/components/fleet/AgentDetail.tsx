@@ -1,7 +1,7 @@
 // AgentDetail: everything about one agent. On desktop it is the right-hand panel of the Fleet
 // view; on mobile it fills a Sheet (FleetView decides). From the top: who and where, the dialog
 // card when the agent is asking something, the Conversation/Terminal toggle (slots that later
-// milestones fill), and the screen preview.
+// milestones fill). The screen-text preview that used to sit below was removed: the Terminal tab shows the same thing live, and a dialog has its own card.
 import { MessagesSquare, SquareTerminal, X } from "lucide-react";
 import { useState } from "react";
 import { cleanTitle } from "../../lib/fleet";
@@ -13,7 +13,6 @@ import { IconButton } from "../ui/Button";
 import { Chip, StatusChip, StatusDot } from "../ui/Chip";
 import { TabPanel, Tabs } from "../ui/Tabs";
 import { DialogCard } from "./DialogCard";
-import { ScreenPreview } from "./ScreenPreview";
 
 type DetailView = "conversation" | "terminal";
 
@@ -87,7 +86,6 @@ export function AgentDetail({ agent, workspace, tab, onClose, hideHeading, initi
         </TabPanel>
       </div>
 
-      {!showDialog && <ScreenPreview query={screen} />}
     </article>
   );
 }

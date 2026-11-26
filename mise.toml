@@ -46,12 +46,12 @@ npm --prefix web run dev
 """
 
 [tasks."dev:container"]
-description = "Build the devbox image for this arch (mise run image) and run it in the foreground: container crowsnest-dev (--rm), 127.0.0.1:2770 (CROWSNEST_DEV_CONTAINER_PORT), volume crowsnest-dev-home, user crow with a random password printed once and mounted as a 0600 secret file. Ctrl+C stops it. Needs Docker"
+description = "Build the devbox image for this arch (mise run image) and run it in the foreground: container crowsnest-dev (--rm), 127.0.0.1:2770 (CROWSNEST_DEV_CONTAINER_PORT), volume crowsnest-dev-home. First run: no login, so it starts in setup mode and the script prints the one-time setup link from its log; later runs use the login chosen there. Ctrl+C stops it. Needs Docker"
 depends = ["image"]
 run = "bash scripts/dev-container.sh"
 
 [tasks."dev:container:reset"]
-description = "Remove the crowsnest-dev container (if running) and its volumes (crowsnest-dev-home, and crowsnest-dev-secret if a run was killed before cleaning up)"
+description = "Remove the crowsnest-dev container (if running) and its volumes (crowsnest-dev-home, which holds the login chosen at setup, and crowsnest-dev-secret left by older versions of dev:container)"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail

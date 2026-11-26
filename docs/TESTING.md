@@ -45,6 +45,7 @@ layout checks).
 
 | Spec | Journeys |
 |---|---|
+| `setup.spec.ts` (no login, no `--no-auth`: first-run setup) | a fresh instance is locked: health says `setup_required`, the API (me, fleet, jobs, orchestrator, login) answers `403 SETUP_REQUIRED`, every page lands on `/setup`, and without a link the token field is empty and says where the token is; a wrong token is refused with the server's message and the form keeps its fields; the link read from the instance's log prefills the token and leaves the address bar at once, setup signs in, names the instance (title and `/auth/me`), the orchestrator starts, health stops saying `setup_required`, a second setup is `410`, no request log line holds the token, and the chosen password signs in after the cookies are cleared; the page at 375 px (no sideways scroll, 44 px targets) and axe; a password change in the Account sheet signs a second browser context out and refuses the old password, while this browser stays signed in |
 | `auth.spec.ts` (login on) | deep link survives the login detour; reload keeps the session; wrong password; five failures then 429 with `Retry-After` and the form's message, even for the right password; signing out ends another tab's terminal and event stream within a heartbeat and kills the cookie server-side; cross-origin POST, POST without `X-Crowsnest`, `Origin: null`; cross-origin, origin-less and unauthenticated terminal WebSockets (opened from Node so Origin can be forged), each with a positive control; forged `Host` (and a rebinding-shaped login) refused |
 | `jobs.spec.ts` | a job given with options launches (queued → running on the timeline); one given without options goes to the orchestrator (Cmd/Ctrl+Enter); a missing directory is refused and the brief kept; board order; message a running agent; answer a job's question inline (back to running, the answer by its label); "Answer in Inbox"; every stuck cause shows its reason and action (Retry now, Open terminal, Nudge); nudge; cancel behind a confirmation; done with verified and not verified; failed; blocked; empty board; unknown job |
 | `chat.spec.ts` | send → Working → reply → Idle, Markdown rendered; tool card expands; a send while working is "queued"; the draft warning and "Send anyway" (server refusal played by `page.route`); Restart and New conversation behind confirmations, the new one empty and working; Show thinking; a long conversation (turns appended to the demo transcript) sticks to the bottom only when the reader is there, with an uncovered "N new messages" pill |
@@ -91,6 +92,41 @@ job told to stop without declaring gets a nudge on its timeline (then cancelled 
 Real screens it captured are Go fixtures: `internal/fleet/testdata/screens/real_claude_2.1.332_*`
 (the idle prompt, a typed draft, the folder-trust prompt).
 
+### First-run setup (Go)
+
+- `internal/auth/owner_test.go`: argon2id hash and verify (PHC string, fresh salt, malformed and
+  over-costly hashes refused without allocating); username and password rules; the stored-owner
+  service: setup required, setup, a second setup refused, login with the right and wrong halves,
+  a login before setup, the session surviving a restart, the login limiter on stored logins and
+  on wrong current passwords; a password change signing other sessions out; `ResetPassword` and
+  `ResetSetup` taking effect on a live service; eight setups racing on a file database, one wins.
+- `internal/setup/setup_test.go`: the token's shape and freshness; the happy path (owner, name,
+  the session it returns, Done); a blank name takes the default; invalid fields cost no attempt;
+  five wrong tokens then 429 even for the right one, rotation after ten wrong tokens (the old
+  token refused, the new one works); four right-token submissions racing (one wins, the rest
+  `ErrDone`); an owner stored by another process.
+- `internal/httpd/setup_test.go`: the locked server refuses every other route (me, login, fleet,
+  events, jobs, account, admin/update) and both terminal WebSockets before any upgrade, redirects
+  pages to `/setup` and serves the files it needs; setup obeys the Origin, `X-Crowsnest` and Host
+  rules; wrong token, short password, success (hardened cookie; the token in no response or log),
+  `503 STARTING` between completion and the full server, `410` after; the full server signs the
+  setup browser in and its login works; the Account routes: password change (wrong current is
+  403, not 401; other sessions and this browser's old cookie die; the new cookie works), refused
+  for a configured login, and the instance name (stored, live in `/auth/me`, refused under
+  `--name`).
+- `cmd/crowsnest/setup_test.go`: the start-up decision table (nothing, stored owner, flag and env
+  logins with and without a stored owner, `--no-auth`, `CROWSNEST_NO_AUTH`, `SUPPRESS_AUTH`); the
+  stored name against `CROWSNEST_NAME`; `serve` with no login: herdr (a fake behind the connect
+  hook) is not called and the agent socket does not exist until setup is completed over HTTP,
+  then herdr is connected once and the setup browser is signed in on the same port;
+  `reset-password` from stdin and from a `--password-file` (a world-readable one refused), its
+  refusals without a database or an owner, sessions dying; `reset-setup` refusing without `--yes`
+  off a terminal and while a server answers on the port, then `--force`.
+- Vitest: `routes/SetupForm.test.tsx` (prefill, the submit rule, the mismatch note, the posted
+  body, a wrong token and a 410), `components/account/AccountSheet.test.tsx` (password change,
+  wrong current password, a configured login and `--name` read-only, saving a name),
+  `lib/password.test.ts` (the strength hint; the fragment token taken out of the URL once).
+
 ### Other Go additions in M9
 
 - `internal/httpd/tls_test.go`: `--tls-cert/--tls-key` with a self-signed pair made in the test:
@@ -120,6 +156,9 @@ Real screens it captured are Go fixtures: `internal/fleet/testdata/screens/real_
   unit tests only.
 - **Multiple browsers on one pane over a long session, SSE overflow, a crowsnest restart while a
   question is on the long-poll**: unit tests or not at all.
+- **First-run setup on real herdr.** The hermetic spec and the Go serve test run setup against
+  the fake herdr; on real herdr it was proved through the devbox image (REPORT of wip/setup), not
+  by a suite.
 - **The `--permission-mode default` path** for `brief.md` and the Bash tool: not run.
 
 ## Bugs found and fixed by the campaign

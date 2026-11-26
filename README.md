@@ -74,9 +74,34 @@ git clone git@github.com:jclement/crowsnest.git && cd crowsnest
 mise run setup            # tools, Go modules, web dependencies (idempotent)
 mise run build            # web app, then ./bin/crowsnest
 
-CROWSNEST_PASSWORD='something long' ./bin/crowsnest --username jeff
-# open http://localhost:2769
+./bin/crowsnest
+# first start: open the setup link it prints and pick a username and password
 ```
+
+**First run.** With no login configured, crowsnest starts locked: it serves nothing but a setup
+page and prints a link to it with a one-time token, to its log and (on a terminal) plainly to
+stderr:
+
+```
+  crowsnest is not set up yet. Open this link to choose a username and password:
+
+    http://127.0.0.1:2769/setup#token=SZq05xlVK_nNdajE2A3RRbKvt1VqUVAhylMcoUf3-IM
+```
+
+Open it, choose a username, a password (at least 12 characters; a few unrelated words make a good
+one) and the instance's name, and you are signed in. Only then does crowsnest start its herdr
+session and the orchestrator. The login is stored in the database (an argon2id hash); change it
+later in the account menu's **Account** sheet, or on the machine with `crowsnest reset-password`.
+`crowsnest reset-setup` goes back to the first-run state. Until setup is done every other page
+and API call is refused (`/api/v1/health` says `setup_required: true`); the token is new at every
+start, works once, is never stored, and is replaced (and the new link logged) after ten wrong
+tries. Anyone who can read crowsnest's log can complete setup, which is the point: that is you,
+on your machine or as the container's operator.
+
+For an unattended install, give the login instead and nothing is stored or asked:
+`CROWSNEST_PASSWORD='something long' ./bin/crowsnest --username jeff` (or `--password-file`). A
+login given that way always wins over a stored one, and the Account sheet shows it read-only.
+`--no-auth` turns the login off entirely, with the rules under Startup refusals.
 
 crowsnest needs [herdr](https://herdr.dev) on `PATH`. On start it connects to the herdr session
 named by `--session` (default `crowsnest`) and, if nothing answers, starts
@@ -233,12 +258,16 @@ nothing changes.
 start. A browser gets the herdr session, a terminal and (once the orchestrator lands) Claude.
 
 ```sh
-cp deploy/crowsnest.env.sample deploy/crowsnest.env      # set CROWSNEST_USERNAME
-(umask 077; printf '%s\n' 'your password' > deploy/crowsnest_password)   # mounted as a secret
+cp deploy/crowsnest.env.sample deploy/crowsnest.env
 docker compose -f deploy/compose.yaml up -d
-docker compose -f deploy/compose.yaml logs -f crowsnest   # first start: watch mise install
-open http://127.0.0.1:2769
+docker compose -f deploy/compose.yaml logs -f crowsnest   # first start: mise install, then the setup link
 ```
+
+Run it, open the setup link it prints (`…/setup#token=…`), pick a username and password. The
+login is stored in the volume; `docker compose exec crowsnest crowsnest reset-password` sets a
+new one. For an unattended install set `CROWSNEST_USERNAME` in `crowsnest.env`, write the
+password to `deploy/crowsnest_password` (mode 0600, uid 1000) and uncomment the secret lines in
+`deploy/compose.yaml`.
 
 While the repository is private its GHCR package is private too: `docker login ghcr.io` (a
 token with `read:packages`, e.g. `gh auth token | docker login ghcr.io -u <you> --password-stdin`)
@@ -247,13 +276,12 @@ before the first pull.
 Or without compose:
 
 ```sh
-docker run -d --name crowsnest -p 127.0.0.1:2769:2769 \
-  -e CROWSNEST_USERNAME=jeff -e CROWSNEST_PASSWORD_FILE=/run/secrets/pw \
-  -v "$PWD/pw:/run/secrets/pw:ro" -v crowsnest-home:/home/crow ghcr.io/jclement/crowsnest
+docker run -d --name crowsnest -p 127.0.0.1:2769:2769 -v crowsnest-home:/home/crow ghcr.io/jclement/crowsnest
+docker logs crowsnest 2>&1 | grep -o 'http://[^"]*/setup#token=[^"]*'   # the setup link
 ```
 
 **The one manual step is signing Claude in.** Nothing personal is in the image, Claude's login
-included: after the first start, log in to crowsnest, open **Terminal**, run `claude`, and
+included: after setup, open **Terminal**, run `claude`, and
 complete its login (it prints a URL to open on any device). The login is kept in the volume.
 
 What is in it, and where things live:
@@ -268,9 +296,10 @@ What is in it, and where things live:
 
 The entrypoint (`deploy/entrypoint.sh`) on every start:
 
-1. **Refuses to start without credentials**: `CROWSNEST_USERNAME` plus `CROWSNEST_PASSWORD` or
-   `CROWSNEST_PASSWORD_FILE`, or else both `CROWSNEST_NO_AUTH=true` and
-   `CROWSNEST_I_KNOW_THIS_IS_OPEN=true`. It exits 64 with a message saying which to set. It then
+1. **Checks the login settings**: with no `CROWSNEST_USERNAME` crowsnest uses the login stored in
+   the volume, or on first start enters setup mode (the link is in `docker logs`). It exits 64
+   with a message when a password is set without a username, when `CROWSNEST_PASSWORD_FILE` is
+   unreadable, or when `CROWSNEST_NO_AUTH=true` lacks `CROWSNEST_I_KNOW_THIS_IS_OPEN=true`. It then
    drops `TUNNEL_TOKEN` and `TS_AUTHKEY` if they reached it (they belong in the sidecars' own env
    files), and notes when the password came as a variable rather than a file.
 2. **On first start only** writes `~/.config/mise/config.toml` (node LTS, and Claude Code from
@@ -299,7 +328,8 @@ fingerprints checked, and the web build runs `npm ci --ignore-scripts`.
 **Secrets in the container.** Agents run as `crow`, the same user as crowsnest, so they can read
 any environment in the container through `/proc/<pid>/environ`. crowsnest re-executes itself
 without its secrets and gives its children none, but tini (PID 1) keeps the environment Docker
-started it with. Hence `deploy/compose.yaml` mounts the password as a file
+started it with. A login chosen at setup is in no environment at all (only its argon2id hash, in
+the database); for a configured one `deploy/compose.yaml` mounts the password as a file
 (`CROWSNEST_PASSWORD_FILE`; `deploy/crowsnest_password`, mode 0600, owned by uid 1000), and each
 sidecar's token lives in that sidecar's own env file (`cloudflared.env`, `tailscale.env`), never
 in `crowsnest.env`. `CROWSNEST_NOTIFY_URL` and `ELEVENLABS_API_KEY` have no file form yet: set in
@@ -324,7 +354,9 @@ workflow does the same on every `v*` tag.
 | `crowsnest` / `crowsnest serve` | Serve the web app (the default) |
 | `crowsnest version [--json]` | Version, commit, build date, Go version, platform, a tagline |
 | `crowsnest --version` | `crowsnest v1.2.3 (abc1234, 2026-01-15T10:30:00Z)` |
-| `crowsnest health [--json]` | GET `/api/v1/health` on the configured address; exit 0 healthy, 1 not (Docker `HEALTHCHECK`) |
+| `crowsnest health [--json]` | GET `/api/v1/health` on the configured address; exit 0 healthy, 1 not (Docker `HEALTHCHECK`). A server waiting for first-run setup is healthy and says "setup required" |
+| `crowsnest reset-password [--password-file F]` | Set a new password for the login chosen at setup, and sign every browser out (at once, even while crowsnest runs). The password comes from `--password-file` (first line, mode 600), else a piped stdin, else it is asked for twice. Use the same `--session`/`--data-dir` as serve |
+| `crowsnest reset-setup [--yes] [--force]` | Remove the stored login and every session, so the next start is first-run setup again (the instance name is kept). Asks for confirmation (or `--yes`); refused while crowsnest is running unless `--force`, after which nobody can sign in until it is restarted |
 | `crowsnest update [--check]` | Install the latest release over this binary after verifying its signature and checksum (see Install, Updating); `--check` only reports. Refused for a development build, in a container and for a Homebrew install |
 
 Exit codes: `0` success, `1` runtime error, `2` usage error.
@@ -428,7 +460,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 
 | Flag | Environment | Default | Meaning |
 |---|---|---|---|
-| `--username` | `CROWSNEST_USERNAME` | none | Login name |
+| `--username` | `CROWSNEST_USERNAME` | none | Login name. With its password it wins over the login stored at first-run setup; with neither (and no `--no-auth`) crowsnest uses the stored login, or starts locked in setup mode |
 | `--password` | `CROWSNEST_PASSWORD` | none | Login password. Prefer the env var or `--password-file`: a flag is visible in `ps` |
 | `--password-file` | `CROWSNEST_PASSWORD_FILE` | none | File holding the password (first line). Refused if its group or others can read or write it: `chmod 600` |
 | `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured, on a localhost-only bind) | `false` | No login. For a trusted localhost or tailnet only; on a tailnet, every peer your ACL lets reach the port has a shell, including nodes shared into your tailnet |
@@ -441,7 +473,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Orchestrator permission mode (`acceptEdits`, `auto`, `bypassPermissions`, `dontAsk`, `manual`, `plan`) |
 | `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke interval; `0` disables timer pokes |
 | `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | `false` | Serve the UI over the session without starting Claude |
-| `--name` | `CROWSNEST_NAME` | the short hostname | This instance's name (letters, digits, `-`, `_`; up to 32): in the header, page title, notices, `/auth/me` and Remote Control |
+| `--name` | `CROWSNEST_NAME` | the name chosen at setup or in the Account sheet, else the short hostname | This instance's name (letters, digits, `-`, `_`; up to 32): in the header, page title, notices, `/auth/me` and Remote Control. Given here, it wins over the stored one and the Account sheet shows it read-only |
 | `--no-remote-control` | `CROWSNEST_NO_REMOTE_CONTROL` | `false` | Start the orchestrator without Claude Code's Remote Control (on by default, named `<name> crowsnest`) |
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | `false` | Start job agents with Remote Control too, named `<name> <job id> <title>` |
 | `--compact-at` | `CROWSNEST_COMPACT_AT` | `150000` | Compact the orchestrator (`/compact` with a focus) once its context passes this many tokens; `0` disables |
@@ -484,7 +516,9 @@ still work).
 
 Crowsnest refuses to start, and says what to pass instead, when:
 
-- there are neither credentials nor `--no-auth` (or both are given);
+- credentials and `--no-auth` are both given (neither is not a refusal: it is the locked
+  first-run start above, also on a bind that is not loopback, since nothing but the token-gated
+  setup page is served; the log says so loudly);
 - `--no-auth` is combined with a bind that is not loopback or a Tailscale address (including
   `0.0.0.0`), unless `--i-know-this-is-open` is also given;
 - the login is off through `SUPPRESS_AUTH` (rather than `--no-auth` or `CROWSNEST_NO_AUTH`) on a
@@ -502,11 +536,16 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /health` | none | `{status, version, update_available}`, plus `latest_version` and `release_url` when a newer release was found |
+| `GET /health` | none | `{status, version, setup_required, update_available}`, plus `latest_version` and `release_url` when a newer release was found |
+| `GET /setup` | none | `{required, default_name?, min_password_length}`: whether first-run setup is waiting |
+| `POST /setup` | none (the setup token) | `{token, username, password, name}` → `201` and a session cookie; `403 BAD_TOKEN`, `400` for a field to fix, `429` with `Retry-After` (about five tries a minute, for everyone), `410` once setup is done. While setup waits, every other API route answers `403 SETUP_REQUIRED` and every page redirects to `/setup` |
+| `GET /account` | session | `{username, source: database\|config\|none, name, name_managed, min_password_length}` |
+| `POST /account/password` | session | `{current_password, new_password}` → signs every other session out and re-issues this browser's cookie; `403 WRONG_PASSWORD` (counted like a failed sign-in), `409` when the login comes from flags or the environment |
+| `PUT /account/name` | session | `{name}` → the instance name, stored; `409` when `--name`/`CROWSNEST_NAME` sets it |
 | `POST /admin/update` | session | Verify and install the newer release (as `crowsnest update`), answer `{updated, version, restarting}`, then exit for a supervisor to restart. `409 REFUSED` with the reason (container, development build, Homebrew install, already current), `409 UNSUPPORTED` when self-update is off (development build, `--demo`, container), `502 UPDATE_FAILED` when a download or check failed (nothing changed; the log says why) |
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
-| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version, name, attachments}}`; `name` is this instance's (`--name`); `attachments` is `{max_bytes, max_files}` |
+| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version, name, attachments}}`; `name` is this instance's (`--name`, else the one chosen at setup or in the Account sheet, else the short hostname); `attachments` is `{max_bytes, max_files}` |
 | `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (voice on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`, played by browsers with speak mode on; voice off: `{text, pane_id, at}`, which nothing plays); `job` (`{id, state, stuck, cause, title, change}`) when a job changes; `poke` (a poke's result, as `POST /orchestrator/poke` returns it) when a poke is sent or held; `journal` (`{id, kind, summary}`) for each new journal entry; `schedule` (`{at}`) when a scheduled task's stamp or switch changed; `attachment` (`{owner}`, such as `job:j_3`) when an owner's files changed |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |

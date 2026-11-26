@@ -62,9 +62,13 @@ type SessionStore interface {
 	DeleteStaleSessions(ctx context.Context, now time.Time, credDigest string) (int64, error)
 	GetKV(ctx context.Context, key string) (string, error)
 	SetKV(ctx context.Context, key, value string) error
+	DeleteKV(ctx context.Context, key string) error
+	InsertKVIfAbsent(ctx context.Context, key, value string, extra map[string]string) (bool, error)
 }
 
-// Options configures a Service.
+// Options configures a Service. With NoAuth, no login. With a Username and Password (from
+// flags, the environment or the config file), those. With neither, the owner stored in the
+// database (owner.go), which may not exist yet: that is setup mode.
 type Options struct {
 	Username string
 	Password string
@@ -72,8 +76,18 @@ type Options struct {
 	Now      func() time.Time // clock, injectable for tests; nil means time.Now
 }
 
+// Source says where the login comes from.
+type Source string
+
+const (
+	SourceNone     Source = "none"     // --no-auth
+	SourceConfig   Source = "config"   // --username and a password from flags, env or the config file
+	SourceDatabase Source = "database" // the owner stored at setup
+)
+
 // Service checks credentials and manages sessions.
 type Service struct {
+	source         Source
 	noAuth         bool
 	usernameDigest [sha256.Size]byte
 	passwordDigest [sha256.Size]byte
@@ -103,12 +117,20 @@ func New(ctx context.Context, opts Options, sessions SessionStore) (*Service, er
 		opts.Now = time.Now
 	}
 	service := &Service{noAuth: opts.NoAuth, sessions: sessions, now: opts.Now, limiter: NewLimiter(opts.Now)}
-	if opts.NoAuth {
+	switch {
+	case opts.NoAuth:
+		service.source = SourceNone
 		return service, nil
+	case opts.Username == "" && opts.Password == "":
+		service.source = SourceDatabase
+		if _, err := service.Cleanup(ctx); err != nil {
+			return nil, err
+		}
+		return service, nil
+	case opts.Username == "" || opts.Password == "":
+		return nil, errors.New("auth: a username needs a password, and a password a username")
 	}
-	if opts.Username == "" || opts.Password == "" {
-		return nil, errors.New("auth: username and password are required unless NoAuth is set")
-	}
+	service.source = SourceConfig
 	service.username = opts.Username
 	service.usernameDigest = sha256.Sum256([]byte(opts.Username))
 	service.passwordDigest = sha256.Sum256([]byte(opts.Password))
@@ -128,8 +150,33 @@ func New(ctx context.Context, opts Options, sessions SessionStore) (*Service, er
 // Enabled reports whether a login is required.
 func (s *Service) Enabled() bool { return !s.noAuth }
 
-// Username is the configured login name (empty with --no-auth).
-func (s *Service) Username() string { return s.username }
+// Source says where the login comes from.
+func (s *Service) Source() Source { return s.source }
+
+// Username is the login name: the configured one, the stored owner's, or empty (--no-auth, or
+// no owner yet).
+func (s *Service) Username(ctx context.Context) string {
+	if s.source != SourceDatabase {
+		return s.username
+	}
+	owner, err := LoadOwner(ctx, s.sessions)
+	if err != nil {
+		return ""
+	}
+	return owner.Username
+}
+
+// SetupRequired reports whether the login is the stored owner and there is none yet.
+func (s *Service) SetupRequired(ctx context.Context) (bool, error) {
+	if s.source != SourceDatabase {
+		return false, nil
+	}
+	_, err := LoadOwner(ctx, s.sessions)
+	if errors.Is(err, ErrNoOwner) {
+		return true, nil
+	}
+	return false, err
+}
 
 // Limiter exposes the rate limiter, for tests and diagnostics.
 func (s *Service) Limiter() *Limiter { return s.limiter }
@@ -150,12 +197,135 @@ func (s *Service) Login(ctx context.Context, clientIP, username, password, userA
 	if s.admitted != nil {
 		s.admitted()
 	}
-	if !s.credentialsMatch(username, password) {
+	digest, name, ok, err := s.checkCredentials(ctx, username, password)
+	if err != nil {
+		return "", Session{}, err
+	}
+	if !ok {
 		return "", Session{}, ErrBadCredentials // Admit already counted it
 	}
 	s.limiter.Succeeded(attempt)
-	return s.createSession(ctx, userAgent, host)
+	return s.createSession(ctx, digest, name, userAgent, host)
 }
+
+// checkCredentials compares a username and password with the login in effect and returns the
+// credential digest and username a session would carry. For the stored owner the username is
+// compared over SHA-256 digests in constant time and argon2 always runs, against a dummy hash
+// when there is no owner, so timing says neither which half was wrong nor whether setup is done.
+func (s *Service) checkCredentials(ctx context.Context, username, password string) (string, string, bool, error) {
+	if s.source == SourceConfig {
+		return s.credDigest, s.username, s.credentialsMatch(username, password), nil
+	}
+	owner, err := LoadOwner(ctx, s.sessions)
+	if err != nil && !errors.Is(err, ErrNoOwner) {
+		return "", "", false, err
+	}
+	hash, exists := owner.Hash, err == nil
+	if !exists {
+		hash = dummyHash()
+	}
+	given := sha256.Sum256([]byte(username))
+	want := sha256.Sum256([]byte(owner.Username))
+	usernameOK := subtle.ConstantTimeCompare(given[:], want[:])
+	passwordOK := 0
+	if VerifyPassword(hash, password) {
+		passwordOK = 1
+	}
+	if !exists || usernameOK&passwordOK != 1 {
+		return "", "", false, nil
+	}
+	return owner.digest(), owner.Username, true, nil
+}
+
+// currentDigest is the credential digest valid sessions must carry right now, and the username
+// they belong to. The stored owner is read on every call, so `crowsnest reset-password` run
+// beside a live server takes effect at once. ErrNoSession when there is no owner.
+func (s *Service) currentDigest(ctx context.Context) (string, string, error) {
+	if s.source == SourceConfig {
+		return s.credDigest, s.username, nil
+	}
+	owner, err := LoadOwner(ctx, s.sessions)
+	if errors.Is(err, ErrNoOwner) {
+		return "", "", ErrNoSession
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return owner.digest(), owner.Username, nil
+}
+
+// NewSession signs a browser in under the login in effect without asking for credentials: the
+// caller has already proved who it is (the setup token, or the current password).
+func (s *Service) NewSession(ctx context.Context, userAgent, host string) (string, Session, error) {
+	if s.noAuth {
+		return "", Session{}, errors.New("auth: sessions are disabled with --no-auth")
+	}
+	digest, username, err := s.currentDigest(ctx)
+	if err != nil {
+		return "", Session{}, err
+	}
+	return s.createSession(ctx, digest, username, userAgent, host)
+}
+
+// CompleteSetup stores the first owner, and the extra kv pairs with it (the instance name), in
+// one transaction. ErrSetupDone if an owner exists already, which is what makes a second setup,
+// or the loser of two racing ones, impossible. Validation is the caller's.
+func (s *Service) CompleteSetup(ctx context.Context, username, password string, extra map[string]string) error {
+	if s.source != SourceDatabase {
+		return ErrManagedOutside
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return err
+	}
+	raw, err := encodeOwner(Owner{Username: username, Hash: hash})
+	if err != nil {
+		return err
+	}
+	inserted, err := s.sessions.InsertKVIfAbsent(ctx, OwnerKey, raw, extra)
+	if err != nil {
+		return err
+	}
+	if !inserted {
+		return ErrSetupDone
+	}
+	return nil
+}
+
+// ChangePassword replaces the stored owner's password after checking the current one, and
+// signs every session out; the caller then signs its own browser in again with NewSession. A
+// wrong current password counts against the login limiter like a failed sign-in, so a stolen
+// session cannot be used to guess the password faster than the login page allows.
+func (s *Service) ChangePassword(ctx context.Context, clientIP, current, next string) error {
+	if s.source != SourceDatabase {
+		return ErrManagedOutside
+	}
+	owner, err := LoadOwner(ctx, s.sessions)
+	if err != nil {
+		return err
+	}
+	if err := ValidatePassword(owner.Username, next); err != nil {
+		return &ValidationError{err}
+	}
+	attempt, retryAfter, ok := s.limiter.Admit(clientIP)
+	if !ok {
+		return &RateLimitedError{RetryAfter: retryAfter}
+	}
+	if !VerifyPassword(owner.Hash, current) {
+		return ErrBadCredentials
+	}
+	s.limiter.Succeeded(attempt)
+	if owner.Hash, err = HashPassword(next); err != nil {
+		return err
+	}
+	return storeOwner(ctx, s.sessions, owner, s.now())
+}
+
+// ValidationError is a rejected new password or username; its message is shown to the user.
+type ValidationError struct{ Err error }
+
+func (e *ValidationError) Error() string { return e.Err.Error() }
+func (e *ValidationError) Unwrap() error { return e.Err }
 
 // credentialsMatch compares SHA-256 digests in constant time. Both comparisons always run, so
 // timing says nothing about which half was wrong; hashing first makes the comparison length
@@ -168,7 +338,7 @@ func (s *Service) credentialsMatch(username, password string) bool {
 	return usernameOK&passwordOK == 1
 }
 
-func (s *Service) createSession(ctx context.Context, userAgent, host string) (string, Session, error) {
+func (s *Service) createSession(ctx context.Context, digest, username, userAgent, host string) (string, Session, error) {
 	token, err := newToken()
 	if err != nil {
 		return "", Session{}, err
@@ -176,7 +346,7 @@ func (s *Service) createSession(ctx context.Context, userAgent, host string) (st
 	now := s.now()
 	row := store.AuthSession{
 		IDHash:     hashToken(token),
-		CredDigest: s.credDigest,
+		CredDigest: digest,
 		CreatedAt:  now,
 		LastSeenAt: now,
 		ExpiresAt:  now.Add(SessionTTL),
@@ -186,7 +356,7 @@ func (s *Service) createSession(ctx context.Context, userAgent, host string) (st
 	if err := s.sessions.CreateSession(ctx, row); err != nil {
 		return "", Session{}, err
 	}
-	return token, Session{Username: s.username, ExpiresAt: row.ExpiresAt, Refreshed: true}, nil
+	return token, Session{Username: username, ExpiresAt: row.ExpiresAt, Refreshed: true}, nil
 }
 
 // Logout deletes the session for token. An unknown token is not an error.
@@ -224,15 +394,19 @@ func (s *Service) Authenticate(ctx context.Context, token, host string) (Session
 	if err != nil {
 		return Session{}, err
 	}
+	digest, username, err := s.currentDigest(ctx)
+	if err != nil {
+		return Session{}, err
+	}
 	now := s.now()
-	if subtle.ConstantTimeCompare([]byte(row.CredDigest), []byte(s.credDigest)) != 1 || !now.Before(row.ExpiresAt) {
+	if subtle.ConstantTimeCompare([]byte(row.CredDigest), []byte(digest)) != 1 || !now.Before(row.ExpiresAt) {
 		_ = s.sessions.DeleteSession(ctx, idHash)
 		return Session{}, ErrNoSession
 	}
 	if row.Host != host {
 		return Session{}, ErrNoSession
 	}
-	session := Session{Username: s.username, ExpiresAt: row.ExpiresAt}
+	session := Session{Username: username, ExpiresAt: row.ExpiresAt}
 	if now.Sub(row.LastSeenAt) >= touchInterval {
 		session.ExpiresAt = now.Add(SessionTTL)
 		session.Refreshed = true
@@ -248,7 +422,13 @@ func (s *Service) Cleanup(ctx context.Context) (int64, error) {
 	if s.noAuth {
 		return 0, nil
 	}
-	return s.sessions.DeleteStaleSessions(ctx, s.now(), s.credDigest)
+	digest, _, err := s.currentDigest(ctx)
+	if errors.Is(err, ErrNoSession) {
+		digest = "" // no owner yet: no session can be valid, and none carries an empty digest
+	} else if err != nil {
+		return 0, err
+	}
+	return s.sessions.DeleteStaleSessions(ctx, s.now(), digest)
 }
 
 // ---- Helpers -----------------------------------------------------------------

@@ -18,19 +18,19 @@ var ErrRefused = errors.New("refusing to start")
 
 // CheckStartup applies the rules that apply to `serve` only:
 //
-//   - neither credentials nor --no-auth;
 //   - --no-auth on a bind that is not loopback or tailnet, without --i-know-this-is-open;
 //   - --session default without --allow-default-session;
 //   - SUPPRESS_AUTH (rather than --no-auth or CROWSNEST_NO_AUTH) on a bind that is not
 //     loopback-only (R1 L4).
 //
-// The fourth rule, `tailnet` with no Tailscale address, is enforced during bind resolution in
-// Load because there is nothing to listen on without it.
+// The rule `tailnet` with no Tailscale address is enforced during bind resolution in Load
+// because there is nothing to listen on without it.
+//
+// Neither credentials nor --no-auth used to be a refusal too. It is now the locked first-run
+// start (DESIGN.md 3 and 4.14): serve looks in the database for a stored owner, and without one
+// serves nothing but the token-gated setup page until an owner exists. That decision needs the
+// database, so it is serve's, not this function's.
 func (c Config) CheckStartup() error {
-	if !c.NoAuth && (c.Username == "" || c.Password == "") {
-		return fmt.Errorf("%w: no login is configured. Pass --username with CROWSNEST_PASSWORD (or --password-file), "+
-			"or pass --no-auth for a trusted localhost or tailnet", ErrRefused)
-	}
 	if c.NoAuthFromSuppressAuth && !c.LoopbackOnly() {
 		return fmt.Errorf("%w: SUPPRESS_AUTH turns the login off only on a localhost bind, and this bind (%s) is not. "+
 			"Use CROWSNEST_NO_AUTH=true (or --no-auth) if you really mean to serve without a login here, "+
