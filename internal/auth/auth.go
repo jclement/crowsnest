@@ -82,6 +82,9 @@ type Service struct {
 	sessions       SessionStore
 	limiter        *Limiter
 	now            func() time.Time
+	// admitted, when set, runs between admission and the credential check; tests use it to
+	// line concurrent logins up at that point.
+	admitted func()
 }
 
 // Session is an authenticated browser session.
@@ -140,14 +143,17 @@ func (s *Service) Login(ctx context.Context, clientIP, username, password, userA
 	if s.noAuth {
 		return "", Session{}, errors.New("auth: login is disabled with --no-auth")
 	}
-	if retryAfter, ok := s.limiter.Allow(clientIP); !ok {
+	attempt, retryAfter, ok := s.limiter.Admit(clientIP)
+	if !ok {
 		return "", Session{}, &RateLimitedError{RetryAfter: retryAfter}
 	}
-	if !s.credentialsMatch(username, password) {
-		s.limiter.RecordFailure(clientIP)
-		return "", Session{}, ErrBadCredentials
+	if s.admitted != nil {
+		s.admitted()
 	}
-	s.limiter.Reset(clientIP)
+	if !s.credentialsMatch(username, password) {
+		return "", Session{}, ErrBadCredentials // Admit already counted it
+	}
+	s.limiter.Succeeded(attempt)
 	return s.createSession(ctx, userAgent)
 }
 
