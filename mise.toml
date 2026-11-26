@@ -27,14 +27,31 @@ run = [
 # ---- Run ---------------------------------------------------------------------
 
 [tasks.dev]
-description = "Go server (no auth, localhost, --demo fake herdr) on :2769 plus Vite on :5173 proxying /api to it. Long-running"
+description = "The real thing, locally: the Go server (no auth, localhost:2769) against its own herdr session crowsnest-dev (CROWSNEST_DEV_SESSION), a real Claude orchestrator in .dev/orchestrator, database in .dev/, plus Vite on :5173 with hot reload. HERDR_* is scrubbed, so it is safe from inside a herdr pane. First start: answer Claude's folder-trust prompt once in the Terminal view. Long-running"
+run = "bash scripts/dev.sh"
+
+[tasks."dev:demo"]
+description = "Go server (no auth, localhost, --demo fake herdr, throwaway state) on :2769 plus Vite on :5173 proxying /api to it. No herdr or Claude needed. Long-running"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
 trap 'kill 0' EXIT INT TERM
-CROWSNEST_DATA_DIR="${CROWSNEST_DATA_DIR:-$PWD/.dev}" \
-  go run ./cmd/crowsnest serve --no-auth --web-dev --demo --port "${CROWSNEST_PORT:-2769}" &
+go run ./cmd/crowsnest serve --no-auth --web-dev --demo --port "${CROWSNEST_PORT:-2769}" &
 npm --prefix web run dev
+"""
+
+[tasks."dev:container"]
+description = "Build the devbox image for this arch (mise run image) and run it in the foreground: container crowsnest-dev (--rm), 127.0.0.1:2770 (CROWSNEST_DEV_CONTAINER_PORT), volume crowsnest-dev-home, user crow with a random password printed once and mounted as a 0600 secret file. Ctrl+C stops it. Needs Docker"
+depends = ["image"]
+run = "bash scripts/dev-container.sh"
+
+[tasks."dev:container:reset"]
+description = "Remove the crowsnest-dev container (if running) and the crowsnest-dev-home volume"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+docker rm -f crowsnest-dev >/dev/null 2>&1 && echo "removed container crowsnest-dev" || true
+docker volume rm crowsnest-dev-home >/dev/null 2>&1 && echo "removed volume crowsnest-dev-home" || true
 """
 
 [tasks.build]
@@ -231,9 +248,5 @@ echo "Tag pushed! GitHub Actions will build and release."
 """
 
 [tasks."dev:reset"]
-description = "Blow away local state: build output, web dist, Vite cache, the dev database"
-run = [
-  "rm -rf bin dist .dev web/node_modules/.vite",
-  "find web/dist -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true",
-  "echo 'local state cleared (web/node_modules kept; run mise run setup to reinstall)'",
-]
+description = "Blow away local state: build output, web dist, Vite cache, .dev/ (dev database and orchestrator dir), and stop and delete the crowsnest-dev herdr session (only that one, by exact name) with its state dir"
+run = "bash scripts/dev-reset.sh"
