@@ -69,16 +69,20 @@ func (b *tuiBridge) Start(cols, rows int) error {
 	return nil
 }
 
-// readOutput copies PTY output to Output until the client exits or Close.
+// readOutput copies PTY output to Output until the client exits. After Close it keeps reading
+// and discards what it reads: on macOS a process exiting with unread output on its terminal
+// blocks in exit until that output drains (seen as state "E" in ps), so a reader that stopped
+// early would leave the killed client unreapable and this goroutine stuck in Wait.
 func (b *tuiBridge) readOutput(ptmx *os.File) {
 	buffer := make([]byte, readChunk)
+	delivering := true
 	for {
 		n, err := ptmx.Read(buffer)
-		if n > 0 && !b.send(buffer[:n]) {
-			break
+		if n > 0 && delivering {
+			delivering = b.send(buffer[:n])
 		}
 		if err != nil {
-			break // EIO when the client exits (the slave side closed), or the PTY was closed
+			break // EIO once the client has exited and the slave side is closed
 		}
 	}
 	waitErr := b.cmd.Wait()
