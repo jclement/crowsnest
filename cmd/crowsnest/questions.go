@@ -9,8 +9,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"sync"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
@@ -21,8 +24,10 @@ import (
 )
 
 // startQuestions builds the question service, starts its background work and the agent socket,
-// and returns the service and the socket path. Everything stops when ctx ends.
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, socket string, logger *slog.Logger) (*questions.Service, error) {
+// and returns the service and a stop function. Everything stops when ctx ends or stop is called;
+// stop returns once the deliverer and the sweeper have finished, and serve calls it before the
+// database closes, so an attempt cut short by shutdown can still record its outcome (R1b-C08).
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, socket string, logger *slog.Logger) (*questions.Service, func(), error) {
 	var deliverer *questions.Deliverer
 	var notifyAsked func(questions.Question)
 	if cfg.NotifyURL != "" {
@@ -52,14 +57,17 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 			}
 		},
 	})
-	go deliverer.Run(ctx)
-	go service.RunSweeper(ctx, 0)
+	ctx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	stop := func() { cancel(); workers.Wait() }
+	workers.Go(func() { deliverer.Run(ctx) })
+	workers.Go(func() { service.RunSweeper(ctx, 0) })
 
 	listener, err := agentapi.Listen(ctx, socket)
 	if err != nil {
-		return nil, err
+		return nil, stop, err
 	}
-	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version})
+	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version})
 	go func() {
 		if err := server.Serve(ctx, listener); err != nil {
 			logger.Error("agent socket stopped", "err", err)
@@ -69,10 +77,21 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 
 	if demo, ok := client.(*fake.Demo); ok {
 		if err := startDemoQuestions(ctx, service, demo, logger); err != nil {
-			return nil, err
+			return nil, stop, err
 		}
 	}
-	return service, nil
+	return service, stop, nil
+}
+
+// agentSocketPath is where the agent socket goes: under $XDG_RUNTIME_DIR, except under --demo,
+// whose socket stays in its throwaway state directory so a demo never collides with, or refuses
+// to start beside, a real instance of the same --session (R1 L2, R1b N11).
+func agentSocketPath(cfg config.Config) string {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if cfg.Demo {
+		runtimeDir = ""
+	}
+	return agentapi.SocketPath(runtimeDir, cfg.StateDir, cfg.Session)
 }
 
 // jobQuestionChanged tells the job a question was asked or settled under it. It runs in the

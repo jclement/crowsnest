@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
@@ -24,6 +25,11 @@ func jobSocket(t *testing.T) (*jobs.Service, *store.Store, string) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	service := jobs.New(jobs.Options{Store: db})
+	identity := agentid.New(db, nil)
+	token, err := identity.Mint(context.Background(), agentid.Binding{PaneID: "w2:p3", Kind: agentid.KindPane})
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir, err := os.MkdirTemp("/tmp", "cn-job-")
 	if err != nil {
 		t.Fatal(err)
@@ -37,12 +43,12 @@ func jobSocket(t *testing.T) (*jobs.Service, *store.Store, string) {
 	}
 	done := make(chan struct{})
 	go func() {
-		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: questions.New(questions.Options{Store: db}), Jobs: service}).Serve(ctx, listener)
+		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: questions.New(questions.Options{Store: db}), Jobs: service, Identity: identity}).Serve(ctx, listener)
 		close(done)
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 	t.Setenv(agentapi.EnvSocket, path)
-	t.Setenv(agentapi.EnvPane, "w2:p3")
+	t.Setenv(agentapi.EnvToken, token) // the pane w2:p3, which runningJob's jobs are held in
 	t.Setenv(agentapi.EnvJob, "")
 	return service, db, path
 }
@@ -56,7 +62,7 @@ func runningJob(t *testing.T, service *jobs.Service, db *store.Store) string {
 	}
 	numeric, _ := jobs.ParseID(job.ID)
 	record, _ := db.GetJob(context.Background(), numeric)
-	record.State = string(jobs.StateRunning)
+	record.State, record.PaneID = string(jobs.StateRunning), "w2:p3"
 	if err := db.UpdateJob(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,8 @@ type QuestionRecord struct {
 	Recommend   string
 	Context     json.RawMessage
 	Urgency     string
-	Files       json.RawMessage
+	Files       json.RawMessage // "[]" in the light projections (lists, delivery); see FileCount
+	FileCount   int             // how many files, from the database, whichever projection
 	Status      string
 	AnswerValue json.RawMessage // nil until answered
 	AnswerNote  string
@@ -46,10 +47,22 @@ type QuestionRecord struct {
 // ErrNotOpen is returned when a settle is attempted on a question that is no longer open.
 var ErrNotOpen = errors.New("question is not open")
 
-// questionColumns is the SELECT list matching scanQuestion.
+// questionColumns is the SELECT list matching scanQuestion: every column, attachments included.
+// Only a request for one question's detail uses it.
 const questionColumns = `id, title, body_md, kind, multi, options_json, recommend, context_json, urgency,
 	files_json, status, answer_value_json, answer_note, source_pane, job_id, wait, created_at, expires_at,
-	settled_at, delivery, delivery_claimed_at, delivered_at, delivery_error`
+	settled_at, delivery, delivery_claimed_at, delivered_at, delivery_error, json_array_length(files_json)`
+
+// listColumns is questionColumns without the attachment bodies (R1b-C09): a list shows a file
+// count, never the files, and twenty 256 KB file pairs per question add up fast.
+const listColumns = `id, title, body_md, kind, multi, options_json, recommend, context_json, urgency,
+	'[]', status, answer_value_json, answer_note, source_pane, job_id, wait, created_at, expires_at,
+	settled_at, delivery, delivery_claimed_at, delivered_at, delivery_error, json_array_length(files_json)`
+
+// deliveryColumns is what typing an answer back needs: no body and no files.
+const deliveryColumns = `id, title, '', kind, multi, options_json, recommend, context_json, urgency,
+	'[]', status, answer_value_json, answer_note, source_pane, job_id, wait, created_at, expires_at,
+	settled_at, delivery, delivery_claimed_at, delivered_at, delivery_error, json_array_length(files_json)`
 
 // InsertQuestion stores a new open question and returns its id.
 func (s *Store) InsertQuestion(ctx context.Context, q QuestionRecord) (int64, error) {
@@ -76,9 +89,9 @@ func (s *Store) GetQuestion(ctx context.Context, id int64) (QuestionRecord, erro
 }
 
 // ListQuestions returns questions with one of statuses (all when empty), open ones first and
-// then newest first, at most limit rows.
+// then newest first, at most limit rows, without their files (FileCount says how many).
 func (s *Store) ListQuestions(ctx context.Context, statuses []string, limit int) ([]QuestionRecord, error) {
-	query := `SELECT ` + questionColumns + ` FROM questions`
+	query := `SELECT ` + listColumns + ` FROM questions`
 	args := make([]any, 0, len(statuses)+1)
 	if len(statuses) > 0 {
 		query += ` WHERE status IN (?` + strings.Repeat(", ?", len(statuses)-1) + `)`
@@ -101,6 +114,16 @@ func (s *Store) CountOpenQuestions(ctx context.Context) (open, blocking int, err
 	return open, blocking, nil
 }
 
+// CountOpenFrom returns how many questions are open from sourcePane, and in total.
+func (s *Store) CountOpenFrom(ctx context.Context, sourcePane string) (mine, total int, err error) {
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(source_pane = ?), 0), COUNT(*) FROM questions WHERE status = 'open'`, sourcePane).Scan(&mine, &total)
+	if err != nil {
+		return 0, 0, fmt.Errorf("counting open questions: %w", err)
+	}
+	return mine, total, nil
+}
+
 // SettleQuestion moves an open question to status (answered, expired or cancelled) with the
 // answer, and records how its outcome will reach the asker. It returns ErrNotOpen when the
 // question was already settled (or ErrNotFound when it does not exist).
@@ -120,29 +143,74 @@ func (s *Store) SettleQuestion(ctx context.Context, id int64, status string, val
 
 // ExpiredOpenQuestions returns the ids of open questions whose expiry is at or before now.
 func (s *Store) ExpiredOpenQuestions(ctx context.Context, now time.Time) ([]int64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM questions WHERE status = 'open' AND expires_at <= ?`, now.Unix())
-	if err != nil {
-		return nil, fmt.Errorf("finding expired questions: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("reading expired question id: %w", err)
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return s.queryIDs(ctx, `SELECT id FROM questions WHERE status = 'open' AND expires_at <= ?`, now.Unix())
 }
 
 // ---- Delivery ----------------------------------------------------------------------------
 
-// PendingDeliveries returns settled questions whose outcome is to be typed into the asker's pane
-// and which nobody has claimed yet.
-func (s *Store) PendingDeliveries(ctx context.Context) ([]QuestionRecord, error) {
-	return s.queryQuestions(ctx, `SELECT `+questionColumns+` FROM questions
-		WHERE delivery = 'type' AND delivery_claimed_at IS NULL AND delivered_at IS NULL ORDER BY settled_at, id`)
+// PendingDeliveryIDs returns the ids of settled questions whose outcome is to be typed into the
+// asker's pane and which nobody has claimed yet, oldest first, at most limit. Ids only: the
+// deliverer skips the ones still in their retry backoff before loading anything (R1b-C09).
+func (s *Store) PendingDeliveryIDs(ctx context.Context, limit int) ([]int64, error) {
+	return s.queryIDs(ctx, `SELECT id FROM questions
+		WHERE delivery = 'type' AND delivery_claimed_at IS NULL AND delivered_at IS NULL ORDER BY settled_at, id LIMIT ?`, limit)
+}
+
+// GetDelivery returns one question as the deliverer needs it: no body, no files.
+func (s *Store) GetDelivery(ctx context.Context, id int64) (QuestionRecord, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+deliveryColumns+` FROM questions WHERE id = ?`, id)
+	q, err := scanQuestion(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return QuestionRecord{}, ErrNotFound
+	}
+	return q, err
+}
+
+// MarkPollCollected confirms a poll delivery: the settled question reached its asker's poll.
+func (s *Store) MarkPollCollected(ctx context.Context, id int64, at time.Time) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE questions SET delivered_at = ? WHERE id = ? AND delivery = 'poll' AND delivered_at IS NULL`, at.Unix(), id); err != nil {
+		return fmt.Errorf("recording that question %d was collected: %w", id, err)
+	}
+	return nil
+}
+
+// UncollectedPoll is a poll delivery nobody has collected.
+type UncollectedPoll struct {
+	ID         int64
+	SourcePane string
+}
+
+// UncollectedPolls returns poll deliveries settled at or before settledBefore that no poll has
+// collected, for a pane to type them into.
+func (s *Store) UncollectedPolls(ctx context.Context, settledBefore time.Time) ([]UncollectedPoll, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, source_pane FROM questions
+		WHERE delivery = 'poll' AND delivered_at IS NULL AND source_pane != '' AND settled_at <= ? ORDER BY id`, settledBefore.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("finding uncollected answers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []UncollectedPoll
+	for rows.Next() {
+		var poll UncollectedPoll
+		if err := rows.Scan(&poll.ID, &poll.SourcePane); err != nil {
+			return nil, fmt.Errorf("reading an uncollected answer: %w", err)
+		}
+		out = append(out, poll)
+	}
+	return out, rows.Err()
+}
+
+// RetypePoll switches an uncollected poll delivery to typing. It reports false when the poll was
+// collected (or the row changed) in the meantime.
+func (s *Store) RetypePoll(ctx context.Context, id int64) (bool, error) {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE questions SET delivery = 'type' WHERE id = ? AND delivery = 'poll' AND delivered_at IS NULL`, id)
+	if err != nil {
+		return false, fmt.Errorf("re-routing the answer to question %d: %w", id, err)
+	}
+	affected, err := result.RowsAffected()
+	return affected == 1, err
 }
 
 // ClaimDelivery sets the write-ahead mark on a pending delivery. It reports false when another
@@ -215,6 +283,23 @@ func (s *Store) queryQuestions(ctx context.Context, query string, args ...any) (
 	return out, rows.Err()
 }
 
+func (s *Store) queryIDs(ctx context.Context, query string, args ...any) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("finding questions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("reading a question id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // rowScanner is the part of *sql.Row and *sql.Rows scanQuestion needs.
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -226,7 +311,7 @@ func scanQuestion(row rowScanner) (QuestionRecord, error) {
 	var settled, claimed, delivered sql.NullInt64
 	err := row.Scan(&q.ID, &q.Title, &q.BodyMD, &q.Kind, &q.Multi, &options, &q.Recommend, &context, &q.Urgency,
 		&files, &q.Status, &answer, &q.AnswerNote, &q.SourcePane, &q.JobID, &q.Wait, &created, &expires,
-		&settled, &q.Delivery, &claimed, &delivered, &q.DeliveryError)
+		&settled, &q.Delivery, &claimed, &delivered, &q.DeliveryError, &q.FileCount)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return QuestionRecord{}, err

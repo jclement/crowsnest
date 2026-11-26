@@ -477,11 +477,16 @@ func FlagTable() [][4]string {
 
 // secretEnv are the environment variables that hold a secret or switch authentication. After
 // the config is loaded they have done their job; UnsetSecretEnv removes them so no child
-// process, and nothing that inspects this process later, can read them (R1 H1).
+// process can inherit them (R1 H1). The notify URL is among them because an ntfy topic in it is
+// as good as a password for posting to (and on a public server, reading) the human's phone.
 var secretEnv = []string{
-	"CROWSNEST_PASSWORD", "CROWSNEST_PASSWORD_FILE", "ELEVENLABS_API_KEY",
+	"CROWSNEST_PASSWORD", "CROWSNEST_PASSWORD_FILE", "ELEVENLABS_API_KEY", "CROWSNEST_NOTIFY_URL",
 	"CROWSNEST_NO_AUTH", "SUPPRESS_AUTH", "CROWSNEST_I_KNOW_THIS_IS_OPEN",
 }
+
+// SecretEnvNames returns the names UnsetSecretEnv removes, for serve's self re-exec (which keeps
+// them out of the process's own initial environment as well).
+func SecretEnvNames() []string { return append([]string(nil), secretEnv...) }
 
 // UnsetSecretEnv removes the secret and auth-switch variables from this process's environment.
 // Call it once the config has been loaded.

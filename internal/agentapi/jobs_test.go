@@ -10,14 +10,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/jclement/crowsnest/internal/jobs"
-	"github.com/jclement/crowsnest/internal/questions"
 )
 
 // startRunningJob creates a job over the socket and marks it running, as a launch would.
 func startRunningJob(t *testing.T, f *socketFixture) string {
 	t.Helper()
 	ctx := context.Background()
-	client := NewClient(f.socket, questions.Caller{})
+	client := NewClient(f.socket, f.token(t, "w9:p9", "")) // creating a job needs an identified caller
 	job, err := client.CreateJob(ctx, jobs.CreateInput{Brief: "Build the thing", Dir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +37,7 @@ func TestSocketJobVerbs(t *testing.T) {
 	f := startSocket(t)
 	ctx := context.Background()
 	id := startRunningJob(t, f)
-	client := NewClient(f.socket, questions.Caller{JobID: id})
+	client := NewClient(f.socket, f.token(t, "w5:p1", id)).WithJob(id)
 
 	if _, err := client.UpdateJob(ctx, id, jobs.UpdateInput{}); !isStatus(err, 400) {
 		t.Fatalf("empty update: %v", err)
@@ -86,7 +85,7 @@ func TestSocketHookStopBlocksAndAllows(t *testing.T) {
 	f := startSocket(t)
 	ctx := context.Background()
 	id := startRunningJob(t, f)
-	client := NewClient(f.socket, questions.Caller{JobID: id})
+	client := NewClient(f.socket, f.token(t, "w5:p1", id)).WithJob(id)
 	out, err := client.Hook(ctx, jobs.HookStop, json.RawMessage(`{"session_id":"s1","stop_hook_active":false,"unknown_future_field":1}`))
 	if err != nil || !strings.Contains(out, `"decision":"block"`) {
 		t.Fatalf("stop: %q %v", out, err)
@@ -98,8 +97,48 @@ func TestSocketHookStopBlocksAndAllows(t *testing.T) {
 		t.Fatalf("failed job may stop: %q", out)
 	}
 	// No job at all: allowed, silently.
-	if out, err = NewClient(f.socket, questions.Caller{}).Hook(ctx, jobs.HookStop, json.RawMessage(`{}`)); err != nil || out != "" {
+	if out, err = NewClient(f.socket, "").Hook(ctx, jobs.HookStop, json.RawMessage(`{}`)); err != nil || out != "" {
 		t.Fatalf("no job: %q %v", out, err)
+	}
+}
+
+// TestJobVerbsFollowTheToken is R1b N2 for the job protocol: naming a job is not holding it. An
+// unidentified caller, or another job's agent, cannot change a job, create one, or have its hook
+// count for it; the agent in the pane holding the job (the orchestrator's case) can.
+func TestJobVerbsFollowTheToken(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	id := startRunningJob(t, f)
+	numeric, _ := jobs.ParseID(id)
+	record, _ := f.db.GetJob(ctx, numeric)
+	record.PaneID = "w1:p1"
+	if err := f.db.UpdateJob(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	for name, client := range map[string]*Client{
+		"unidentified": NewClient(f.socket, "").WithJob(id),
+		"another job":  NewClient(f.socket, f.token(t, "w7:p1", "j_99")).WithJob(id),
+		"another pane": NewClient(f.socket, f.token(t, "w7:p2", "")).WithJob(id),
+	} {
+		if _, err := client.UpdateJob(ctx, id, jobs.UpdateInput{Progress: "hijacked"}); !isStatus(err, 403) {
+			t.Fatalf("%s updated the job: %v", name, err)
+		}
+		if _, err := client.FailJob(ctx, id, "hijacked"); !isStatus(err, 403) {
+			t.Fatalf("%s failed the job: %v", name, err)
+		}
+		if out, _ := client.Hook(ctx, jobs.HookStop, json.RawMessage(`{"stop_hook_active":false}`)); out != "" {
+			t.Fatalf("%s's hook was counted for the job: %q", name, out)
+		}
+	}
+	if _, err := NewClient(f.socket, "").CreateJob(ctx, jobs.CreateInput{Brief: "x", Dir: t.TempDir()}); !isStatus(err, 403) {
+		t.Fatalf("an unidentified caller created a job: %v", err)
+	}
+	holder := NewClient(f.socket, f.token(t, "w1:p1", "")) // the orchestrator: a pane token, no job
+	if job, err := holder.UpdateJob(ctx, id, jobs.UpdateInput{Progress: "mine"}); err != nil || job.Progress != "mine" {
+		t.Fatalf("the agent holding the job by pane: %+v %v", job, err)
+	}
+	if out, _ := holder.Hook(ctx, jobs.HookStop, json.RawMessage(`{"stop_hook_active":false}`)); !strings.Contains(out, `"decision":"block"`) {
+		t.Fatalf("the holder's stop hook was not mapped to its job: %q", out)
 	}
 }
 
@@ -107,7 +146,9 @@ func TestMCPJobToolsUseTheEnvironmentsJob(t *testing.T) {
 	f := startSocket(t)
 	ctx := context.Background()
 	id := startRunningJob(t, f)
-	session := connectMCP(t, NewClient(f.socket, questions.Caller{JobID: id}))
+	client := NewClient(f.socket, f.token(t, "w5:p1", id))
+	client.job = id // as CROWSNEST_JOB in the MCP server's environment
+	session := connectMCP(t, client)
 	call := func(name string, args map[string]any) (string, bool) {
 		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 		if err != nil {
@@ -132,7 +173,7 @@ func TestMCPJobToolsUseTheEnvironmentsJob(t *testing.T) {
 		t.Fatalf("done %q", text)
 	}
 	// Without a job anywhere, the tools say how to name one.
-	bare := connectMCP(t, NewClient(f.socket, questions.Caller{}))
+	bare := connectMCP(t, NewClient(f.socket, f.token(t, "w6:p1", "")))
 	result, _ := bare.CallTool(ctx, &mcp.CallToolParams{Name: "job_update", Arguments: map[string]any{"progress": "x"}})
 	if !result.IsError || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "job_id") {
 		t.Fatalf("no job: %+v", result)

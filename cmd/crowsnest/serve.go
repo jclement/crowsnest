@@ -18,7 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -44,6 +44,18 @@ func newServeCommand() *cobra.Command {
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {
+	restored, err := restoreHandedOverSecrets()
+	if err != nil {
+		return err
+	}
+	// The re-executed process (restored) never re-executes again. A failed re-exec is not
+	// fatal: the secrets stay in this process's initial environment, as they did before the
+	// re-exec existed, and children still never inherit them (UnsetSecretEnv).
+	if !restored {
+		if err := reexecWithoutSecrets(); err != nil {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "crowsnest: could not drop secrets from its own environment:", err)
+		}
+	}
 	cfg, err := config.LoadForServe(cmd.Flags(), config.Options{})
 	config.UnsetSecretEnv() // loaded or refused, nothing after this needs them (R1 H1)
 	if err != nil {
@@ -114,14 +126,16 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	agentSocket := agentapi.SocketPath(os.Getenv("XDG_RUNTIME_DIR"), cfg.StateDir, cfg.Session)
+	identity := agentid.New(db, nil)
+	agentSocket := agentSocketPath(cfg)
 	refs := &jobRefs{}
-	jobService := newJobService(cfg, client, db, events, agentSocket, refs, logger)
-	questionService, err := startQuestions(ctx, cfg, client, db, events, jobService, speakerOf(talk), agentSocket, logger)
+	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, logger)
+	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), agentSocket, logger)
+	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err
 	}
-	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, events, agentSocket, talk, logger)
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	startJobs(ctx, jobService, client, logger)
 

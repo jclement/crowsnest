@@ -1,7 +1,7 @@
 // Regression tests for the R1 review findings on conversations: cursors across a restart
 // (R1-C05), pins that follow the orchestrator between panes (R1-C06), a read that must still
 // announce what it found (R1-C07), and a session change between two conversations that both
-// have no transcript yet (R1-C11).
+// have no transcript yet (R1-C11); a pin racing a poll (R1b-C04).
 
 package transcript
 
@@ -135,4 +135,33 @@ func TestSessionChangeBetweenTwoFallbacksResets(t *testing.T) {
 	if second.SessionID != "b" || !second.Reset {
 		t.Fatalf("after a fallback-to-fallback session change = %+v (cursor %s → %s)", second, first.Cursor, second.Cursor)
 	}
+}
+
+// TestPinRacingAPollIsRaceFree is R1b-C04: the orchestrator's status callback pins from its own goroutine
+// while the manager's poll rewrites the watcher's origin. Under -race the two must not touch the
+// origin without the same lock.
+func TestPinRacingAPollIsRaceFree(t *testing.T) {
+	origins := &fakeOrigins{origins: map[string]Origin{}}
+	origins.set("orchestrator", Origin{PaneID: "w1:p1", Cwd: "/x", SessionID: "s1"})
+	origins.set("w1:p1", Origin{PaneID: "w1:p1", Cwd: "/x", SessionID: "s1"})
+	manager := NewManager(ManagerOptions{ConfigDir: t.TempDir(), Lookup: origins.lookup, IdleTimeout: time.Hour})
+	ctx := context.Background()
+	if err := manager.Pin(ctx, "orchestrator"); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			_ = manager.Pin(ctx, "orchestrator")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			manager.PollAll(ctx)
+		}
+	}()
+	wg.Wait()
 }

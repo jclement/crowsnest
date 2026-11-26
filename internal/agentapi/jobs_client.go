@@ -21,17 +21,18 @@ func (c *Client) JobID(explicit string) (string, error) {
 	if explicit != "" {
 		return explicit, nil
 	}
-	if c.caller.JobID != "" {
-		return c.caller.JobID, nil
+	if c.job != "" {
+		return c.job, nil
 	}
 	return "", ErrNoJob
 }
 
-// WithJob returns a copy of the client that identifies itself as holding jobID (a hook baked
-// with --job, or an MCP call naming job_id).
+// WithJob returns a copy of the client whose default job is jobID (a hook baked with --job, or an
+// MCP call naming job_id). It changes which job the paths name, not what the server lets the
+// caller touch: that comes from the caller's token.
 func (c *Client) WithJob(jobID string) *Client {
 	copied := *c
-	copied.caller.JobID = jobID
+	copied.job = jobID
 	return &copied
 }
 
