@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
@@ -132,12 +133,13 @@ func newStopRig(t *testing.T) *stopRig {
 	})
 	deliverer = questions.NewDeliverer(questions.DelivererOptions{Store: db, Prompt: questions.HerdrPrompter(session.Client), Logger: logger, Interval: time.Second})
 	go deliverer.Run(ctx)
+	identity := agentid.New(db, nil) // the hooks and tools are identified by their tokens, as in serve
 	jobService = jobs.New(jobs.Options{
 		Store: db, Hub: events, Logger: logger, Herdr: session.Client,
 		Launch: jobs.LaunchOptions{
 			StateDir: filepath.Join(short, "state"), Executable: binary, AgentSocket: socket, BinDir: filepath.Dir(binary),
 			BasePath: os.Getenv("PATH"), Session: session.Name, PermissionMode: "auto", ClaudeConfigDir: claudeDir,
-			WorktreeRoot: filepath.Join(scratch, "worktrees"),
+			WorktreeRoot: filepath.Join(scratch, "worktrees"), Identity: identity,
 		},
 	})
 	listener, err := agentapi.Listen(ctx, socket)
@@ -145,7 +147,7 @@ func newStopRig(t *testing.T) *stopRig {
 		t.Fatal(err)
 	}
 	go func() {
-		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: questionService, Jobs: jobService, Hub: events, Logger: logger}).Serve(ctx, listener)
+		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: questionService, Jobs: jobService, Identity: identity, Hub: events, Logger: logger}).Serve(ctx, listener)
 	}()
 	go jobService.Run(ctx, 2*time.Second)
 

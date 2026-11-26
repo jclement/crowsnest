@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 )
 
@@ -50,6 +51,56 @@ func TestStartWiresTheAgentSocketAndMCP(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mcp.json mode %v", info.Mode().Perm())
 	}
+}
+
+// TestStartHandsTheOrchestratorItsTokens is R1b N2/N7 on the orchestrator's side: its pane's
+// environment and its MCP server's each carry a token the registry maps to its pane, and a
+// restart replaces the MCP one.
+func TestStartHandsTheOrchestratorItsTokens(t *testing.T) {
+	f := fake.New()
+	var registry *agentid.Registry
+	rig := newRig(t, f, func(o *Options) {
+		o.Executable, o.AgentSocket = "/opt/crowsnest/bin/crowsnest", "/run/crowsnest/test.sock"
+		registry = agentid.New(o.KV.(agentid.KV), nil)
+		o.Identity = registry
+	})
+	ctx := context.Background()
+	status, err := rig.orch.Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paneToken := f.PaneEnv(status.PaneID)[agentid.EnvToken]
+	if binding, ok, _ := registry.Resolve(ctx, paneToken); !ok || binding.PaneID != status.PaneID || binding.Kind != agentid.KindPane {
+		t.Fatalf("pane token %q resolves to %+v (%v)", paneToken, binding, ok)
+	}
+	mcpToken := mcpTokenOf(t, f.Starts()[0].Args)
+	if binding, ok, _ := registry.Resolve(ctx, mcpToken); !ok || binding.PaneID != status.PaneID || binding.Kind != agentid.KindStart {
+		t.Fatalf("MCP token resolves to %+v (%v)", binding, ok)
+	}
+	if _, err := rig.orch.Restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	starts := f.Starts()
+	if len(starts) < 2 {
+		t.Fatalf("restart started Claude %d times in all", len(starts))
+	}
+	if _, ok, _ := registry.Resolve(ctx, mcpToken); ok {
+		t.Fatal("the previous start's MCP token still resolves after a restart")
+	}
+	if _, ok, _ := registry.Resolve(ctx, mcpTokenOf(t, starts[len(starts)-1].Args)); !ok {
+		t.Fatal("the restarted orchestrator's MCP token does not resolve")
+	}
+}
+
+func mcpTokenOf(t *testing.T, args []string) string {
+	t.Helper()
+	var config struct {
+		MCPServers map[string]struct {
+			Env map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	readJSON(t, argValue(args, "--mcp-config"), &config)
+	return config.MCPServers["crowsnest"].Env[agentid.EnvToken]
 }
 
 func TestStartWithoutASocketPassesNoMCPConfig(t *testing.T) {

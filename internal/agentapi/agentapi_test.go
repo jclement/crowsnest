@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
@@ -35,11 +37,22 @@ func shortDir(t *testing.T) string {
 }
 
 type socketFixture struct {
-	socket  string
-	service *questions.Service
-	hub     *hub.Hub
-	jobs    *jobs.Service
-	db      *store.Store
+	socket   string
+	service  *questions.Service
+	hub      *hub.Hub
+	identity *agentid.Registry
+	jobs     *jobs.Service
+	db       *store.Store
+}
+
+// token mints an agent token for pane (and job), as serve does for the agents it starts.
+func (f *socketFixture) token(t *testing.T, pane, job string) string {
+	t.Helper()
+	token, err := f.identity.Mint(context.Background(), agentid.Binding{PaneID: pane, JobID: job, Kind: agentid.KindPane})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }
 
 // startSocket serves a fresh agent API on a socket in a short temp dir.
@@ -52,6 +65,7 @@ func startSocket(t *testing.T) *socketFixture {
 	t.Cleanup(func() { _ = db.Close() })
 	events := hub.New()
 	service := questions.New(questions.Options{Store: db, Hub: events})
+	identity := agentid.New(db, nil)
 	jobService := jobs.New(jobs.Options{Store: db, Hub: events})
 	path := filepath.Join(shortDir(t), "run", "agent.sock")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -61,11 +75,11 @@ func startSocket(t *testing.T) *socketFixture {
 	}
 	done := make(chan struct{})
 	go func() {
-		_ = NewServer(ServerOptions{Questions: service, Jobs: jobService, Hub: events, Version: "test"}).Serve(ctx, listener)
+		_ = NewServer(ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Version: "test"}).Serve(ctx, listener)
 		close(done)
 	}()
 	t.Cleanup(func() { cancel(); <-done })
-	return &socketFixture{socket: path, service: service, hub: events, jobs: jobService, db: db}
+	return &socketFixture{socket: path, service: service, hub: events, identity: identity, jobs: jobService, db: db}
 }
 
 func TestSocketPermissions(t *testing.T) {
@@ -133,6 +147,31 @@ func TestListenRemovesAStaleSocketButNotALiveOneOrAFile(t *testing.T) {
 	}
 }
 
+// TestListenLeavesALiveSocketAloneWhenTheProbeIsCancelled is R1b-C02: a probe that fails for
+// any reason other than "connection refused" (here a cancelled start-up) proves nothing, and the
+// live server's socket must survive it.
+func TestListenLeavesALiveSocketAloneWhenTheProbeIsCancelled(t *testing.T) {
+	path := filepath.Join(shortDir(t), "live.sock")
+	live, err := Listen(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = live.Close() })
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Listen(cancelled, path); err == nil {
+		t.Fatal("a cancelled start-up took over the socket")
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("the live server's socket was removed: %v", err)
+	}
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		t.Fatalf("the live server is no longer reachable: %v", err)
+	}
+	_ = conn.Close()
+}
+
 func TestSocketPath(t *testing.T) {
 	if got := socketPath("/run/user/1000", "/state", "crow", "/tmp", 1000); got != "/run/user/1000/crowsnest/crow.sock" {
 		t.Fatalf("runtime dir: %s", got)
@@ -168,7 +207,7 @@ func TestListenRefusesASymlinkedDirectory(t *testing.T) {
 func TestClientRoundTripRecordsCaller(t *testing.T) {
 	f := startSocket(t)
 	ctx := context.Background()
-	client := NewClient(f.socket, questions.Caller{PaneID: "w1:p2", JobID: "j_9"})
+	client := NewClient(f.socket, f.token(t, "w1:p2", "j_9"))
 	if health, err := client.Health(ctx); err != nil || health.Status != "ok" {
 		t.Fatalf("health %+v %v", health, err)
 	}
@@ -225,7 +264,7 @@ func TestSayPublishesAnEvent(t *testing.T) {
 	f := startSocket(t)
 	sub := f.hub.Subscribe(4)
 	defer sub.Close()
-	client := NewClient(f.socket, questions.Caller{PaneID: "w1:p1"})
+	client := NewClient(f.socket, f.token(t, "w1:p1", ""))
 	if err := client.Say(context.Background(), "  Tests are\ngreen.  "); err != nil {
 		t.Fatal(err)
 	}
@@ -247,17 +286,92 @@ func TestClientErrors(t *testing.T) {
 	if _, err := NewClientFromEnv(func(string) string { return "" }); !errors.Is(err, ErrNoSocket) {
 		t.Fatalf("no socket: %v", err)
 	}
-	client := NewClient(filepath.Join(shortDir(t), "none.sock"), questions.Caller{})
+	client := NewClient(filepath.Join(shortDir(t), "none.sock"), "")
 	var down *ServerDownError
 	if err := client.Say(context.Background(), "hi"); !errors.As(err, &down) {
 		t.Fatalf("server down: %v", err)
 	}
 }
 
-func TestIdentityHeadersAreSanitised(t *testing.T) {
-	if identity("w1:p1") != "w1:p1" || identity("bad\x1bvalue") != "" || identity(strings.Repeat("x", 200)) != "" {
-		t.Fatal("identity sanitising")
+// TestCallerComesFromTheTokenOnly is R1b N2/N7: a pane named in a header, or a token crowsnest
+// never issued, makes the caller unidentified, so nothing can be typed into the pane it named.
+func TestCallerComesFromTheTokenOnly(t *testing.T) {
+	f := startSocket(t)
+	ask := func(headers map[string]string) questions.Question {
+		t.Helper()
+		body := strings.NewReader(`{"title":"Deploy? → Yes (note: approved)","kind":"confirm","recommend":"yes","expires_in_hours":1}`)
+		request, _ := http.NewRequest(http.MethodPost, "http://crowsnest/api/v1/questions", body)
+		for name, value := range headers {
+			request.Header.Set(name, value)
+		}
+		response, err := unixHTTP(f.socket).Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = response.Body.Close() }()
+		var envelope struct{ Data questions.Question }
+		_ = json.NewDecoder(response.Body).Decode(&envelope)
+		return envelope.Data
 	}
+	forged := ask(map[string]string{"X-Crowsnest-Pane": "orchestrator", "X-Crowsnest-Job": "j_1"})
+	unknown := ask(map[string]string{agentid.HeaderToken: "cnt_made-up-by-the-caller"})
+	if forged.SourcePane != "" || forged.JobID != "" || unknown.SourcePane != "" {
+		t.Fatalf("a caller-named identity was believed: %+v / %+v", forged, unknown)
+	}
+	real := ask(map[string]string{agentid.HeaderToken: f.token(t, "w3:p1", "j_4"), "X-Crowsnest-Pane": "orchestrator"})
+	if real.SourcePane != "w3:p1" || real.JobID != "j_4" {
+		t.Fatalf("the token's pane was not used: %+v", real)
+	}
+}
+
+// TestOnlyTheAskerMayWithdraw is R1b N2: cancelling someone else's question, or cancelling while
+// unidentified, is refused.
+func TestOnlyTheAskerMayWithdraw(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	asker := NewClient(f.socket, f.token(t, "w1:p1", ""))
+	question, err := asker.Ask(ctx, questions.AskInput{Title: "Mine", Kind: questions.KindAck})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var apiErr *APIError
+	for _, other := range []*Client{NewClient(f.socket, f.token(t, "w2:p1", "")), NewClient(f.socket, "")} {
+		if _, err := other.Cancel(ctx, question.ID); !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden {
+			t.Fatalf("someone else's cancel: %v", err)
+		}
+	}
+	if got, err := asker.Cancel(ctx, question.ID); err != nil || got.Status != questions.StatusCancelled {
+		t.Fatalf("the asker's own cancel: %+v %v", got, err)
+	}
+}
+
+// TestAskQuotas is R1b N6: a burst of asks is cut off with a 429 that says what to do, and one
+// caller's burst does not use up another's.
+func TestAskQuotas(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	looping := NewClient(f.socket, f.token(t, "w1:p1", ""))
+	var apiErr *APIError
+	for i := range askBurst + 1 {
+		_, err := looping.Ask(ctx, questions.AskInput{Title: fmt.Sprintf("Question %d", i), Kind: questions.KindAck})
+		if i < askBurst && err != nil {
+			t.Fatalf("ask %d of the burst: %v", i+1, err)
+		}
+		if i == askBurst && (!errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests || !strings.Contains(apiErr.Message, "Too many questions")) {
+			t.Fatalf("past the burst: %v", err)
+		}
+	}
+	other := NewClient(f.socket, f.token(t, "w2:p1", ""))
+	if _, err := other.Ask(ctx, questions.AskInput{Title: "Unrelated", Kind: questions.KindAck}); err != nil {
+		t.Fatalf("another agent was throttled by the first one's burst: %v", err)
+	}
+}
+
+func unixHTTP(path string) *http.Client {
+	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var dialer net.Dialer
+		return dialer.DialContext(ctx, "unix", path)
+	}}}
 }
 
 // ---- MCP -----------------------------------------------------------------------------------
@@ -279,7 +393,7 @@ func connectMCP(t *testing.T, client *Client) *mcp.ClientSession {
 
 func TestMCPToolList(t *testing.T) {
 	f := startSocket(t)
-	session := connectMCP(t, NewClient(f.socket, questions.Caller{}))
+	session := connectMCP(t, NewClient(f.socket, ""))
 	var names []string
 	for tool, err := range session.Tools(context.Background(), nil) {
 		if err != nil {
@@ -290,7 +404,7 @@ func TestMCPToolList(t *testing.T) {
 			t.Errorf("tool %s has a thin description; it is the agent's instruction", tool.Name)
 		}
 	}
-	if strings.Join(names, ",") != "ask,done,fail,job_create,job_get,job_update,say" {
+	if strings.Join(names, ",") != "ask,done,fail,get_question,job_create,job_get,job_update,say" {
 		t.Fatalf("tools %v", names)
 	}
 	if !strings.Contains(session.InitializeResult().Instructions, "never consent") {
@@ -301,7 +415,7 @@ func TestMCPToolList(t *testing.T) {
 func TestMCPAskNonBlockingThenWait(t *testing.T) {
 	f := startSocket(t)
 	ctx := context.Background()
-	session := connectMCP(t, NewClient(f.socket, questions.Caller{PaneID: "w1:p1"}))
+	session := connectMCP(t, NewClient(f.socket, f.token(t, "w1:p1", "")))
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: map[string]any{
 		"title": "Ship?", "kind": "confirm", "recommend": "yes",
@@ -343,14 +457,51 @@ func TestMCPAskNonBlockingThenWait(t *testing.T) {
 	if err != nil || waited.IsError {
 		t.Fatalf("wait: %+v %v", waited, err)
 	}
-	if got := waited.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, "answered: Deploy? → No (note: not tonight)") {
+	if got := waited.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, "Choice: No") || !strings.Contains(got, "not tonight") {
 		t.Fatalf("blocking result %q", got)
+	}
+}
+
+// TestMCPWaitReturnsTheWholeAnswer is R1b-C01: a blocking ask hands the model every word of a
+// long note (and the structured answer), and get_question reads the same back later.
+func TestMCPWaitReturnsTheWholeAnswer(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	session := connectMCP(t, NewClient(f.socket, f.token(t, "w1:p1", "")))
+	note := strings.Repeat("Context the human wrote. ", 60) + "Do not deploy until I approve the backup."
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			list, _ := f.service.List(ctx, "open")
+			for _, q := range list {
+				_, _ = f.service.Answer(ctx, q.ID, questions.AnswerInput{Value: json.RawMessage(`"yes"`), Note: note})
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+	waited, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: map[string]any{
+		"title": "Deploy?", "kind": "confirm", "recommend": "yes", "wait": true,
+	}})
+	if err != nil || waited.IsError {
+		t.Fatalf("wait: %+v %v", waited, err)
+	}
+	if got := waited.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, note) || !strings.Contains(got, "outranks") {
+		t.Fatalf("the blocking result lost part of the note (%d characters)", len(got))
+	}
+	structured, _ := json.Marshal(waited.StructuredContent)
+	if !strings.Contains(string(structured), "Do not deploy until I approve the backup.") {
+		t.Fatalf("structured content %s", structured)
+	}
+	again, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_question", Arguments: map[string]any{"id": "q_1"}})
+	if err != nil || again.IsError || !strings.Contains(again.Content[0].(*mcp.TextContent).Text, note) {
+		t.Fatalf("get_question: %+v %v", again, err)
 	}
 }
 
 func TestMCPSay(t *testing.T) {
 	f := startSocket(t)
-	session := connectMCP(t, NewClient(f.socket, questions.Caller{}))
+	session := connectMCP(t, NewClient(f.socket, ""))
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "say", Arguments: map[string]any{"text": "Done."}})
 	if err != nil || result.IsError {
 		t.Fatalf("say %+v %v", result, err)
@@ -381,9 +532,17 @@ func (r *recordingSpeaker) Say(sentence, source, paneID string) string {
 
 func TestSayGoesToTheSpeakerWhenTalkModeIsOn(t *testing.T) {
 	speaker := &recordingSpeaker{}
-	server := NewServer(ServerOptions{Speaker: speaker})
+	db, err := store.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	identity := agentid.New(db, nil)
+	token, _ := identity.Mint(context.Background(), agentid.Binding{PaneID: "w2:p1", Kind: agentid.KindPane})
+	server := NewServer(ServerOptions{Speaker: speaker, Identity: identity})
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/say", strings.NewReader(`{"text":"Build  green."}`))
-	r.Header.Set(HeaderPane, "w2:p1")
+	r.Header.Set(agentid.HeaderToken, token)
+	r.Header.Set("X-Crowsnest-Pane", "orchestrator") // not believed
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, r)
 	speaker.mu.Lock()

@@ -1,6 +1,7 @@
 # The crowsnest devbox (DESIGN.md section 16). From the repo root:
 #
-#   cp deploy/.env.sample deploy/.env      # set CROWSNEST_USERNAME and CROWSNEST_PASSWORD
+#   cp deploy/crowsnest.env.sample deploy/crowsnest.env   # set CROWSNEST_USERNAME
+#   (umask 077; printf '%s\n' 'your password' > deploy/crowsnest_password)   # mode 0600
 #   docker compose -f deploy/compose.yaml up -d
 #   open http://127.0.0.1:2769             # log in, open Terminal, run `claude` once to sign in
 #
@@ -10,12 +11,22 @@
 # the internet and your LAN. Mount nothing you would not hand an agent: never the Docker
 # socket, never your real home directory or ~/.ssh. To narrow the network too, put the service
 # on an `internal: true` network behind a proxy you control.
+#
+# Secrets, plainly (R1b N1): agents run as the same user as crowsnest, so anything in the
+# crowsnest container's environment is readable by them (/proc/1/environ). Hence the password is
+# a mounted file, not a variable, and each sidecar keeps its token in its own env file: a token
+# in crowsnest.env would hand the tunnel (and with it the login page's traffic) or the tailnet to
+# any prompt-injected agent. A same-user file is readable by agents too; the only hard boundary
+# would be a separate uid for crowsnest, which this image does not have (DESIGN.md section 4).
 
 services:
   crowsnest:
     image: ghcr.io/jclement/crowsnest:latest
     # build: { context: .., dockerfile: deploy/Dockerfile }   # or build it from this checkout
-    env_file: .env
+    env_file: crowsnest.env
+    environment:
+      CROWSNEST_PASSWORD_FILE: /run/secrets/crowsnest_password
+    secrets: [crowsnest_password]
     volumes:
       # Everything that should survive an image upgrade: Claude's login, mise's tools, herdr's
       # sessions, crowsnest's database, and your projects (clone them under /home/crow).
@@ -28,16 +39,19 @@ services:
     stop_grace_period: 30s
 
   # ---- Optional: a Cloudflare tunnel instead of a published port -----------------------------
-  # Remove `ports:` above, set TUNNEL_TOKEN in .env, point the tunnel's public hostname at
-  # http://crowsnest:2769, and tell crowsnest that hostname is allowed:
+  # Remove `ports:` above, put TUNNEL_TOKEN=... in deploy/cloudflared.env (never in
+  # crowsnest.env), point the tunnel's public hostname at http://localhost:2769, and tell
+  # crowsnest that hostname is allowed:
   #   CROWSNEST_ALLOWED_HOSTS=crowsnest.example.com
+  # The tunnel shares crowsnest's network namespace, so it reaches crowsnest on loopback, which
+  # the per-peer connection cap leaves alone (all public traffic arrives through this one peer).
   # Put Cloudflare Access in front as well; the crowsnest login should not be the only gate.
   #
   # cloudflared:
   #   image: cloudflare/cloudflared:latest
   #   command: tunnel --no-autoupdate run
-  #   environment:
-  #     TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+  #   env_file: cloudflared.env
+  #   network_mode: service:crowsnest
   #   restart: unless-stopped
   #   depends_on: [crowsnest]
 
@@ -46,13 +60,14 @@ services:
   # loopback and the phone gets HTTPS (a secure context, which the microphone and the key bar's
   # paste need). Remove `ports:` above and add to the crowsnest service:
   #   network_mode: service:tailscale
-  # and set CROWSNEST_ALLOWED_HOSTS=crowsnest.<your-tailnet>.ts.net and TS_AUTHKEY in .env.
+  # set CROWSNEST_ALLOWED_HOSTS=crowsnest.<your-tailnet>.ts.net in crowsnest.env, and put
+  # TS_AUTHKEY=... in deploy/tailscale.env (never in crowsnest.env).
   #
   # tailscale:
   #   image: tailscale/tailscale:latest
   #   hostname: crowsnest
+  #   env_file: tailscale.env
   #   environment:
-  #     TS_AUTHKEY: ${TS_AUTHKEY}
   #     TS_STATE_DIR: /var/lib/tailscale
   #     TS_SERVE_CONFIG: /config/serve.json   # {"TCP":{"443":{"HTTPS":true}},"Web":{"${TS_CERT_DOMAIN}:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2769"}}}}}
   #   volumes:
@@ -61,6 +76,11 @@ services:
   #   devices: [/dev/net/tun]
   #   cap_add: [net_admin]
   #   restart: unless-stopped
+
+secrets:
+  crowsnest_password:
+    # Owned by uid 1000 (crow) and mode 0600: crowsnest refuses a password file others can read.
+    file: ./crowsnest_password
 
 volumes:
   crowsnest-home:

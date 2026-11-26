@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
@@ -30,7 +31,7 @@ type jobRefs struct {
 
 // newJobService builds the jobs service. refs is filled in by serve once the orchestrator and
 // the transcript manager exist.
-func newJobService(cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, socket string, refs *jobRefs, logger *slog.Logger) *jobs.Service {
+func newJobService(cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, socket string, identity *agentid.Registry, refs *jobRefs, logger *slog.Logger) *jobs.Service {
 	binDir, executable := executablePaths()
 	roles, problems := jobs.LoadRoles(rolesDir(cfg))
 	for _, problem := range problems {
@@ -50,6 +51,7 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,
+			Identity: identity,
 		},
 		Orchestrator: func() jobs.OrchestratorInfo {
 			if refs.orchestrator == nil {

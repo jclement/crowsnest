@@ -125,12 +125,12 @@ rebinding against `--no-auth` on localhost); secrets leaking into logs; agent ou
 3. **Host check** on every request: `Host` must be loopback, a bound IP, the machine hostname (only when a non-loopback address is bound: on loopback it adds nothing but DNS-rebinding surface, R1 I4), a detected MagicDNS name, or an `--allowed-host`. This is what stops DNS rebinding, and it applies with `--no-auth` too.
 4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host` (host and port, default ports normalised). `null` counts as missing. Non-GET calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set). A failed host check is `403` with a message naming `--allowed-host`. MagicDNS names are not auto-detected yet (M1); pass them with `--allowed-host`.
 5. **WebSockets** authenticate with the same cookie at upgrade, check Origin, and are closed when the session is revoked. No tokens in URLs.
-6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions are the authentication; it serves only the agent API (ask, say, notify, hook), never terminals.
+6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions decide who may connect (this user's processes); it serves only the agent API (ask, say, notify, job, hook), never terminals. **Who is calling** comes from a token, never from what the caller says (R1b N2, N7): crowsnest mints a random token (`cnt_…`, 32 bytes) for each agent it starts, puts it in that agent's pane environment (`CROWSNEST_TOKEN`), in its MCP server's environment (`mcp.json`) and in a 0600 `agent-token` file its hook command lines name (`--token-file`), and keeps only the token's SHA-256 in `kv`, mapped to the pane and job (`internal/agentid`). A caller with no known token is unidentified: it may ask (the answer reaches it only through `--wait`), nothing is ever typed into a pane on its behalf, and it may not withdraw questions, create jobs or act on one. Job verbs work only on the token's job or the job held in the token's pane (the orchestrator's tokens name no job). Quotas per caller cap the rate of asks and says, open questions (30 each, 200 in all) and concurrent long-polls (8), and an expiry is at least five minutes. What this does not stop: any process of the same user can read another agent's environment (`/proc/<pid>/environ`, `ps eww`) or its 0600 files and borrow its token. Processes of one uid are not isolated from each other; only a separate uid for crowsnest would make the socket a hard boundary.
 7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'`. (`unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
 8. **Rendering untrusted text**: transcripts, pane text and question bodies are data. Markdown renders without raw HTML; mermaid runs with `securityLevel: 'strict'`; links open with `rel="noopener noreferrer"`; no `dangerouslySetInnerHTML` outside the sanitised mermaid SVG.
-9. **Secrets**: the password, session ids and the ElevenLabs key are never logged, never returned by any endpoint, never placed in argv or the environment of a child process. Once the config is loaded, `serve` removes `CROWSNEST_PASSWORD`, `CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY`, `CROWSNEST_NO_AUTH`, `SUPPRESS_AUTH` and `CROWSNEST_I_KNOW_THIS_IS_OPEN` from its own environment (R1 H1). Request logs record method, path, status, duration and client IP only. Error responses, the orchestrator's status detail and a terminal's start failure carry a sentence that says what to do, never herdr's or the orchestrator's own error text (which can hold paths and internals); that goes to the server log (R1 I2). A terminal's exit reason is still herdr's (`detached`, `terminal attach taken over`), because the browser acts on it. A `redact` helper scrubs token-shaped strings from anything echoed from panes into logs or notices.
+9. **Secrets**: the password, session ids and the ElevenLabs key are never logged, never returned by any endpoint, never placed in argv or the environment of a child process. Once the config is loaded, `serve` removes `CROWSNEST_PASSWORD`, `CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY`, `CROWSNEST_NOTIFY_URL`, `CROWSNEST_NO_AUTH`, `SUPPRESS_AUTH` and `CROWSNEST_I_KNOW_THIS_IS_OPEN` from its own environment (R1 H1). That only changes the process's in-memory copy: the kernel keeps the environment a process was exec'd with, readable by the same user. So when `serve` finds any of the secret variables it re-executes itself once, with them removed from the new environment and handed over through an inherited pipe (`CROWSNEST_SECRETS_FD`); the environment the OS reports for crowsnest then holds no secret (R1b H1 residual; `cmd/crowsnest/secretenv.go`). The process that started crowsnest (a shell, tini in the devbox) keeps its own environment: pass the password as a file to keep it out of that too. Request logs record method, path, status, duration and client IP only. Error responses, the orchestrator's status detail and a terminal's start failure carry a sentence that says what to do, never herdr's or the orchestrator's own error text (which can hold paths and internals); that goes to the server log (R1 I2). A terminal's exit reason is still herdr's (`detached`, `terminal attach taken over`), because the browser acts on it. A `redact` helper scrubs token-shaped strings from anything echoed from panes into logs or notices.
 10. **Child processes** get a scrubbed environment: every `HERDR_*` variable is removed and the session is always addressed by its explicit socket path, so crowsnest started from inside a herdr pane cannot drive the pane's session. Every `CROWSNEST_*` variable except the pane variables (`CROWSNEST`, `CROWSNEST_SESSION`, `CROWSNEST_SOCKET`, `CROWSNEST_JOB`) and every `ELEVENLABS_*` one is removed too. That covers the herdr server crowsnest starts (which spawns every pane and agent, so a prompt-injected `env` in any pane finds no secret), the TUI client and each pane-control process (R1 H1). **A herdr session crowsnest did not start keeps whatever environment its server was started with**: if that shell exported the password or the ElevenLabs key, every pane in it can read them. Start the session through crowsnest, or from a shell without them.
-11. **Resource limits** (R1 L3): request headers are capped at 32 KiB and must arrive within 10 s; a login body must arrive within 5 s; at most 128 connections are open at once across all listeners. Past the cap, new connections wait in the kernel's backlog until one closes rather than being refused, so the event stream and terminal sockets (which stay open for hours and so cannot have a request timeout) keep working, and the header and body deadlines make a slow or silent client give its slot back within seconds.
+11. **Resource limits** (R1 L3): request headers are capped at 32 KiB and must arrive within 10 s; a login body must arrive within 5 s; at most 128 connections are open at once across all listeners. Past the cap, new connections wait in the kernel's backlog until one closes rather than being refused, so the event stream and terminal sockets (which stay open for hours and so cannot have a request timeout) keep working, and the header and body deadlines make a slow or silent client give its slot back within seconds. Each non-loopback address may hold at most 32 of them; one more from it is closed at once, so a single unauthenticated peer can no longer take every slot (R1b N4). Loopback is exempt, because a local proxy (`tailscale serve`, a tunnel sharing the network namespace) carries every real user through it. An SSE frame's write deadline is cleared once the frame is flushed: over HTTP/2 an armed deadline resets an idle stream (R1b-C03).
 12. **Files** (R1 L5): the data and state directories are made `0700` at start even when they already existed with looser modes, and the database is created (or tightened to) `0600`; SQLite gives its `-wal` and `-shm` files the same mode. A `--password-file` that its group or others can read or write is refused (`chmod 600` it). A config file that holds `password` and is readable by others is a startup warning (move the password to `CROWSNEST_PASSWORD` or `--password-file`, or `chmod 600` the file).
 13. **TLS**: optional built-in cert/key; the documented path for a phone is `tailscale serve`, which also gives the secure context the microphone needs.
 
@@ -339,8 +339,10 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
   j_<n>` (single-quoted) for Stop, SessionStart, Notification, StopFailure, PermissionDenied,
   SessionEnd and **PostToolUse**. PostToolUse is an addition to 6.3: it is what tells the nudge
   budget that the agent made progress, and it gives "doing now" its fallback (`Bash: go test …`).
-  The orchestrator's hooks carry no `--job`; the server maps them, by the calling pane
-  (`HERDR_PANE_ID`), to the job the orchestrator holds. Unknown fields in hook input are accepted
+  Since R1b every hook line also names the agent's token file (`--token-file`), and the server
+  takes the job from the token: a job agent's token names its job; the orchestrator's carries no
+  `--job` and its token names only its pane, which the server maps to the job the orchestrator
+  holds. `--job` stays as the path a client uses, not as proof. Unknown fields in hook input are accepted
   (the input grows with Claude Code releases); unknown flags on `crowsnest hook` are ignored, and
   any failure prints nothing and exits 0.
 - **The disposition check** is `Decide(job, openQuestions, StopInput, NudgeHistory, now)`, pure,
@@ -583,15 +585,30 @@ comes in M12.
   `poll` when the asker is on the long-poll, or ended one less than 10 s ago (a CLI or MCP loop
   re-polls within milliseconds), or asked with `wait=true` less than 10 s ago; `none` for a
   notice, a question the asker cancelled itself (the socket's DELETE), or one with no source
-  pane; otherwise `type`. Waiter state is in memory, so after a crowsnest restart a waiting
-  asker's answer is typed as well as returned to its next poll.
-- **Typing it back** (the Deliverer): one line, `[crowsnest answer q_7] <title> → <labels> (note:
-  …)`, or `→ expired with no answer (expiry is not consent)`, or `→ cancelled by the human`; ANSI
-  sequences and control characters removed, whitespace collapsed, capped at 600 characters. It
+  pane; otherwise `type`. Only the asker's own polls count (by token), a poll its caller cut off
+  leaves no grace, and a poll answer is confirmed only when a poll hands it to the asker; one
+  nobody collects within 30 s is switched to `type` by the sweeper (R1b-C06). Waiter entries for
+  missing or settled questions are dropped and idle ones pruned (R1b-C07). Waiter state is in
+  memory, so after a crowsnest restart a waiting asker's uncollected answer is typed.
+- **Typing it back** (the Deliverer): one line, `[crowsnest answer q_7] <labels> (note: …); the
+  question was "<title>"`, or `expired with no answer (expiry is not consent); …`, or `cancelled by
+  the human (not consent); …`. The outcome comes first and the asker's title last, quoted, with
+  its double quotes made single and its square brackets made round, so a title can neither forge
+  an outcome nor pass for a `[crowsnest …]` header (R1b N3). Every interpolated field goes through
+  `internal/termtext`, the one sanitiser for text crowsnest types into a terminal (M8's pokes must
+  use it too): line breaks become spaces, and ANSI sequences, control, format (bidi overrides,
+  zero-width) and private-use characters and invalid UTF-8 are dropped. Titles and labels holding a
+  bidi control are refused at validation. A line longer than 600 characters is never shortened
+  (that could cut the note that outranks the choice, R1b-C01): it is replaced by one that says the
+  answer is too long and to read it with the `get_question` tool or `crowsnest question q_7`. It
   goes through the web app's send path (`orch.Prompt`), so it is queued when the agent works and
   wakes it when idle; a dialog on screen, a draft in the input box, or an agent that cannot be
   found means nothing is typed, and the delivery is held and retried (3 s, doubling to a minute,
-  given up after a week). **At most once**: `delivery_claimed_at` is set before typing and
+  given up after a week; a claim is released with a short context detached from shutdown, and
+  serve waits for the deliverer before closing the database, R1b-C08). A send whose answer from
+  herdr was lost is recorded as uncertain, never as delivered and never retried (R1b-C05). The
+  deliverer reads ids first and loads at most 20 due questions a pass, without bodies or files;
+  lists leave file contents out in SQL (R1b-C09). **At most once**: `delivery_claimed_at` is set before typing and
   released only when the attempt provably typed nothing (`orch.ErrNotTyped`, a dialog, a draft);
   an attempt whose outcome is unknown is recorded in `delivery_error` and never retried, and a
   claim left by a crash is marked "interrupted" at the next start, not retried.
@@ -601,13 +618,14 @@ comes in M12.
   the state dir>.sock` under the OS temporary directory. `Listen` refuses a socket directory that
   is a symlink or owned by another user (the fallback may sit in a shared `/tmp`), creates it
   `0700` (and tightens an existing one), removes a stale socket
-  nobody answers on, refuses to take over a live one or to delete a non-socket file, and chmods
-  the socket `0600`. Routes: Meat Prompt's four, plus `POST /api/v1/say` and `GET
-  /api/v1/health` (the CLI's "is crowsnest running" check). Identity headers set by the client
-  from its environment: `X-Crowsnest-Pane` (`HERDR_PANE_ID`) and `X-Crowsnest-Job`
-  (`CROWSNEST_JOB`); values over 128 bytes or with control characters are dropped.
-  **(verified in M6)**: herdr sets `HERDR_PANE_ID` in its panes, and Claude passes its own
-  environment through to the MCP servers it starts, so `crowsnest mcp` knows the asking pane.
+  only when a probe is refused outright (a cancelled or timed-out probe proves nothing, R1b-C02),
+  refuses to take over a live one or to delete a non-socket file, and chmods the socket `0600`.
+  Under `--demo` the socket ignores `XDG_RUNTIME_DIR` and stays in the demo's temporary state
+  directory. Routes: Meat Prompt's four, plus `POST /api/v1/say` and `GET
+  /api/v1/health` (the CLI's "is crowsnest running" check). The caller sends its token as
+  `X-Crowsnest-Token` (from `CROWSNEST_TOKEN`); the M6 headers `X-Crowsnest-Pane` and
+  `X-Crowsnest-Job` are gone (section 4.6). Claude passes the `env` of `mcp.json` to the MCP
+  server it starts, which is how `crowsnest mcp` gets the start token.
 - **MCP**: `github.com/modelcontextprotocol/go-sdk` v1.8.0, stdio. Each tool is one file
   (`mcp_ask.go`, `mcp_say.go`) that calls `registerTool` from `init`; M7 adds `job_update`, `done`,
   `fail`, `job_create`, `job_get` the same way. Errors come back as tool results with `isError`,
@@ -647,16 +665,18 @@ comes in M12.
 
 ## 9. Agent-side CLI
 
-The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`:
+The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identified by
+`CROWSNEST_TOKEN` (section 4.6):
 
 | Command | Does |
 |---|---|
 | `crowsnest ask --file q.json [--wait] [--timeout 12h]` | Post a question. Without `--wait` it prints the id and returns; the answer is typed to the asker later. With `--wait`, block until settled and print `{status, answer_value, answer_note}`. Exit 0 answered, 3 expired/cancelled, 1 error |
+| `crowsnest question <id>` | A question with its whole answer as JSON (R1b-C01): what a too-long answer line points to |
 | `crowsnest notify "text" [--urgency]` | A `notice` question (no answer needed) |
 | `crowsnest say "sentence"` | Speak now in talk mode (progress lines); no-op when off |
 | `crowsnest job update|done|fail|get|create|list` | The job protocol of section 6.2 for agents without MCP (Codex) and for scripts. The job is `CROWSNEST_JOB` unless `--job` is given |
-| `crowsnest hook <event> [--job j_<n>] [--socket PATH]` | Claude Code hook entry point (section 6.3): stdin JSON to the server with a 5 s timeout, the server's decision to stdout; silent success when the server is unreachable, slow, or anything else fails |
-| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `done`, `fail`, `job_create`, `job_get`, `say`; a thin proxy to the same socket |
+| `crowsnest hook <event> [--job j_<n>] [--socket PATH] [--token-file PATH]` | Claude Code hook entry point (section 6.3): stdin JSON to the server with a 5 s timeout, the server's decision to stdout; silent success when the server is unreachable, slow, or anything else fails |
+| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done`, `fail`, `job_create`, `job_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
 
 ## 10. HTTP API
 
@@ -966,6 +986,8 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
   - Blast radius: an agent in the container reaches only what is mounted and the network. That is the point.
   - As built (M10b):
     - `deploy/Dockerfile` has three stages. `web` (node, same version as `mise.toml`) runs `npm ci` and `vite build`; it also copies `internal/taglines/taglines.txt`, which the SPA imports raw. `build` (golang, same version) compiles with `CGO_ENABLED=0 -trimpath` and the `main.version/commit/buildDate` ldflags from build args `VERSION`, `COMMIT`, `BUILD_DATE`. Both run on `$BUILDPLATFORM` and cross-compile, so a multi-arch build runs only the runtime stage under QEMU (Go under QEMU on Apple silicon has crashed in the GC). `runtime` is `debian:trixie-slim` (pinned by codename rather than `stable-slim`, so a Debian release does not change the image under a rebuild).
+    - Supply chain (R1b N8): the three base images are pinned by digest as well as tag; gh is pinned to a version, and the build fails unless its apt keyring holds exactly the two primary keys GitHub publishes; the web stage runs `npm ci --ignore-scripts`. First-start `mise install` of `node = "lts"` and `claude = "latest"` is deliberately unpinned (checked by aqua's checksums, current on every new volume); pinning is a line in the volume's `~/.config/mise/config.toml`.
+    - Secrets (R1b N1): every agent runs as `crow`, like tini and crowsnest, so any environment in the container is readable by them. The compose example therefore mounts the password as a secret file (`CROWSNEST_PASSWORD_FILE`), gives crowsnest its own `crowsnest.env` and each sidecar its own env file (a `TUNNEL_TOKEN` in crowsnest's environment would let a prompt-injected agent run its own connector for the public hostname and receive login traffic), and runs cloudflared in crowsnest's network namespace. The entrypoint drops `TUNNEL_TOKEN` and `TS_AUTHKEY` if they reach it anyway, keeps crowsnest's secrets out of `mise install`, and notes a password given as a variable; crowsnest re-executes itself without its secrets (section 4.9). Not fixable here: tini (PID 1) keeps Docker's environment, and `CROWSNEST_NOTIFY_URL` and `ELEVENLABS_API_KEY` have no file form yet, so set as variables they are readable by agents; files of crowsnest's are readable by the same uid too. The real boundary would be running crowsnest as a different uid from the agents.
     - herdr is the GitHub release binary for a pinned `HERDR_VERSION`, checked against per-architecture `HERDR_SHA256_*` build args (the same digests `https://herdr.dev/latest.json` and the GitHub release publish). herdr's `install.sh` was not used: it always installs whatever `latest.json` names. mise is its release binary, pinned the same way against `SHASUMS256.txt`. gh comes from GitHub's own apt repository (Debian's trails far behind).
     - Environment: `HOME=/home/crow`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR` under it, `PATH` with mise's shims and `~/.local/bin` first, `LANG`/`LC_ALL=en_US.UTF-8`, `SHELL=/bin/bash`, `DISABLE_AUTOUPDATER=1` (Claude Code upgrades through `mise upgrade`; its own updater would install a second copy the shims shadow), `CROWSNEST_PORT=2769`. `/etc/profile.d/crowsnest-devbox.sh` puts the shims back for login shells, whose `/etc/profile` resets `PATH`.
     - `deploy/entrypoint.sh` (POSIX sh, under tini, as crow): refuses with exit 64 and a message naming the variables when there are no credentials, when `CROWSNEST_PASSWORD_FILE` is unreadable, or when `CROWSNEST_NO_AUTH=true` lacks `CROWSNEST_I_KNOW_THIS_IS_OPEN=true`; refuses an unwritable `$HOME` (a bind mount not owned by uid 1000). On first start it seeds `~/.config/mise/config.toml` (`node = "lts"`, `claude = "latest"`: mise's registry maps `claude` to `aqua:anthropics/claude-code`, the native binary with checksums, preferred over `npm:@anthropic-ai/claude-code`) and `~/.config/herdr/config.toml` (`onboarding = false`, so the browser's Terminal view does not open on herdr's first-run screen); it never overwrites either. Then `mise install` runs detached (double fork, so tini reaps it) and the entrypoint waits up to `CROWSNEST_MISE_WAIT` seconds (default 300): long enough that Claude Code is usually on `PATH` before crowsnest starts, capped so a slow network never keeps the UI down. A failure prints the log's tail and carries on. Last, `exec crowsnest serve --bind 0.0.0.0 "$@"`.
@@ -1045,6 +1067,17 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
     nudging an agent whose answer was just typed costs a turn and says the wrong thing.
 30. **Job agents get a tab in the new worktree workspace** (M7), because herdr's worktree.create
     takes no environment; the workspace's root pane is left as a plain shell in the checkout.
+31. **Agent identity is a crowsnest-issued token, not peer credentials** (R1b N2). Walking
+    `SO_PEERCRED`/`LOCAL_PEERPID` up the process tree to a pane would depend on herdr's process
+    view and on platform calls; a token is portable and also reaches the MCP server and hooks,
+    whose parents are Claude, not the pane's shell. Tokens are minted per pane (in its env, for
+    `crowsnest ask` in a shell) and per start (MCP env and the hooks' token file), because
+    `agent.start` takes no environment and an adopted pane has none of crowsnest's.
+32. **An answer too long for one line is replaced, never shortened** (R1b-C01). The note
+    outranks the choice; a cut note can turn a conditional yes into an unconditional one.
+33. **Serve re-executes itself to shed its secrets** (R1b H1). `os.Unsetenv` cannot change the
+    environment the kernel reports; a re-exec with the secrets on a pipe can, at the cost of one
+    exec at start.
 
 ## 18. Milestones
 
@@ -1093,7 +1126,8 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - A job agent in a folder Claude has not been told to trust stops at the trust prompt; the job shows `needs_you` and waits for someone to answer it in the terminal. A new worktree is a new folder.
 - The orchestrator holds one running job at a time; further jobs without a directory wait queued.
 - Codex jobs are launched but have no hooks: they are covered by the herdr-side backstop (M8 calls `NudgeIfDue`), not the Stop hook.
-- Answers are typed back only to the pane the question came from. An agent restarted in another pane, or one whose `HERDR_PANE_ID` did not reach the asking process, gets the answer only through the Inbox (and, from M7, `job_get`). A held delivery (dialog or draft) waits up to a week.
+- Answers are typed back only to the pane the question came from, as its token says. An agent restarted in another pane, or a caller without a token (a pane crowsnest did not create, a script), gets the answer only through the Inbox, `--wait`, `get_question` or `job_get`. A held delivery (dialog or draft) waits up to a week.
+- **Agent identity is per uid, not per process** (R1b N2): a process of the same user that reads another agent's environment or 0600 token file can act as that agent on the socket. The token stops the trivial forgery (setting an environment variable), not a determined same-user attacker. Questions and jobs can still be read (`GET`) by any caller.
 - The long-poll's waiter state is in memory: after a crowsnest restart, an asker blocked on `ask --wait` gets its answer from its next poll and also typed into its pane.
 - One controller per pane: two browsers on the same pane view take turns (the one that lost the pane says so and offers Reconnect).
 - The Terminal view is herdr's own TUI, which shows every machine the user's herdr config names, remote ones included; anyone who can open it reaches those machines as well (M5). The pane view is limited to the session's own panes.

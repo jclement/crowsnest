@@ -1,6 +1,7 @@
-// The agent-side subcommands (DESIGN.md section 9): `ask`, `notify`, `say` and `mcp`. They run
-// inside agent panes, talk to the unix socket named by CROWSNEST_SOCKET, and identify the caller
-// from HERDR_PANE_ID and CROWSNEST_JOB. `job` and `hook` join them in M7.
+// The agent-side subcommands (DESIGN.md section 9): `ask`, `question`, `notify`, `say` and `mcp`.
+// They run inside agent panes, talk to the unix socket named by CROWSNEST_SOCKET, and identify the
+// caller with CROWSNEST_TOKEN, which crowsnest gave the agent (the server maps it to the pane and
+// job). `job` and `hook` join them in M7.
 //
 // Exit codes: 0 success (for `ask --wait`: answered), 3 for `ask --wait` when the question expired
 // or was cancelled, 1 for any error, 2 for a usage error.
@@ -106,7 +107,9 @@ func runAsk(ctx context.Context, out io.Writer, input questions.AskInput, wait b
 	}
 	input.Wait = wait
 	if wait && timeout > 0 && input.ExpiresInHours == 0 {
-		input.ExpiresInHours = timeout.Hours()
+		// The server refuses an expiry under five minutes; a shorter --timeout still gives up
+		// locally at its own time.
+		input.ExpiresInHours = max(timeout.Hours(), questions.MinExpiryHours)
 	}
 	question, err := client.Ask(ctx, input)
 	if err != nil {
@@ -136,6 +139,33 @@ func runAsk(ctx context.Context, out io.Writer, input questions.AskInput, wait b
 		return exitCodeError{code: exitUnanswered}
 	}
 	return nil
+}
+
+// ---- question ------------------------------------------------------------------------------
+
+func newQuestionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "question <id>",
+		Short: "Print a question you asked, with its whole answer (agent side)",
+		Long: "Prints {id, status, title, answer_value, answer_labels, answer_note} as JSON. Use it when a\n" +
+			"[crowsnest answer q_<n>] line says the answer is too long for one line: the note, which\n" +
+			"outranks the choice, is never shortened here. It does not wait; see ask --wait for that.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := agentClient()
+			if err != nil {
+				return err
+			}
+			question, err := client.Get(cmd.Context(), args[0], 0)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(agentapi.AnswerResult{
+				ID: question.ID, Status: string(question.Status), Title: question.Title, AnswerValue: question.AnswerValue,
+				AnswerLabels: questions.AnswerLabelList(question), AnswerNote: question.AnswerNote,
+			})
+		},
+	}
 }
 
 // ---- notify --------------------------------------------------------------------------------
@@ -190,7 +220,7 @@ func newMCPCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
 		Short: "Serve crowsnest's agent tools over MCP on stdio (Claude Code starts this)",
-		Long: "A stdio MCP server exposing ask and say (and, from M7, the job tools), proxied to the agent\n" +
+		Long: "A stdio MCP server exposing ask, get_question and say (and, from M7, the job tools), proxied to the agent\n" +
 			"socket named by CROWSNEST_SOCKET. Claude Code starts it from the --mcp-config file crowsnest writes.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

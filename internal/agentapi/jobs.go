@@ -10,7 +10,12 @@
 //	POST /api/v1/jobs/{id}/fail          fail
 //	POST /api/v1/hooks/{event}           a Claude Code hook's stdin; answers {stdout}
 //
-// The job id is explicit in the path; clients take it from --job / job_id or CROWSNEST_JOB.
+// The job id is explicit in the path; clients take it from --job / job_id or CROWSNEST_JOB. What
+// the caller may do comes from its token, never from that path (R1b N2): reading is open to any
+// caller, but job_update, done and fail are allowed only on the job the token was issued for, or
+// on the job held in the token's pane (the orchestrator's tokens name no job). Creating a job
+// needs an identified caller (it starts an agent), and its parent is the caller's own job. A hook
+// belongs to the token's job, else to the job held in the token's pane, else to nothing.
 
 package agentapi
 
@@ -68,7 +73,12 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, maxJobBody, &input) {
 		return
 	}
-	job, err := service.Create(r.Context(), input, callerOf(r).JobID)
+	caller := s.callerOf(r)
+	if caller.PaneID == "" {
+		writeError(w, http.StatusForbidden, codeForbidden, "Only an agent crowsnest started can create jobs (no valid CROWSNEST_TOKEN came with this request).")
+		return
+	}
+	job, err := service.Create(r.Context(), input, caller.JobID)
 	if err != nil {
 		s.writeJobError(w, r, err)
 		return
@@ -92,7 +102,7 @@ func (s *Server) handleJobList(w http.ResponseWriter, r *http.Request) {
 		s.writeJobError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "meta": map[string]int{"total": len(list)}})
+	_ = writeJSON(w, http.StatusOK, map[string]any{"data": list, "meta": map[string]int{"total": len(list)}})
 }
 
 func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +137,7 @@ func (s *Server) handleJobUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input jobs.UpdateInput
-	if !decodeBody(w, r, maxJobBody, &input) {
+	if !decodeBody(w, r, maxJobBody, &input) || !s.mayActOnJob(w, r, service) {
 		return
 	}
 	job, err := service.Update(r.Context(), r.PathValue("id"), input)
@@ -144,7 +154,7 @@ func (s *Server) handleJobDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input jobs.DoneInput
-	if !decodeBody(w, r, maxJobBody, &input) {
+	if !decodeBody(w, r, maxJobBody, &input) || !s.mayActOnJob(w, r, service) {
 		return
 	}
 	job, err := service.Done(r.Context(), r.PathValue("id"), input)
@@ -161,7 +171,7 @@ func (s *Server) handleJobFail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input FailRequest
-	if !decodeBody(w, r, maxJobBody, &input) {
+	if !decodeBody(w, r, maxJobBody, &input) || !s.mayActOnJob(w, r, service) {
 		return
 	}
 	job, err := service.Fail(r.Context(), r.PathValue("id"), input.Reason)
@@ -184,13 +194,29 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, "The hook input must be JSON: "+err.Error())
 		return
 	}
-	caller := callerOf(r)
+	caller := s.callerOf(r)
 	reply, err := service.HandleHook(r.Context(), r.PathValue("event"), caller.JobID, caller.PaneID, input)
 	if err != nil {
 		s.writeJobError(w, r, err)
 		return
 	}
 	writeData(w, http.StatusOK, reply)
+}
+
+// mayActOnJob reports whether the caller may change the job in the path: its token was issued for
+// that job, or for the pane holding it. Otherwise it writes the refusal.
+func (s *Server) mayActOnJob(w http.ResponseWriter, r *http.Request, service *jobs.Service) bool {
+	caller := s.callerOf(r)
+	job, err := service.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeJobError(w, r, err)
+		return false
+	}
+	if caller.PaneID != "" && (caller.JobID == job.ID || (caller.JobID == "" && caller.PaneID == job.PaneID)) {
+		return true
+	}
+	writeError(w, http.StatusForbidden, codeForbidden, "This is not your job: an agent may update, finish or fail only the job it holds.")
+	return false
 }
 
 func (s *Server) writeJobError(w http.ResponseWriter, r *http.Request, err error) {

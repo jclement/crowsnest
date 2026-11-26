@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 // Limits. They keep one question readable on a phone and bound what a misbehaving agent can put
@@ -32,6 +34,10 @@ const (
 	// DefaultExpiryHours applies when the asker gives none; MaxExpiryHours is a week.
 	DefaultExpiryHours = 24.0
 	MaxExpiryHours     = 168.0
+	// MinExpiryHours is five minutes. An expiry is typed back to the asker, so a question that
+	// expires at the next sweep was a way to have crowsnest type a line with no human involved
+	// (R1b N2); five minutes also gives the human a chance to see it.
+	MinExpiryHours = 5.0 / 60
 	// MaxRequestBytes bounds a whole ask request: every file at its limit plus the rest.
 	MaxRequestBytes = MaxFiles*2*MaxFileSideBytes + MaxBodyBytes + 256<<10
 )
@@ -97,6 +103,8 @@ func checkText(input AskInput) error {
 		return invalid("body_md is longer than %d KB; link to a file instead", MaxBodyBytes>>10)
 	case !utf8.ValidString(input.Title) || !utf8.ValidString(input.BodyMD):
 		return invalid("title and body_md must be UTF-8 text")
+	case termtext.HasBidiControl(input.Title):
+		return invalid("title holds a bidirectional control character, which makes it read differently from what it says; remove it")
 	}
 	return nil
 }
@@ -140,6 +148,8 @@ func checkOptions(input AskInput) error {
 			return invalid("option %q needs a label", option.Key)
 		case utf8.RuneCountInString(option.Label) > MaxOptionLabel:
 			return invalid("option %q: label is longer than %d characters; use detail", option.Key, MaxOptionLabel)
+		case termtext.HasBidiControl(option.Label) || termtext.HasBidiControl(option.Detail):
+			return invalid("option %q holds a bidirectional control character; remove it", option.Key)
 		case utf8.RuneCountInString(option.Detail) > MaxOptionDetail:
 			return invalid("option %q: detail is longer than %d characters", option.Key, MaxOptionDetail)
 		}
@@ -189,8 +199,8 @@ func checkFiles(input AskInput) error {
 }
 
 func checkExpiry(input AskInput) error {
-	if input.ExpiresInHours < 0 || input.ExpiresInHours > MaxExpiryHours {
-		return invalid("expires_in_hours must be between 0 and %.0f (a week)", MaxExpiryHours)
+	if input.ExpiresInHours < MinExpiryHours || input.ExpiresInHours > MaxExpiryHours {
+		return invalid("expires_in_hours must be between %.3f (five minutes) and %.0f (a week)", MinExpiryHours, MaxExpiryHours)
 	}
 	return nil
 }

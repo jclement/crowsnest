@@ -1,6 +1,7 @@
 // The client the agent-side commands (`crowsnest ask|notify|say|mcp`) use to reach the socket.
-// It reads its configuration from the environment crowsnest gives every pane it starts:
-// CROWSNEST_SOCKET (where), HERDR_PANE_ID and CROWSNEST_JOB (who is asking).
+// It reads its configuration from the environment crowsnest gives every agent it starts:
+// CROWSNEST_SOCKET (where) and CROWSNEST_TOKEN (who is asking; the server maps it to the pane
+// and job). It sends no pane id of its own: the server would not believe one (R1b N2, N7).
 
 package agentapi
 
@@ -17,14 +18,17 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/questions"
 )
 
 // Environment variables the client reads.
 const (
 	EnvSocket = "CROWSNEST_SOCKET"
-	EnvPane   = "HERDR_PANE_ID"
-	EnvJob    = "CROWSNEST_JOB"
+	EnvToken  = agentid.EnvToken
+	// EnvJob is the job a job agent holds: only the default job id for the job verbs' paths.
+	// The server decides what the caller may touch from its token, not from this.
+	EnvJob = "CROWSNEST_JOB"
 )
 
 // pollSeconds is the long-poll window a waiting client asks for; it polls again until settled.
@@ -57,12 +61,14 @@ func (e *APIError) Error() string { return e.Message }
 // Client talks to the agent socket.
 type Client struct {
 	socket string
-	caller questions.Caller
+	token  string
+	job    string // default job id for the job verbs (CROWSNEST_JOB, --job, job_id)
 	http   *http.Client
 }
 
-// NewClient returns a client for the socket at path, identifying itself as caller.
-func NewClient(path string, caller questions.Caller) *Client {
+// NewClient returns a client for the socket at path, identifying itself with token ("" for an
+// unidentified caller).
+func NewClient(path, token string) *Client {
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var dialer net.Dialer
@@ -70,17 +76,19 @@ func NewClient(path string, caller questions.Caller) *Client {
 		},
 		MaxIdleConns: 2,
 	}
-	return &Client{socket: path, caller: caller, http: &http.Client{Transport: transport}}
+	return &Client{socket: path, token: token, http: &http.Client{Transport: transport}}
 }
 
-// NewClientFromEnv builds a client from CROWSNEST_SOCKET, HERDR_PANE_ID and CROWSNEST_JOB, read
-// through getenv. It returns ErrNoSocket when the socket is not named.
+// NewClientFromEnv builds a client from CROWSNEST_SOCKET and CROWSNEST_TOKEN, read through
+// getenv. It returns ErrNoSocket when the socket is not named.
 func NewClientFromEnv(getenv func(string) string) (*Client, error) {
 	path := getenv(EnvSocket)
 	if path == "" {
 		return nil, ErrNoSocket
 	}
-	return NewClient(path, questions.Caller{PaneID: getenv(EnvPane), JobID: getenv(EnvJob)}), nil
+	client := NewClient(path, getenv(EnvToken))
+	client.job = getenv(EnvJob)
+	return client, nil
 }
 
 // Socket is the socket path the client uses.
@@ -111,17 +119,51 @@ func (c *Client) Get(ctx context.Context, id string, wait time.Duration) (questi
 	return out, err
 }
 
-// WaitSettled long-polls until the question is no longer open or ctx ends.
+// WaitSettled long-polls until the question is no longer open or ctx ends. A poll that fails
+// because the socket dropped or crowsnest answered 5xx (a restart, say) is retried with backoff
+// for up to waitRetryBudget; the question itself is never asked again (R1b-C06).
 func (c *Client) WaitSettled(ctx context.Context, id string) (questions.Question, error) {
+	var failingSince time.Time
+	backoff := waitRetryMin
 	for {
 		question, err := c.Get(ctx, id, pollSeconds*time.Second)
-		if err != nil || question.Status != questions.StatusOpen {
+		switch {
+		case err == nil && question.Status != questions.StatusOpen:
+			return question, nil
+		case err == nil:
+			failingSince, backoff = time.Time{}, waitRetryMin
+		case !retryable(err) || ctx.Err() != nil:
+			return question, err
+		case failingSince.IsZero():
+			failingSince = time.Now()
+		case time.Since(failingSince) > waitRetryBudget:
 			return question, err
 		}
-		if err := ctx.Err(); err != nil {
-			return question, err
+		if err == nil {
+			continue
 		}
+		select {
+		case <-ctx.Done():
+			return question, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, waitRetryMax)
 	}
+}
+
+// Retries of a failing long-poll: from waitRetryMin doubling to waitRetryMax, for at most
+// waitRetryBudget in a row (long enough for crowsnest to restart).
+const (
+	waitRetryMin    = 500 * time.Millisecond
+	waitRetryMax    = 10 * time.Second
+	waitRetryBudget = 2 * time.Minute
+)
+
+// retryable is a transport failure or a server error: the poll may work next time.
+func retryable(err error) bool {
+	var down *ServerDownError
+	var apiErr *APIError
+	return errors.As(err, &down) || (errors.As(err, &apiErr) && apiErr.Status >= 500)
 }
 
 // Cancel withdraws a question the caller asked.
@@ -151,11 +193,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return fmt.Errorf("building the request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	if c.caller.PaneID != "" {
-		request.Header.Set(HeaderPane, c.caller.PaneID)
-	}
-	if c.caller.JobID != "" {
-		request.Header.Set(HeaderJob, c.caller.JobID)
+	if c.token != "" {
+		request.Header.Set(agentid.HeaderToken, c.token)
 	}
 	response, err := c.http.Do(request)
 	if err != nil {

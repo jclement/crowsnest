@@ -43,8 +43,12 @@ type PromptResult struct {
 	Queued bool `json:"queued"`
 	// Started is true when a turn was seen to start (or the text was queued). False means the
 	// text was typed but Claude did not visibly pick it up within 30 s; Note says what to do.
-	Started bool   `json:"started"`
-	Note    string `json:"note,omitempty"`
+	Started bool `json:"started"`
+	// Uncertain is true when crowsnest handed the text to herdr and then lost the answer, so it
+	// cannot say whether the text was typed (R1b-C05). A caller must neither retry it (that may
+	// type it twice) nor report it as delivered.
+	Uncertain bool   `json:"uncertain,omitempty"`
+	Note      string `json:"note,omitempty"`
 }
 
 // DraftError refuses a send because the input box holds text typed at the terminal.
@@ -150,7 +154,7 @@ func promptOutcome(ctx context.Context, client herdr.Client, before, after herdr
 		// The request reached herdr and then the answer was lost (our own deadline, a dropped
 		// connection). herdr may well have typed it, so this is uncertain delivery, not a
 		// failure: an error here would invite a retry that sends the instruction twice (R1-C09).
-		result.Status, result.Started = before.AgentStatus, false
+		result.Status, result.Started, result.Uncertain = before.AgentStatus, false, true
 		result.Note = "crowsnest lost track of this send after handing it to herdr, so it may or may not have been typed. Check the agent's terminal before sending again."
 		return result, nil
 	default:

@@ -118,3 +118,22 @@ func (s *Store) DeleteKV(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+// ListKV returns every key starting with prefix, with its value. It is for small families of
+// keys (the agent tokens, keyed agent_token:<hash>), not for scanning the table.
+func (s *Store) ListKV(ctx context.Context, prefix string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM kv WHERE substr(key, 1, ?) = ?`, len(prefix), prefix)
+	if err != nil {
+		return nil, fmt.Errorf("listing kv %q: %w", prefix, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]string{}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("reading kv %q: %w", prefix, err)
+		}
+		out[key] = value
+	}
+	return out, rows.Err()
+}
