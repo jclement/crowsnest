@@ -91,7 +91,9 @@ func TestIntegrationClaudeAsk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = agentapi.NewServer(agentapi.ServerOptions{Questions: service, Hub: events, Logger: logger}).Serve(ctx, listener) }()
+	go func() {
+		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: service, Hub: events, Logger: logger}).Serve(ctx, listener)
+	}()
 
 	stateDir := t.TempDir()
 	// CROWSNEST_E2E_PERMISSION_MODE probes other modes (M6 checked "default" too; DESIGN.md 7.6).
