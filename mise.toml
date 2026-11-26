@@ -118,6 +118,11 @@ description = "Chat view against the built binary in --demo mode (a real prompt 
 depends = ["build"]
 run = "npm --prefix web run screenshots:chat"
 
+[tasks."e2e:voice"]
+description = "Talk mode against the built binary in --demo mode and a fake ElevenLabs (never the real one), with Chromium's fake microphone: hold to talk, transcript sent, SAY reply played; plus Chat-with-talk screenshots at 375 and 1440 px into web/screenshots"
+depends = ["build"]
+run = "npm --prefix web run e2e:voice"
+
 # ---- Ship --------------------------------------------------------------------
 
 [tasks.snapshot]

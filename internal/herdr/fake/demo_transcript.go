@@ -213,7 +213,8 @@ type cannedReply struct {
 // demoSay follows the SAY contract the way a real orchestrator is told to: a prompt whose header
 // says talk=on gets a spoken first line, so talk mode can be exercised without Claude.
 func demoSay(prompt string, reply cannedReply) string {
-	if !strings.Contains(firstLine(prompt), "talk=on") {
+	header, _, _ := strings.Cut(prompt, "\n") // not firstLine: it shortens the line, and the flag is at its end
+	if !strings.HasPrefix(header, "[crowsnest ") || !strings.Contains(header, "talk=on") {
 		return ""
 	}
 	return "SAY: " + reply.say + "\n\n"
