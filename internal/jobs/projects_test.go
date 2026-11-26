@@ -212,3 +212,21 @@ func TestALeadDelegatesOnlyInsideItsProject(t *testing.T) {
 		t.Fatal("an unknown pane created a job")
 	}
 }
+
+func TestRestartAgentResumesWithFreshFiles(t *testing.T) {
+	r := newRig(t, nil)
+	job := r.create(CreateInput{Brief: "Work", Dir: t.TempDir(), Role: "tester"})
+	if job.State != StateRunning {
+		t.Fatalf("not running: %+v", job.Job)
+	}
+	starts := len(r.fake.Starts())
+	if _, err := r.svc.RestartAgent(context.Background(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.fake.Starts(); len(got) != starts+1 || got[len(got)-1].Name != job.AgentName {
+		t.Fatalf("starts %d → %+v", starts, got)
+	}
+	if _, err := r.svc.RestartAgent(context.Background(), "j_999"); err == nil {
+		t.Fatal("a missing job restarted")
+	}
+}
