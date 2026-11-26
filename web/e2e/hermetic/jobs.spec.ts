@@ -113,7 +113,8 @@ test("a running job: message its agent and watch the timeline", async ({ page },
   await expect(detail.getByRole("heading", { name: "Add retry back-off to the webhook sender" })).toBeVisible();
   await expect(detail.getByText("Doing now:")).toBeVisible();
   await expect(detail.getByText("~/.herdr/worktrees/crowsnest/job-1 · job/1-add-retry-back-off")).toBeVisible();
-  const box = detail.getByRole("textbox", { name: "Message to job-1" });
+  // A job names the agent its pane holds (R3, ExpectAgent): the demo's builder pane.
+  const box = detail.getByRole("textbox", { name: "Message to builder" });
   await box.fill("Use full jitter, not equal jitter");
   await detail.getByRole("button", { name: "Send" }).click();
   // The builder is working, so Claude queues it.

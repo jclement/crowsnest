@@ -43,6 +43,14 @@ func SeedDemo(ctx context.Context, s *Service, panes DemoPanes) error {
 	}
 	ids := map[string]string{}
 	for _, item := range demoJobs(s.opts.Now(), panes) {
+		key := item.record.AgentName // runDemo finds the scripted jobs by these names
+		if item.record.PaneID != "" && s.opts.Herdr != nil {
+			// The job names the agent its pane really holds, as a real launch records it, so the
+			// supervisor's ExpectAgent check (a nudge, a message) accepts the demo's panes.
+			if agent, err := s.opts.Herdr.AgentGet(ctx, item.record.PaneID); err == nil && agent.Name != "" {
+				item.record.AgentName = agent.Name
+			}
+		}
 		id, err := s.opts.Store.InsertJob(ctx, item.record)
 		if err != nil {
 			return fmt.Errorf("seeding a demo job: %w", err)
@@ -52,7 +60,7 @@ func SeedDemo(ctx context.Context, s *Service, panes DemoPanes) error {
 				return err
 			}
 		}
-		ids[item.record.AgentName] = FormatID(id)
+		ids[key] = FormatID(id)
 		if item.record.State == string(StateNeedsYou) && Cause(item.record.Cause) == CauseQuestions {
 			if err := seedDemoQuestion(ctx, s, FormatID(id), item.record.PaneID); err != nil {
 				return err
