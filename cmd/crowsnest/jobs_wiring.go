@@ -72,7 +72,7 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	}
 	return jobs.New(jobs.Options{
 		Projects: projectSource,
-		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
+		Store:    db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
 		Attachments: files, Spend: meter, Instructions: jobInstructions(refs.instructions),
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),

@@ -42,9 +42,9 @@ const (
 )
 
 var (
-	slugPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
-	rolePattern  = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
-	modelPattern = regexp.MustCompile(`^[A-Za-z0-9._:\[\]-]{1,64}$`)
+	slugPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	rolePattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	modelPattern    = regexp.MustCompile(`^[A-Za-z0-9._:\[\]-]{1,64}$`)
 	permissionModes = map[string]bool{"": true, "default": true, "auto": true, "acceptEdits": true, "plan": true, "bypassPermissions": true, "dontAsk": true}
 )
 

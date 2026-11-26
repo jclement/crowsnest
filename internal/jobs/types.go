@@ -138,13 +138,13 @@ const (
 
 // Job is the record both APIs return (6.1).
 type Job struct {
-	ID             string     `json:"id"` // j_<n>
-	Title          string     `json:"title"`
-	BriefMD        string     `json:"brief_md"`
-	DoneWhen       string     `json:"done_when"`
-	Role           string     `json:"role"`
+	ID       string `json:"id"` // j_<n>
+	Title    string `json:"title"`
+	BriefMD  string `json:"brief_md"`
+	DoneWhen string `json:"done_when"`
+	Role     string `json:"role"`
 	// ProjectID is the project the job belongs to; 0 is Unfiled (DESIGN.md 21.1).
-	ProjectID int64 `json:"project_id"`
+	ProjectID      int64      `json:"project_id"`
 	Dir            string     `json:"dir"`
 	WorktreeBranch string     `json:"worktree_branch"`
 	WorkDir        string     `json:"work_dir"`

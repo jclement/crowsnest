@@ -138,8 +138,7 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 		if permission == "" {
 			permission = deps.cfg.PermissionMode
 		}
-		var agent *orch.Orchestrator
-		agent = orch.New(orch.Options{
+		agent := orch.New(orch.Options{
 			Client: deps.client, KV: deps.db, Hub: nil, Journal: deps.journal, Logger: deps.logger.With("lead", project.Slug),
 			Session: deps.cfg.Session, Dir: project.Dir, StateDir: filepath.Join(deps.cfg.StateDir, "leads", project.Slug),
 			Model: deps.cfg.Model, PermissionMode: permission, Version: version,

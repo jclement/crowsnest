@@ -66,11 +66,11 @@ const (
 
 // SayEvent is the data of a `say` hub event.
 type SayEvent struct {
-	Kind   string    `json:"kind"`              // speak or chime
-	Source string    `json:"source"`            // say or reply
-	TextID string    `json:"text_id,omitempty"` // speak only
-	Text   string    `json:"text,omitempty"`    // speak only: shown as a caption
-	PaneID string    `json:"pane_id,omitempty"` // who said it
+	Kind   string `json:"kind"`              // speak or chime
+	Source string `json:"source"`            // say or reply
+	TextID string `json:"text_id,omitempty"` // speak only
+	Text   string `json:"text,omitempty"`    // speak only: shown as a caption
+	PaneID string `json:"pane_id,omitempty"` // who said it
 	// Agent is the standing agent that said it ("orchestrator", "lead-<slug>"), so a browser
 	// speaks only the agents it opted into and queues them (DESIGN.md 13.5); "" when unknown.
 	Agent string    `json:"agent,omitempty"`

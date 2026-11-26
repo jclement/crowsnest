@@ -35,7 +35,7 @@ type projectView struct {
 
 // projectsView is GET /projects.
 type projectsView struct {
-	Projects []projectView  `json:"projects"`
+	Projects []projectView   `json:"projects"`
 	Unfiled  projects.Counts `json:"unfiled"`
 }
 

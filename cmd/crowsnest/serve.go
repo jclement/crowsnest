@@ -207,7 +207,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		tasks: scheduleTasks{service: scheduleService}, tender: tender, leads: refs.projects.leads.Load,
 	}, client, logger)
 	pokerRef.Store(poker)
-	tasksFor := func(projectID int64) orch.TaskSource { return scheduleTasks{service: scheduleService, projectID: projectID} }
+	tasksFor := func(projectID int64) orch.TaskSource {
+		return scheduleTasks{service: scheduleService, projectID: projectID}
+	}
 	refs.projects.taskSource.Store(&tasksFor)
 	refs.projects.useInstructions(refs.instructions, logger)
 	leads := refs.projects.startLeads(ctx, leadDeps{
@@ -217,6 +219,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 				go func() { _ = conversations.Pin(ctx, status.Name) }()
 			}
 			standingReplies.status(ctx, status.Name, status.State == orch.StateIdle, status.PaneID)
+			if status.State == orch.StateIdle || status.State == orch.StateWorking {
+				// A lead that just became ready takes the job waiting for it now, not at the
+				// supervisor's next tick (which --demo does not run at all).
+				go jobService.DispatchStanding(context.WithoutCancel(ctx))
+			}
 			events.Publish(hub.Event{Type: "lead", Data: projects.LeadStatus{Status: status, ProjectID: project.ID, Slug: project.Slug, Running: true}})
 		},
 	})

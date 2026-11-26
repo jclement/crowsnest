@@ -114,9 +114,18 @@ test("start a lead and give it a job to the lead: filed in the project, for its 
   );
   const infra = await page.evaluate(() => fetch("/api/v1/projects/infra").then((r) => r.json()).then((body: { data: { id: number } }) => body.data.id));
   expect(job).toMatchObject({ project_id: infra, dir: "", role: "lead" });
-  // The demo's supervisor does not dispatch queued jobs to standing agents, so the job waits for
-  // the lead here (with real herdr the lead takes it and agent_name becomes lead-infra).
-  expect(["", "lead-infra"]).toContain(job?.agent_name ?? "");
+  // The lead takes it once it is ready: a lead's status turning idle dispatches its waiting job.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          fetch("/api/v1/jobs")
+            .then((r) => r.json())
+            .then((body: { data: Array<{ title: string; agent_name: string }> }) => body.data.find((j) => j.title.startsWith("Rotate the devbox"))?.agent_name ?? ""),
+        ),
+      { timeout: 20_000 },
+    )
+    .toBe("lead-infra");
 });
 
 test("chat with a project's lead: the target is in the URL and the lead replies", async ({ page }, testInfo) => {

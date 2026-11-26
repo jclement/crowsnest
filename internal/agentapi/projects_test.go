@@ -13,7 +13,9 @@ import (
 
 type stubProjects struct{}
 
-func (stubProjects) ProjectsText(context.Context) (string, error) { return "# Projects\n- alpha\n", nil }
+func (stubProjects) ProjectsText(context.Context) (string, error) {
+	return "# Projects\n- alpha\n", nil
+}
 
 func (stubProjects) ProjectText(_ context.Context, ref string) (string, error) {
 	if ref != "alpha" && ref != "7" {
