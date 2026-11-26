@@ -295,6 +295,9 @@ func (f *Fake) AgentStart(_ context.Context, params herdr.AgentStartParams) (her
 	if notReady {
 		status = herdr.StatusBlocked // parked at a trust dialog, as real Claude would be
 	}
+	if f.startSession != nil {
+		session, f.startSession = *f.startSession, nil
+	}
 	f.attachAgentLocked(p, params.Name, params.Kind, status, session)
 	if notReady {
 		p.agent.InteractiveReady, p.agent.LaunchPending = false, true

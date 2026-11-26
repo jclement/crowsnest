@@ -22,6 +22,34 @@ func (f *Fake) StartNotReadyNext() {
 	f.startNotReady = true
 }
 
+// StartReportsSessionNext makes the agent of the next agent.start report sessionID ("" for no
+// session at all) instead of the id in its --session-id or --resume argument. Real herdr's
+// detection lags a launch: right after a restart it can still report the previous session, or
+// none yet (DESIGN.md 7.6).
+func (f *Fake) StartReportsSessionNext(sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startSession = &sessionID
+}
+
+// SetAgentSession changes the session an agent reports, as herdr's detection catching up or a
+// /clear in the terminal would. "" removes it.
+func (f *Fake) SetAgentSession(target, sessionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, err := f.resolveLocked(target)
+	if err != nil {
+		return err
+	}
+	p.agent.AgentSession = nil
+	if sessionID != "" {
+		p.agent.AgentSession = &herdr.AgentSession{Agent: p.agent.Agent, Kind: "id", Source: "fake", Value: sessionID}
+	}
+	p.info.AgentSession = p.agent.AgentSession
+	f.bumpLocked(p)
+	return nil
+}
+
 // ClearDialog marks an agent that stopped at a start-up dialog as ready and idle, as if someone
 // answered the dialog in the terminal.
 func (f *Fake) ClearDialog(target string) error {

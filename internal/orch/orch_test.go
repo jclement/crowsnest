@@ -355,3 +355,72 @@ func TestStartRetriesAPaneThatIsNotReadyYet(t *testing.T) {
 		t.Fatalf("status = %+v, %v, starts %d", status, err, len(f.Starts()))
 	}
 }
+
+// TestNewConversationIgnoresAStaleSessionFromHerdr is R1-C02: right after a launch herdr can
+// still report the previous conversation's session id. The id Claude was started with must be
+// the one published, stored and used for the transcript, until herdr reports something new.
+func TestNewConversationIgnoresAStaleSessionFromHerdr(t *testing.T) {
+	f := fake.New()
+	rig := newRig(t, f)
+	ctx := context.Background()
+	first, _ := rig.orch.Ensure(ctx)
+
+	f.StartReportsSessionNext(first.SessionID) // herdr still sees the old conversation
+	fresh, err := rig.orch.NewConversation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launched := argValue(f.Starts()[1].Args, "--session-id")
+	if launched == first.SessionID || fresh.SessionID != launched {
+		t.Fatalf("status session = %q, launched %q, old %q", fresh.SessionID, launched, first.SessionID)
+	}
+	assertStoredSession(t, rig, launched)
+	origin, err := TranscriptLookup(f, rig.orch)(ctx, Name)
+	if err != nil || origin.SessionID != launched {
+		t.Fatalf("transcript lookup = %+v, %v; want session %q", origin, err, launched)
+	}
+
+	rig.orch.Watch(ctx) // herdr still stale: nothing moves
+	if got := rig.orch.Status().SessionID; got != launched {
+		t.Fatalf("watch adopted the stale session: %q", got)
+	}
+	assertStoredSession(t, rig, launched)
+
+	_ = f.SetAgentSession(Name, "after-clear") // a /clear in the terminal really moves it
+	rig.orch.Watch(ctx)
+	if got := rig.orch.Status().SessionID; got != "after-clear" {
+		t.Fatalf("watch missed a genuine session change: %q", got)
+	}
+	assertStoredSession(t, rig, "after-clear")
+}
+
+// TestStartPublishesTheSessionBeforeHerdrDetectsIt is R1-C02's other half: herdr may not report
+// any session yet when the agent is ready.
+func TestStartPublishesTheSessionBeforeHerdrDetectsIt(t *testing.T) {
+	f := fake.New()
+	f.StartReportsSessionNext("")
+	rig := newRig(t, f)
+	ctx := context.Background()
+	status, err := rig.orch.Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launched := argValue(f.Starts()[0].Args, "--session-id")
+	if launched == "" || status.SessionID != launched {
+		t.Fatalf("status session = %q, launched %q", status.SessionID, launched)
+	}
+	assertStoredSession(t, rig, launched)
+	rig.orch.Watch(ctx)
+	_ = f.SetAgentSession(Name, launched) // detection catches up
+	rig.orch.Watch(ctx)
+	if got := rig.orch.Status().SessionID; got != launched {
+		t.Fatalf("after detection: %q", got)
+	}
+}
+
+func assertStoredSession(t *testing.T, rig *testRig, want string) {
+	t.Helper()
+	if stored, _ := rig.db.GetKV(context.Background(), kvSessionID); stored != want {
+		t.Fatalf("stored session = %q, want %q", stored, want)
+	}
+}

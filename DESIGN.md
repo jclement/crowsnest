@@ -386,8 +386,11 @@ Claude Code 2.1.332 by `mise run test:claude`):
   fallback, and switches to the transcript (a reset page) when the file appears. After "New
   conversation" the new session id has no file yet, so the old conversation is dropped at once.
 - **The orchestrator's own session id wins** for its pane: right after a restart herdr can still
-  report the previous session. The watch adopts herdr's value only when it changes outside a
-  launch (`/clear`).
+  report the previous session, or none yet. A successful start publishes and stores the id it
+  passed to Claude, and remembers the ids herdr may go on reporting (the previous conversation's
+  and whatever herdr showed when the launch finished). The watch ignores those; the first other
+  id herdr reports (it caught up, or a `/clear` moved the conversation) is adopted and stored
+  (R1-C02).
 - **States** (`GET /orchestrator`, `orchestrator` events): `idle` (herdr idle or done),
   `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed`, `disabled`.
 - **Watch**: every 2 s, and at once whenever the fleet cache publishes a `fleet` event (herdr's

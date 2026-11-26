@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -126,6 +127,31 @@ type Orchestrator struct {
 	mu       sync.Mutex
 	status   Status
 	restarts []time.Time // automatic restarts, for the hourly budget
+	// launch remembers what crowsnest started Claude with, so a stale session id from herdr
+	// cannot replace it (R1-C02). knownSession is the last non-empty Status.SessionID, kept
+	// across New conversation (which clears the status) so it can be recognised as stale.
+	launch       launchBaseline
+	knownSession string
+}
+
+// launchBaseline is the session id Claude was started with and the ids herdr may go on
+// reporting for a while afterwards: the previous conversation's, and whatever herdr reported
+// when the launch finished. While herdr reports one of those stale ids, the launched id wins;
+// the first time herdr reports anything else (it caught up, or a /clear really moved the
+// conversation) the baseline is dropped and herdr is followed again.
+type launchBaseline struct {
+	session string
+	stale   []string
+}
+
+func newLaunchBaseline(session string, candidates ...string) launchBaseline {
+	baseline := launchBaseline{session: session}
+	for _, candidate := range candidates {
+		if candidate != "" && candidate != session && !slices.Contains(baseline.stale, candidate) {
+			baseline.stale = append(baseline.stale, candidate)
+		}
+	}
+	return baseline
 }
 
 // New returns an orchestrator in the starting (or disabled) state. Nothing touches herdr until
@@ -262,17 +288,45 @@ func (o *Orchestrator) adopt(ctx context.Context, agent herdr.Agent) Status {
 
 // follow maps herdr's view of the agent onto the status.
 func (o *Orchestrator) follow(agent herdr.Agent) Status {
+	return o.update(func(s *Status) { o.applyAgentLocked(s, agent) })
+}
+
+// followLaunch is follow for an agent crowsnest has just started with sessionID: that id is
+// published and becomes the baseline herdr's possibly stale report is judged against. prior is
+// the session id known before the launch.
+func (o *Orchestrator) followLaunch(agent herdr.Agent, sessionID, prior string) Status {
 	return o.update(func(s *Status) {
-		s.PaneID = agent.PaneID
-		// While Claude is launching, herdr may still report the previous session's id.
-		if session := sessionOf(agent, ""); session != "" && !agent.LaunchPending {
-			s.SessionID = session
-		}
-		s.State, s.Detail = stateOf(agent, s.State), ""
-		if s.State == StateNeedsTerminal {
-			s.Detail = needsTerminalDetail
-		}
+		o.launch = newLaunchBaseline(sessionID, prior, sessionOf(agent, ""))
+		s.SessionID = sessionID
+		o.applyAgentLocked(s, agent)
 	})
+}
+
+// applyAgentLocked copies herdr's view of the agent into s; called with o.mu held.
+func (o *Orchestrator) applyAgentLocked(s *Status, agent herdr.Agent) {
+	s.PaneID = agent.PaneID
+	o.adoptSessionLocked(s, agent)
+	s.State, s.Detail = stateOf(agent, s.State), ""
+	if s.State == StateNeedsTerminal {
+		s.Detail = needsTerminalDetail
+	}
+}
+
+// adoptSessionLocked takes herdr's session id for the agent unless it is stale: while Claude is
+// launching herdr may still report the previous session, and after a launch it can keep doing
+// so for a while (DESIGN.md 7.6). Called with o.mu held.
+func (o *Orchestrator) adoptSessionLocked(s *Status, agent herdr.Agent) {
+	reported := sessionOf(agent, "")
+	if reported == "" || agent.LaunchPending {
+		return
+	}
+	if o.launch.session != "" {
+		if slices.Contains(o.launch.stale, reported) {
+			return
+		}
+		o.launch = launchBaseline{}
+	}
+	s.SessionID = reported
 }
 
 const needsTerminalDetail = "Claude stopped at a start-up prompt (folder trust or login). Open the orchestrator's terminal and answer it."
@@ -328,6 +382,9 @@ func (o *Orchestrator) update(change func(*Status)) Status {
 	o.mu.Lock()
 	before := o.status
 	change(&o.status)
+	if o.status.SessionID != "" {
+		o.knownSession = o.status.SessionID
+	}
 	o.status.Restarts = o.restartsInLastHourLocked()
 	after := o.status
 	after.UpdatedAt = before.UpdatedAt
