@@ -116,7 +116,7 @@ Startup rules (all fail closed, with a message that says what to pass):
 `localhost` binds 127.0.0.1 and ::1; ::1 is optional, so a machine without IPv6 still starts. An
 interface name binds every address on it except IPv6 link-local.
 
-Other subcommands: `version`, `health` (exit code for Docker), and the agent-side `job`, `ask`, `say`, `notify`, `hook`, `mcp` (section 9).
+Other subcommands: `version`, `health` (exit code for Docker), `update` (self-update, 16.1), and the agent-side `job`, `ask`, `say`, `notify`, `hook`, `mcp` (section 9).
 
 ## 4. Security model
 
@@ -959,7 +959,8 @@ browser reconnects, gets `hello`, and refetches.
 
 | Route | Purpose |
 |---|---|
-| `GET /health` | Unauthenticated: `{status, version, update_available:false}` |
+| `GET /health` | Unauthenticated: `{status, version, update_available, latest_version?, release_url?}` (16.1) |
+| `POST /admin/update` | Self-update from the browser (16.1): verify, install, answer, exit for a supervisor to restart |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`) |
 | `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
@@ -1226,15 +1227,17 @@ internal/questions/          store, long-poll, expiry
 internal/term/               PTY bridge, pane-control bridge
 internal/voice/              ElevenLabs client
 internal/agentapi/           unix-socket server, the CLI client, the stdio MCP proxy
+internal/update/             self-update: GitHub release check, Sigstore + checksum verification, install
 internal/store/              SQLite, migrations/
 internal/hub/                pub/sub
 web/                         React app; web/e2e Playwright; web/embed.go embeds web/dist
 deploy/                      Dockerfile (devbox), compose.yaml, entrypoint
+scripts/                     dev.sh, dev-reset.sh, dev-container.sh (the dev mise tasks)
 mise.toml  .goreleaser.yml  .github/workflows/{ci,release}.yml
 ```
 
 Go 1.27, `CGO_ENABLED=0`, `modernc.org/sqlite`, `github.com/coder/websocket`, `github.com/creack/pty`, `log/slog`.
-mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`; M5 adds the terminal bridges), `test:claude` (M4: real Claude, opt-in), `lint`, `fmt`, `check`, `e2e`, `e2e:real` (M5: Playwright against the built binary), `screenshots`, `screenshots:chat` (M4), `screenshots:inbox` (M6), `e2e:voice` (M11), `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
+mise tasks: `setup`, `dev` (the real binary on its own herdr session `crowsnest-dev` with a real orchestrator, plus Vite with reload; `dev:demo` is the fake-herdr variant, `dev:container` the devbox image on 127.0.0.1:2770), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`; M5 adds the terminal bridges), `test:claude` (M4: real Claude, opt-in), `lint`, `fmt`, `check`, `e2e`, `e2e:real` (M5: Playwright against the built binary), `screenshots`, `screenshots:chat` (M4), `screenshots:inbox` (M6), `e2e:voice` (M11), `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset` (also stops and deletes the `crowsnest-dev` session), `dev:container:reset`.
 
 ## 15. Test strategy
 
@@ -1255,12 +1258,12 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 
 ## 16. Distribution
 
-- **GitHub**: private repo `jclement/crowsnest`. CI on push and PR: `jdx/mise-action`, `mise run check`, hermetic E2E.
+- **GitHub**: public repo `jclement/crowsnest` (private until 2026-11-26). CI on push and PR: `jdx/mise-action`, `mise run check`, hermetic E2E.
 - **Release** on `v*` tags: GoReleaser builds linux and darwin, amd64 and arm64 (windows is skipped: PTYs and unix sockets make it a different product), tar.gz archives, sha256 checksums, attached to the GitHub release. `mise run release` is the interactive tag bump and is Jeff's to run. `mise run snapshot` proves the packaging locally.
   - As built (M10a, split in R1 M3): `.github/workflows/release.yml` runs on `v*` tags with only `GITHUB_TOKEN`, in two jobs. `check` (`contents: read`) runs `mise run setup` and `mise run check`, builds the web app and uploads `web/dist` as an artifact; npm install scripts and the tests run only here. `release` (`needs: check`, `contents: write`) checks out with `persist-credentials: false`, installs only Go through `jdx/mise-action` with `cache: false`, downloads `web/dist`, and runs `goreleaser/goreleaser-action` (pinned to the same GoReleaser version as `mise.toml`) with `--skip=before`, so nothing from npm runs beside the write token. Every action in both workflows is pinned to a full commit SHA with its tag in a comment. A tag with a prerelease suffix (`v0.1.0-rc.1`) becomes a GitHub prerelease.
   - `.goreleaser.yml`: a before-hook runs `npm --prefix web run build` so the binary embeds the real web app (decision 15); `CGO_ENABLED=0`, `-trimpath`, and the ldflags `mise run build` stamps (`main.version`, `main.commit`, `main.buildDate`). The version is stamped as `v{{.Version}}` so a release binary prints `v1.2.3` like a local `git describe` build. Archives are `crowsnest_<version>_<os>_<arch>.tar.gz` with README and LICENSE; the changelog comes from commits.
   - Snapshots are versioned `<next patch>-snapshot-<commit>` (no `+`, which is awkward in file names and URLs).
-  - Cosign signing and the Homebrew tap are in `.goreleaser.yml` commented out, per section 19 item 4; switching them on also needs `id-token: write`, the cosign installer step and the `HOMEBREW_TAP_TOKEN` secret.
+  - Signing and the Homebrew tap (switched on 2026-11-26, when the repository went public; section 19 item 4). `.goreleaser.yml` `signs` runs keyless `cosign sign-blob --bundle` over `checksums.txt`, giving `checksums.txt.sigstore.json` (the new protobuf bundle format: the release job installs cosign v3 through `sigstore/cosign-installer`, pinned by SHA, whose `--bundle` with the default signing config writes it). The release job alone has `id-token: write`; the certificate's identity is `https://github.com/jclement/crowsnest/.github/workflows/release.yml@refs/tags/v…` from issuer `https://token.actions.githubusercontent.com`, which is what self-update (16.1) and the README's `cosign verify-blob` pin. `homebrew_casks` (GoReleaser 2.17 deprecated `brews`) writes `Casks/crowsnest.rb` to `jclement/homebrew-tap` with `HOMEBREW_TAP_TOKEN` (a repository secret, release job only), depends on homebrew-core's `herdr` formula, and strips the macOS quarantine flag after install. `mise run snapshot` passes `--skip=sign` (a local keyless sign would start a browser login and log this machine's identity publicly); a snapshot never publishes, so the cask is only written to `dist/homebrew`. The check/release split is unchanged: the write-scoped job still runs no npm and no tests.
 - **Devbox image** `ghcr.io/jclement/crowsnest`, amd64 and arm64, built in the release workflow and by `mise run publish`:
   - Debian slim; `tini` as init (PTY children get reaped); non-root user `crow` (uid 1000).
   - Baked in: crowsnest, herdr, mise, git, gh, openssh-client, curl, build-essential, ripgrep, jq, less, a UTF-8 locale.
@@ -1279,6 +1282,17 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
     - `HEALTHCHECK` is `crowsnest health` every 30 s with a 5-minute start period (the capped first-start install). It probes 127.0.0.1 on `CROWSNEST_PORT`, so the port is changed by that variable, not by a `--port` argument.
     - `mise run image` builds `crowsnest:dev` for the host architecture; `mise run publish` (`deploy/publish.sh`) builds both architectures with a `docker-container` buildx builder and pushes `<version>` and `latest`. It refuses a dirty tree, takes the token from `GHCR_TOKEN` or `gh auth token`, logs in on stdin against a throwaway `DOCKER_CONFIG` (keeping the Docker context and CLI plugins), and removes its builder afterwards.
     - The release workflow's `image` job runs after the binaries job succeeds: QEMU, buildx, `docker/login-action` with `GITHUB_TOKEN` (`packages: write`), `docker/metadata-action` for OCI labels and the tags (the git tag, plus `latest` only when the tag has no prerelease suffix), `docker/build-push-action` for both architectures with the GitHub Actions cache.
+
+### 16.1 Self-update
+
+Every distributed build tells its user it is stale and can fix itself (the shipping skill's
+contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/update.go`:
+
+- **Checking.** `serve` starts a goroutine that asks `GET https://api.github.com/repos/jclement/crowsnest/releases/latest` (10 s timeout) once at start and then every 24 h, and compares `tag_name` by semver (a prerelease sorts before its release; `/releases/latest` never returns prereleases). Skipped entirely, with no request made, when the version is not a release (`dev`, `git describe` output such as `16fad2e-dirty` or `v1.2.3-4-gabc…`, a snapshot), under `--demo` (hermetic), and in a container (`/.dockerenv` or `/run/.containerenv`). A failure is logged at debug and changes nothing.
+- **Surfacing.** `/health` adds `update_available: true`, `latest_version` and `release_url`; the footer shows "vX available" linking to the release page. The CLI has `crowsnest update --check`.
+- **Applying** (`crowsnest update`, `POST /api/v1/admin/update`): ask GitHub again; refuse (a `Refusal`, worded to be shown) in a container, for a development build, for a binary under Homebrew's `Caskroom`/`Cellar` (`brew upgrade`), and when already current. Then download `checksums.txt` and its bundle and verify the bundle with `sigstore-go` against the public-good TUF root (Fulcio chain, SCT, Rekor entry, observer timestamp) with the certificate identity pinned to this repository's `release.yml` on a `v*` tag; only then trust the archive's line in `checksums.txt` and compare its SHA-256; only then extract `crowsnest` and rename it over the running binary (temporary file in the same directory). A release with no bundle is refused, never installed unverified (drillbit's updater falls back to an unverified install and accepts the legacy cosign bundle; neither was copied).
+- **The HTTP route** is behind the session (one user, so "admin" is the user) and the usual Origin and `X-Crowsnest` checks. On success it answers `{updated, version, restarting: true}` and half a second later cancels `serve`'s context, so the process exits 0 for a supervisor to restart; herdr and the agents carry on, as across any restart. Without a supervisor, crowsnest stays stopped until started again. Refusals are `409` with the reason; a failed download or verification is `502` with a sentence, the detail in the log (4.9).
+- **Tests**: unit tests against a fake GitHub (an install, a bad signature, a checksum mismatch, a checksum file that does not list the archive, an unsigned release, the signer pattern) and, under `-tags integration`, the real Sigstore chain over a real cosign-v3 bundle (cosign's own `cosign_checksums.txt`; crowsnest had no signed release when this was written): it verifies for its signer, is refused under crowsnest's identity, and fails on a changed artifact.
 
 ## 17. Key decisions and why
 
@@ -1450,7 +1464,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 1. **"localhost by default, only on tailnet"**: read as two settings, loopback by default and a `tailnet` keyword that binds only the Tailscale address. Taken.
 2. **Should the orchestrator get its own CLAUDE.md?** No: an appended system prompt pointing at a state file, so `--dir` can be an existing repo without crowsnest writing into it. Taken.
 3. **Does crowsnest relay to Meat Prompt as well?** No. It replaces it; `--notify-url` covers "tell my phone". Taken.
-4. **Cosign and the Homebrew tap**: both deferred while the repo is private. Keyless cosign writes the repo and workflow identity to a public transparency log, which cannot be undone, and a tap formula cannot fetch from a private repo. The config carries both, commented, to switch on when Jeff makes it public. Self-update waits for the same reason. **Jeff to confirm.**
+4. **Cosign and the Homebrew tap**: deferred while the repo was private (keyless cosign writes the repo and workflow identity to a public transparency log, which cannot be undone, and a tap cannot fetch from a private repo). **Answered 2026-11-26**: Jeff made the repository public and asked for signing, the tap and self-update; all three are on (16, 16.1). The first signed release and the tap push are unproven until he sets `HOMEBREW_TAP_TOKEN` and cuts a tag.
 5. **Proving the release workflow** needs a tag. Recommendation: one prerelease tag (`v0.1.0-rc.1`) on the private repo to prove the pipeline, deletable. Not taken on the night: a tag also publishes the devbox image to ghcr, and releases are Jeff's step. The workflow is therefore unproven until he cuts one.
 6. **Windows**: skipped. Taken.
 7. **MCP tools or a CLI for the job protocol?** Both, over one socket API: MCP for Claude agents crowsnest starts (declared tools get used; a CLI named in a prompt gets forgotten), CLI for everything else. Taken.
