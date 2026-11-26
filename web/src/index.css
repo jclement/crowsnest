@@ -1,0 +1,64 @@
+/* Theme tokens (DESIGN.md section 11, web-apps house style). Components use only the semantic
+   colours below (bg-surface, text-muted, border-border, ...). Light values live in @theme; the
+   .dark class on <html> swaps them, set before paint by public/theme-init.js. */
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-surface: #ffffff;
+  --color-surface-raised: #f6f7f9;
+  --color-heading: #0f172a;
+  --color-body: #334155;
+  --color-muted: #64748b;
+  --color-border: #e2e8f0;
+  --color-hover: #f1f5f9;
+  --color-selected: #e0f2fe;
+  --color-accent: #0369a1;
+  --color-accent-fg: #ffffff;
+  --color-danger: #b91c1c;
+  --color-warning: #b45309;
+  --color-success: #15803d;
+
+  /* The header is dark in both themes. */
+  --color-chrome: #0b1220;
+  --color-chrome-fg: #e2e8f0;
+  --color-chrome-muted: #94a3b8;
+  --color-chrome-hover: #1e293b;
+}
+
+.dark {
+  --color-surface: #0b0f14;
+  --color-surface-raised: #111821;
+  --color-heading: #f1f5f9;
+  --color-body: #cbd5e1;
+  --color-muted: #8494a7;
+  --color-border: #1f2a37;
+  --color-hover: #16202b;
+  --color-selected: #0c2a3d;
+  --color-accent: #38bdf8;
+  --color-accent-fg: #0b1220;
+  --color-danger: #f87171;
+  --color-warning: #fbbf24;
+  --color-success: #4ade80;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-surface text-body font-sans text-sm antialiased;
+  overflow-x: hidden; /* never scroll the page sideways */
+}
+
+:focus-visible {
+  @apply outline-2 outline-offset-2 outline-accent;
+}
