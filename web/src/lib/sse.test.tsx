@@ -156,7 +156,7 @@ describe("useEventStream and the reconnect banner", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await act(async () => resolveProbe(new Response(JSON.stringify({ data: { username: "jeff", features: {} } }), { status: 200 })));
     expect(FakeEventSource.instances).toHaveLength(2);
-    expect(FakeEventSource.instances[0].readyState).toBe(FakeEventSource.CLOSED);
+    expect(FakeEventSource.instances[0]?.readyState).toBe(FakeEventSource.CLOSED);
   });
 
   it("ignores a late error from a stream that was already replaced (R1-C08)", async () => {
