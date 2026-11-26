@@ -44,6 +44,10 @@ type payload struct {
 	Tag   string `json:"tag"`
 	URL   string `json:"url"`
 	Kind  Kind   `json:"kind"`
+	// Actions and ActionToken are a notification's buttons and the single-use token the service
+	// worker sends back with the one pressed (DESIGN.md 8.7). Absent on every other notice.
+	Actions     []NoticeAction `json:"actions,omitempty"`
+	ActionToken string         `json:"action_token,omitempty"`
 }
 
 // Deliver pushes notice to every subscription, or only to the one for endpoint when it is not
@@ -54,7 +58,8 @@ func (s *Service) Deliver(ctx context.Context, notice Notice, endpoint string) (
 		notice.Title = s.opts.Name + ": " + notice.Title
 	}
 	notice = notice.Clean()
-	body, err := json.Marshal(payload{Title: notice.Title, Body: notice.Body, Tag: notice.Tag, URL: notice.URL, Kind: notice.Kind})
+	body, err := json.Marshal(payload{Title: notice.Title, Body: notice.Body, Tag: notice.Tag, URL: notice.URL, Kind: notice.Kind,
+		Actions: notice.Actions, ActionToken: notice.ActionToken})
 	if err != nil {
 		return Result{}, fmt.Errorf("encoding the notice: %w", err)
 	}

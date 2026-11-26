@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agentid"
+	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
@@ -36,6 +38,9 @@ type jobRefs struct {
 	// notify tells Jeff something (the log, and the --notify-url POST when set); the poker's
 	// draft alert goes through it too.
 	notify func(text string)
+	// guard is the guard hook's rules and approvals the tool-call approvals (DESIGN.md 8.7).
+	guard     *guard.Rules
+	approvals *approvals.Service
 }
 
 // newJobService builds the jobs service. refs is filled in by serve once the orchestrator and
@@ -67,7 +72,10 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,
-			Identity: identity, RemoteControlPrefix: jobRemoteControlPrefix(cfg),
+			Identity: identity, RemoteControlPrefix: jobRemoteControlPrefix(cfg), Guard: refs.guard,
+		},
+		ApprovalPending: func(ctx context.Context, jobID string) bool {
+			return refs.approvals != nil && refs.approvals.PendingForJob(ctx, jobID)
 		},
 		Orchestrator: func() jobs.OrchestratorInfo {
 			if refs.orchestrator == nil {

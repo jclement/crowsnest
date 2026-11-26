@@ -13,6 +13,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/journal"
@@ -44,7 +45,7 @@ func claudeConfigDir(cfg config.Config) string {
 // startOrchestrator builds the orchestrator and the transcript manager, starts both running until
 // ctx ends, and returns them for the HTTP server. With --no-orchestrator the orchestrator reports
 // itself disabled and the conversations of other agents still work.
-func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, agentSocket string, talk *voice.Service, journalLog *journal.Journal, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
+func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, agentSocket string, talk *voice.Service, journalLog *journal.Journal, guardRules *guard.Rules, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
 	claudeDir := claudeConfigDir(cfg)
 	binDir, executable := "", ""
 	if path, err := os.Executable(); err == nil {
@@ -59,7 +60,7 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 		Client: client, KV: db, Hub: events, Journal: journalLog, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
 		StateDir: cfg.StateDir, Model: cfg.Model, PermissionMode: cfg.PermissionMode, Version: version,
 		RemoteControlName: orchestratorRemoteControl(cfg),
-		BinDir:            binDir, Executable: executable, AgentSocket: agentSocket, BasePath: os.Getenv("PATH"), ClaudeConfigDir: claudeDir, Disabled: cfg.NoOrchestrator, Identity: identity,
+		BinDir:            binDir, Executable: executable, AgentSocket: agentSocket, BasePath: os.Getenv("PATH"), ClaudeConfigDir: claudeDir, Disabled: cfg.NoOrchestrator, Identity: identity, Guard: guardRules,
 		OnStatus: func(status orch.Status) {
 			// Follow the orchestrator's conversation from the moment it has a pane, so its
 			// `message` events flow before any browser asks.

@@ -47,6 +47,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jclement/crowsnest/internal/agentid"
+	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
@@ -129,6 +130,7 @@ type Server struct {
 
 	attachments AgentAttacher
 	attachRoots func(ctx context.Context, caller questions.Caller) []string
+	approvals   *approvals.Service
 }
 
 // ServerOptions configure a Server. Questions is required.
@@ -153,6 +155,9 @@ type ServerOptions struct {
 	// AttachRoots returns the directories a caller may attach files from: its working directory
 	// and its job directory (DESIGN.md 8.6). Nil or empty: the caller may attach nothing.
 	AttachRoots func(ctx context.Context, caller questions.Caller) []string
+	// Approvals serves the PermissionRequest hook (DESIGN.md 8.7). Nil: those routes answer 503
+	// and every hook falls through to Claude's own dialog.
+	Approvals *approvals.Service
 }
 
 // AgentAttacher is what the socket needs of internal/attach.
@@ -170,7 +175,7 @@ func NewServer(opts ServerOptions) *Server {
 	server := &Server{
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext,
-		attachments: opts.Attachments, attachRoots: opts.AttachRoots,
+		attachments: opts.Attachments, attachRoots: opts.AttachRoots, approvals: opts.Approvals,
 		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
 		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
 		creates: ratelimit.New(createBurst, createRefill, opts.Now),
@@ -185,6 +190,7 @@ func NewServer(opts ServerOptions) *Server {
 	mux.HandleFunc("POST /api/v1/questions/{id}/collected", server.handleCollected)
 	mux.HandleFunc("POST /api/v1/say", server.handleSay)
 	server.registerJobRoutes(mux)
+	server.registerApprovalRoutes(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "No such endpoint on the crowsnest agent socket.")
 	})

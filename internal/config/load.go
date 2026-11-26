@@ -80,7 +80,7 @@ func Load(flags *pflag.FlagSet, opts Options) (Config, error) {
 	if cfg.ConfigFile, err = l.readFile(); err != nil {
 		return Config{}, err
 	}
-	steps := []func(*Config) error{l.loadAuth, l.loadNetwork, l.loadOrchestrator, l.loadExtras, l.loadUpkeep, l.loadAttachments}
+	steps := []func(*Config) error{l.loadAuth, l.loadNetwork, l.loadOrchestrator, l.loadExtras, l.loadUpkeep, l.loadAttachments, l.loadGuard}
 	for _, step := range steps {
 		if err := step(&cfg); err != nil {
 			return Config{}, err

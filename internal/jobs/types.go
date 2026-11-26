@@ -95,6 +95,9 @@ const (
 	// CauseApproval: queued, held until the human allows a job an agent asked for beyond its
 	// own directory, engine or isolation (R2-H1). CauseDetail is the question's id.
 	CauseApproval Cause = "approval"
+	// CauseApprovalTool: needs_you while one of the agent's tool calls waits for the human's
+	// approval (DESIGN.md 8.7). CauseDetail is the call in one line.
+	CauseApprovalTool Cause = "approval-tool"
 )
 
 // Describe is the cause in words, for the card and notices.
@@ -126,6 +129,8 @@ func (c Cause) Describe() string {
 		return "Claude refused the request (model or settings)"
 	case CauseApproval:
 		return "Waiting for your approval: an agent asked for it"
+	case CauseApprovalTool:
+		return "A tool call is waiting for your approval"
 	}
 	return ""
 }

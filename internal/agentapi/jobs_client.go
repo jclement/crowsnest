@@ -9,6 +9,8 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/jobs"
 )
@@ -99,4 +101,23 @@ func (c *Client) Hook(ctx context.Context, event string, input json.RawMessage) 
 	var out jobs.HookReply
 	err := c.do(ctx, http.MethodPost, "/api/v1/hooks/"+url.PathEscape(event), input, &out)
 	return out.Stdout, err
+}
+
+// RequestApproval posts a PermissionRequest hook's input (DESIGN.md 8.7).
+func (c *Client) RequestApproval(ctx context.Context, input json.RawMessage) (ApprovalReply, error) {
+	var out ApprovalReply
+	err := c.do(ctx, http.MethodPost, "/api/v1/approvals", input, &out)
+	return out, err
+}
+
+// WaitApproval long-polls an approval for up to wait.
+func (c *Client) WaitApproval(ctx context.Context, id string, wait time.Duration) (ApprovalReply, error) {
+	var out ApprovalReply
+	err := c.do(ctx, http.MethodGet, "/api/v1/approvals/"+url.PathEscape(id)+"?wait="+strconv.Itoa(int(wait.Seconds())), nil, &out)
+	return out, err
+}
+
+// GuardDenied tells crowsnest the guard refused a command.
+func (c *Client) GuardDenied(ctx context.Context, denial GuardDenial) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/guard/denied", denial, nil)
 }

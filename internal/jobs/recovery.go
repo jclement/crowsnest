@@ -100,6 +100,7 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 	if record, ok := s.reconcileQuestions(ctx, r); ok {
 		r = record
 	}
+	s.reconcileApprovalWait(ctx, r) // a lost "settled" callback (8.7); liveness below still runs
 	now := s.opts.Now()
 	if State(r.State) == StateQueued && Cause(r.Cause) == CauseApproval {
 		// Held for the human: apply a decision the callback missed, repair a missing link, and

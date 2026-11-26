@@ -15,21 +15,36 @@ import (
 // rule through --settings stops `ask` at no permission prompt, under auto and default).
 const MCPAllowRule = "mcp__crowsnest__*"
 
+// PermissionRequestTimeout is the PermissionRequest hook's timeout in seconds. The hook holds
+// while a human decides in the browser (DESIGN.md 8.7). Claude Code's hooks reference documents
+// no ceiling for a command hook's timeout (default 600 s); a hook held 700 s with this value was
+// verified to allow its call on 2.1.332. The hook's own client gives up shortly after the
+// server's approval expiry (approvals.DefaultTTL, 12 h), so this is only the outer fence: a hook
+// killed by it leaves Claude's terminal dialog, which was on screen all along.
+const PermissionRequestTimeout = 86400
+
 // Hook names Claude Code fires, and the `crowsnest hook <event>` argument each runs.
 var Hooks = []struct {
 	Event   string // Claude Code's event name
 	Command string // crowsnest hook <command>
 	Timeout int    // seconds; the hook's own client gives up after 5 s and fails open
+	Matcher string // tool-name matcher; "" for every tool or event
 }{
-	{"Stop", "stop", 30},
-	{"SessionStart", "session-start", 30},
-	{"Notification", "notification", 30},
-	{"StopFailure", "stop-failure", 30},
-	{"PermissionDenied", "permission-denied", 30},
-	{"SessionEnd", "session-end", 10},
+	{"Stop", "stop", 30, ""},
+	{"SessionStart", "session-start", 30, ""},
+	{"Notification", "notification", 30, ""},
+	{"StopFailure", "stop-failure", 30, ""},
+	{"PermissionDenied", "permission-denied", 30, ""},
+	{"SessionEnd", "session-end", 10, ""},
 	// PostToolUse is not in DESIGN 6.3's first list: it is what tells the nudge budget that the
 	// agent made progress (a tool call), and gives "doing now" its fallback.
-	{"PostToolUse", "post-tool-use", 30},
+	{"PostToolUse", "post-tool-use", 30, ""},
+	// PermissionRequest holds until a human decides in the browser (8.7); it fails open to
+	// Claude's own dialog.
+	{"PermissionRequest", "permission-request", PermissionRequestTimeout, ""},
+	// PreToolUse is the guard (8.7): it decides locally from GuardRules, so it is fast, and only
+	// Bash is guarded.
+	{"PreToolUse", "pre-tool-use", 10, "Bash"},
 }
 
 // ClaudeSettings is the --settings file. With executable and socket set it carries the
@@ -37,8 +52,9 @@ var Hooks = []struct {
 // the agent's token file, which is how the socket knows whose hook it is (R1b N2): the server
 // maps the token to the job (a job agent's) or to the pane, whose current job it then looks up
 // (the orchestrator's). jobID is still baked in for a job agent, as the path a client uses; the
-// server checks it against the token.
-func ClaudeSettings(executable, socket, jobID, tokenFile string, withMCP bool) map[string]any {
+// server checks it against the token. guardRules is the guard's rules file (GuardRules), named on
+// the PreToolUse hook's command line; "" leaves the guard out.
+func ClaudeSettings(executable, socket, jobID, tokenFile, guardRules string, withMCP bool) map[string]any {
 	settings := map[string]any{}
 	if withMCP {
 		settings["permissions"] = map[string]any{"allow": []string{MCPAllowRule}}
@@ -48,11 +64,18 @@ func ClaudeSettings(executable, socket, jobID, tokenFile string, withMCP bool) m
 	}
 	hooks := map[string]any{}
 	for _, hook := range Hooks {
-		hooks[hook.Event] = []map[string]any{{
-			"hooks": []map[string]any{{
-				"type": "command", "command": HookCommand(executable, socket, hook.Command, jobID, tokenFile), "timeout": hook.Timeout,
-			}},
-		}}
+		command := HookCommand(executable, socket, hook.Command, jobID, tokenFile)
+		if hook.Command == "pre-tool-use" {
+			if guardRules == "" {
+				continue
+			}
+			command += " --rules " + quote(guardRules)
+		}
+		entry := map[string]any{"hooks": []map[string]any{{"type": "command", "command": command, "timeout": hook.Timeout}}}
+		if hook.Matcher != "" {
+			entry["matcher"] = hook.Matcher
+		}
+		hooks[hook.Event] = []map[string]any{entry}
 	}
 	settings["hooks"] = hooks
 	return settings
