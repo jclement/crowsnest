@@ -572,3 +572,47 @@ func TestConfigFileWithAReadablePasswordWarns(t *testing.T) {
 		t.Fatalf("a readable config file without a password warned: %v", cfg.Warnings)
 	}
 }
+
+// R1b N1 residual: the ElevenLabs key and the notify URL have file forms too.
+func TestSecretFileForms(t *testing.T) {
+	dir := t.TempDir()
+	key := filepath.Join(dir, "key")
+	notify := filepath.Join(dir, "notify")
+	_ = os.WriteFile(key, []byte("xi-secret\n"), 0o600)
+	_ = os.WriteFile(notify, []byte("https://ntfy.sh/topic\n"), 0o600)
+	cfg, err := newHarness(t, "--no-auth", "--elevenlabs-api-key-file", key).withEnv("CROWSNEST_NOTIFY_URL_FILE", notify).load()
+	if err != nil || cfg.ElevenLabsAPIKey != "xi-secret" || cfg.NotifyURL != "https://ntfy.sh/topic" {
+		t.Fatalf("cfg key %q notify %q err %v", cfg.ElevenLabsAPIKey, cfg.NotifyURL, err)
+	}
+	_, err = newHarness(t, "--no-auth", "--elevenlabs-api-key-file", key).withEnv("ELEVENLABS_API_KEY", "x").load()
+	assertErrorContains(t, err, "pass only one")
+}
+
+// R2-L4: the ElevenLabs base URL is https, or plain http only to loopback.
+func TestElevenLabsURLMustBeSecure(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"https://api.elevenlabs.io": true, "http://127.0.0.1:9999": true, "http://localhost:8080/x": true, "http://[::1]:1": true,
+		"http://api.elevenlabs.io": false, "http://10.0.0.5": false, "http://127.0.0.1.evil.example": false,
+	} {
+		_, err := newHarness(t, "--no-auth", "--elevenlabs-url", raw).load()
+		if (err == nil) != ok {
+			t.Errorf("%s: err %v, want ok=%v", raw, err, ok)
+		}
+	}
+}
+
+// R2-L2: --trusted-proxy takes loopback, IPs and CIDRs.
+func TestTrustedProxy(t *testing.T) {
+	cfg, err := newHarness(t, "--no-auth", "--trusted-proxy", "loopback", "--trusted-proxy", "10.1.2.3,172.16.0.0/12").load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for addr, want := range map[string]bool{"127.0.0.1": true, "::1": true, "10.1.2.3": true, "172.20.1.1": true, "10.1.2.4": false, "192.168.1.1": false} {
+		got := slices.ContainsFunc(cfg.TrustedProxies, func(p netip.Prefix) bool { return p.Contains(netip.MustParseAddr(addr)) })
+		if got != want {
+			t.Errorf("%s trusted = %v, want %v", addr, got, want)
+		}
+	}
+	_, err = newHarness(t, "--no-auth", "--trusted-proxy", "everyone").load()
+	assertErrorContains(t, err, "--trusted-proxy")
+}

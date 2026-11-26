@@ -23,6 +23,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/netip"
 	"net/textproto"
 	"net/url"
 	"strings"
@@ -124,10 +125,33 @@ func NewClient(opts ClientOptions) (*Client, error) {
 	if opts.BaseURL == "" {
 		opts.BaseURL = "https://api.elevenlabs.io"
 	}
-	if opts.HTTP == nil {
-		opts.HTTP = &http.Client{}
+	if !secureBase(opts.BaseURL) {
+		return nil, errors.New("voice: the ElevenLabs base URL must be https (plain http only to a loopback address); the key travels with every request")
 	}
-	return &Client{baseURL: strings.TrimRight(opts.BaseURL, "/"), apiKey: opts.APIKey, voiceID: opts.VoiceID, http: opts.HTTP}, nil
+	// R2-L4: never follow a redirect. Go's client copies custom headers (xi-api-key among them)
+	// to the redirect target, and a 307 or 308 resends the body (a recording, or text). The
+	// copy keeps the caller's own client untouched.
+	client := http.Client{}
+	if opts.HTTP != nil {
+		client = *opts.HTTP
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{baseURL: strings.TrimRight(opts.BaseURL, "/"), apiKey: opts.APIKey, voiceID: opts.VoiceID, http: &client}, nil
+}
+
+// secureBase reports whether base is https, or http to a loopback host (a local fake in tests).
+// config refuses the same at start-up; this keeps the client safe on its own.
+func secureBase(base string) bool {
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme == "https" {
+		return true
+	}
+	host := parsed.Hostname()
+	addr, err := netip.ParseAddr(host)
+	return parsed.Scheme == "http" && (strings.EqualFold(host, "localhost") || (err == nil && addr.IsLoopback()))
 }
 
 // ---- Speech to text ------------------------------------------------------------------

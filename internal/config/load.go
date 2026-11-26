@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -312,24 +314,69 @@ const othersMayAccess fs.FileMode = 0o066
 // readPasswordFile returns the first line of path without its line ending. It refuses a file
 // that its group or others may read or write.
 func readPasswordFile(path string) (string, error) {
+	return readSecretFile(optPasswordFile, "the password", path)
+}
+
+// readSecretFile is readPasswordFile for any --<flag>-file option: the first line of path, from
+// a file only its owner may read or write. A file form keeps a secret out of the environment of
+// whatever started crowsnest (tini in the devbox, R1b N1), where every agent of the same user
+// could read it.
+func readSecretFile(flag, what, path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", fmt.Errorf("reading --password-file: %w", err)
+		return "", fmt.Errorf("reading --%s: %w", flag, err)
 	}
 	if info.Mode().Perm()&othersMayAccess != 0 {
-		return "", fmt.Errorf("--password-file %s can be read or written by other users (mode %s); run `chmod 600 %s` and start again",
-			path, info.Mode().Perm(), path)
+		return "", fmt.Errorf("--%s %s can be read or written by other users (mode %s); run `chmod 600 %s` and start again",
+			flag, path, info.Mode().Perm(), path)
 	}
 	data, err := os.ReadFile(path) //nolint:gosec // the path is configuration
 	if err != nil {
-		return "", fmt.Errorf("reading --password-file: %w", err)
+		return "", fmt.Errorf("reading --%s: %w", flag, err)
 	}
 	line, _, _ := strings.Cut(string(data), "\n")
 	line = strings.TrimSuffix(line, "\r")
 	if line == "" {
-		return "", fmt.Errorf("--password-file %s: the first line is empty; put the password on it", path)
+		return "", fmt.Errorf("--%s %s: the first line is empty; put %s on it", flag, path, what)
 	}
 	return line, nil
+}
+
+// secretOrFile returns the value of option, or the first line of fileOption's file; both at
+// once is refused.
+func (l *loader) secretOrFile(option, fileOption, what string) (string, error) {
+	value, path := l.str(option), l.path(fileOption)
+	if path == "" {
+		return value, nil
+	}
+	if value != "" {
+		return "", fmt.Errorf("both --%s and --%s were given; pass only one", option, fileOption)
+	}
+	return readSecretFile(fileOption, what, path)
+}
+
+// parseTrustedProxies reads --trusted-proxy: "loopback" (127.0.0.0/8 and ::1), an IP, or a CIDR.
+func parseTrustedProxies(values []string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, value := range values {
+		switch value = strings.TrimSpace(strings.ToLower(value)); {
+		case value == "loopback":
+			out = append(out, netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128"))
+		case strings.Contains(value, "/"):
+			prefix, err := netip.ParsePrefix(value)
+			if err != nil {
+				return nil, fmt.Errorf("--trusted-proxy %q is not loopback, an IP or a CIDR: %w", value, err)
+			}
+			out = append(out, prefix.Masked())
+		default:
+			addr, err := netip.ParseAddr(value)
+			if err != nil {
+				return nil, fmt.Errorf("--trusted-proxy %q is not loopback, an IP or a CIDR", value)
+			}
+			out = append(out, netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()))
+		}
+	}
+	return out, nil
 }
 
 func (l *loader) loadNetwork(cfg *Config) error {
@@ -353,6 +400,9 @@ func (l *loader) loadNetwork(cfg *Config) error {
 	}
 	for _, host := range l.list(optAllowedHost) {
 		cfg.AllowedHosts = append(cfg.AllowedHosts, strings.ToLower(host))
+	}
+	if cfg.TrustedProxies, err = parseTrustedProxies(l.list(optTrustedProxy)); err != nil {
+		return err
 	}
 	if err := l.loadTLS(cfg); err != nil {
 		return err
@@ -422,12 +472,21 @@ func (l *loader) loadOrchestrator(cfg *Config) error {
 }
 
 func (l *loader) loadExtras(cfg *Config) error {
-	cfg.ElevenLabsAPIKey = l.str(optElevenLabsAPIKey)
+	var err error
+	if cfg.ElevenLabsAPIKey, err = l.secretOrFile(optElevenLabsAPIKey, optElevenLabsKeyFile, "the API key"); err != nil {
+		return err
+	}
 	cfg.ElevenLabsVoice = l.str(optElevenLabsVoice)
 	cfg.ElevenLabsURL = strings.TrimRight(l.str(optElevenLabsURL), "/")
-	cfg.NotifyURL = l.str(optNotifyURL)
+	if cfg.NotifyURL, err = l.secretOrFile(optNotifyURL, optNotifyURLFile, "the URL"); err != nil {
+		return err
+	}
 	if err := checkHTTPURL(optElevenLabsURL, cfg.ElevenLabsURL); err != nil {
 		return err
+	}
+	if !SecureOrLoopbackURL(cfg.ElevenLabsURL) {
+		// R2-L4: the API key travels in a header on every request.
+		return fmt.Errorf("--%s %q must be https (plain http only to a loopback address, such as a local fake); the API key travels with every request", optElevenLabsURL, cfg.ElevenLabsURL)
 	}
 	if err := checkHTTPURL(optNotifyURL, cfg.NotifyURL); err != nil {
 		return err
@@ -449,6 +508,30 @@ func (l *loader) loadExtras(cfg *Config) error {
 		*item.target = value
 	}
 	return nil
+}
+
+// SecureOrLoopbackURL reports whether raw is https, or http to a loopback host (localhost,
+// 127.0.0.0/8, ::1). An empty value counts as secure (the default is https).
+func SecureOrLoopbackURL(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	switch parsed.Scheme {
+	case "https":
+		return true
+	case "http":
+		host := parsed.Hostname()
+		if strings.EqualFold(host, "localhost") {
+			return true
+		}
+		addr, err := netip.ParseAddr(host)
+		return err == nil && addr.IsLoopback()
+	}
+	return false
 }
 
 // checkHTTPURL accepts an empty value or an absolute http(s) URL with a host.
@@ -481,6 +564,7 @@ func FlagTable() [][4]string {
 // as good as a password for posting to (and on a public server, reading) the human's phone.
 var secretEnv = []string{
 	"CROWSNEST_PASSWORD", "CROWSNEST_PASSWORD_FILE", "ELEVENLABS_API_KEY", "CROWSNEST_NOTIFY_URL",
+	"ELEVENLABS_API_KEY_FILE", "CROWSNEST_NOTIFY_URL_FILE",
 	"CROWSNEST_NO_AUTH", "SUPPRESS_AUTH", "CROWSNEST_I_KNOW_THIS_IS_OPEN",
 }
 
