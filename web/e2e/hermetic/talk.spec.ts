@@ -274,7 +274,11 @@ test.describe("hold Space", () => {
     await page.keyboard.down("Space");
     await page.waitForTimeout(100);
     await page.keyboard.up("Space");
-    await expect(page.getByRole("alert")).toContainText("Hold the key down");
+    // Which hint depends on when the browser delivers the keyup relative to the mic starting
+    // (under load WebKit has delivered a 100 ms tap's keyup 450 ms late): before it, "hold the
+    // key down"; after it, with under half a second recorded, "too short to send". Neither locks
+    // the mic on or uploads, which is the point.
+    await expect(page.getByRole("alert")).toContainText(/Hold the key down|too short to send/);
     await page.waitForTimeout(1_500);
     await expect(page.getByTestId("mic-button")).not.toHaveAttribute("data-phase", "recording");
     expect(uploads()).toBe(0);

@@ -101,8 +101,12 @@ export const SHORT_CLIP_HINT = "That was too short to send. Hold while you speak
 function release(state: PttState, at: number): PttState {
   if ((state.phase !== "starting" && state.phase !== "recording") || state.mode !== "hold") return state;
   const tap = at - state.pressedAt < TAP_MS;
-  if (tap) return state.source === "pointer" ? { ...state, mode: "lock" } : { phase: "error", message: SHORT_KEY_HINT };
-  // Let go after a long hold before the microphone even started: nothing was recorded.
+  if (tap && state.source === "pointer") return { ...state, mode: "lock" };
+  // A key let go before the microphone was even recording (a tap, or a short hold while the
+  // device started, which can take half a second in WebKit): nothing was recorded, and saying so
+  // beats going quietly back to idle.
+  if (state.source === "key" && (tap || state.phase === "starting")) return { phase: "error", message: SHORT_KEY_HINT };
+  // Let go of the button after a long hold before the microphone even started: nothing recorded.
   if (state.phase === "starting") return initialPtt;
   return finish(state, at);
 }

@@ -70,6 +70,11 @@ describe("push-to-talk state machine", () => {
     expect(before.map((state) => state.phase)).toEqual(["starting", "error", "error"]);
   });
 
+  it("a key let go after a short hold but before the mic started says so rather than going quiet", () => {
+    const states = run({ type: "press", at: 0, source: "key" }, { type: "release", at: 450 });
+    expect(last(states)).toEqual({ phase: "error", message: SHORT_KEY_HINT });
+  });
+
   it("a key held long enough records while held and sends on release", () => {
     const states = run({ type: "press", at: 0, source: "key" }, { type: "micReady", at: 50 }, { type: "release", at: 30_000 });
     expect(last(states)).toEqual({ phase: "uploading" });
