@@ -10,7 +10,8 @@ import { NotFound } from "./routes/NotFound";
 import { FleetView } from "./routes/FleetView";
 import { ChatView } from "./routes/ChatView";
 import { InboxView } from "./routes/InboxView";
-import { JobsView, TerminalView } from "./routes/views";
+import { JobsView } from "./routes/JobsView";
+import { TerminalView } from "./routes/views";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -54,7 +55,15 @@ const appRoute = createRoute({
   component: AppFrame,
 });
 
-const jobsRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: JobsView });
+const jobsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/",
+  // ?job=j_12 selects a job, so a link or a reload opens the same one.
+  validateSearch: (search: Record<string, unknown>): { job?: string } => ({
+    job: typeof search.job === "string" && search.job ? search.job : undefined,
+  }),
+  component: JobsView,
+});
 const chatRoute = createRoute({ getParentRoute: () => appRoute, path: "/chat", component: ChatView });
 const inboxRoute = createRoute({
   getParentRoute: () => appRoute,

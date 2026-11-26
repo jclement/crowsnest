@@ -8,9 +8,11 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -38,6 +41,8 @@ type socketFixture struct {
 	service  *questions.Service
 	hub      *hub.Hub
 	identity *agentid.Registry
+	jobs     *jobs.Service
+	db       *store.Store
 }
 
 // token mints an agent token for pane (and job), as serve does for the agents it starts.
@@ -61,6 +66,7 @@ func startSocket(t *testing.T) *socketFixture {
 	events := hub.New()
 	service := questions.New(questions.Options{Store: db, Hub: events})
 	identity := agentid.New(db, nil)
+	jobService := jobs.New(jobs.Options{Store: db, Hub: events})
 	path := filepath.Join(shortDir(t), "run", "agent.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	listener, err := Listen(ctx, path)
@@ -69,11 +75,11 @@ func startSocket(t *testing.T) *socketFixture {
 	}
 	done := make(chan struct{})
 	go func() {
-		_ = NewServer(ServerOptions{Questions: service, Identity: identity, Hub: events, Version: "test"}).Serve(ctx, listener)
+		_ = NewServer(ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Version: "test"}).Serve(ctx, listener)
 		close(done)
 	}()
 	t.Cleanup(func() { cancel(); <-done })
-	return &socketFixture{socket: path, service: service, hub: events, identity: identity}
+	return &socketFixture{socket: path, service: service, hub: events, identity: identity, jobs: jobService, db: db}
 }
 
 func TestSocketPermissions(t *testing.T) {
@@ -398,7 +404,7 @@ func TestMCPToolList(t *testing.T) {
 			t.Errorf("tool %s has a thin description; it is the agent's instruction", tool.Name)
 		}
 	}
-	if strings.Join(names, ",") != "ask,get_question,say" {
+	if strings.Join(names, ",") != "ask,done,fail,get_question,job_create,job_get,job_update,say" {
 		t.Fatalf("tools %v", names)
 	}
 	if !strings.Contains(session.InitializeResult().Instructions, "never consent") {
@@ -418,7 +424,7 @@ func TestMCPAskNonBlockingThenWait(t *testing.T) {
 		t.Fatalf("ask: %+v %v", result, err)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, "q_1 posted") || !strings.Contains(text, "[crowsnest answer q_1]") {
+	if !strings.Contains(text, "Recorded as q_1") || !strings.Contains(text, "[crowsnest answer q_1]") {
 		t.Fatalf("non-blocking result %q", text)
 	}
 	open, _ := f.service.List(ctx, "open")
@@ -508,5 +514,40 @@ func TestSettledText(t *testing.T) {
 	}
 	if got := SettledText(questions.Question{ID: "q_1", Status: questions.StatusCancelled}); !strings.Contains(got, "not consent") {
 		t.Fatal(got)
+	}
+}
+
+// recordingSpeaker is a Speaker that remembers what it was asked to say.
+type recordingSpeaker struct {
+	mu   sync.Mutex
+	said []string
+}
+
+func (r *recordingSpeaker) Say(sentence, source, paneID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.said = append(r.said, source+"|"+paneID+"|"+sentence)
+	return "t_1"
+}
+
+func TestSayGoesToTheSpeakerWhenTalkModeIsOn(t *testing.T) {
+	speaker := &recordingSpeaker{}
+	db, err := store.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	identity := agentid.New(db, nil)
+	token, _ := identity.Mint(context.Background(), agentid.Binding{PaneID: "w2:p1", Kind: agentid.KindPane})
+	server := NewServer(ServerOptions{Speaker: speaker, Identity: identity})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/say", strings.NewReader(`{"text":"Build  green."}`))
+	r.Header.Set(agentid.HeaderToken, token)
+	r.Header.Set("X-Crowsnest-Pane", "orchestrator") // not believed
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, r)
+	speaker.mu.Lock()
+	defer speaker.mu.Unlock()
+	if response.Code != http.StatusOK || len(speaker.said) != 1 || speaker.said[0] != "say|w2:p1|Build green." {
+		t.Fatalf("%d %v", response.Code, speaker.said)
 	}
 }

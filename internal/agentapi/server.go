@@ -15,12 +15,15 @@
 //	DELETE /api/v1/questions/{id}         withdraw
 //	POST   /api/v1/say                    speak a sentence in talk mode (M11 voices it)
 //	GET    /api/v1/health                 liveness, for the CLI's "is crowsnest running" check
+//	…/api/v1/jobs…, /api/v1/hooks/{event}  the job protocol and the hooks (jobs.go, M7)
 //
 // A request may carry the caller's token (X-Crowsnest-Token, which the client takes from
 // CROWSNEST_TOKEN). The socket derives the caller's pane and job from that token alone, through
 // the agentid registry; it never believes a pane or job the caller names (R1b N2, N7). A caller
 // without a known token is unidentified: it may ask, but its questions have no pane to be typed
-// back to (it reads the answer from the long-poll), and it may not withdraw questions.
+// back to (it reads the answer from the long-poll); it may not withdraw questions, create jobs,
+// or act on a job. A job verb on job j is allowed when the token was issued for j, or for the pane
+// that holds j (the orchestrator, whose tokens name no job; DESIGN.md 6.2).
 //
 // Quotas (R1b N6), per caller (its pane, or one shared bucket for every unidentified caller):
 // asks are rate limited, open questions are capped per caller and in total, and concurrent
@@ -42,6 +45,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
 )
@@ -77,8 +81,14 @@ const (
 	unidentifiedKey = "unidentified"
 )
 
-// SayEvent is the data of a `say` hub event: a sentence an agent wants spoken (M11 speaks it when
-// talk mode is on in a browser; until then the event is simply published).
+// Speaker voices a `say` (M11: *voice.Service). It is an interface so this package does not
+// depend on talk mode.
+type Speaker interface {
+	Say(sentence, source, paneID string) string
+}
+
+// SayEvent is the data of the `say` hub event published when no Speaker is configured (talk mode
+// off): nothing plays it, but the event still shows an agent said something.
 type SayEvent struct {
 	Text   string    `json:"text"`
 	PaneID string    `json:"pane_id,omitempty"`
@@ -94,6 +104,8 @@ type SayRequest struct {
 type Server struct {
 	questions *questions.Service
 	identity  *agentid.Registry
+	jobs      *jobs.Service
+	speaker   Speaker
 	hub       *hub.Hub
 	logger    *slog.Logger
 	version   string
@@ -107,12 +119,15 @@ type Server struct {
 // ServerOptions configure a Server. Questions is required.
 type ServerOptions struct {
 	Questions *questions.Service
+	Jobs      *jobs.Service // nil: the job routes answer 503
 	// Identity resolves callers' tokens. nil: every caller is unidentified.
 	Identity *agentid.Registry
 	Hub      *hub.Hub // nil: say is accepted and dropped
-	Logger   *slog.Logger
-	Version  string
-	Now      func() time.Time // for the quotas; nil means time.Now
+	// Speaker, when set (talk mode on), voices `say` instead of the plain hub event.
+	Speaker Speaker
+	Logger  *slog.Logger
+	Version string
+	Now     func() time.Time // for the quotas; nil means time.Now
 }
 
 // NewServer wires the routes.
@@ -121,7 +136,8 @@ func NewServer(opts ServerOptions) *Server {
 		opts.Logger = slog.Default()
 	}
 	server := &Server{
-		questions: opts.Questions, identity: opts.Identity, hub: opts.Hub, logger: opts.Logger, version: opts.Version,
+		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
+		logger: opts.Logger, version: opts.Version,
 		asks:  ratelimit.New(askBurst, askRefill, opts.Now),
 		says:  ratelimit.New(sayBurst, sayRefill, opts.Now),
 		waits: &waitCounter{active: map[string]int{}},
@@ -133,6 +149,7 @@ func NewServer(opts ServerOptions) *Server {
 	mux.HandleFunc("GET /api/v1/questions/{id}", server.handleGet)
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", server.handleCancel)
 	mux.HandleFunc("POST /api/v1/say", server.handleSay)
+	server.registerJobRoutes(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "No such endpoint on the crowsnest agent socket.")
 	})
@@ -322,7 +339,10 @@ func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, "text is longer than "+strconv.Itoa(MaxSayRunes)+" characters; say one sentence")
 		return
 	}
-	if s.hub != nil {
+	switch {
+	case s.speaker != nil:
+		s.speaker.Say(text, "say", caller.PaneID)
+	case s.hub != nil:
 		s.hub.Publish(hub.Event{Type: "say", Data: SayEvent{Text: text, PaneID: caller.PaneID, At: time.Now().UTC()}})
 	}
 	writeData(w, http.StatusOK, map[string]bool{"accepted": true})

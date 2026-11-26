@@ -74,7 +74,7 @@ func TestStartHandsTheOrchestratorItsTokens(t *testing.T) {
 		t.Fatalf("pane token %q resolves to %+v (%v)", paneToken, binding, ok)
 	}
 	mcpToken := mcpTokenOf(t, f.Starts()[0].Args)
-	if binding, ok, _ := registry.Resolve(ctx, mcpToken); !ok || binding.PaneID != status.PaneID || binding.Kind != agentid.KindMCP {
+	if binding, ok, _ := registry.Resolve(ctx, mcpToken); !ok || binding.PaneID != status.PaneID || binding.Kind != agentid.KindStart {
 		t.Fatalf("MCP token resolves to %+v (%v)", binding, ok)
 	}
 	if _, err := rig.orch.Restart(ctx); err != nil {

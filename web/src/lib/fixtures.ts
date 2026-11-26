@@ -8,6 +8,7 @@
 // dialog option in fixtures mode behaves like the real thing (the dialog goes away).
 import type { AnswerRequest, Question } from "./questions";
 import { fixtureQuestions } from "./questionFixtures";
+import { makeBoard, makeDetail } from "./jobFixtures";
 import { ApiError } from "./api";
 import type {
   Agent,
@@ -418,6 +419,8 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
   if (path === "/fleet") return structuredClone(fleetState);
   const questionsAnswer = questionFixtureApi(path, method, body);
   if (questionsAnswer !== undefined) return questionsAnswer;
+  const jobsAnswer = jobFixtureApi(path);
+  if (jobsAnswer !== undefined) return jobsAnswer;
   const match = /^\/agents\/([^/]+)\/(screen|keys)$/.exec(path);
   if (match?.[1] && match[2]) {
     const target = decodeURIComponent(match[1]);
@@ -462,4 +465,18 @@ function questionFixtureApi(path: string, method: string, body: unknown): unknow
     });
   }
   return structuredClone(question);
+}
+
+// ---- Jobs (M7) -----------------------------------------------------------------------------
+
+/** Answers the job routes from lib/jobFixtures; undefined for any other path. Read-only. */
+function jobFixtureApi(path: string): unknown {
+  if (path === "/jobs") return makeBoard();
+  if (path === "/roles") return ["builder", "lead", "reviewer", "tester"].map((name) => ({ name, summary: `The ${name} role`, custom: false }));
+  if (path === "/dirs") return [{ path: "/src/crowsnest", label: "crowsnest", source: "remembered" }];
+  const one = /^\/jobs\/(j_\d+)$/.exec(path);
+  if (!one) return undefined;
+  const job = makeBoard().find((candidate) => candidate.id === one[1]);
+  if (!job) throw new ApiError(404, "NOT_FOUND", "No such job.");
+  return { ...makeDetail(), ...job };
 }

@@ -26,6 +26,9 @@ import (
 const (
 	EnvSocket = "CROWSNEST_SOCKET"
 	EnvToken  = agentid.EnvToken
+	// EnvJob is the job a job agent holds: only the default job id for the job verbs' paths.
+	// The server decides what the caller may touch from its token, not from this.
+	EnvJob = "CROWSNEST_JOB"
 )
 
 // pollSeconds is the long-poll window a waiting client asks for; it polls again until settled.
@@ -59,6 +62,7 @@ func (e *APIError) Error() string { return e.Message }
 type Client struct {
 	socket string
 	token  string
+	job    string // default job id for the job verbs (CROWSNEST_JOB, --job, job_id)
 	http   *http.Client
 }
 
@@ -82,7 +86,9 @@ func NewClientFromEnv(getenv func(string) string) (*Client, error) {
 	if path == "" {
 		return nil, ErrNoSocket
 	}
-	return NewClient(path, getenv(EnvToken)), nil
+	client := NewClient(path, getenv(EnvToken))
+	client.job = getenv(EnvJob)
+	return client, nil
 }
 
 // Socket is the socket path the client uses.

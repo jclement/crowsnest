@@ -1,0 +1,413 @@
+// The Service: every change to a job goes through mutate, under one lock, so a hook, an agent
+// call, the recovery tick and a browser action never interleave on the same row. mutate loads
+// the row, applies the change, re-derives needs_you from the job's questions, validates the
+// state change with CheckTransition, saves, journals the events and publishes a `job` event.
+
+package jobs
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/store"
+)
+
+const (
+	// MaxBriefBytes caps a brief; it is typed into the agent as its first prompt.
+	MaxBriefBytes = 24 << 10
+	// maxProgressRunes caps the one-line progress.
+	maxProgressRunes = 200
+	// maxResultBytes caps result_md.
+	maxResultBytes = 64 << 10
+	// timelineLimit bounds one detail's timeline.
+	timelineLimit = 300
+	// listLimit bounds the board.
+	listLimit = 300
+	// progressStale is how old a job_update may get before "doing now" falls back to the last
+	// tool call (6.5).
+	progressStale = 5 * time.Minute
+)
+
+// ErrNotFound is returned for an unknown job.
+var ErrNotFound = errors.New("no such job")
+
+// ValidationError is a refusal worded for whoever sent the request (an agent or the browser).
+type ValidationError struct{ Message string }
+
+func (e *ValidationError) Error() string { return e.Message }
+
+// IsValidation reports whether err is a ValidationError or a TransitionError.
+func IsValidation(err error) bool {
+	var validation *ValidationError
+	var transition *TransitionError
+	return errors.As(err, &validation) || errors.As(err, &transition)
+}
+
+func invalid(format string, args ...any) error {
+	return &ValidationError{Message: fmt.Sprintf(format, args...)}
+}
+
+// OrchestratorInfo is what the launcher needs to know about the orchestrator.
+type OrchestratorInfo struct {
+	PaneID string // empty: no orchestrator pane yet
+	Ready  bool   // idle, working or blocked: it can be given a job
+}
+
+// ActivityFunc reports a job agent's transcript activity: when the transcript last grew, and a
+// summary of the last tool call. serve wires it to internal/transcript (M4's tailer).
+type ActivityFunc func(ctx context.Context, job Job) (lastAppend time.Time, lastTool string)
+
+// Options configure a Service. Store is required; the rest may be zero in tests.
+type Options struct {
+	Store  *store.Store
+	Hub    *hub.Hub
+	Logger *slog.Logger
+	Now    func() time.Time
+
+	// Herdr is the session's client; nil means jobs are recorded but never launched.
+	Herdr herdr.Client
+	// Launch is the launcher's configuration.
+	Launch LaunchOptions
+	// Orchestrator reports the orchestrator's pane; nil means no-dir jobs stay queued.
+	Orchestrator func() OrchestratorInfo
+	// Activity reads transcript activity for the heartbeat; nil disables it.
+	Activity ActivityFunc
+	// Notify tells Jeff something (serve wires --notify-url). It must not block.
+	Notify func(text string)
+	// Roles are the role prompts (embedded plus overrides). Nil: the embedded set.
+	Roles *Roles
+	// Synchronous runs launches and restarts inline instead of in goroutines (tests).
+	Synchronous bool
+}
+
+// Service holds the jobs.
+type Service struct {
+	opts Options
+	mu   sync.Mutex
+
+	busyMu sync.Mutex
+	busy   map[string]bool // jobs with a launch or restart running in the background
+}
+
+// New returns a Service.
+func New(opts Options) *Service {
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	if opts.Roles == nil {
+		opts.Roles = EmbeddedRoles()
+	}
+	if opts.Notify == nil {
+		opts.Notify = func(string) {}
+	}
+	return &Service{opts: opts}
+}
+
+// Roles returns the role set.
+func (s *Service) Roles() *Roles { return s.opts.Roles }
+
+// ---- Reading -------------------------------------------------------------------------------
+
+// Get returns a job with its timeline and questions.
+func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
+	numeric, err := ParseID(id)
+	if err != nil {
+		return Detail{}, ErrNotFound
+	}
+	record, err := s.opts.Store.GetJob(ctx, numeric)
+	if errors.Is(err, store.ErrNotFound) {
+		return Detail{}, ErrNotFound
+	}
+	if err != nil {
+		return Detail{}, err
+	}
+	questionList, err := s.questionsOf(ctx, numeric)
+	if err != nil {
+		return Detail{}, err
+	}
+	events, err := s.opts.Store.ListJobEvents(ctx, numeric, timelineLimit)
+	if err != nil {
+		return Detail{}, err
+	}
+	detail := Detail{Job: s.toJob(record, countOpen(questionList)), Questions: questionList, Timeline: []Event{}}
+	for _, event := range events {
+		detail.Timeline = append(detail.Timeline, toEvent(event))
+	}
+	return detail, nil
+}
+
+// List returns jobs, newest first; states filters (empty: all).
+func (s *Service) List(ctx context.Context, states []State) ([]Job, error) {
+	names := make([]string, 0, len(states))
+	for _, state := range states {
+		if !state.Valid() {
+			return nil, invalid("unknown state %q", state)
+		}
+		names = append(names, string(state))
+	}
+	records, err := s.opts.Store.ListJobs(ctx, names, listLimit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Job, 0, len(records))
+	for _, record := range records {
+		open := 0
+		if !State(record.State).Terminal() {
+			list, err := s.questionsOf(ctx, record.ID)
+			if err != nil {
+				return nil, err
+			}
+			open = countOpen(list)
+		}
+		out = append(out, s.toJob(record, open))
+	}
+	return out, nil
+}
+
+func (s *Service) questionsOf(ctx context.Context, id int64) ([]Question, error) {
+	records, err := s.opts.Store.ListQuestionsByJob(ctx, FormatID(id))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Question, 0, len(records))
+	for _, record := range records {
+		question := Question{ID: fmt.Sprintf("q_%d", record.ID), Title: record.Title, Kind: record.Kind, Status: record.Status,
+			Urgency: record.Urgency, Wait: record.Wait, AnswerNote: record.AnswerNote, CreatedAt: record.CreatedAt}
+		if len(record.AnswerValue) > 0 {
+			_ = json.Unmarshal(record.AnswerValue, &question.AnswerValue)
+		}
+		out = append(out, question)
+	}
+	return out, nil
+}
+
+func countOpen(list []Question) int {
+	open := 0
+	for _, question := range list {
+		if question.Status == "open" {
+			open++
+		}
+	}
+	return open
+}
+
+// ---- Mutating ------------------------------------------------------------------------------
+
+// change is what one mutation produced: events to journal, and whether to tell Jeff.
+type change struct {
+	events []store.JobEventRecord
+	notify string
+}
+
+// event appends a timeline entry.
+func (c *change) event(kind, summary string, detail map[string]any) {
+	encoded := "{}"
+	if len(detail) > 0 {
+		if body, err := json.Marshal(detail); err == nil {
+			encoded = string(body)
+		}
+	}
+	c.events = append(c.events, store.JobEventRecord{Kind: kind, Summary: summary, DetailJSON: encoded})
+}
+
+// mutate applies fn to job id under the lock and saves it. fn may return an error to abandon
+// the change. The returned job is the saved state.
+func (s *Service) mutate(ctx context.Context, id string, fn func(record *store.JobRecord, c *change) error) (Job, error) {
+	numeric, err := ParseID(id)
+	if err != nil {
+		return Job{}, ErrNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, err := s.opts.Store.GetJob(ctx, numeric)
+	if errors.Is(err, store.ErrNotFound) {
+		return Job{}, ErrNotFound
+	}
+	if err != nil {
+		return Job{}, err
+	}
+	before := record
+	var c change
+	if err := fn(&record, &c); err != nil {
+		return Job{}, err
+	}
+	open, err := s.reconcileQuestionsLocked(ctx, &record, &c)
+	if err != nil {
+		return Job{}, err
+	}
+	if err := CheckTransition(State(before.State), State(record.State)); err != nil && before.State != record.State {
+		return Job{}, err
+	}
+	if before.State != record.State {
+		c.event(EventState, fmt.Sprintf("%s → %s", before.State, record.State), map[string]any{"from": before.State, "to": record.State})
+		if State(record.State).Terminal() && record.SettledAt.IsZero() {
+			record.SettledAt = s.opts.Now()
+		}
+	}
+	if err := s.save(ctx, record, c); err != nil {
+		return Job{}, err
+	}
+	job := s.toJob(record, open)
+	changeName := "updated"
+	if before.State != record.State {
+		changeName = "state"
+	}
+	s.publish(job, changeName)
+	if c.notify != "" {
+		s.opts.Notify(c.notify)
+	}
+	return job, nil
+}
+
+func (s *Service) save(ctx context.Context, record store.JobRecord, c change) error {
+	if err := s.opts.Store.UpdateJob(ctx, record); err != nil {
+		return err
+	}
+	now := s.opts.Now()
+	for _, event := range c.events {
+		event.JobID, event.At = record.ID, now
+		if _, err := s.opts.Store.InsertJobEvent(ctx, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reconcileQuestionsLocked derives needs_you from the job's questions: a live job goes to
+// needs_you when a blocking ask (wait=true) is open, or when the agent declared waiting and
+// questions are open; it comes back to running when that stops being true. It returns the open
+// question count.
+func (s *Service) reconcileQuestionsLocked(ctx context.Context, record *store.JobRecord, c *change) (int, error) {
+	if State(record.State).Terminal() {
+		return 0, nil
+	}
+	records, err := s.opts.Store.ListQuestionsByJob(ctx, FormatID(record.ID))
+	if err != nil {
+		return 0, err
+	}
+	open, blocking := 0, 0
+	for _, question := range records {
+		if question.Status == "open" {
+			open++
+			if question.Wait {
+				blocking++
+			}
+		}
+	}
+	if open == 0 {
+		record.Waiting = false
+	}
+	wantNeedsYou := blocking > 0 || (record.Waiting && open > 0)
+	switch {
+	case State(record.State) == StateRunning && wantNeedsYou:
+		record.State, record.Cause, record.CauseDetail = string(StateNeedsYou), string(CauseQuestions), fmt.Sprintf("%d open question(s)", open)
+	case State(record.State) == StateNeedsYou && Cause(record.Cause) == CauseQuestions && !wantNeedsYou:
+		record.State, record.Cause, record.CauseDetail = string(StateRunning), "", ""
+	}
+	return open, nil
+}
+
+func (s *Service) publish(job Job, changeName string) {
+	if s.opts.Hub == nil {
+		return
+	}
+	s.opts.Hub.Publish(hub.Event{Type: "job", Data: HubEvent{ID: job.ID, State: job.State, Stuck: job.Stuck, Cause: job.Cause, Title: job.Title, Change: changeName}})
+}
+
+// Journal adds a timeline entry to a job without changing it.
+func (s *Service) Journal(ctx context.Context, id, kind, summary string, detail map[string]any) error {
+	_, err := s.mutate(ctx, id, func(_ *store.JobRecord, c *change) error {
+		c.event(kind, summary, detail)
+		return nil
+	})
+	return err
+}
+
+// ---- Conversion ----------------------------------------------------------------------------
+
+func (s *Service) toJob(r store.JobRecord, open int) Job {
+	job := Job{
+		ID: FormatID(r.ID), Title: r.Title, BriefMD: r.BriefMD, DoneWhen: r.DoneWhen, Role: r.Role, Dir: r.Dir,
+		WorktreeBranch: r.WorktreeBranch, WorkDir: r.WorkDir, Engine: r.Engine, Model: r.Model,
+		State: State(r.State), Stuck: r.Stuck, Cause: Cause(r.Cause), CauseText: Cause(r.Cause).Describe(), CauseDetail: r.CauseDetail,
+		BlockedReason: r.BlockedReason, Waiting: r.Waiting, Progress: r.Progress, LastTool: r.LastTool,
+		ResultMD: r.ResultMD, FailReason: r.FailReason, PaneID: r.PaneID, AgentName: r.AgentName, SessionID: r.ClaudeSessionID,
+		CreatedAt: r.CreatedAt, StartedAt: timePtr(r.StartedAt), SettledAt: timePtr(r.SettledAt),
+		LastActivityAt: timePtr(r.LastActivityAt), Nudges: r.Nudges, Restarts: r.Restarts,
+		RetryAt: timePtr(r.RetryAt), RetryCount: r.RetryCount, OpenQuestions: open,
+		Verified: decodeList(r.VerifiedJSON), NotVerified: decodeList(r.NotVerifiedJSON),
+		Isolate: r.Isolate, isolate: r.Isolate,
+	}
+	if r.ParentID > 0 {
+		job.ParentID = FormatID(r.ParentID)
+	}
+	job.DoingNow = doingNow(r, s.opts.Now())
+	return job
+}
+
+// doingNow is the progress line, or the last tool call when the agent has not said anything for
+// a while (6.5).
+func doingNow(r store.JobRecord, now time.Time) string {
+	progressAt := r.LastProgressAt
+	if r.Progress != "" && (r.LastTool == "" || progressAt.IsZero() || now.Sub(progressAt) < progressStale) {
+		return r.Progress
+	}
+	if r.LastTool != "" {
+		return r.LastTool
+	}
+	return r.Progress
+}
+
+func toEvent(r store.JobEventRecord) Event {
+	event := Event{ID: r.ID, At: r.At, Kind: r.Kind, Summary: r.Summary}
+	if r.DetailJSON != "" && r.DetailJSON != "{}" {
+		_ = json.Unmarshal([]byte(r.DetailJSON), &event.Detail)
+	}
+	return event
+}
+
+func decodeList(encoded string) []string {
+	out := []string{}
+	_ = json.Unmarshal([]byte(encoded), &out)
+	return out
+}
+
+func encodeList(items []string) string {
+	clean := []string{}
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" {
+			clean = append(clean, item)
+		}
+	}
+	body, _ := json.Marshal(clean)
+	return string(body)
+}
+
+func timePtr(at time.Time) *time.Time {
+	if at.IsZero() {
+		return nil
+	}
+	utc := at.UTC()
+	return &utc
+}
+
+// oneLine collapses whitespace and caps a string at limit runes.
+func oneLine(text string, limit int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if len(runes) > limit {
+		return string(runes[:limit-1]) + "…"
+	}
+	return text
+}

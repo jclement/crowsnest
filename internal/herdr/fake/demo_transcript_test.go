@@ -49,3 +49,22 @@ func TestDemoTranscripts(t *testing.T) {
 		t.Fatalf("turn not recorded:\n%s", text[len(seeded):])
 	}
 }
+
+func TestDemoSayFollowsTheTalkFlag(t *testing.T) {
+	reply := cannedReplies[0]
+	voiceOn := "[crowsnest voice: transcribed speech, may contain mis-hearings] talk=on\nwhat is the status"
+	if got := demoSay(voiceOn, reply); got != "SAY: "+reply.say+"\n\n" {
+		t.Fatalf("talk=on: %q", got)
+	}
+	for _, prompt := range []string{
+		"[crowsnest voice: transcribed speech, may contain mis-hearings] talk=off\nhi",
+		"plain prompt mentioning talk=on",
+	} {
+		if got := demoSay(prompt, reply); got != "" {
+			t.Errorf("%q: %q", prompt, got)
+		}
+	}
+	if got := promptBody(voiceOn); got != "what is the status" {
+		t.Errorf("promptBody: %q", got)
+	}
+}

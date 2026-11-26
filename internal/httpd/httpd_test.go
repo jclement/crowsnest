@@ -22,11 +22,13 @@ import (
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
+	"github.com/jclement/crowsnest/internal/voice"
 )
 
 const (
@@ -94,6 +96,10 @@ type harnessOptions struct {
 	maxTerminals  int
 	// M6: the question inbox (questions_test.go); nil: the routes answer 503
 	questions *questions.Service
+	// M7: jobs (jobs_test.go); nil: the routes answer 503
+	jobs *jobs.Service
+	// M11: talk mode (voice_test.go); nil: the /voice routes answer 404
+	voice *voice.Service
 }
 
 var testWeb = fstest.MapFS{
@@ -153,6 +159,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Conversations: opts.conversations,
 		Orchestrator:  opts.orchestrator,
 		Questions:     opts.questions,
+		Jobs:          opts.jobs,
+		Voice:         opts.voice,
 	})
 	if err != nil {
 		t.Fatal(err)

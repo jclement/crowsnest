@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jclement/crowsnest/internal/agentcfg"
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/transcript"
@@ -30,12 +31,15 @@ const (
 	InstructionsFile = "CROWSNEST.md"
 	SettingsFile     = "claude-settings.json"
 	MCPConfigFile    = "mcp.json"
+	// TokenFile holds this start's agent token for the hooks (`crowsnest hook --token-file`),
+	// which, unlike the MCP server, cannot be given an environment of their own. 0600.
+	TokenFile = "agent-token"
 )
 
 // MCPAllowRule pre-approves every tool of crowsnest's MCP server in the orchestrator's settings,
 // so `ask` never stops at a permission prompt (DESIGN.md 6.2; verified in M6 under
 // --permission-mode auto, see section 7.6).
-const MCPAllowRule = "mcp__crowsnest__*"
+const MCPAllowRule = agentcfg.MCPAllowRule
 
 // shellNames are the processes that count as "a bare shell" in a pane.
 var shellNames = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": true, "dash": true, "ksh": true, "tcsh": true, "csh": true, "nu": true}
@@ -372,14 +376,21 @@ func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFile
 	if err := writePrivate(files.instructions, []byte(body)); err != nil {
 		return startFiles{}, err
 	}
-	if err := writeJSONFile(files.settings, ClaudeSettings(o.mcpEnabled())); err != nil {
+	token, err := o.mintStartToken(ctx, paneID)
+	if err != nil {
+		return startFiles{}, err
+	}
+	tokenFile := ""
+	if token != "" {
+		tokenFile = filepath.Join(o.opts.StateDir, TokenFile)
+		if err := writePrivate(tokenFile, []byte(token+"\n")); err != nil {
+			return startFiles{}, err
+		}
+	}
+	if err := writeJSONFile(files.settings, o.claudeSettings(tokenFile)); err != nil {
 		return startFiles{}, err
 	}
 	if o.mcpEnabled() {
-		token, err := o.mintMCPToken(ctx, paneID)
-		if err != nil {
-			return startFiles{}, err
-		}
 		files.mcpConfig = filepath.Join(o.opts.StateDir, MCPConfigFile)
 		if err := writeJSONFile(files.mcpConfig, MCPConfig(o.opts.Executable, o.opts.AgentSocket, token)); err != nil {
 			return startFiles{}, err
@@ -388,14 +399,15 @@ func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFile
 	return files, nil
 }
 
-// mintMCPToken returns a token for this start's MCP server, bound to paneID ("" without an
-// identity registry). It is minted per start, so it identifies the orchestrator even in a pane
-// it adopted rather than created (whose environment carries no token of crowsnest's).
-func (o *Orchestrator) mintMCPToken(ctx context.Context, paneID string) (string, error) {
-	if o.opts.Identity == nil {
+// mintStartToken returns a token for this start, bound to paneID: the MCP server gets it in its
+// environment and the hooks read it from TokenFile ("" without an identity registry or socket).
+// It is minted per start, so it identifies the orchestrator even in a pane it adopted rather than
+// created (whose environment carries no token of crowsnest's).
+func (o *Orchestrator) mintStartToken(ctx context.Context, paneID string) (string, error) {
+	if o.opts.Identity == nil || !o.mcpEnabled() {
 		return "", nil
 	}
-	token, err := o.opts.Identity.Mint(ctx, agentid.Binding{PaneID: paneID, Kind: agentid.KindMCP})
+	token, err := o.opts.Identity.Mint(ctx, agentid.Binding{PaneID: paneID, Kind: agentid.KindStart})
 	if err != nil {
 		return "", fmt.Errorf("minting the orchestrator's agent token: %w", err)
 	}
@@ -406,31 +418,18 @@ func (o *Orchestrator) mcpEnabled() bool {
 	return o.opts.Executable != "" && o.opts.AgentSocket != ""
 }
 
-// ClaudeSettings is the --settings file: the allow rule for crowsnest's MCP tools when they are
-// offered. (M7 adds the hooks.)
-func ClaudeSettings(withMCP bool) map[string]any {
-	if !withMCP {
-		return map[string]any{}
-	}
-	return map[string]any{"permissions": map[string]any{"allow": []string{MCPAllowRule}}}
+// claudeSettings is the --settings file: the allow rule for crowsnest's MCP tools and the
+// supervisor's hooks (M7), built by agentcfg like every job agent's. The orchestrator's hooks
+// carry no job id: the server maps them to the job the orchestrator currently holds.
+func (o *Orchestrator) claudeSettings(tokenFile string) map[string]any {
+	return agentcfg.ClaudeSettings(o.opts.Executable, o.opts.AgentSocket, "", tokenFile, o.mcpEnabled())
 }
 
-// MCPConfig is the --mcp-config file: one stdio server, `<executable> mcp`, told where the agent
-// socket is and given the agent's token (when there is one), which is how the socket knows which
-// pane is asking. The file is 0600 in the 0700 state directory.
+// MCPConfig is the --mcp-config file (agentcfg.MCPConfig with no job): one stdio server,
+// `<executable> mcp`, told where the agent socket is and given the agent's token (when there is
+// one), which is how the socket knows which pane is asking.
 func MCPConfig(executable, socket, token string) map[string]any {
-	env := map[string]string{"CROWSNEST_SOCKET": socket}
-	if token != "" {
-		env[agentid.EnvToken] = token
-	}
-	return map[string]any{"mcpServers": map[string]any{
-		"crowsnest": map[string]any{
-			"type":    "stdio",
-			"command": executable,
-			"args":    []string{"mcp"},
-			"env":     env,
-		},
-	}}
+	return agentcfg.MCPConfig(executable, socket, "", token)
 }
 
 func writeJSONFile(path string, value any) error {

@@ -18,23 +18,33 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
 // startQuestions builds the question service, starts its background work and the agent socket,
-// and returns the service, the socket path, and a stop function. Everything stops when ctx ends
-// or stop is called; stop returns once the deliverer and the sweeper have finished, and serve
-// calls it before the database closes, so an attempt cut short by shutdown can still record its
-// outcome (R1b-C08).
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, logger *slog.Logger) (*questions.Service, string, func(), error) {
+// and returns the service and a stop function. Everything stops when ctx ends or stop is called;
+// stop returns once the deliverer and the sweeper have finished, and serve calls it before the
+// database closes, so an attempt cut short by shutdown can still record its outcome (R1b-C08).
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, socket string, logger *slog.Logger) (*questions.Service, func(), error) {
 	var deliverer *questions.Deliverer
+	var notifyAsked func(questions.Question)
+	if cfg.NotifyURL != "" {
+		notifyAsked = questions.NewURLNotifier(cfg.NotifyURL, nil, logger)
+	}
 	options := questions.Options{
 		Store: db, Hub: events, Logger: logger,
-		OnSettled: func(questions.Question) { deliverer.Kick() },
-	}
-	if cfg.NotifyURL != "" {
-		options.OnAsked = questions.NewURLNotifier(cfg.NotifyURL, nil, logger)
+		OnSettled: func(question questions.Question) {
+			deliverer.Kick()
+			jobQuestionChanged(ctx, jobService, question, string(question.Status))
+		},
+		OnAsked: func(question questions.Question) {
+			if notifyAsked != nil {
+				notifyAsked(question)
+			}
+			jobQuestionChanged(ctx, jobService, question, "asked")
+		},
 	}
 	service := questions.New(options)
 	deliverer = questions.NewDeliverer(questions.DelivererOptions{
@@ -53,12 +63,11 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	workers.Go(func() { deliverer.Run(ctx) })
 	workers.Go(func() { service.RunSweeper(ctx, 0) })
 
-	socket := agentapi.SocketPath(socketRuntimeDir(cfg), cfg.StateDir, cfg.Session)
 	listener, err := agentapi.Listen(ctx, socket)
 	if err != nil {
-		return nil, "", stop, err
+		return nil, stop, err
 	}
-	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Hub: events, Logger: logger, Version: version})
+	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version})
 	go func() {
 		if err := server.Serve(ctx, listener); err != nil {
 			logger.Error("agent socket stopped", "err", err)
@@ -68,21 +77,30 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 
 	if demo, ok := client.(*fake.Demo); ok {
 		if err := startDemoQuestions(ctx, service, demo, logger); err != nil {
-			return nil, "", stop, err
+			return nil, stop, err
 		}
 	}
-	return service, socket, stop, nil
+	return service, stop, nil
 }
 
-// socketRuntimeDir is where the agent socket goes before the state directory is considered:
-// $XDG_RUNTIME_DIR, except under --demo, whose socket stays in its throwaway state directory so a
-// demo never collides with, or refuses to start beside, a real instance of the same --session
-// (R1 L2, R1b N11).
-func socketRuntimeDir(cfg config.Config) string {
+// agentSocketPath is where the agent socket goes: under $XDG_RUNTIME_DIR, except under --demo,
+// whose socket stays in its throwaway state directory so a demo never collides with, or refuses
+// to start beside, a real instance of the same --session (R1 L2, R1b N11).
+func agentSocketPath(cfg config.Config) string {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if cfg.Demo {
-		return ""
+		runtimeDir = ""
 	}
-	return os.Getenv("XDG_RUNTIME_DIR")
+	return agentapi.SocketPath(runtimeDir, cfg.StateDir, cfg.Session)
+}
+
+// jobQuestionChanged tells the job a question was asked or settled under it. It runs in the
+// background: the questions service calls its hooks inline and they must not block.
+func jobQuestionChanged(ctx context.Context, jobService *jobs.Service, question questions.Question, change string) {
+	if jobService == nil || question.JobID == "" {
+		return
+	}
+	go jobService.QuestionChanged(context.WithoutCancel(ctx), question.JobID, question.ID, question.Title, change, question.Wait)
 }
 
 // startDemoQuestions seeds the demo inbox and keeps asking.

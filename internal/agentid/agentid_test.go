@@ -21,7 +21,7 @@ func newRegistry(t *testing.T) (*Registry, *store.Store) {
 func TestMintAndResolve(t *testing.T) {
 	registry, db := newRegistry(t)
 	ctx := context.Background()
-	token, err := registry.Mint(ctx, Binding{PaneID: "w1:p1", JobID: "j_3", Kind: KindMCP})
+	token, err := registry.Mint(ctx, Binding{PaneID: "w1:p1", JobID: "j_3", Kind: KindStart})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestMintAndResolve(t *testing.T) {
 		t.Fatalf("token %q", token)
 	}
 	binding, ok, err := registry.Resolve(ctx, token)
-	if err != nil || !ok || binding.PaneID != "w1:p1" || binding.JobID != "j_3" || binding.Kind != KindMCP {
+	if err != nil || !ok || binding.PaneID != "w1:p1" || binding.JobID != "j_3" || binding.Kind != KindStart {
 		t.Fatalf("resolve: %+v %v %v", binding, ok, err)
 	}
 	stored, _ := db.ListKV(ctx, kvPrefix)
@@ -49,11 +49,11 @@ func TestBindRevokesStaleTokens(t *testing.T) {
 	registry, _ := newRegistry(t)
 	ctx := context.Background()
 	oldPane, _ := registry.Mint(ctx, Binding{PaneID: "w1:p1", Kind: KindPane})
-	oldMCP, _ := registry.Mint(ctx, Binding{PaneID: "w1:p1", Kind: KindMCP})
+	oldMCP, _ := registry.Mint(ctx, Binding{PaneID: "w1:p1", Kind: KindStart})
 	other, _ := registry.Mint(ctx, Binding{PaneID: "w2:p1", Kind: KindPane})
 
 	// The agent restarts in the same pane: a new MCP token replaces the old one only.
-	newMCP, _ := registry.Mint(ctx, Binding{PaneID: "w1:p1", Kind: KindMCP})
+	newMCP, _ := registry.Mint(ctx, Binding{PaneID: "w1:p1", Kind: KindStart})
 	if _, ok, _ := registry.Resolve(ctx, oldMCP); ok {
 		t.Fatal("the previous start's MCP token still resolves")
 	}

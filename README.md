@@ -1,17 +1,23 @@
 # crowsnest
 
 One Go binary that starts a [herdr](https://herdr.dev) session and a Claude Code orchestrator in
-it, and serves a mobile-friendly web app for running that session from a browser: chat with the
-orchestrator, answer questions from agents, drive a terminal, and see every agent in the fleet.
+it, and serves a mobile-friendly web app for running that session from a browser: give an agent a
+job and watch it, chat with the orchestrator, answer questions from agents, drive a terminal, and
+see every agent in the fleet.
 
-> **Status: M6 (questions and the agent API), M5 (terminals) and M4 (orchestrator and Chat).**
+> **Status: M11 (talk mode), M7 (jobs), M6 (questions and the agent API), M5 (terminals) and M4 (orchestrator and
+> Chat).** Jobs are the default view: one text box gives a job to a new agent (in a git worktree
+> for a builder) or to the orchestrator; every job has a declared state, a heartbeat and a
+> progress line, and Claude Code hooks refuse a turn that ends with nothing declared (DESIGN.md
+> section 6).
 > crowsnest serves the login, the API, the event stream and the web app; it connects to (or
 > starts) its herdr session and serves the fleet, agent screens, dialog key presses, and live
 > terminals. It keeps the session's orchestrator running and serves the Chat view and every Claude
 > agent's conversation, read live from Claude's transcripts. Agents ask the human questions over a
 > unix socket (`crowsnest ask`, or the `ask` MCP tool the orchestrator is started with); the Inbox
-> shows them beside terminal dialogs, and an answer is typed back into the asker's pane. Jobs,
-> pokes and talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
+> shows them beside terminal dialogs, and an answer is typed back into the asker's pane. With an
+> ElevenLabs key, Chat has talk mode: push to talk, and the orchestrator's replies spoken. Pokes,
+> budgets and review gates arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
 > [STATUS.md](STATUS.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
@@ -86,11 +92,25 @@ turns it off. Fixtures mode exists only in development builds; it is compiled ou
 `mise run build`.
 
 On a phone over Tailscale, bind the tailnet address, or keep localhost and use `tailscale serve`,
-which also gives the HTTPS secure context the microphone needs later:
+which also gives the HTTPS secure context the microphone needs for talk mode:
 
 ```sh
 ./bin/crowsnest --bind tailnet --username jeff --password-file ~/.config/crowsnest/password
 ```
+
+**Talk mode.** Start crowsnest with an ElevenLabs API key (`ELEVENLABS_API_KEY`; prefer the
+environment to the flag, which `ps` shows) and Chat gets a **Talk** toggle. While it is on in a
+tab, a large push-to-talk button sits above the composer: hold it (or hold Space on a desktop)
+and speak, or tap it to lock recording on and tap again to stop; a recording stops by itself at
+60 s. What you said is transcribed by ElevenLabs, shown for 1.5 s with Cancel, then sent to the
+orchestrator under a `[crowsnest voice: …] talk=on` header. The orchestrator is told (in its
+`CROWSNEST.md`) to begin each final reply with `SAY: <one sentence>` while talk mode is on; that
+sentence is spoken, as is anything an agent says with `crowsnest say`. A reply with no SAY line
+plays a short chime; `SAY: -` and `noop` are silent. In the Inbox, a question can be read aloud
+and its note dictated. The key never leaves the server: the browser can only ask to hear texts
+the server holds (by id), never arbitrary text. The microphone needs a secure context
+(`https://` or `localhost`); over plain HTTP on a tailnet address the page says so and spoken
+replies still work. Without a key every `/voice` route is a 404 and nothing changes.
 
 ## Container (devbox)
 
@@ -210,19 +230,38 @@ withdraw questions. Without `CROWSNEST_SOCKET`, or with no server answering, the
 | `crowsnest ask --file q.json\|- [--wait] [--timeout 12h]` | Post a question (DESIGN.md 8.1 shape: `title`, `body_md`, `kind` confirm/choice/ack/manual/notice, `multi`, `options`, `recommend`, `context`, `urgency`, `expires_in_hours`, `files`). Without `--wait` it prints the id (`q_7`) and returns; the answer is typed into the pane later as `[crowsnest answer q_7] <answer> (note: …); the question was "<title>"` (or, when that would not fit on one line, a line saying to read it with `crowsnest question`). With `--wait` it blocks and prints `{id, status, answer_value, answer_note}`: exit `0` answered, `3` expired or cancelled, `1` error. `expires_in_hours` is between 5 minutes (0.084) and 168 |
 | `crowsnest question <id>` | Print a question with its whole answer, `{id, status, title, answer_value, answer_labels, answer_note}`; never shortened |
 | `crowsnest notify "text" [--urgency low\|normal\|blocking]` | A notice (no answer needed); the first line is its title. Prints the id |
-| `crowsnest say "sentence"` | Ask for one sentence to be spoken in talk mode (M11 speaks it; now it is published as a `say` event) |
-| `crowsnest mcp` | A stdio MCP server exposing `ask`, `get_question` and `say` (M7 adds the job tools), proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes. `ask` with `wait=true` returns the whole answer and note |
+| `crowsnest say "sentence"` | Speak one sentence in every browser with talk mode on; a no-op when talk mode is off |
+| `crowsnest mcp` | A stdio MCP server exposing `ask`, `get_question`, `say`, `job_update`, `done`, `fail`, `job_create` and `job_get`, proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes. `ask` with `wait=true` returns the whole answer and note |
+| `crowsnest job update "doing now" [--state blocked --reason "…"] [--waiting]` | The job protocol for agents without MCP (Codex) and scripts: a heartbeat with a progress line; `--state blocked` with a reason, or `running`; `--waiting` declares that nothing is left the open questions do not block (refused with no open question). The job is `--job j_<n>` or `CROWSNEST_JOB` |
+| `crowsnest job done --result "…" --verified "…" --not-verified "…"` | The job is finished, with evidence (repeat the list flags; `none` for an empty list; `--result-file` reads the result) |
+| `crowsnest job fail "reason"` | It cannot be finished |
+| `crowsnest job get [j_<n>] [--json]` | The job as text for an agent (brief, state, progress, questions and answers), or the full record with its timeline |
+| `crowsnest job create "brief" [--dir] [--role] [--done-when] [--engine] [--model] [--isolate]` | Delegate a child job; the caller's job is its parent |
+| `crowsnest job list [--state …]` | Jobs, newest first |
+| `crowsnest hook <event> [--job j_<n>] [--socket PATH] [--token-file PATH]` | The Claude Code hook entry point crowsnest writes into each agent's `--settings` (`stop`, `session-start`, `notification`, `stop-failure`, `permission-denied`, `session-end`, `post-tool-use`): stdin JSON to the server, its reply on stdout. Fails open: any failure prints nothing and exits 0 |
 
 The socket is `$XDG_RUNTIME_DIR/crowsnest/<session>.sock` when `XDG_RUNTIME_DIR` is set, else
 `~/.local/state/crowsnest/<session>/agent.sock` (or, when that path is too long for a unix socket,
 `crowsnest-<uid>/<hash>.sock` under the OS temporary directory); `serve` logs it at start. Its
 directory is `0700` and must belong to you; the socket is `0600`.
 Its routes are Meat Prompt's (`POST /api/v1/questions`, `GET /api/v1/questions/{id}?wait=90`,
-`GET /api/v1/questions?status=`, `DELETE /api/v1/questions/{id}`) plus `POST /api/v1/say` and
-`GET /api/v1/health`. The caller's token travels as `X-Crowsnest-Token`. Quotas, per caller
-(all unidentified callers share one): 10 asks at once then one per 30 s, 30 open questions (200
-in all), 8 concurrent long-polls, and a say rate limit; past one the answer is `429` with
-`Retry-After` and a sentence saying what to do.
+`GET /api/v1/questions?status=`, `DELETE /api/v1/questions/{id}`) plus `POST /api/v1/say`,
+`GET /api/v1/health`, the job protocol (`POST /api/v1/jobs`, `GET /api/v1/jobs`,
+`GET /api/v1/jobs/{id}`, `GET /api/v1/jobs/{id}/context`, `POST /api/v1/jobs/{id}/update|done|fail`)
+and the hooks (`POST /api/v1/hooks/{event}`).
+
+The caller's token travels as `X-Crowsnest-Token`. Job verbs follow it: anyone may read a job,
+but `update`, `done` and `fail` work only on the job the token was issued for, or the job held in
+the token's pane (the orchestrator's case); creating a job needs a token; a hook counts for the
+token's job, or the job in the token's pane, and otherwise for nothing. Each agent start writes
+its token to an `agent-token` file (0600) that the hook command lines name with `--token-file`.
+Quotas, per caller (all unidentified callers share one): 10 asks at once then one per 30 s, 30
+open questions (200 in all), 8 concurrent long-polls, and a say rate limit; past one the answer is
+`429` with `Retry-After` and a sentence saying what to do.
+
+Roles are prompts: `lead`, `builder`, `reviewer` and `tester` are built in; a file
+`~/.config/crowsnest/roles/<name>.md` adds a role or replaces a built-in one. The job protocol is
+appended to every role's prompt.
 
 ## Configuration
 
@@ -249,7 +288,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--tls-cert` | `CROWSNEST_TLS_CERT` | none | PEM certificate: serve HTTPS directly |
 | `--tls-key` | `CROWSNEST_TLS_KEY` | none | PEM key for `--tls-cert` |
 | `--elevenlabs-api-key` | `ELEVENLABS_API_KEY` | none | Enables talk mode |
-| `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id | Voice for spoken replies |
+| `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id (`21m00Tcm4TlvDq8ikWAM`) | Voice for spoken replies |
 | `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs API base URL (tests point it at a fake) |
 | `--notify-url` | `CROWSNEST_NOTIFY_URL` | none | POST a one-line notice here when something needs you (ntfy-style) |
 | `--demo` | `CROWSNEST_DEMO` | `false` | In-memory fake herdr and scripted orchestrator |
@@ -264,11 +303,12 @@ served by Vite, so the binary does not require embedded web assets.
 `--session`, `--allow-default-session`, `--demo`, `--dir`, `--model`, `--permission-mode`,
 `--no-orchestrator` and `--notify-url` (one plain-text line, the question's id and scrubbed title,
 POSTed for each `blocking` question, at most 3 at once and then one a minute per asking pane; the
-URL is never logged) take effect now. When `serve` finds `CROWSNEST_PASSWORD`,
-`CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY` or `CROWSNEST_NOTIFY_URL` in its environment it
-re-executes itself once with them moved to an inherited pipe, so the environment the OS reports
-for the process (`/proc/<pid>/environ`, `ps eww`) holds none of them. `--poke-interval` (M8) and talk mode are
-parsed and validated now and take effect in their milestones.
+URL is never logged) and the ElevenLabs settings (talk mode, M11) take effect now. When `serve`
+finds `CROWSNEST_PASSWORD`, `CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY` or
+`CROWSNEST_NOTIFY_URL` in its environment it re-executes itself once with them moved to an
+inherited pipe, so the environment the OS reports for the process (`/proc/<pid>/environ`,
+`ps eww`) holds none of them. `--poke-interval` (M8) is parsed and validated now and takes effect
+in its milestone.
 
 ### Startup refusals
 
@@ -296,12 +336,12 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
 | `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version}}` |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (`{text, pane_id, at}`); later `job`, … |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (talk mode on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`; off: `{text, pane_id, at}`, which nothing plays); `job` (`{id, state, stuck, cause, title, change}`) when a job changes; later `poke` |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
 | `GET /agents/{target}/messages?after=&limit=` | session | A page of the agent's conversation from its Claude transcript: `{source, session_id, cursor, reset, earlier, more, messages}`. Without `after` (or with a stale cursor) the newest `limit` (200) messages and `reset: true`; with it, only what changed since. No transcript: one `pane` message with the pane's recent text |
-| `POST /agents/{target}/prompt` | session | `{text, force_over_draft}` → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
+| `POST /agents/{target}/prompt` | session | `{text, force_over_draft, voice}` (`voice: true` adds the voice header and talk flag; 404 when talk mode is off) → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
 | `GET /orchestrator` | session | `{state, pane_id, session_id, dir, detail, restarts}`; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed` or `disabled` |
 | `POST /orchestrator/restart`, `POST /orchestrator/new` | session | Restart Claude on the same conversation (`--resume`), or with a fresh one |
 | `GET /questions?status=` | session | Questions with a status (`open`, `answered`, `expired`, `cancelled`, a comma-separated list, or `all`), open first; file contents left out (`file_count` says how many) |
@@ -309,6 +349,16 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /questions/{id}/answer` | session | `{answer_value, answer_note}`: a key, an array of keys for a multi-select, nothing for ack/notice; a `manual` answer is the note. `409 CONFLICT` once settled |
 | `DELETE /questions/{id}` | session | Cancel an open question; the asker is told |
 | `GET /inbox/summary` | session | `{open, blocking}` for the Inbox badge |
+| `GET /jobs?state=` | session | The board: every job, newest first (`state` filters, comma-separated) |
+| `POST /jobs` | session | `{brief, dir?, role?, done_when?, engine?, model?, isolate?}` → the queued job (`201`); the agent starts in the background. No `dir`: the orchestrator takes it |
+| `GET /jobs/{id}` | session | The job with its `timeline` (state changes, progress, nudges, hooks, questions, restarts, retries, messages) and `questions` |
+| `POST /jobs/{id}/message` | session | `{text, force_over_draft}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
+| `POST /jobs/{id}/cancel`, `/nudge`, `/resume` | session | Cancel (Esc to the agent, then `cancelled`; the pane stays), nudge by hand, or resume a stuck job (retry now after a limit, restart a gone agent, else nudge) |
+| `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
+| `POST /voice/stt` | session | Talk mode. The body is one recording as MediaRecorder made it (`audio/webm`, `audio/mp4`, `audio/ogg`, …; at most 2 MB) → `{text}`. 12 a minute per session (`429` with `Retry-After`); ElevenLabs failures are `502`/`503`/`422` with code `VOICE_UPSTREAM` and never its own error text |
+| `GET /voice/tts?text_id=` | session | The speech of a server-held text (a `say`, a SAY line, a read-aloud), streamed (`audio/mpeg`). `404` for an unknown or expired id (texts live an hour). 30 a minute per session; a replay comes from a cache |
+| `POST /voice/talk` | session | `{client_id, on}`: this tab's talk-mode heartbeat (every 15 s; gone after 45 s) → `{talk, heartbeat_seconds, max_recording_seconds}`. Talk mode is on for the orchestrator while any tab beats |
+| `POST /voice/read` | session | `{question_id}` → `{text_id}`: the question's title and options, to play through `/voice/tts` |
 | `GET /term/tui` (WebSocket) | session | The herdr TUI in a PTY. Binary frames are terminal bytes both ways; text frames are JSON control: the browser sends `{"type":"resize","cols","rows"}` first (the process starts on it), the server ends with `{"type":"exit","reason"}` |
 | `GET /term/pane/{pane_id}` (WebSocket) | session | One pane through `herdr terminal session control --takeover`, same protocol. `404` unless the pane is in the fleet |
 
@@ -321,7 +371,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
 | `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, and the pane and TUI terminal bridges |
-| `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript |
+| `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript. Then **the stop test**: three haiku job agents in a scratch git repo, where an undeclared stop is refused by the Stop hook, `done` stops cleanly, and a non-blocking `ask` answered through the browser API reaches the agent, which finishes |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
@@ -329,7 +379,9 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures, and the terminals on a throwaway `crowsnest-test-*` herdr session. Each spec starts and stops its own instance on a random localhost port |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run screenshots:inbox` | Builds, then Playwright against `./bin/crowsnest --demo`: the Inbox list and a question (mermaid and a diff) at 375×812 and 1440×900, light and dark, a multi-select, the 375 px checks, and an answer round trip |
+| `mise run screenshots:jobs` | Builds, then Playwright against `./bin/crowsnest --demo`: the Jobs board (light and dark), the new-job form, a running, a stuck and a done job at 375×812 and 1440×900, the 375 px checks, and giving a job |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
+| `mise run e2e:voice` | Builds, then Playwright against `./bin/crowsnest --demo` with talk mode on and a fake ElevenLabs (`web/e2e/support/fake-elevenlabs.mjs`, never the real API), Chromium's fake microphone: hold to talk, the transcript is sent, the SAY reply is fetched from `/voice/tts` and played; Cancel sends nothing; screenshots of Chat with talk mode at 375×812 and 1440×900 |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives and `checksums.txt`, nothing published |
 | `mise run image` | Build the devbox image (`deploy/Dockerfile`) for this machine's architecture as `crowsnest:dev`. Needs Docker |
 | `mise run publish` | Build the devbox image for amd64 and arm64 and push `ghcr.io/jclement/crowsnest:<version>` and `:latest`. Jeff's step |
@@ -356,11 +408,13 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | Path | Holds |
 |---|---|
 | `~/.config/crowsnest/config.yaml` | Optional config file |
-| `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed), settings and questions |
+| `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed), settings, questions, jobs and their timelines |
 | `~/.local/state/crowsnest/<session>/herdr-server.log` | Output of a herdr server crowsnest started |
 | `~/.local/state/crowsnest/<session>/CROWSNEST.md` | The orchestrator's instructions (`--append-system-prompt-file`), rewritten from the embedded template on every start |
-| `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` (M7 adds hooks) |
-| `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server, its `CROWSNEST_SOCKET` and its agent token (`0600`) |
+| `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` and the supervisor's hooks |
+| `~/.local/state/crowsnest/<session>/jobs/j_<n>/` | A job agent's `prompt.md` (role prompt and job protocol), `settings.json` (hooks with `--job j_<n>`, the allow rule) `mcp.json` (with the agent's token) and `agent-token` (the token, for the hooks) |
+| `~/.config/crowsnest/roles/*.md` | Optional role prompts that add to or replace the built-in ones |
+| `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server, its `CROWSNEST_SOCKET` and its agent token (`0600`); `agent-token` beside it holds the same start's token for the hooks |
 | `~/.local/state/crowsnest/<session>/agent.sock` | The agent API socket (when `XDG_RUNTIME_DIR` is unset) |
 | `$TMPDIR/crowsnest-demo-*/` | `--demo` only: the demo's database, state (the demo agents' transcripts, its agent socket) and orchestrator directory, removed on exit |
 | `~/.local/state/crowsnest/mise-install.log` | Devbox image only: the entrypoint's last `mise install` |

@@ -18,6 +18,7 @@ import (
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/transcript"
+	"github.com/jclement/crowsnest/internal/voice"
 )
 
 // MessageEvent is the data of a `message` event: the conversation of the agent in PaneID changed,
@@ -42,7 +43,7 @@ func claudeConfigDir(cfg config.Config) string {
 // startOrchestrator builds the orchestrator and the transcript manager, starts both running until
 // ctx ends, and returns them for the HTTP server. With --no-orchestrator the orchestrator reports
 // itself disabled and the conversations of other agents still work.
-func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, agentSocket string, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
+func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, agentSocket string, talk *voice.Service, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
 	claudeDir := claudeConfigDir(cfg)
 	binDir, executable := "", ""
 	if path, err := os.Executable(); err == nil {
@@ -52,6 +53,7 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 		binDir, executable = filepath.Dir(path), path
 	}
 	var manager *transcript.Manager
+	var replies *voice.ReplyWatcher // talk mode: speaks the orchestrator's SAY lines
 	orchestrator := orch.New(orch.Options{
 		Client: client, KV: db, Hub: events, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
 		StateDir: cfg.StateDir, Model: cfg.Model, PermissionMode: cfg.PermissionMode, Version: version,
@@ -62,6 +64,9 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 			if status.PaneID != "" && manager != nil {
 				go func() { _ = manager.Pin(ctx, orch.Name) }()
 			}
+			if replies != nil {
+				go replies.Status(ctx, status.State == orch.StateIdle, status.PaneID)
+			}
 		},
 	})
 	manager = transcript.NewManager(transcript.ManagerOptions{
@@ -70,8 +75,14 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 		Fallback: orch.PaneFallback(client),
 		Notify: func(paneID, cursor string) {
 			events.Publish(hub.Event{Type: "message", Data: MessageEvent{PaneID: paneID, Cursor: cursor}})
+			if replies != nil {
+				go replies.Changed(ctx, paneID)
+			}
 		},
 	})
+	if talk != nil {
+		replies = voice.NewReplyWatcher(talk, manager, orch.Name)
+	}
 	go manager.Run(ctx)
 	go orchestrator.Run(ctx)
 	logger.Info("conversations follow Claude transcripts", "claude_config_dir", claudeDir, "orchestrator", !cfg.NoOrchestrator)

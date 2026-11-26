@@ -13,7 +13,9 @@
 // other, and only a separate uid would be (DESIGN.md section 4).
 //
 // Tokens live in the kv table (agent_token:<sha256 hex>), so they survive a crowsnest restart,
-// as the agents holding them do. M7's job launcher uses the same registry (see Mint and Bind).
+// as the agents holding them do. The orchestrator and the job launcher (internal/jobs) both mint
+// them here: NewToken then Bind for a pane's environment (the pane id is known only after herdr
+// creates it), Mint for a start.
 package agentid
 
 import (
@@ -25,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -39,12 +42,13 @@ const (
 )
 
 // Kinds of binding: where the token was handed out. A pane token sits in the pane's environment
-// for its lifetime (every process in the pane inherits it, `crowsnest ask` included); an MCP token
-// is written into the --mcp-config of one agent start, so the MCP server knows its agent even in a
-// pane crowsnest did not create.
+// for its lifetime (every process in the pane inherits it, `crowsnest ask` included); a start
+// token is minted for one agent start and written into its --mcp-config (the MCP server's
+// environment) and a 0600 token file its hooks read (`crowsnest hook --token-file`), so both know
+// their agent even in a pane crowsnest did not create.
 const (
-	KindPane = "pane"
-	KindMCP  = "mcp"
+	KindPane  = "pane"
+	KindStart = "start"
 )
 
 const (
@@ -59,7 +63,7 @@ const (
 type Binding struct {
 	PaneID    string    `json:"pane_id"`          // the herdr pane id answers are typed into
 	JobID     string    `json:"job_id,omitempty"` // the job the agent was started for (M7); empty for the orchestrator
-	Kind      string    `json:"kind"`             // KindPane or KindMCP
+	Kind      string    `json:"kind"`             // KindPane or KindStart
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -98,8 +102,8 @@ func NewToken() (string, error) {
 
 // Bind records that token stands for binding. A pane token bound to a pane first revokes every
 // earlier token of that pane (the pane is new: anything bound to its id belonged to an older pane
-// herdr has since reused the id for); an MCP token revokes the pane's earlier MCP tokens (the
-// agent was restarted, the old MCP server is gone).
+// herdr has since reused the id for); a start token revokes the pane's earlier start tokens (the
+// agent was restarted; its old MCP server and hooks are gone).
 func (r *Registry) Bind(ctx context.Context, token string, binding Binding) error {
 	if binding.PaneID == "" || token == "" {
 		return errors.New("binding an agent token needs a token and a pane id")
@@ -173,4 +177,14 @@ func (r *Registry) RevokePane(ctx context.Context, paneID, kind string) error {
 func hash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+// ReadTokenFile returns the token in a token file (first line), for `crowsnest hook`.
+func ReadTokenFile(path string) (string, error) {
+	body, err := os.ReadFile(path) //nolint:gosec // a path crowsnest wrote into the hook command
+	if err != nil {
+		return "", fmt.Errorf("reading the agent token file: %w", err)
+	}
+	line, _, _ := strings.Cut(string(body), "\n")
+	return strings.TrimSpace(line), nil
 }
