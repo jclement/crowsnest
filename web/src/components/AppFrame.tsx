@@ -1,15 +1,15 @@
 // The signed-in frame: a dark header (session, connection state, theme, user menu), the five
 // views as a left rail from md and a bottom nav on mobile, the reconnect banner, and the
 // footer. It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
-// badge and the tab title count agents that need Jeff until questions arrive in M6.
+// badge and the tab title count what needs Jeff: open questions plus agents at a terminal dialog.
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { endpoints, fixturesEnabled } from "../lib/api";
 import { cn } from "../lib/cn";
-import { needsYouCount } from "../lib/fleet";
+import { inboxCount, needsYouCount } from "../lib/fleet";
 import { useLiveQueries } from "../lib/live";
-import { useFleet, useMe } from "../lib/queries";
+import { useFleet, useInboxSummary, useMe } from "../lib/queries";
 import type { StreamStatus } from "../lib/sse";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Footer } from "./Footer";
@@ -24,7 +24,8 @@ export function AppFrame() {
   const me = useMe();
   const stream = useLiveQueries();
   const fleet = useFleet();
-  const needsYou = needsYouCount(fleet.data);
+  const summary = useInboxSummary();
+  const needsYou = inboxCount(summary.data?.open, needsYouCount(fleet.data));
 
   useEffect(() => {
     document.title = needsYou > 0 ? `(${needsYou}) crowsnest` : "crowsnest";

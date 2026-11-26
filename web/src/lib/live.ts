@@ -5,6 +5,8 @@
 import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { queryKeys } from "./api";
+import { notifyQuestion } from "./notifications";
+import type { QuestionEvent } from "./questions";
 import { useEventStream, type StreamState } from "./sse";
 import type { EventName, Fleet } from "./types";
 
@@ -33,6 +35,13 @@ export const payloads: Partial<Record<EventName, { key: QueryKey; accept: (data:
   fleet: { key: queryKeys.fleet, accept: isFleet },
 };
 
+/** Effects beyond the cache: a newly asked question raises a browser notification when the tab is hidden. */
+export const sideEffects: Partial<Record<EventName, (data: unknown) => void>> = {
+  question: (data) => {
+    if (data && typeof data === "object" && "change" in data) notifyQuestion(data as QuestionEvent);
+  },
+};
+
 /** True when data has the shape of a Fleet (enough of it to render). */
 export function isFleet(data: unknown): data is Fleet {
   const candidate = data as Partial<Fleet> | null;
@@ -51,6 +60,7 @@ export function useLiveQueries(): StreamState {
             const payload = payloads[name as EventName];
             const written = !!payload && payload.accept(data);
             if (written) queryClient.setQueryData(payload.key, data);
+            sideEffects[name as EventName]?.(data);
             if (keys === null) void queryClient.invalidateQueries();
             else
               for (const queryKey of keys) {
