@@ -35,11 +35,9 @@ import (
 
 // Model and format choices. Each is a named constant so a change is one line and shows in review.
 const (
-	// STTModel is ElevenLabs' batch transcription model. scribe_v2 is the model the
-	// speech-to-text reference's own example uses; the models page also lists a newer scribe_v3
-	// and deprecates scribe_v1. A human with a key should confirm scribe_v3 and switch if it
-	// transcribes better (REPORT.md, "check with a real key").
-	STTModel = "scribe_v2"
+	// STTModel is ElevenLabs' batch transcription model. scribe_v3 is the current one on the
+	// models page; checked with a real key on 2026-11-26 (it punctuates where scribe_v2 did not).
+	STTModel = "scribe_v3"
 	// TTSModel is the default text-to-speech model, the low-latency one: a spoken reply should
 	// start quickly, and the sentences are short. Settings can pick the higher-quality model
 	// instead (settings.go, TTSModels).

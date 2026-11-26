@@ -25,8 +25,8 @@ const (
 	SpeedMax     = 1.5
 	SpeedDefault = 1.0
 	// APISpeedMin and APISpeedMax are what ElevenLabs' voice_settings.speed accepts. The reference
-	// gives no range; 0.7 to 1.2 is what the API accepted in the real check (REPORT.md), and a
-	// value outside it is refused with a 400.
+	// gives no range; the real API (2026-11-26) refused 1.3 with 400 invalid_voice_settings,
+	// "expected to be greater or equal to 0.7 and less or equal to 1.2", and accepted 1.2.
 	APISpeedMin = 0.7
 	APISpeedMax = 1.2
 )
