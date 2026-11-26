@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/config"
@@ -98,13 +99,57 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 			if replies != nil {
 				go replies.Changed(ctx, paneID)
 			}
+			standingReplies.changed(ctx, paneID)
 		},
 	})
 	if talk != nil {
 		replies = voice.NewReplyWatcher(talk, manager, orch.Name)
+		standingReplies.talk, standingReplies.source = talk, manager
 	}
 	go manager.Run(ctx)
 	go orchestrator.Run(ctx)
 	logger.Info("conversations follow Claude transcripts", "claude_config_dir", claudeDir, "orchestrator", !cfg.NoOrchestrator)
 	return orchestrator, manager
+}
+
+// leadReplies speaks the SAY lines of project leads (DESIGN.md 13.5): one reply watcher per
+// lead, made when the lead first reports a status, fed like the orchestrator's. Without talk
+// mode it does nothing.
+type leadReplies struct {
+	mu       sync.Mutex
+	talk     *voice.Service
+	source   voice.MessageSource
+	watchers map[string]*voice.ReplyWatcher // by agent name
+}
+
+// standingReplies is the process's one leadReplies (serve builds one server per process).
+var standingReplies = &leadReplies{watchers: map[string]*voice.ReplyWatcher{}}
+
+// status tells the lead's watcher whether it is idle (a finished turn's reply is then read).
+func (l *leadReplies) status(ctx context.Context, agent string, idle bool, paneID string) {
+	l.mu.Lock()
+	if l.talk == nil {
+		l.mu.Unlock()
+		return
+	}
+	watcher, ok := l.watchers[agent]
+	if !ok {
+		watcher = voice.NewReplyWatcher(l.talk, l.source, agent)
+		l.watchers[agent] = watcher
+	}
+	l.mu.Unlock()
+	go watcher.Status(ctx, idle, paneID)
+}
+
+// changed passes a conversation change to every lead's watcher (each ignores other panes).
+func (l *leadReplies) changed(ctx context.Context, paneID string) {
+	l.mu.Lock()
+	watchers := make([]*voice.ReplyWatcher, 0, len(l.watchers))
+	for _, watcher := range l.watchers {
+		watchers = append(watchers, watcher)
+	}
+	l.mu.Unlock()
+	for _, watcher := range watchers {
+		go watcher.Changed(ctx, paneID)
+	}
 }

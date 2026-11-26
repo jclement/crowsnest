@@ -212,6 +212,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 			if status.PaneID != "" {
 				go func() { _ = conversations.Pin(ctx, status.Name) }()
 			}
+			standingReplies.status(ctx, status.Name, status.State == orch.StateIdle, status.PaneID)
 			events.Publish(hub.Event{Type: "lead", Data: projects.LeadStatus{Status: status, ProjectID: project.ID, Slug: project.Slug, Running: true}})
 		},
 	})
