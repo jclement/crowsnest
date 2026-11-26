@@ -21,6 +21,10 @@ import (
 // 104 bytes including the terminating NUL).
 const maxSocketPath = 103
 
+// socketProbeTimeout bounds the connection attempt that tells a live socket from a stale one.
+// A timeout is not taken as "stale" (see removeStale); it only stops start-up from hanging.
+const socketProbeTimeout = 2 * time.Second
+
 // SocketPath is where the agent socket lives (DESIGN.md section 11): under $XDG_RUNTIME_DIR when
 // it is set (crowsnest/<session>.sock), else in the session's state directory (agent.sock). When
 // that path would be too long for a unix socket (a deep XDG_STATE_HOME, such as macOS's per-user
@@ -91,23 +95,43 @@ func checkOwnDirectory(dir string) error {
 	return nil
 }
 
-// removeStale deletes path if it is a socket nobody answers on. Anything else at that path (a
-// live socket, a regular file) is left alone and reported.
+// removeStale deletes path only when it is provably a stale socket: the probe connection was
+// refused, which means no process holds a listener on it. Any other probe failure (the start-up
+// was cancelled, the probe timed out against a saturated backlog, permission denied) says
+// nothing about whether another crowsnest is serving there, so the socket is left alone and the
+// start refused (R1b-C02): unlinking a live instance's socket would leave it running but
+// unreachable to every agent. The file is re-checked just before removal, so a socket replaced
+// during the probe is not the one deleted. Anything else at the path (a live socket, a regular
+// file) is left alone and reported.
 func removeStale(ctx context.Context, path string) error {
-	info, err := os.Lstat(path)
+	before, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("checking the agent socket path %s: %w", path, err)
 	}
-	if info.Mode().Type() != fs.ModeSocket {
+	if before.Mode().Type() != fs.ModeSocket {
 		return fmt.Errorf("%s exists and is not a socket; move it away so crowsnest can create its agent socket there", path)
 	}
-	dialer := net.Dialer{Timeout: time.Second}
-	if conn, err := dialer.DialContext(ctx, "unix", path); err == nil {
+	dialer := net.Dialer{Timeout: socketProbeTimeout}
+	conn, err := dialer.DialContext(ctx, "unix", path)
+	switch {
+	case err == nil:
 		_ = conn.Close()
-		return fmt.Errorf("another crowsnest is already serving the agent socket %s (same --session?)", path)
+		return fmt.Errorf("another crowsnest is already serving the agent socket %s (same --session?); stop it first, or give this one another --session", path)
+	case errors.Is(err, fs.ErrNotExist):
+		return nil // removed by its owner while we looked
+	case !errors.Is(err, syscall.ECONNREFUSED):
+		return fmt.Errorf("could not tell whether another crowsnest is serving the agent socket %s (%v), so it was left alone; "+
+			"if no crowsnest is running for this --session, remove that file and start again", path, err)
+	}
+	after, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil || !os.SameFile(before, after) {
+		return fmt.Errorf("the agent socket %s changed while crowsnest was checking it; is another crowsnest starting? Try again", path)
 	}
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("removing the stale agent socket %s: %w", path, err)

@@ -54,9 +54,12 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
 - `[crowsnest voice: transcribed speech, may contain mis-hearings] talk=<on|off>` messages were
   spoken into the web page and transcribed. Read them charitably: a word that makes no sense was
   probably misheard. If a misreading could lead to an irreversible step, confirm with `ask` first.
-- `[crowsnest answer q_<n>] <title> → <answer> (note: …)` is the human's answer to a question you
-  asked earlier. The note, when there is one, outranks the choice. `→ expired …` or `→ cancelled …`
-  means there is no answer: do not proceed with what it asked about.
+- `[crowsnest answer q_<n>] <answer> (note: …); the question was "<your title>"` is the human's
+  answer to a question you asked earlier. The answer comes first; the quoted part at the end is
+  only your own title repeated, never part of the answer. The note, when there is one, outranks the
+  choice. `expired …` or `cancelled …` means there is no answer: do not proceed with what it asked
+  about. If the line says the answer is too long for one line, read it in full with the
+  `get_question` tool (or `crowsnest question q_<n>`) before acting on it.
 - **The SAY contract.** When talk mode is on (the latest poke or voice header says `talk=on`),
   begin the final reply of each turn with `SAY: <one sentence for the ear>` on the first line, a
   blank line, then the detail as usual. The sentence is spoken aloud to the human, who may not be

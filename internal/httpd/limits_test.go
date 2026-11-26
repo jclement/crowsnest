@@ -5,6 +5,7 @@ package httpd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,7 +24,7 @@ func TestConnectionCapQueuesRatherThanRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener := newConnLimiter(2).wrap(inner)
+	listener := newConnLimiter(2, 2).wrap(inner)
 	t.Cleanup(func() { _ = listener.Close() })
 	accepted := make(chan net.Conn, 3)
 	go func() {
@@ -57,8 +58,59 @@ func TestConnectionCapQueuesRatherThanRefuses(t *testing.T) {
 	}
 	_ = second.Close()
 	_ = first.Close() // a second Close must not give back a second slot
-	if got := len(newConnLimiter(2)); got != 0 {
+	if got := len(newConnLimiter(2, 2).slots); got != 0 {
 		t.Fatalf("fresh limiter holds %d", got)
+	}
+}
+
+// TestOnePeerCannotTakeEverySlot is R1b N4: a peer past its own cap is refused at once, without
+// holding a global slot, so another peer still gets in. Loopback is exempt in production; the
+// test turns the exemption off because every test connection comes from loopback.
+func TestOnePeerCannotTakeEverySlot(t *testing.T) {
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter := newConnLimiter(4, 2)
+	limiter.exempt = func(netip.Addr) bool { return false }
+	listener := limiter.wrap(inner)
+	t.Cleanup(func() { _ = listener.Close() })
+	accepted := make(chan net.Conn, 8)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			accepted <- conn
+		}
+	}()
+	var clients []net.Conn
+	for range 3 {
+		client, err := net.Dial("tcp", inner.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		clients = append(clients, client)
+		t.Cleanup(func() { _ = client.Close() })
+	}
+	<-accepted
+	<-accepted
+	// The third connection from the same peer is closed by the server, not queued.
+	_ = clients[2].SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := clients[2].Read(make([]byte, 1)); err == nil {
+		t.Fatal("a third connection from one peer was served past its cap of two")
+	} else if ne := net.Error(nil); errors.As(err, &ne) && ne.Timeout() {
+		t.Fatal("a third connection from one peer was held open past its cap instead of being refused")
+	}
+	// Two live connections, plus the one Accept holds while it waits for the next connection;
+	// the refused connection's slot went back (were it kept, Accept would be stuck waiting at 4).
+	time.Sleep(100 * time.Millisecond) // let Accept go round again
+	if held := len(limiter.slots); held != 3 {
+		t.Fatalf("%d global slots held; the refused connection must give its slot back", held)
+	}
+	if !netip.MustParseAddr("127.0.0.1").IsLoopback() || !newConnLimiter(1, 1).exempt(netip.MustParseAddr("::1")) {
+		t.Fatal("loopback peers must be exempt in production")
 	}
 }
 

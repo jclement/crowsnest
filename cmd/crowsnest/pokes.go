@@ -20,6 +20,7 @@ import (
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/termtext"
 	"github.com/jclement/crowsnest/internal/voice"
 )
 
@@ -110,11 +111,11 @@ func standingWork(services pokeServices) func(context.Context) []string {
 				for _, job := range list {
 					switch {
 					case job.Stuck:
-						lines = append(lines, fmt.Sprintf("job %s is stuck (%s): %s", job.ID, job.CauseText, job.Title))
+						lines = append(lines, fmt.Sprintf("job %s is stuck (%s): %s", job.ID, job.CauseText, termtext.Quote(job.Title)))
 					case job.State == jobs.StateNeedsYou:
-						lines = append(lines, fmt.Sprintf("job %s needs the human: %s", job.ID, job.Title))
+						lines = append(lines, fmt.Sprintf("job %s needs the human: %s", job.ID, termtext.Quote(job.Title)))
 					case job.State == jobs.StateBlocked:
-						lines = append(lines, fmt.Sprintf("job %s is blocked: %s", job.ID, job.Title))
+						lines = append(lines, fmt.Sprintf("job %s is blocked: %s", job.ID, termtext.Quote(job.Title)))
 					}
 				}
 			}

@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 )
@@ -279,7 +280,7 @@ func readInput(stdin io.Reader, file string) ([]byte, error) {
 // ---- hook ----------------------------------------------------------------------------------
 
 func newHookCommand() *cobra.Command {
-	var jobID, socket string
+	var jobID, socket, tokenFile string
 	command := &cobra.Command{
 		Use:   "hook <event>",
 		Short: "Claude Code hook entry point (crowsnest writes it into the settings it starts agents with)",
@@ -292,18 +293,19 @@ func newHookCommand() *cobra.Command {
 			if len(args) != 1 {
 				return nil // fail open even on a malformed command line
 			}
-			runHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), os.Getenv, args[0], jobID, socket)
+			runHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), os.Getenv, args[0], jobID, socket, tokenFile)
 			return nil
 		},
 	}
 	command.Flags().StringVar(&jobID, "job", "", "the job this agent holds (baked into the job's settings.json)")
 	command.Flags().StringVar(&socket, "socket", "", "the agent socket (default: CROWSNEST_SOCKET)")
+	command.Flags().StringVar(&tokenFile, "token-file", "", "the file holding this agent's token (default: CROWSNEST_TOKEN)")
 	command.FParseErrWhitelist.UnknownFlags = true // a newer crowsnest's settings must not break an older binary
 	return command
 }
 
 // runHook does the hook's work and swallows every failure (fail open).
-func runHook(ctx context.Context, stdin io.Reader, stdout io.Writer, getenv func(string) string, event, jobID, socket string) {
+func runHook(ctx context.Context, stdin io.Reader, stdout io.Writer, getenv func(string) string, event, jobID, socket, tokenFile string) {
 	input, err := io.ReadAll(io.LimitReader(stdin, maxHookInput))
 	if err != nil || !json.Valid(input) {
 		return
@@ -317,7 +319,15 @@ func runHook(ctx context.Context, stdin io.Reader, stdout io.Writer, getenv func
 	if jobID == "" {
 		jobID = getenv(agentapi.EnvJob)
 	}
-	client := agentapi.NewClient(socket, questions.Caller{PaneID: getenv(agentapi.EnvPane), JobID: jobID})
+	// The token says whose hook this is (R1b N2): from the file crowsnest named on the hook's
+	// command line, else the pane's environment. Without one the server ignores the hook.
+	token := getenv(agentapi.EnvToken)
+	if tokenFile != "" {
+		if fromFile, err := agentid.ReadTokenFile(tokenFile); err == nil {
+			token = fromFile
+		}
+	}
+	client := agentapi.NewClient(socket, token).WithJob(jobID)
 	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
 	defer cancel()
 	reply, err := client.Hook(ctx, event, input)

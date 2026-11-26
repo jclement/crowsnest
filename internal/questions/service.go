@@ -5,6 +5,12 @@
 // loser gets ErrNotOpen. At the moment of settling the service decides how the outcome reaches the
 // asker: through the long-poll if someone is waiting on it (or was a moment ago, between two
 // polls), else typed into its pane by the Deliverer.
+//
+// Only the asker counts as waiting: a poll from another caller reads the question but never
+// changes how its answer is delivered (R1b N2). A poll delivery is confirmed when the settled
+// question is actually handed to the asker's poll (Collected); one nobody collects within
+// collectGrace is switched to typing, so an asker whose wait was cut off still gets its answer
+// (R1b-C06).
 
 package questions
 
@@ -34,6 +40,9 @@ const (
 	pollGrace = 10 * time.Second
 	// listLimit bounds one list response; the Inbox shows open questions and recent history.
 	listLimit = 200
+	// collectGrace is how long a poll delivery may wait to be collected before the answer is
+	// typed instead: longer than pollGrace, so a looping asker that re-polls collects it first.
+	collectGrace = 30 * time.Second
 )
 
 // ErrNotFound and ErrNotOpen are the lifecycle's refusals.
@@ -62,11 +71,13 @@ type Service struct {
 	waiters map[int64]*waitState
 }
 
-// waitState tracks the askers polling one question.
+// waitState tracks the long-polls on one question. Pollers are counted by the caller's pane, so
+// a settle can ask whether the asker itself is waiting; anyone may poll, only the asker counts.
 type waitState struct {
-	active   int           // long-polls in flight
-	lastSeen time.Time     // when the last one ended (or the ask, for a wait=true asker)
-	settled  chan struct{} // closed when the question settles
+	active   int                  // long-polls in flight, from anyone
+	polling  map[string]int       // long-polls in flight by pane (identified callers only)
+	lastSeen map[string]time.Time // per pane: when its last poll ended normally (or its wait=true ask)
+	settled  chan struct{}        // closed when the question settles
 }
 
 // New returns a Service.
@@ -96,9 +107,9 @@ func (s *Service) Ask(ctx context.Context, input AskInput, caller Caller) (Quest
 	if err != nil {
 		return Question{}, err
 	}
-	if input.Wait {
+	if input.Wait && caller.PaneID != "" {
 		s.mu.Lock()
-		s.waitStateLocked(id).lastSeen = s.opts.Now()
+		s.waitStateLocked(id).lastSeen[caller.PaneID] = s.opts.Now()
 		s.mu.Unlock()
 	}
 	question, err := s.Get(ctx, FormatID(id))
@@ -152,6 +163,12 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 	return Summary{Open: open, Blocking: blocking}, err
 }
 
+// OpenCounts returns how many questions are open from pane ("" counts the unidentified askers
+// together), and in total: the agent socket's quotas.
+func (s *Service) OpenCounts(ctx context.Context, pane string) (mine, total int, err error) {
+	return s.opts.Store.CountOpenFrom(ctx, pane)
+}
+
 func parseStatuses(text string) ([]string, error) {
 	if text == "" || text == "all" {
 		return nil, nil
@@ -171,9 +188,14 @@ func parseStatuses(text string) ([]string, error) {
 // ---- Long-poll -----------------------------------------------------------------------------
 
 // Wait returns the question once it is settled, or as it stands after timeout (capped at
-// MaxWait), or when ctx ends. While it waits, the asker counts as waiting, so a settle in that
-// window is answered through the poll rather than typed into its pane.
-func (s *Service) Wait(ctx context.Context, id string, timeout time.Duration) (Question, error) {
+// MaxWait), or when ctx ends. While it waits, a caller who is the asker counts as waiting, so a
+// settle in that window is answered through the poll rather than typed into its pane.
+//
+// A poll that ends because its caller went away (ctx cancelled) does not leave the asker
+// counted as about to poll again: the shipped clients give up on cancellation, so the answer is
+// typed instead (R1b-C06). The entry is removed as soon as nothing needs it, including when the
+// question is missing or already settled (R1b-C07).
+func (s *Service) Wait(ctx context.Context, id string, timeout time.Duration, caller Caller) (Question, error) {
 	numeric, err := ParseID(id)
 	if err != nil {
 		return Question{}, ErrNotFound
@@ -181,20 +203,17 @@ func (s *Service) Wait(ctx context.Context, id string, timeout time.Duration) (Q
 	if timeout > MaxWait {
 		timeout = MaxWait
 	}
+	pane := caller.PaneID
 	s.mu.Lock()
 	state := s.waitStateLocked(numeric)
 	state.active++
+	if pane != "" {
+		state.polling[pane]++
+	}
 	settled := state.settled
 	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		state.active--
-		state.lastSeen = s.opts.Now()
-		if state.active == 0 && isClosed(state.settled) && s.waiters[numeric] == state {
-			delete(s.waiters, numeric) // settled and nobody left polling
-		}
-		s.mu.Unlock()
-	}()
+	resolved := false // false: the caller went away, or the question was never waitable
+	defer func() { s.endPoll(numeric, state, pane, resolved) }()
 
 	// The channel was taken before this read, so a settle between the two still wakes us.
 	question, err := s.Get(ctx, id)
@@ -209,13 +228,33 @@ func (s *Service) Wait(ctx context.Context, id string, timeout time.Duration) (Q
 	case <-ctx.Done():
 		return Question{}, ctx.Err()
 	}
+	resolved = true
 	return s.Get(context.WithoutCancel(ctx), id)
+}
+
+// endPoll is Wait's bookkeeping on the way out. resolved says the poll ran its course (settled
+// or timed out) rather than being cut off, so its pane may re-poll within pollGrace.
+func (s *Service) endPoll(id int64, state *waitState, pane string, resolved bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state.active--
+	if pane != "" {
+		if state.polling[pane]--; state.polling[pane] <= 0 {
+			delete(state.polling, pane)
+		}
+		if resolved && !isClosed(state.settled) {
+			state.lastSeen[pane] = s.opts.Now()
+		}
+	}
+	if state.active == 0 && (isClosed(state.settled) || len(state.lastSeen) == 0) && s.waiters[id] == state {
+		delete(s.waiters, id) // settled, missing, or nobody's grace to remember
+	}
 }
 
 func (s *Service) waitStateLocked(id int64) *waitState {
 	state, ok := s.waiters[id]
 	if !ok {
-		state = &waitState{settled: make(chan struct{})}
+		state = &waitState{polling: map[string]int{}, lastSeen: map[string]time.Time{}, settled: make(chan struct{})}
 		s.waiters[id] = state
 	}
 	return state
@@ -230,13 +269,71 @@ func isClosed(channel chan struct{}) bool {
 	}
 }
 
-// isWaitedOnLocked reports whether an asker is polling id now or was within pollGrace.
-func (s *Service) isWaitedOnLocked(id int64) bool {
+// pruneWaitersLocked drops entries nobody polls whose grace has run out (s.mu held), so asks
+// with wait=true and polls on questions that are never settled do not accumulate (R1b-C07).
+func (s *Service) pruneWaitersLocked() {
+	now := s.opts.Now()
+	for id, state := range s.waiters {
+		for pane, seen := range state.lastSeen {
+			if now.Sub(seen) >= pollGrace {
+				delete(state.lastSeen, pane)
+			}
+		}
+		if state.active == 0 && len(state.lastSeen) == 0 {
+			delete(s.waiters, id)
+		}
+	}
+}
+
+// isWaitedOnLocked reports whether the asker in pane is polling id now or was within pollGrace.
+func (s *Service) isWaitedOnLocked(id int64, pane string) bool {
 	state, ok := s.waiters[id]
-	if !ok {
+	if !ok || pane == "" {
 		return false
 	}
-	return state.active > 0 || (!state.lastSeen.IsZero() && s.opts.Now().Sub(state.lastSeen) < pollGrace)
+	seen, recent := state.lastSeen[pane]
+	return state.polling[pane] > 0 || (recent && s.opts.Now().Sub(seen) < pollGrace)
+}
+
+// Collected records that a settled question was handed to its asker's poll (the agent socket
+// calls it after writing the answer). It confirms a poll delivery; for any other caller or
+// delivery it does nothing.
+func (s *Service) Collected(ctx context.Context, question Question, caller Caller) {
+	if question.Delivery != DeliveryPoll || question.DeliveredAt != nil || caller.PaneID == "" || caller.PaneID != question.SourcePane {
+		return
+	}
+	numeric, _ := ParseID(question.ID)
+	if err := s.opts.Store.MarkPollCollected(ctx, numeric, s.opts.Now()); err != nil {
+		s.opts.Logger.Warn("recording a collected answer", "question", question.ID, "err", err)
+	}
+}
+
+// RetypeUncollected switches poll deliveries nobody collected within collectGrace, and whose
+// asker is not polling right now, to typing, and returns how many (R1b-C06). The asker's wait
+// was cut off (a cancelled tool call, a dropped connection, a crowsnest restart), so without
+// this the answer would sit in the Inbox marked delivered-by-poll and never reach the agent.
+func (s *Service) RetypeUncollected(ctx context.Context) (int, error) {
+	candidates, err := s.opts.Store.UncollectedPolls(ctx, s.opts.Now().Add(-collectGrace))
+	if err != nil {
+		return 0, err
+	}
+	retyped := 0
+	for _, candidate := range candidates {
+		s.mu.Lock()
+		waiting := s.isWaitedOnLocked(candidate.ID, candidate.SourcePane)
+		s.mu.Unlock()
+		if waiting {
+			continue
+		}
+		changed, err := s.opts.Store.RetypePoll(ctx, candidate.ID)
+		if err != nil {
+			return retyped, err
+		}
+		if changed {
+			retyped++
+		}
+	}
+	return retyped, nil
 }
 
 // ---- Settling ------------------------------------------------------------------------------
@@ -291,7 +388,8 @@ func (s *Service) SweepExpired(ctx context.Context) (int, error) {
 	return expired, nil
 }
 
-// RunSweeper expires questions every interval (DefaultSweepInterval when zero) until ctx ends.
+// RunSweeper expires questions, re-routes uncollected poll answers and prunes idle waiter entries
+// every interval (DefaultSweepInterval when zero) until ctx ends.
 func (s *Service) RunSweeper(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = DefaultSweepInterval
@@ -302,6 +400,14 @@ func (s *Service) RunSweeper(ctx context.Context, interval time.Duration) {
 		if _, err := s.SweepExpired(ctx); err != nil && ctx.Err() == nil {
 			s.opts.Logger.Warn("expiring questions", "err", err)
 		}
+		if retyped, err := s.RetypeUncollected(ctx); err != nil && ctx.Err() == nil {
+			s.opts.Logger.Warn("re-routing uncollected answers", "err", err)
+		} else if retyped > 0 {
+			s.opts.Logger.Info("answers whose waiting asker went away will be typed into its pane", "count", retyped)
+		}
+		s.mu.Lock()
+		s.pruneWaitersLocked()
+		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return
@@ -350,7 +456,7 @@ func (s *Service) deliveryForLocked(id int64, question Question, quiet bool) Del
 	switch {
 	case question.Kind == KindNotice, quiet, question.SourcePane == "":
 		return DeliveryNone
-	case s.isWaitedOnLocked(id):
+	case s.isWaitedOnLocked(id, question.SourcePane):
 		return DeliveryPoll
 	default:
 		return DeliveryType
@@ -404,11 +510,9 @@ func fromRecord(record store.QuestionRecord, withFiles bool) Question {
 	// is shown with that part empty rather than failing the whole inbox.
 	_ = json.Unmarshal(record.Options, &question.Options)
 	_ = json.Unmarshal(record.Context, &question.Context)
-	var files []File
-	_ = json.Unmarshal(record.Files, &files)
-	question.FileCount = len(files)
+	question.FileCount = record.FileCount
 	if withFiles {
-		question.Files = files
+		_ = json.Unmarshal(record.Files, &question.Files)
 	}
 	if len(record.AnswerValue) > 0 {
 		_ = json.Unmarshal(record.AnswerValue, &question.AnswerValue)

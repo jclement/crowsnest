@@ -17,31 +17,37 @@
 //	GET    /api/v1/health                 liveness, for the CLI's "is crowsnest running" check
 //	…/api/v1/jobs…, /api/v1/hooks/{event}  the job protocol and the hooks (jobs.go, M7)
 //
-// Each request may carry the caller's identity, set by the CLI from its environment:
-// X-Crowsnest-Pane (HERDR_PANE_ID, where answers are typed back) and X-Crowsnest-Job
-// (CROWSNEST_JOB, M7).
+// A request may carry the caller's token (X-Crowsnest-Token, which the client takes from
+// CROWSNEST_TOKEN). The socket derives the caller's pane and job from that token alone, through
+// the agentid registry; it never believes a pane or job the caller names (R1b N2, N7). A caller
+// without a known token is unidentified: it may ask, but its questions have no pane to be typed
+// back to (it reads the answer from the long-poll); it may not withdraw questions, create jobs,
+// or act on a job. A job verb on job j is allowed when the token was issued for j, or for the pane
+// that holds j (the orchestrator, whose tokens name no job; DESIGN.md 6.2).
+//
+// Quotas (R1b N6), per caller (its pane, or one shared bucket for every unidentified caller):
+// asks are rate limited, open questions are capped per caller and in total, and concurrent
+// long-polls are capped. Each refusal is a 429 that says what to do.
 package agentapi
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
-)
-
-// Identity headers.
-const (
-	HeaderPane = "X-Crowsnest-Pane"
-	HeaderJob  = "X-Crowsnest-Job"
+	"github.com/jclement/crowsnest/internal/ratelimit"
 )
 
 // Error codes, the same words the browser API uses.
@@ -49,6 +55,8 @@ const (
 	codeValidation = "VALIDATION_ERROR"
 	codeNotFound   = "NOT_FOUND"
 	codeConflict   = "CONFLICT"
+	codeForbidden  = "FORBIDDEN"
+	codeQuota      = "RATE_LIMITED"
 	codeInternal   = "INTERNAL_ERROR"
 )
 
@@ -56,8 +64,21 @@ const (
 	// MaxSayRunes caps a spoken sentence: one breath, not a paragraph.
 	MaxSayRunes = 300
 	maxSayBody  = 8 << 10
-	// maxIdentityLen bounds the identity headers (pane ids are "w1:p2"-short).
-	maxIdentityLen = 128
+)
+
+// Quotas on the socket (R1b N6). They are set to stop a looping or hijacked agent, not to meter
+// a working one: an agent that asks a question every thirty seconds for an hour is already
+// something the human should hear about.
+const (
+	askBurst          = 10               // asks one caller may make at once
+	askRefill         = 30 * time.Second // then one more every this long
+	sayBurst          = 10
+	sayRefill         = 6 * time.Second
+	maxOpenPerCaller  = 30  // open questions one caller may have
+	maxOpenTotal      = 200 // open questions across every caller (the Inbox's list size)
+	maxWaitsPerCaller = 8   // concurrent long-polls one caller may hold
+	// unidentifiedKey is the one quota bucket every caller without a token shares.
+	unidentifiedKey = "unidentified"
 )
 
 // Speaker voices a `say` (M11: *voice.Service). It is an interface so this package does not
@@ -82,23 +103,31 @@ type SayRequest struct {
 // Server is the agent API's handler. Build with NewServer and serve it with Serve.
 type Server struct {
 	questions *questions.Service
+	identity  *agentid.Registry
 	jobs      *jobs.Service
-	hub       *hub.Hub
 	speaker   Speaker
+	hub       *hub.Hub
 	logger    *slog.Logger
 	version   string
 	handler   http.Handler
+
+	asks  *ratelimit.Limiter
+	says  *ratelimit.Limiter
+	waits *waitCounter
 }
 
 // ServerOptions configure a Server. Questions is required.
 type ServerOptions struct {
 	Questions *questions.Service
 	Jobs      *jobs.Service // nil: the job routes answer 503
-	Hub       *hub.Hub      // nil: say is accepted and dropped
+	// Identity resolves callers' tokens. nil: every caller is unidentified.
+	Identity *agentid.Registry
+	Hub      *hub.Hub // nil: say is accepted and dropped
 	// Speaker, when set (talk mode on), voices `say` instead of the plain hub event.
 	Speaker Speaker
 	Logger  *slog.Logger
 	Version string
+	Now     func() time.Time // for the quotas; nil means time.Now
 }
 
 // NewServer wires the routes.
@@ -106,7 +135,13 @@ func NewServer(opts ServerOptions) *Server {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	server := &Server{questions: opts.Questions, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker, logger: opts.Logger, version: opts.Version}
+	server := &Server{
+		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
+		logger: opts.Logger, version: opts.Version,
+		asks:  ratelimit.New(askBurst, askRefill, opts.Now),
+		says:  ratelimit.New(sayBurst, sayRefill, opts.Now),
+		waits: &waitCounter{active: map[string]int{}},
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", server.handleHealth)
 	mux.HandleFunc("POST /api/v1/questions", server.handleAsk)
@@ -125,18 +160,53 @@ func NewServer(opts ServerOptions) *Server {
 // Handler returns the routes, for tests and Serve.
 func (s *Server) Handler() http.Handler { return s.handler }
 
-// callerOf reads the identity headers. Values that are too long or carry control characters are
-// dropped rather than stored.
-func callerOf(r *http.Request) questions.Caller {
-	return questions.Caller{PaneID: identity(r.Header.Get(HeaderPane)), JobID: identity(r.Header.Get(HeaderJob))}
+// callerOf derives the caller from its token. No token, an unknown one, or a lookup failure all
+// mean unidentified: such a caller can still ask, and the answer reaches it only by polling.
+func (s *Server) callerOf(r *http.Request) questions.Caller {
+	if s.identity == nil {
+		return questions.Caller{}
+	}
+	binding, ok, err := s.identity.Resolve(r.Context(), r.Header.Get(agentid.HeaderToken))
+	if err != nil {
+		s.logger.Warn("resolving an agent token failed; treating the caller as unidentified", "err", err)
+	}
+	if !ok {
+		return questions.Caller{}
+	}
+	return questions.Caller{PaneID: binding.PaneID, JobID: binding.JobID}
 }
 
-func identity(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) > maxIdentityLen || strings.ContainsFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
-		return ""
+// quotaKey is the caller's quota bucket.
+func quotaKey(caller questions.Caller) string {
+	if caller.PaneID == "" {
+		return unidentifiedKey
 	}
-	return value
+	return caller.PaneID
+}
+
+// waitCounter counts concurrent long-polls per quota key.
+type waitCounter struct {
+	mu     sync.Mutex
+	active map[string]int
+}
+
+// enter takes a long-poll slot for key, or reports false when key holds maxWaitsPerCaller.
+func (c *waitCounter) enter(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.active[key] >= maxWaitsPerCaller {
+		return false
+	}
+	c.active[key]++
+	return true
+}
+
+func (c *waitCounter) leave(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.active[key]--; c.active[key] <= 0 {
+		delete(c.active, key)
+	}
 }
 
 // ---- Handlers ------------------------------------------------------------------------------
@@ -152,16 +222,42 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
+	caller := s.callerOf(r)
+	if ok, retry := s.asks.Allow(quotaKey(caller)); !ok {
+		writeQuota(w, retry, "Too many questions in a short time. Wait, then ask one question that covers what you need; carry on with other work meanwhile.")
+		return
+	}
 	var input questions.AskInput
 	if !decodeBody(w, r, questions.MaxRequestBytes, &input) {
 		return
 	}
-	question, err := s.questions.Ask(r.Context(), input, callerOf(r))
+	if message := s.openQuota(r, caller); message != "" {
+		writeQuota(w, time.Minute, message)
+		return
+	}
+	question, err := s.questions.Ask(r.Context(), input, caller)
 	if err != nil {
 		s.writeQuestionError(w, r, err)
 		return
 	}
 	writeData(w, http.StatusCreated, question)
+}
+
+// openQuota returns a refusal when the caller, or the inbox as a whole, has too many open
+// questions; "" lets the ask through.
+func (s *Server) openQuota(r *http.Request, caller questions.Caller) string {
+	mine, total, err := s.questions.OpenCounts(r.Context(), caller.PaneID)
+	if err != nil {
+		s.logger.Warn("counting open questions for the quota", "err", err)
+		return ""
+	}
+	switch {
+	case total >= maxOpenTotal:
+		return fmt.Sprintf("The human's inbox already holds %d open questions. Do not ask more now: carry on with what you can, and mention the question in your reply instead.", total)
+	case mine >= maxOpenPerCaller:
+		return fmt.Sprintf("You already have %d open questions. Wait for answers, or withdraw ones that no longer matter, before asking more.", mine)
+	}
+	return ""
 }
 
 func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
@@ -171,9 +267,16 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, err.Error())
 		return
 	}
+	caller := s.callerOf(r)
 	var question questions.Question
 	if wait > 0 {
-		question, err = s.questions.Wait(r.Context(), id, wait)
+		key := quotaKey(caller)
+		if !s.waits.enter(key) {
+			writeQuota(w, 10*time.Second, fmt.Sprintf("You are already waiting on %d questions at once. Wait on one at a time.", maxWaitsPerCaller))
+			return
+		}
+		defer s.waits.leave(key)
+		question, err = s.questions.Wait(r.Context(), id, wait, caller)
 	} else {
 		question, err = s.questions.Get(r.Context(), id)
 	}
@@ -181,7 +284,10 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		s.writeQuestionError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusOK, question)
+	// The answer counts as collected only once it is out of the door (R1b-C06).
+	if writeDataChecked(w, http.StatusOK, question) == nil && question.Status != questions.StatusOpen {
+		s.questions.Collected(context.WithoutCancel(r.Context()), question, caller)
+	}
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -190,11 +296,23 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		s.writeQuestionError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "meta": map[string]int{"total": len(list)}})
+	_ = writeJSON(w, http.StatusOK, map[string]any{"data": list, "meta": map[string]int{"total": len(list)}})
 }
 
+// handleCancel withdraws a question; only the agent that asked it may (R1b N2). The human cancels
+// from the Inbox, which is the browser API.
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
-	question, err := s.questions.Cancel(r.Context(), r.PathValue("id"), true)
+	caller := s.callerOf(r)
+	current, err := s.questions.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeQuestionError(w, r, err)
+		return
+	}
+	if caller.PaneID == "" || caller.PaneID != current.SourcePane {
+		writeError(w, http.StatusForbidden, codeForbidden, "Only the agent that asked a question can withdraw it. The human can cancel it from the Inbox.")
+		return
+	}
+	question, err := s.questions.Cancel(r.Context(), current.ID, true)
 	if err != nil {
 		s.writeQuestionError(w, r, err)
 		return
@@ -203,6 +321,11 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
+	caller := s.callerOf(r)
+	if ok, retry := s.says.Allow(quotaKey(caller)); !ok {
+		writeQuota(w, retry, "Too many spoken lines in a short time; say less, less often.")
+		return
+	}
 	var request SayRequest
 	if !decodeBody(w, r, maxSayBody, &request) {
 		return
@@ -218,9 +341,9 @@ func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case s.speaker != nil:
-		s.speaker.Say(text, "say", callerOf(r).PaneID)
+		s.speaker.Say(text, "say", caller.PaneID)
 	case s.hub != nil:
-		s.hub.Publish(hub.Event{Type: "say", Data: SayEvent{Text: text, PaneID: callerOf(r).PaneID, At: time.Now().UTC()}})
+		s.hub.Publish(hub.Event{Type: "say", Data: SayEvent{Text: text, PaneID: caller.PaneID, At: time.Now().UTC()}})
 	}
 	writeData(w, http.StatusOK, map[string]bool{"accepted": true})
 }
@@ -261,7 +384,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
 		s.logger.Debug("agent request", "method", r.Method, "path", r.URL.Path, "status", recorder.status,
-			"duration", time.Since(started).Round(time.Millisecond), "pane", callerOf(r).PaneID)
+			"duration", time.Since(started).Round(time.Millisecond))
 	})
 }
 
@@ -274,6 +397,9 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
 }
+
+// Unwrap lets http.ResponseController reach the connection (Flush, deadlines).
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 // ---- Envelope ------------------------------------------------------------------------------
 
@@ -293,15 +419,30 @@ func decodeBody(w http.ResponseWriter, r *http.Request, limit int64, into any) b
 }
 
 func writeData(w http.ResponseWriter, status int, data any) {
-	writeJSON(w, status, map[string]any{"data": data})
+	_ = writeJSON(w, status, map[string]any{"data": data})
+}
+
+// writeDataChecked writes the envelope, flushes it, and reports whether that worked: a
+// long-poll's answer counts as collected only once it reached the socket (R1b-C06).
+func writeDataChecked(w http.ResponseWriter, status int, data any) error {
+	return writeJSON(w, status, map[string]any{"data": data})
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"message": message, "code": code}})
+	_ = writeJSON(w, status, map[string]any{"error": map[string]string{"message": message, "code": code}})
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
+// writeQuota is a 429 with Retry-After.
+func writeQuota(w http.ResponseWriter, retry time.Duration, message string) {
+	w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retry.Round(time.Second)/time.Second))))
+	writeError(w, http.StatusTooManyRequests, codeQuota, message)
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		return err
+	}
+	return http.NewResponseController(w).Flush()
 }

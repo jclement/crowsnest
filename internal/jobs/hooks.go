@@ -65,8 +65,9 @@ type HookReply struct {
 	Stdout string `json:"stdout"`
 }
 
-// HandleHook applies one hook event. jobID may be empty (the orchestrator); callerPane is the
-// HERDR_PANE_ID of the hook process. A hook for no job is a no-op (and Stop is allowed).
+// HandleHook applies one hook event. jobID and callerPane come from the hook's agent token (the
+// agent socket resolves it; R1b N2): a job agent's token names its job, the orchestrator's only
+// its pane, whose running job is then used. A hook for no job is a no-op (and Stop is allowed).
 func (s *Service) HandleHook(ctx context.Context, event, jobID, callerPane string, input HookInput) (HookReply, error) {
 	id := s.resolveHookJob(ctx, jobID, callerPane)
 	if id == "" {

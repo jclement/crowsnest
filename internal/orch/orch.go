@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/journal"
@@ -110,6 +111,10 @@ type Options struct {
 	AgentSocket string
 	// BasePath is the PATH that BinDir is prepended to (normally os.Getenv("PATH")).
 	BasePath string
+	// Identity mints the orchestrator's agent tokens (CROWSNEST_TOKEN in its pane and in its
+	// MCP server's environment), which is how the agent socket knows a question came from the
+	// orchestrator's pane (R1b N2). nil: no tokens, so the orchestrator asks unidentified.
+	Identity *agentid.Registry
 	// ClaudeConfigDir is where transcripts live, to decide between --resume and a new session.
 	ClaudeConfigDir string
 	Disabled        bool          // --no-orchestrator: report disabled, start nothing

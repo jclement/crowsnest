@@ -31,6 +31,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jclement/crowsnest/internal/agentcfg"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
@@ -51,6 +52,10 @@ type LaunchOptions struct {
 	WorktreeRoot  string
 	ShellWait     time.Duration // default 15 s
 	LaunchTimeout time.Duration // default 60 s
+	// Identity mints each job agent's tokens (R1b N2): CROWSNEST_TOKEN in its pane's environment,
+	// bound to the pane and the job, and a token per start for its MCP server and hooks. The
+	// socket derives the caller's job from them, never from CROWSNEST_JOB. nil: no tokens.
+	Identity *agentid.Registry
 }
 
 func (o LaunchOptions) shellWait() time.Duration {
@@ -138,7 +143,7 @@ func (s *Service) startJobAgent(ctx context.Context, job Job) error {
 // restarts Claude on job.SessionID with --resume. On success the brief (or, on resume, a nudge)
 // is sent.
 func (s *Service) startInPane(ctx context.Context, job Job, resume bool) error {
-	files, err := s.writeJobFiles(job)
+	files, err := s.writeJobFiles(ctx, job)
 	if err != nil {
 		return err
 	}
@@ -267,27 +272,37 @@ func (s *Service) worktreePane(ctx context.Context, job Job) (preparedPane, erro
 	if workDir == "" {
 		workDir = created.RootPane.Cwd
 	}
-	tab, err := s.opts.Herdr.TabCreate(ctx, herdr.TabCreateParams{WorkspaceID: created.Workspace.ID, Label: AgentName(job.ID), Cwd: workDir, Env: s.paneEnv(job.ID)})
+	env, token, err := s.paneEnv(job.ID)
+	if err != nil {
+		return preparedPane{}, err
+	}
+	tab, err := s.opts.Herdr.TabCreate(ctx, herdr.TabCreateParams{WorkspaceID: created.Workspace.ID, Label: AgentName(job.ID), Cwd: workDir, Env: env})
 	if err != nil {
 		return preparedPane{}, fmt.Errorf("opening a tab in the job's worktree: %w", err)
 	}
+	s.bindPaneToken(ctx, token, tab.RootPane.ID, job.ID)
 	return preparedPane{paneID: tab.RootPane.ID, workDir: workDir, branch: branch}, nil
 }
 
 // tabPane: a tab in a workspace open on job.Dir, else a new workspace there.
 func (s *Service) tabPane(ctx context.Context, job Job) (preparedPane, error) {
-	env := s.paneEnv(job.ID)
+	env, token, err := s.paneEnv(job.ID)
+	if err != nil {
+		return preparedPane{}, err
+	}
 	if workspaceID := s.workspaceFor(ctx, job.Dir); workspaceID != "" {
 		tab, err := s.opts.Herdr.TabCreate(ctx, herdr.TabCreateParams{WorkspaceID: workspaceID, Label: AgentName(job.ID), Cwd: job.Dir, Env: env})
 		if err != nil {
 			return preparedPane{}, fmt.Errorf("opening a tab for the job: %w", err)
 		}
+		s.bindPaneToken(ctx, token, tab.RootPane.ID, job.ID)
 		return preparedPane{paneID: tab.RootPane.ID, workDir: job.Dir}, nil
 	}
 	created, err := s.opts.Herdr.WorkspaceCreate(ctx, herdr.WorkspaceCreateParams{Label: filepath.Base(job.Dir), Cwd: job.Dir, Env: env})
 	if err != nil {
 		return preparedPane{}, fmt.Errorf("opening a workspace for %s: %w", job.Dir, err)
 	}
+	s.bindPaneToken(ctx, token, created.RootPane.ID, job.ID)
 	return preparedPane{paneID: created.RootPane.ID, workDir: job.Dir}, nil
 }
 
@@ -305,8 +320,11 @@ func (s *Service) workspaceFor(ctx context.Context, dir string) string {
 	return ""
 }
 
-// paneEnv is the environment of a job's pane (6.2).
-func (s *Service) paneEnv(jobID string) map[string]string {
+// paneEnv is the environment of a job's pane (6.2), with a fresh agent token when there is an
+// identity registry; the token is returned so it can be bound once herdr names the pane.
+// CROWSNEST_JOB stays as the default job id the agent's own commands use; the socket checks it
+// against the token.
+func (s *Service) paneEnv(jobID string) (map[string]string, string, error) {
 	env := map[string]string{"CROWSNEST": "1", "CROWSNEST_JOB": jobID}
 	if s.opts.Launch.Session != "" {
 		env["CROWSNEST_SESSION"] = s.opts.Launch.Session
@@ -317,7 +335,26 @@ func (s *Service) paneEnv(jobID string) map[string]string {
 	if s.opts.Launch.BinDir != "" {
 		env["PATH"] = s.opts.Launch.BinDir + string(os.PathListSeparator) + s.opts.Launch.BasePath
 	}
-	return env
+	if s.opts.Launch.Identity == nil || s.opts.Launch.AgentSocket == "" {
+		return env, "", nil
+	}
+	token, err := agentid.NewToken()
+	if err != nil {
+		return nil, "", err
+	}
+	env[agentid.EnvToken] = token
+	return env, token, nil
+}
+
+// bindPaneToken binds a pane token to the pane herdr created for job. A failure is logged, not
+// fatal: the start token in the agent's MCP config and hook file still identifies it.
+func (s *Service) bindPaneToken(ctx context.Context, token, paneID, jobID string) {
+	if token == "" {
+		return
+	}
+	if err := s.opts.Launch.Identity.Bind(ctx, token, agentid.Binding{PaneID: paneID, JobID: jobID, Kind: agentid.KindPane}); err != nil {
+		s.opts.Logger.Warn("binding a job pane's agent token", "job", jobID, "pane", paneID, "err", err)
+	}
 }
 
 // Isolated reports whether the job asked for a worktree.
@@ -352,8 +389,9 @@ type jobFiles struct {
 	prompt, settings, mcpConfig string
 }
 
-// writeJobFiles writes <state>/jobs/<id>/{prompt.md,settings.json,mcp.json}, all 0600.
-func (s *Service) writeJobFiles(job Job) (jobFiles, error) {
+// writeJobFiles writes <state>/jobs/<id>/{prompt.md,settings.json,mcp.json,agent-token}, all
+// 0600. The token is minted for this start, bound to the job and its pane.
+func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) {
 	dir := filepath.Join(s.opts.Launch.StateDir, "jobs", job.ID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return jobFiles{}, fmt.Errorf("creating %s: %w", dir, err)
@@ -367,12 +405,24 @@ func (s *Service) writeJobFiles(job Job) (jobFiles, error) {
 		return jobFiles{}, fmt.Errorf("writing the job prompt: %w", err)
 	}
 	withMCP := s.opts.Launch.Executable != "" && s.opts.Launch.AgentSocket != ""
-	if err := writeJSON(files.settings, agentcfg.ClaudeSettings(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, withMCP)); err != nil {
+	token, tokenFile := "", ""
+	if withMCP && s.opts.Launch.Identity != nil {
+		var err error
+		token, err = s.opts.Launch.Identity.Mint(ctx, agentid.Binding{PaneID: job.PaneID, JobID: job.ID, Kind: agentid.KindStart})
+		if err != nil {
+			return jobFiles{}, fmt.Errorf("minting the job agent's token: %w", err)
+		}
+		tokenFile = filepath.Join(dir, "agent-token")
+		if err := os.WriteFile(tokenFile, []byte(token+"\n"), 0o600); err != nil {
+			return jobFiles{}, fmt.Errorf("writing the job agent's token file: %w", err)
+		}
+	}
+	if err := writeJSON(files.settings, agentcfg.ClaudeSettings(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, tokenFile, withMCP)); err != nil {
 		return jobFiles{}, err
 	}
 	if withMCP {
 		files.mcpConfig = filepath.Join(dir, "mcp.json")
-		if err := writeJSON(files.mcpConfig, agentcfg.MCPConfig(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID)); err != nil {
+		if err := writeJSON(files.mcpConfig, agentcfg.MCPConfig(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, token)); err != nil {
 			return jobFiles{}, err
 		}
 	}

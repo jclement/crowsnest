@@ -32,10 +32,12 @@ var Hooks = []struct {
 }
 
 // ClaudeSettings is the --settings file. With executable and socket set it carries the
-// supervisor's hooks; with withMCP the allow rule for crowsnest's tools. jobID is baked into
-// each hook command for a job agent; the orchestrator's hooks carry none, and the server finds
-// its current job from the calling pane.
-func ClaudeSettings(executable, socket, jobID string, withMCP bool) map[string]any {
+// supervisor's hooks; with withMCP the allow rule for crowsnest's tools. Each hook command names
+// the agent's token file, which is how the socket knows whose hook it is (R1b N2): the server
+// maps the token to the job (a job agent's) or to the pane, whose current job it then looks up
+// (the orchestrator's). jobID is still baked in for a job agent, as the path a client uses; the
+// server checks it against the token.
+func ClaudeSettings(executable, socket, jobID, tokenFile string, withMCP bool) map[string]any {
 	settings := map[string]any{}
 	if withMCP {
 		settings["permissions"] = map[string]any{"allow": []string{MCPAllowRule}}
@@ -47,7 +49,7 @@ func ClaudeSettings(executable, socket, jobID string, withMCP bool) map[string]a
 	for _, hook := range Hooks {
 		hooks[hook.Event] = []map[string]any{{
 			"hooks": []map[string]any{{
-				"type": "command", "command": HookCommand(executable, socket, hook.Command, jobID), "timeout": hook.Timeout,
+				"type": "command", "command": HookCommand(executable, socket, hook.Command, jobID, tokenFile), "timeout": hook.Timeout,
 			}},
 		}}
 	}
@@ -57,21 +59,27 @@ func ClaudeSettings(executable, socket, jobID string, withMCP bool) map[string]a
 
 // HookCommand is the shell command line for one hook. Claude Code runs it through a shell, so
 // every argument is single-quoted.
-func HookCommand(executable, socket, event, jobID string) string {
+func HookCommand(executable, socket, event, jobID, tokenFile string) string {
 	parts := []string{quote(executable), "hook", event, "--socket", quote(socket)}
 	if jobID != "" {
 		parts = append(parts, "--job", quote(jobID))
+	}
+	if tokenFile != "" {
+		parts = append(parts, "--token-file", quote(tokenFile))
 	}
 	return strings.Join(parts, " ")
 }
 
 // MCPConfig is the --mcp-config file: one stdio server, `<executable> mcp`, told where the agent
-// socket is and (for a job agent) which job it holds. The pane's own environment (HERDR_PANE_ID)
-// reaches it too, which is how the server knows which pane is asking.
-func MCPConfig(executable, socket, jobID string) map[string]any {
+// socket is, which job it holds (a job agent's: the default job id for the tools' paths) and the
+// agent's token, which is how the socket knows who is calling (R1b N2). The file is 0600.
+func MCPConfig(executable, socket, jobID, token string) map[string]any {
 	env := map[string]string{"CROWSNEST_SOCKET": socket}
 	if jobID != "" {
 		env["CROWSNEST_JOB"] = jobID
+	}
+	if token != "" {
+		env["CROWSNEST_TOKEN"] = token
 	}
 	return map[string]any{"mcpServers": map[string]any{
 		"crowsnest": map[string]any{"type": "stdio", "command": executable, "args": []string{"mcp"}, "env": env},

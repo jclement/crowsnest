@@ -70,7 +70,7 @@ func newRootCommand() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
 	config.RegisterFlags(root.PersistentFlags())
 	root.AddCommand(newServeCommand(), newVersionCommand(), newHealthCommand(),
-		newAskCommand(), newNotifyCommand(), newSayCommand(), newMCPCommand(), newJobCommand(), newHookCommand())
+		newAskCommand(), newQuestionCommand(), newNotifyCommand(), newSayCommand(), newMCPCommand(), newJobCommand(), newHookCommand())
 	return root
 }
 

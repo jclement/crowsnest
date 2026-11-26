@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/store"
@@ -197,6 +198,47 @@ func assertJobFiles(t *testing.T, args []string, jobID string) {
 	_ = json.Unmarshal(body, &mcp)
 	if mcp.Servers["crowsnest"].Env["CROWSNEST_JOB"] != jobID {
 		t.Fatalf("mcp.json %s", body)
+	}
+}
+
+// TestJobAgentsCarryTheirTokens is R1b N2 for job agents: the pane's environment, the MCP
+// server's and the hooks' token file each hold a token the registry maps to the job and its
+// pane, so the socket can tell the job's own calls from anyone naming it.
+func TestJobAgentsCarryTheirTokens(t *testing.T) {
+	var registry *agentid.Registry
+	r := newRig(t, func(o *Options) {
+		registry = agentid.New(o.Store, nil)
+		o.Launch.Identity = registry
+	})
+	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir(), Role: "reviewer"})
+	ctx := context.Background()
+	check := func(where, token, kind string) {
+		t.Helper()
+		binding, ok, err := registry.Resolve(ctx, token)
+		if err != nil || !ok || binding.JobID != job.ID || binding.PaneID != job.PaneID || binding.Kind != kind {
+			t.Fatalf("%s token %q resolves to %+v (%v %v)", where, token, binding, ok, err)
+		}
+	}
+	check("pane", r.fake.PaneEnv(job.PaneID)[agentid.EnvToken], agentid.KindPane)
+	args := r.fake.Starts()[0].Args
+	var mcp struct {
+		Servers map[string]struct{ Env map[string]string } `json:"mcpServers"`
+	}
+	body, _ := os.ReadFile(argValue(args, "--mcp-config"))
+	_ = json.Unmarshal(body, &mcp)
+	check("mcp.json", mcp.Servers["crowsnest"].Env[agentid.EnvToken], agentid.KindStart)
+	settings, _ := os.ReadFile(argValue(args, "--settings"))
+	tokenFile := filepath.Join(filepath.Dir(argValue(args, "--settings")), "agent-token")
+	if !strings.Contains(string(settings), "--token-file '"+tokenFile+"'") {
+		t.Fatalf("the hooks do not name the token file: %s", settings)
+	}
+	fromFile, err := agentid.ReadTokenFile(tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("hook token file", fromFile, agentid.KindStart)
+	if info, _ := os.Stat(tokenFile); info.Mode().Perm() != 0o600 {
+		t.Fatalf("token file mode %v", info.Mode().Perm())
 	}
 }
 

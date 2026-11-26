@@ -10,6 +10,18 @@
 #      crowsnest from starting (a slow one carries on in the background);
 #   4. execs `crowsnest serve --bind 0.0.0.0` with any extra arguments passed through.
 #
+# Secrets (R1b N1): every agent runs as crow, the same uid as this script, tini and crowsnest, so
+# whatever sits in an environment here is readable by an agent through /proc/<pid>/environ.
+#   - Sidecar tokens (TUNNEL_TOKEN, TS_AUTHKEY) belong to other containers. They are dropped at
+#     once, so a .env shared with a sidecar by mistake still never reaches crowsnest or a pane.
+#   - crowsnest's own secrets are kept out of every child this script starts (mise install), and
+#     crowsnest re-executes itself without them (see cmd/crowsnest/secretenv.go), so neither its
+#     own environment nor any pane's holds them.
+#   - What no script can change: tini, PID 1, keeps the environment Docker started it with. A
+#     password given as CROWSNEST_PASSWORD is therefore readable in /proc/1/environ. Give it as a
+#     file (CROWSNEST_PASSWORD_FILE, a compose secret) to keep it out of there too; the start-up
+#     log says so when it was not.
+#
 # POSIX sh on purpose (shellcheck-clean): it must run before mise has installed anything.
 set -eu
 
@@ -35,7 +47,7 @@ check_credentials() {
     die "CROWSNEST_NO_AUTH=true needs CROWSNEST_I_KNOW_THIS_IS_OPEN=true as well: without a login, anyone who reaches the port gets a shell. Set a username and password instead (CROWSNEST_USERNAME plus CROWSNEST_PASSWORD or CROWSNEST_PASSWORD_FILE)."
   fi
   [ -n "${CROWSNEST_USERNAME:-}" ] ||
-    die "no credentials: set CROWSNEST_USERNAME plus CROWSNEST_PASSWORD or CROWSNEST_PASSWORD_FILE (see deploy/.env.sample). A web terminal is a shell; it does not start open."
+    die "no credentials: set CROWSNEST_USERNAME plus CROWSNEST_PASSWORD or CROWSNEST_PASSWORD_FILE (see deploy/crowsnest.env.sample). A web terminal is a shell; it does not start open."
   if [ -n "${CROWSNEST_PASSWORD_FILE:-}" ]; then
     [ -r "$CROWSNEST_PASSWORD_FILE" ] ||
       die "CROWSNEST_PASSWORD_FILE=$CROWSNEST_PASSWORD_FILE is not a readable file (mount it, e.g. as a Docker secret)."
@@ -43,6 +55,25 @@ check_credentials() {
   fi
   [ -n "${CROWSNEST_PASSWORD:-}" ] ||
     die "CROWSNEST_USERNAME is set but there is no password: set CROWSNEST_PASSWORD or CROWSNEST_PASSWORD_FILE."
+}
+
+# The variables holding crowsnest's own secrets: kept from every child but crowsnest itself.
+secret_vars="CROWSNEST_PASSWORD ELEVENLABS_API_KEY CROWSNEST_NOTIFY_URL"
+
+# Sidecar tokens: never crowsnest's to hold.
+drop_sidecar_tokens() {
+  for name in TUNNEL_TOKEN TS_AUTHKEY; do
+    if [ -n "$(printenv "$name" 2>/dev/null || true)" ]; then
+      log "WARNING: $name is in crowsnest's environment; it belongs to a sidecar's own env file. Dropped, so no agent can read it here (but PID 1 still holds it: move it out of crowsnest.env)."
+    fi
+    unset "$name"
+  done
+}
+
+warn_env_secrets() {
+  [ -n "${CROWSNEST_PASSWORD:-}" ] &&
+    log "NOTE: the password came as CROWSNEST_PASSWORD. Agents run as the same user and can read it in /proc/1/environ; mount it as a file and set CROWSNEST_PASSWORD_FILE instead (see deploy/compose.yaml)."
+  return 0
 }
 
 # ---- 2. First-start seeding -----------------------------------------------------------------
@@ -89,6 +120,8 @@ run_mise_install() {
   log "mise install: starting (log: $install_log; waiting up to ${mise_wait}s)"
   (
     (
+      # shellcheck disable=SC2086 # the names are a fixed, space-separated list
+      unset $secret_vars
       started=$(date +%s)
       if mise install >"$install_log" 2>&1; then code=0; else code=$?; fi
       echo "$code $(($(date +%s) - started))" >"$install_status"
@@ -121,6 +154,8 @@ report_mise_install() {
 
 # ---- main -----------------------------------------------------------------------------------
 check_credentials
+drop_sidecar_tokens
+warn_env_secrets
 check_home
 mkdir -p "$state_dir"
 seed_mise_config

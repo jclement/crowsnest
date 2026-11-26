@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 const (
@@ -136,9 +137,9 @@ func agentReason(input PrecheckInput, agent AgentSeen) (Reason, string, bool) {
 	if held < hold || input.Pushed[agent.PaneID] == mark {
 		return Reason{}, "", false
 	}
-	name := agent.Name
-	if name == "" {
-		name = "an unnamed agent"
+	name := "an unnamed agent"
+	if agent.Name != "" {
+		name = termtext.Quote(agent.Name) // herdr names can be set from inside a pane
 	}
 	text := fmt.Sprintf("%s (pane %s) %s, for %s", name, agent.PaneID, what, roundHeld(held))
 	return Reason{Key: "agent:" + agent.PaneID + ":" + mark, Source: SourceAgent, Text: text, At: agent.Since}, mark, true
@@ -258,14 +259,11 @@ func ReasonTexts(reasons []Reason) []string {
 // maxReasonRunes keeps one reason to a line a phone shows whole.
 const maxReasonRunes = 240
 
-// oneLine collapses whitespace (a title with a newline must not forge a second reason line)
-// and caps the length.
+// oneLine makes a reason safe to type (internal/termtext: one line, no escape sequences,
+// control, format or private-use characters, so a title with a newline cannot forge a second
+// reason line) and caps its length.
 func oneLine(text string) string {
-	text = strings.Join(strings.Fields(text), " ")
-	if runes := []rune(text); len(runes) > maxReasonRunes {
-		text = string(runes[:maxReasonRunes-1]) + "…"
-	}
-	return text
+	return termtext.Cap(termtext.Clean(text), maxReasonRunes)
 }
 
 // keysOf lists reason keys, for removing delivered reasons from the pending set.

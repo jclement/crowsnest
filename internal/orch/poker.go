@@ -29,6 +29,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/journal"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 const (
@@ -199,7 +200,8 @@ func (p *Poker) QuestionSettled(ctx context.Context, q QuestionInfo) {
 	if q.Kind == "notice" || q.SourcePane == "" || q.SourcePane == p.opts.Status().PaneID {
 		return
 	}
-	text := q.ID + " (asked by pane " + q.SourcePane + ") was " + q.Status + ": " + q.Title
+	// The title is the asker's words: quoted, so it cannot pass for a header (internal/termtext).
+	text := q.ID + " (asked by pane " + q.SourcePane + ") was " + q.Status + ": " + termtext.Quote(q.Title)
 	p.Add(ctx, Reason{Key: "question:" + q.ID, Source: SourceQuestion, Text: text})
 }
 
@@ -221,7 +223,7 @@ func (p *Poker) JobChanged(ctx context.Context, job JobInfo) {
 	default:
 		return
 	}
-	p.Add(ctx, Reason{Key: key, Source: SourceJob, Text: "job " + job.ID + " " + what + ": " + job.Title})
+	p.Add(ctx, Reason{Key: key, Source: SourceJob, Text: "job " + job.ID + " " + what + ": " + termtext.Quote(job.Title)})
 }
 
 // Check observes the agents, runs the backstop and the timer, and pokes if anything is due and
