@@ -28,7 +28,10 @@ export default defineConfig({
   timeout: 45_000,
   expect: { timeout: 10_000 },
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }], ["github"]] : [["list"], ["html", { open: "never" }]],
-  use: { trace: "retain-on-failure", screenshot: "only-on-failure" },
+  // Service workers are blocked except where a spec allows them (push.spec.ts): a page a worker
+  // controls hides its requests from page.route (Playwright documents this; WebKit does it even
+  // for a worker with no fetch handler), and several specs answer API calls through page.route.
+  use: { trace: "retain-on-failure", screenshot: "only-on-failure", serviceWorkers: "block" },
   projects: [
     {
       name: "desktop-chromium",

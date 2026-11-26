@@ -22,7 +22,7 @@ import { mockPushManagerScript, startFakePush, type FakePush } from "../support/
 import { expect, expectAccessible, isPhone, smallTapTargets, test } from "../support/fixtures";
 
 test.skip(({ browserName }) => browserName !== "chromium", "service-worker push needs Chromium (CDP)");
-test.use({ channel: "chromium" });
+test.use({ channel: "chromium", serviceWorkers: "allow" });
 
 let fake: FakePush;
 test.beforeEach(async ({ context, page, baseURL }) => {
@@ -80,10 +80,15 @@ test("turn on, test, receive a push and open its deep link", async ({ page, cont
   const cdp = await context.newCDPSession(page);
   const registration = await registrationId(cdp, `${baseURL}/`);
   const notice = { title: "An agent is blocked on you", body: "Ship the migration tonight?", tag: "q_1", url: "/inbox?q=q_1", kind: "question" };
-  await cdp.send("ServiceWorker.deliverPushMessage", { origin: baseURL!, registrationId: registration, data: JSON.stringify(notice) });
-  await expect
-    .poll(() => page.evaluate(async () => (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body, tag: n.tag, data: n.data as unknown }))))
-    .toEqual([{ title: notice.title, body: notice.body, tag: "q_1", data: { url: "/inbox?q=q_1", kind: "question" } }]);
+  // Under a loaded machine a CDP-delivered push is now and then dropped before the worker runs
+  // (seen only in full parallel runs, never alone); CDP delivery is a test hook, not the product
+  // path, so it is sent again until it shows. The same tag replaces, so a repeat adds nothing.
+  await expect(async () => {
+    await cdp.send("ServiceWorker.deliverPushMessage", { origin: baseURL!, registrationId: registration, data: JSON.stringify(notice) });
+    await expect
+      .poll(() => page.evaluate(async () => (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body, tag: n.tag, data: n.data as unknown }))), { timeout: 3_000 })
+      .toEqual([{ title: notice.title, body: notice.body, tag: "q_1", data: { url: "/inbox?q=q_1", kind: "question" } }]);
+  }).toPass({ timeout: 20_000 });
 
   // Tapping it: the worker's notificationclick focuses this tab and the app routes to the item.
   await page.getByRole("button", { name: "Close" }).click();
@@ -107,25 +112,27 @@ test("turn on, test, receive a push and open its deep link", async ({ page, cont
 });
 
 /** Delivers a raw push to the service worker and returns the notifications it then shows. */
-async function deliver(page: Page, context: BrowserContext, baseURL: string, data: string) {
+async function deliver(page: Page, context: BrowserContext, baseURL: string, data: string, expected: unknown) {
   await openNotifications(page);
   const cdp = await context.newCDPSession(page);
   const registration = await registrationId(cdp, `${baseURL}/`);
-  await cdp.send("ServiceWorker.deliverPushMessage", { origin: baseURL, registrationId: registration, data });
+  // Sent again until it shows: see the note in the first test.
+  await expect(async () => {
+    await cdp.send("ServiceWorker.deliverPushMessage", { origin: baseURL, registrationId: registration, data });
+    await expect.poll(() => shownNotifications(page), { timeout: 3_000 }).toEqual(expected);
+  }).toPass({ timeout: 20_000 });
 }
 
 const shownNotifications = (page: Page) =>
   page.evaluate(async () => (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, url: (n.data as { url: string }).url })));
 
 test("a pushed URL can never leave the app", async ({ page, context, baseURL }) => {
-  await deliver(page, context, baseURL!, JSON.stringify({ title: "x", body: "y", tag: "evil", url: "https://evil.example/" }));
-  await expect.poll(() => shownNotifications(page)).toEqual([{ title: "x", url: "/" }]);
+  await deliver(page, context, baseURL!, JSON.stringify({ title: "x", body: "y", tag: "evil", url: "https://evil.example/" }), [{ title: "x", url: "/" }]);
 });
 
 test("a push that is not JSON still shows a notice", async ({ page, context, baseURL }) => {
   // A push with no notification is punished by browsers (and says nothing to Jeff).
-  await deliver(page, context, baseURL!, "not json");
-  await expect.poll(() => shownNotifications(page)).toEqual([{ title: "crowsnest", url: "/" }]);
+  await deliver(page, context, baseURL!, "not json", [{ title: "crowsnest", url: "/" }]);
 });
 
 test("the sheet passes axe and keeps tap targets at 44 px", async ({ page }, testInfo) => {
