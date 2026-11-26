@@ -1,5 +1,5 @@
 // Wiring for scheduled work and the orchestrator's upkeep (DESIGN.md 7.8 to 7.10): the schedule
-// service that reads task files and feeds the poker, the tender that compacts the orchestrator
+// service that reads task files and app schedules and feeds the poker, the tender that compacts the orchestrator
 // and hands it over to a new conversation each day, the standing context its SessionStart hook
 // re-injects, and the Remote Control names built from the instance's name.
 
@@ -68,8 +68,27 @@ func taskSources(cfg config.Config) []schedule.Source {
 type scheduleJobs struct{ service *jobs.Service }
 
 func (a scheduleJobs) CreateJob(ctx context.Context, request schedule.JobRequest) (string, error) {
-	job, err := a.service.Create(ctx, jobs.CreateInput{Brief: request.Brief, Dir: request.Dir, Role: request.Role}, "")
+	job, err := a.service.Create(ctx, jobs.CreateInput{
+		Brief: request.Brief, Dir: request.Dir, Role: request.Role, Engine: request.Engine, ProjectID: request.ProjectID,
+	}, "")
 	return job.ID, err
+}
+
+// liveProjects lists the live projects, slug → id, for scheduled tasks' targets. A read error
+// is logged and reads as no projects: a task naming one is then a problem until the next check.
+func liveProjects(db *store.Store, logger *slog.Logger) func(context.Context) map[string]int64 {
+	return func(ctx context.Context) map[string]int64 {
+		projects, err := db.ListProjects(ctx, false)
+		if err != nil {
+			logger.Warn("listing projects for the schedule", "err", err)
+			return nil
+		}
+		bySlug := make(map[string]int64, len(projects))
+		for _, project := range projects {
+			bySlug[project.Slug] = project.ID
+		}
+		return bySlug
+	}
 }
 
 func (a scheduleJobs) JobState(ctx context.Context, id string) (string, bool, error) {
@@ -101,6 +120,7 @@ func (a scheduleTasks) Delivered(ctx context.Context, at time.Time, names []stri
 func startSchedule(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, journalLog *journal.Journal, jobService *jobs.Service, client herdr.Client, kick *atomic.Pointer[orch.Poker], logger *slog.Logger) *schedule.Service {
 	options := schedule.Options{
 		KV: db, Sources: taskSources(cfg), Journal: journalLog, Hub: events, Logger: logger,
+		Store: db, StateDir: cfg.StateDir, Projects: liveProjects(db, logger),
 		Picture: fleetPicture(client, jobService),
 		Kick: func() {
 			if poker := kick.Load(); poker != nil {

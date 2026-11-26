@@ -676,8 +676,8 @@ builds the reason list. Nothing due means no poke and no tokens spent. Gate: orc
 done **and** an empty input box; skipped while working; a blocked orchestrator raises a "needs
 you" item instead. Text sent: `[crowsnest poke 2026-11-26T03:10Z]` followed by one line
 per reason. Every poke and skip is recorded in the journal table and visible in the UI.
-Scheduled tasks (`tasks/*.md` with `every:` frontmatter, as the front door has) are another
-reason source: 7.8.
+Scheduled tasks (`tasks/*.md` with `every:` frontmatter, as the front door has, and schedules
+made in the app) are another reason source, for the orchestrator or a project's lead: 7.8.
 
 **7.5 Upkeep**: if the orchestrator pane is back at a shell, restart with `--resume`. "New
 conversation" in the UI sends `/exit`, waits for the shell, and starts with a fresh session id.
@@ -799,18 +799,43 @@ Claude Code 2.1.332 by `mise run test:claude`):
   older". A poke in a conversation is a one-line system row ("Poke · 2 reasons · 03:10") with the
   reasons behind a disclosure, not a user bubble.
 
-**7.8 Scheduled work** (built on `wip/upkeep`; `internal/schedule`, `internal/orch/poke.go` and
-`poker.go`, `cmd/crowsnest/upkeep.go`, `internal/httpd/schedule.go`,
-`web/src/components/schedule/SchedulePanel.tsx`). The front door's periodic tasks, in Go, in the
-existing poker:
+**7.8 Scheduled work** (built on `wip/upkeep`, app schedules and targets on `wip/schedules`;
+`internal/schedule`, `internal/orch/poke.go` and `poker.go`, `cmd/crowsnest/upkeep.go`,
+`internal/httpd/schedule.go`, `web/src/components/schedule/SchedulePanel.tsx`). The front door's
+periodic tasks, in Go, in the existing poker, plus schedules made in the app:
 
 - **Files.** `<--dir>/tasks/*.md` and `~/.config/crowsnest/tasks/*.md` (beside the config file's
   `roles/`; not read under `--demo`), re-read at every check, so a new or edited file needs no
   restart. A name is the file name (`[a-z0-9][a-z0-9_-]*`); the orchestrator's directory wins a
   clash and the other file is a problem. Frontmatter keys: `every` (`Nm` of at least 5 minutes,
   `Nh`, `Nd`, `poke`, `change`), `after` (`HH:MM`, local), `as` (`poke`, the default, or `job`),
-  and for jobs `dir` and `role`. An unknown key is an error, not ignored (a misspelt `afer:` would
-  run a daily task at midnight). The front door's files parse unchanged.
+  for jobs `dir` and `role`, and `project` (a project's slug, below). An unknown key is an error,
+  not ignored (a misspelt `afer:` would run a daily task at midnight). The front door's files
+  parse unchanged.
+- **App schedules** (`internal/schedule/app.go`, table `schedules`): made, edited and deleted in
+  the app; each row becomes the same `Task` a file does (origin `app`), validated by the same
+  code (`Task.apply` on the row's every/after/as/dir/role, so the grammar has one definition),
+  plus: a body (non-empty, at most 64 KB), `engine` (`claude` or `codex`, jobs only), `dir`
+  absolute or empty, and `project_id` naming a live project. The UI's cadence words are the
+  file grammar: every N minutes (at least 5) / hours / days is `Nm`/`Nh`/`Nd`; daily at HH:MM is
+  `every: 1d` with `after: HH:MM`; on poke and on change are `poke` and `change`. A poke-type
+  schedule's body is materialised to `<state dir>/schedules/<name>.md` (0600, written beside and
+  renamed over, rewritten only when it changed; removed on delete or when it becomes a job) so
+  the reason line names a file exactly as for a task file. A schedule is not renamed (the name
+  keys its stamps and history); delete and re-make it, which starts with fresh stamps.
+- **Targets.** A poke task goes to the orchestrator (`project_id` 0, no `project:`) or to one
+  project's lead (`project_id`, or a file's `project: <slug>` resolved through
+  `Options.Projects`, slug → id of the live projects; an unknown slug or an archived project is
+  a problem, and the task does not run). A job task (`as: job`) is created with the brief, `dir`,
+  `role`, `engine` and the project (`JobRequest.ProjectID` → `jobs.CreateInput.ProjectID`). Who
+  a task targets is `Task.Target()`: `orchestrator`, `lead` or `job`.
+- **One name space, the file wins.** A task file and an app schedule with the same name: the
+  file runs; the app schedule is listed with `shadowed: true` (its stamps are the file's, so the
+  row shows none), reported as a problem, and never run, so a name never runs twice. A file
+  owns its name even while it does not parse (fixing it never starts a second task). Creating
+  an app schedule with a file's (or another schedule's) name is `409`; editing or deleting a
+  file's task through the API is `409` "read-only: edit the file". Only the on/off switch is the
+  app's for both kinds.
 - **Due** is pure (`schedule.Check`, a table in `due_test.go` with a fixed time zone): an
   interval since the last run; `Nd` by calendar days between local dates (DST-proof, never twice
   on one day); `after:` by local wall clock (a time skipped by spring-forward counts as passed at
@@ -824,6 +849,11 @@ existing poker:
   that carried the task was delivered (the poker calls `Delivered` with the task names), so a task
   never repeats because the model forgot to mark it, and a poke the gate held keeps its tasks due.
   A poke whose delivery was uncertain counts as delivered, as every reason does (decision 35).
+- **Per standing agent.** `DueTasksFor(ctx, now, projectID)` returns only the poke-type tasks
+  that target that agent (0 the orchestrator, else that project's lead); `DueTasks(ctx, now)` is
+  `DueTasksFor(ctx, now, 0)`, which the orchestrator's poker calls. A lead's poker calls it with
+  its project and applies the same gate; `Delivered(ctx, at, names)` stamps whichever agent the
+  poke went to.
 - **The precheck** takes `Tasks` (due by themselves: a poke even when nothing else is due) and
   `RideAlong` (added only when the poke has something else). Each is one reason line, key
   `task:<name>`: `scheduled task <name> is due (<cadence>, last run <time>|never run): read <file>
@@ -832,8 +862,18 @@ existing poker:
   its title and a line naming the file) becomes a job's brief, created as the human would
   (`jobs.Service.Create`), with the full supervisor; a task whose previous job is still live waits
   for it ("waiting: the previous run, j_4, is still running") rather than stacking copies.
-- **Problems** (unreadable file, bad frontmatter, a name clash) are journalled once each as an
-  `alert` (keyed by path and error, remembered across restarts), and listed by `GET /schedule`.
+- **Run history** (table `schedule_runs`, both kinds, keyed by name): every run is a row with
+  its time, outcome and job id: a poke delivered (`carried by a poke`), a job created (`job j_4
+  created`), a job that could not be created, waiting on the previous run, jobs unavailable.
+  The not-a-run outcomes are recorded only when they differ from the last one (the task stays
+  due and is looked at every 30 s; twenty identical "waiting" rows would push out every run).
+  The newest 20 per task are kept (`store.AddScheduleRun` prunes) and `GET /schedule` returns
+  them per task, newest first. A failure to record is logged and never stops a run. Deleting an
+  app schedule keeps its history.
+- **Problems** (unreadable file, bad frontmatter, a name clash, an unknown project, an invalid
+  or shadowed app schedule) are journalled once each as an `alert` (keyed by path or schedule
+  name and error, remembered across restarts), and listed by `GET /schedule` (`path` for a file,
+  `name` for an app schedule).
 - **The instructions** (`CROWSNEST.md`) say a `scheduled task …` reason means read that file and
   do it, and that there is nothing to mark done.
 - **UI**: the Schedule sheet (Chat menu, the Jobs view's Schedule button, and the command
@@ -1369,7 +1409,8 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /spend?from=&to=&group=job\|model\|day`, `GET /spend/summary` | Spend for a range of local days, grouped; today, this week and the orchestrator's line (7.11). Jobs carry `spend` on `/jobs` and `/jobs/{id}` (with `spend_turns` there) |
 | `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control` and `remote_control_note` (7.10) |
 | `GET /orchestrator/context`, `POST /orchestrator/compact` | The orchestrator's context size and upkeep `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}`; Compact now (409 when it cannot take it) (7.9) |
-| `GET /schedule`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin, every, after, schedule, as, dir, role, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now}], problems:[{path, error}], dirs}`; Run now; `{enabled}` (7.8). A `schedule` event (`{at}`) says a stamp or switch changed |
+| `GET /schedule?project=`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md (app only), shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs:[{at, outcome, job_id}]}], problems:[{path, name, error}], dirs}`, `project=<id>` keeping one project's tasks (0: the orchestrator's and unfiled); Run now; `{enabled}` for any task and/or every field of an app schedule (a full replacement; a task file's edit is `409` "read-only: edit the file") (7.8). A `schedule` event (`{at}`) says a stamp, switch or app schedule changed |
+| `POST /schedule`, `DELETE /schedule/{name}` | An app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list (`400` invalid, `409` a taken name); delete one (`409` for a task file, `404` unknown) → the list (7.8) |
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
 | `GET /inbox/summary` | `{open, blocking}`: the Inbox badge (added in M6) |
@@ -1457,6 +1498,8 @@ The client sends a resize first; the server starts the process on that first res
 - `push_subscriptions(id, endpoint, p256dh, auth, user_agent, created_at, last_success_at, last_failure_at, failures)` (migration `0009_push.sql`, 8.5); `kv` keys `push.vapid` and `push.settings`
 - `spend_totals(subject, input, output, cache_write_5m, cache_write_1h, cache_read, turns, tool_calls, first_at, last_at, updated_at, state_json)`, `spend_daily(day, subject, model, …the same counts)` and `spend_turns(id, subject, message_id, at, model, …tokens)` (migration `0011_spend.sql`, 7.11): a subject is `j_<n>` or `orchestrator`; `model` is a pricing key
 - `attachments(id, name, type, size, sha256, has_thumb, origin, origin_pane, owner_kind, owner_id, role, ref, path, created_at, attached_at, released_at)` (migration `0010_attachments.sql`, 8.6): one row per upload or agent file; the bytes are `<data-dir>/attachments/<sha256>` (and `.thumb.jpg`); `owner_kind` is `''` (pending), `job`, `orchestrator`, `pane` or `question`; `role` is `brief`, `message`, `prompt`, `answer` (with `ref` the question), `ask` or `result`; `path` is the agent's copy
+- `schedules(id, name, every, after, run_as, project_id, body_md, dir, role, engine, created_at, updated_at)` (migration `0012_projects.sql`, 7.8): schedules made in the app; `name` unique and shared with task files (a file wins); `every`/`after` in the task-file grammar; `run_as` `poke` (to the orchestrator, `project_id` 0, or that project's lead) or `job` (`project_id` the job's project)
+- `schedule_runs(id, name, at, outcome, job_id)` (migration `0012_projects.sql`, 7.8): the run history of every scheduled task, file or app, keyed by name, the newest 20 per task kept
 - `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -1804,7 +1847,7 @@ internal/jobs/               job service, launcher, supervisor (hooks, dispositi
 internal/agentcfg/           the --settings (hooks, allow rule) and --mcp-config files every Claude agent gets
 internal/orch/               lifecycle, send, poke precheck and gate, poker, herdr-side backstop
 internal/journal/            journal entries (pokes, skips, sends, answers, restarts, alerts)
-internal/schedule/           scheduled task files: parse, due rules, stamps, job tasks (7.8)
+internal/schedule/           scheduled tasks, files and app schedules: parse, due rules, stamps, targets, run history, job tasks (7.8)
 internal/transcript/         locate, tail, normalise Claude JSONL; usage records for spend
 internal/spend/              spend: price table, the meter over transcripts, summaries and reports (7.11)
 internal/questions/          store, long-poll, expiry
@@ -2097,6 +2140,12 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 67. **Tokens are stored per pricing key; costs are computed when read.** A wrong or late price is
     one file away from being corrected for all of history, and an unknown model keeps its tokens
     until a price arrives. Storing dollars would freeze every mistake in.
+68. **App schedules are Tasks, and a file wins a shared name** (7.8). Turning a row into the same
+    Task a file becomes (through the same frontmatter rules) keeps one set of due rules, stamps,
+    switches and poke lines. A file is what someone wrote and committed; an app schedule can be
+    re-made in a click, so on a clash the file runs and the row is shown shadowed, never both
+    (a double run costs a turn or a job). A poke-type schedule's body is materialised as a file
+    because the poke line's contract is "read this file", and agents already read files.
 
 ## 18. Milestones
 
@@ -2156,7 +2205,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - A restart mints a new start token, which revokes the agent's previous one. It now happens only once the old agent is confirmed gone (R2-C07); replacing tokens atomically per pane is R2-C15, in `internal/agentid`.
 - Codex jobs are launched but have no hooks: they are covered by the herdr-side backstop (M8 calls `NudgeIfDue`), not the Stop hook.
 - Pokes (M8): the agent-settled trigger is herdr's `done`/`blocked`; an agent that goes `idle` without passing through `done` is not reported. The timer reports a change in the standing list, not elapsed time, so a stuck job that stays stuck is pushed once (at its event) and then only when the list changes. A poke whose delivery was uncertain is not resent, and the scheduled tasks it carried count as run.
-- Scheduled work (7.8) and upkeep (7.9): a task's run is "the poke carrying it was delivered", not "the orchestrator did it"; crowsnest cannot see the difference, and a task file should say what to report. `every: change` watches herdr's agent states, which flicker between turns, so it runs at most every 5 minutes rather than on every change. The context size is unknown after an auto compaction until the next call (Claude 2.1.332 records no `postTokens` for those). The hand-over is written by the orchestrator's own Write tool into the state directory, outside its working directory; whether that needs a permission prompt was not tested (under `default` it may stop at a dialog; the Inbox would then show it and the restart waits). The daily new conversation and compaction were exercised against the fake herdr only, not against a real Claude (the real tests cover the scheduled task and Remote Control). Job agents are not compacted by crowsnest.
+- Scheduled work (7.8) and upkeep (7.9): a task's run is "the poke carrying it was delivered", not "the orchestrator did it"; crowsnest cannot see the difference, and a task file should say what to report. `every: change` watches herdr's agent states, which flicker between turns, so it runs at most every 5 minutes rather than on every change. The context size is unknown after an auto compaction until the next call (Claude 2.1.332 records no `postTokens` for those). The hand-over is written by the orchestrator's own Write tool into the state directory, outside its working directory; whether that needs a permission prompt was not tested (under `default` it may stop at a dialog; the Inbox would then show it and the restart waits). The daily new conversation and compaction were exercised against the fake herdr only, not against a real Claude (the real tests cover the scheduled task and Remote Control). Job agents are not compacted by crowsnest. An app poke schedule's materialised file is under the state directory, outside the standing agent's working directory, so reading it may ask for permission the first time (as the hand-over may); a lead's poker calling `DueTasksFor` is another branch's work, so until it lands a lead-targeted task is listed but only the orchestrator's tasks are poked.
 - The backstop's "stop handled by a hook" test is time-based (a Stop hook stamp within 15 s before the agent was seen to settle). An agent whose hook works on one turn and fails on the very next within that window would miss one backstop nudge; the next idle minute catches it.
 - **Spend (7.11)** is an estimate: list prices, no discounts, no server-tool charges (web
   search), no Bedrock or Vertex pricing. Codex jobs are not measured. A job's transcript is found

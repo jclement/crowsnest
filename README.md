@@ -412,8 +412,8 @@ appended to every role's prompt.
 
 ## Scheduled work
 
-Periodic work for the orchestrator is a markdown file in `<--dir>/tasks/` or
-`~/.config/crowsnest/tasks/` (the first wins on a name clash). The files are re-read at every
+Periodic work is a markdown file in `<--dir>/tasks/` or `~/.config/crowsnest/tasks/` (the first
+wins on a name clash), or a schedule made in the app (below). The files are re-read at every
 check, so adding, editing or removing one needs no restart. The format is claude-agent's front
 door's, so its task files run unchanged:
 
@@ -424,6 +424,7 @@ after: 17:00      # optional: not before this local time of day
 as: job           # optional: start a crowsnest job instead of telling the orchestrator
 dir: ~/Work/thing # as: job only: where the job runs (none: the orchestrator takes it)
 role: builder     # as: job only
+project: webapp   # optional: a project's slug; a poke goes to that project's lead, a job joins it
 ---
 # Daily digest
 
@@ -439,12 +440,25 @@ What to do, in plain words. The orchestrator (or the job's agent) reads this fil
   every 5 minutes). Neither can be `as: job`.
 - `as: job` starts a crowsnest job with the body as its brief and the full supervisor; a job
   task whose previous job is still live waits for it rather than stacking a second copy.
-- A file that cannot be used (no frontmatter, an unknown key, `every: 1w`) is skipped and
-  reported once in the Journal, and listed in the Schedule view.
+- `project: <slug>` sends a poke task to that project's lead instead of the orchestrator (same
+  due rules, stamps and gate), and files an `as: job` task's job under the project. A slug that
+  names no live project is a problem.
+- A file that cannot be used (no frontmatter, an unknown key, `every: 1w`, an unknown project)
+  is skipped and reported once in the Journal, and listed in the Schedule view.
+- **App schedules** are made, edited and deleted in the app (`POST`/`PUT`/`DELETE /schedule`)
+  and stored in the database: a name, a cadence (every N minutes of at least 5, hours or days;
+  daily at HH:MM; on poke; on change, which are `every`/`after` in the file grammar), a target
+  (the orchestrator, a project's lead, or a job with its directory, role and engine) and a
+  body. They follow exactly the rules a file does. A poke-type schedule's body is written to
+  `<state dir>/schedules/<name>.md` so the poke line can name it. Names are shared with task
+  files and a **file wins**: an app schedule whose name a file has is listed as shadowed and
+  never runs, and making one with a file's name is refused.
+- Every run (a poke delivered, a job created, a job that could not be created, waiting for the
+  previous run) is kept in a short history, the last 20 per task, shown in the Schedule view.
 - The **Schedule** view (Chat menu, the Jobs view's Schedule button, or the command palette)
-  lists every task with its cadence, last run, next time and last outcome, a Run now button and
-  an on/off switch. The switch is crowsnest's (kept in its database); the file stays the source
-  of what the task says.
+  lists every task with its cadence, target, last run, next time, last outcome and recent runs,
+  a Run now button and an on/off switch. The switch is crowsnest's (kept in its database) for
+  both kinds; a file stays the source of what it says, and only app schedules are editable.
 
 `examples/tasks/` holds three to copy: `check.md` (every 15 minutes: anything stuck or waiting
 on you?), `tidy.md` (hourly: bring the orchestrator's notes up to date) and `digest.md` (daily
@@ -598,9 +612,11 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /orchestrator/poke` | session | "Poke now" → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}`. Skips the two-minute limit between agent pokes; `skipped` with `reason` "nothing is due" when there is nothing to say, or why the orchestrator cannot take one (working, a dialog, a draft) |
 | `GET /orchestrator/context` | session | The orchestrator's context: `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}` (`known` is false before the first reading and right after a compaction that recorded no size) |
 | `POST /orchestrator/compact` | session | "Compact now": `/compact` with the focus, at any size → the context as above; `409 CONFLICT` when the orchestrator is busy, at a dialog or has a draft |
-| `GET /schedule` | session | Scheduled tasks: `{tasks: [{name, title, path, origin, every, after, schedule, as, dir, role, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now}], problems: [{path, error}], dirs}` |
+| `GET /schedule?project=` | session | Scheduled tasks: `{tasks: [{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md, shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs: [{at, outcome, job_id}]}], problems: [{path, name, error}], dirs}`; `project=<id>` keeps one project's tasks (`0`: the orchestrator's and unfiled) |
+| `POST /schedule` | session | A new app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list. `400` invalid, `409` the name is taken (by a file or app schedule) |
 | `POST /schedule/{name}/run` | session | Run now: a poke task goes with the next poke the orchestrator can take, a job task starts its job → the list. `404` for an unknown name |
-| `PUT /schedule/{name}` | session | `{enabled}`: switch a task off or on (kept by crowsnest; the file is untouched) → the list |
+| `PUT /schedule/{name}` | session | `{enabled}`: switch a task off or on (kept by crowsnest; a file is untouched); and/or every field of `POST /schedule` (but `name`) to replace an app schedule → the list. `409` "read-only: edit the file" for a task file's edit |
+| `DELETE /schedule/{name}` | session | Delete an app schedule (its history stays) → the list. `409` for a task file, `404` unknown |
 | `GET /spend?from=&to=&group=` | session | Spend for the local days `from`..`to` (YYYY-MM-DD, inclusive; default this week, Monday to today, at most a year) grouped by `job` (the orchestrator is its own row), `model` or `day`: `{from, to, group, rows: [{key, label, …summary}], total, prices_checked, prices_source, prices_file, note}`. A summary is `{measured, reason, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, total_tokens, turns, tool_calls, wall_seconds, cost_usd (null when unknown), cost_partial, unpriced_tokens, cache_hit_share, models, first_at, last_at}` |
 | `GET /spend/summary` | session | `{today, week, orchestrator_today, orchestrator_total, today_date, week_start, prices_checked, note}`: the Jobs header's totals and the Chat menu's line |
 | `GET /journal?kind=&before=&limit=` | session | The journal, newest first: `{entries: [{id, at, kind, summary, detail}], total, next_before}`. `kind` filters (comma-separated: `poke`, `skip`, `send`, `answer`, `restart`, `alert`, `backstop`, `task`, `upkeep`); `before` is the previous page's `next_before`; `limit` defaults to 50, at most 200 |

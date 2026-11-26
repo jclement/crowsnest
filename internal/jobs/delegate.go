@@ -132,11 +132,21 @@ func (s *Service) CreateForAgent(ctx context.Context, input CreateInput, caller 
 		return Job{}, err
 	}
 	input = who.inherit(input)
+	projectID := int64(0)
+	if who.origin == OriginOrchestrator {
+		// The front door may hand a job to a project (DESIGN.md 21.2), validated like the human's.
+		if input, projectID, err = s.applyProject(ctx, input); err != nil {
+			return Job{}, err
+		}
+	} else {
+		input.ProjectID, input.To = 0, "" // a job agent's or a lead's child stays in its creator's project
+	}
 	record, err := s.newRecord(input, who.parentID())
 	if err != nil {
 		return Job{}, err
 	}
 	record.Origin = who.origin
+	record.ProjectID = projectID
 	switch {
 	case who.lead != nil:
 		record.ProjectID = who.lead.ProjectID

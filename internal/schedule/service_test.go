@@ -38,6 +38,8 @@ func (f *fakeJobs) JobState(_ context.Context, id string) (string, bool, error) 
 
 type harness struct {
 	dir, userDir string
+	stateDir     string           // app schedules' materialised files
+	projects     map[string]int64 // the live projects appService sees
 	db           *store.Store
 	journal      *journal.Journal
 	jobs         *fakeJobs
@@ -51,7 +53,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	h := &harness{dir: t.TempDir(), userDir: t.TempDir(), db: db, jobs: &fakeJobs{states: map[string]string{}},
+	h := &harness{dir: t.TempDir(), userDir: t.TempDir(), stateDir: t.TempDir(), db: db, jobs: &fakeJobs{states: map[string]string{}},
 		now: time.Date(2026, 11, 26, 18, 0, 0, 0, time.UTC)}
 	h.journal = journal.New(db, nil, nil, func() time.Time { return h.now })
 	return h

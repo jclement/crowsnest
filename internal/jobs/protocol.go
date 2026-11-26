@@ -186,7 +186,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	}
 	return store.JobRecord{
 		Title: titleOf(brief), BriefMD: brief, DoneWhen: strings.TrimSpace(input.DoneWhen), Role: role, Dir: dir,
-		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent,
+		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent, ProjectID: input.ProjectID,
 		State: string(StateQueued), VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: s.opts.Now(),
 	}, nil
 }
