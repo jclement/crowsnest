@@ -1,7 +1,7 @@
 # Crowsnest: status
 
 Living record kept by the lead agent. Updated at every milestone boundary.
-Last updated: 2026-11-26 04:10
+Last updated: 2026-11-26 04:40
 
 ## Where things stand
 
@@ -26,7 +26,7 @@ Last updated: 2026-11-26 04:10
 ## Not verified
 
 - Nothing has been tried on a real phone (key bar, on-screen keyboard, Safari).
-- The release workflow on GitHub (needs a tag). Linux binaries are built but have not been run.
+- The release workflow on GitHub (needs a tag). The Linux binary has only been run in a container on arm64, in demo mode.
 - Dialog detection has only seen hand-made screens plus one real permission dialog shape; the folder-trust path with a real untrusted directory has not been tried.
 - TLS serving and a clean-clone `mise run setup`.
 - Talk mode has never spoken to the real ElevenLabs API.
@@ -38,7 +38,7 @@ Nothing.
 
 ## Red right now
 
-- **CI on GitHub is failing** (since the first review-fix merge): one terminal-bridge test fails on Linux only. Local macOS gate is green. Being fixed.
+Nothing. CI on GitHub is green again at b310983: the failure was a real Linux-only bug (a blocked write to the terminal PTY was never woken, so a terminal socket could hang and leak), found and fixed in a Linux container. The whole Go suite and the real-herdr integration tests also passed on Linux in that container.
 
 ## Decisions waiting for Jeff (none block the build)
 
@@ -49,7 +49,6 @@ Nothing.
 - `crow-fix3a` (Opus), worktree `wip/fix-r2a`: R2 supervisor correctness fixes. Its move.
 - `crow-fix3b` (Opus), worktree `wip/fix-r2b`: R2 security fixes plus questions, poker and identity leftovers. Its move.
 - `crow-m9` (Opus), worktree `wip/m9-e2e`: the test campaign. Its move.
-- `crow-linux` (Opus), worktree `wip/linux-ci`: CI on GitHub is red on one Linux-only test (`TestTUIBridgeCloseWithBlockedWrite`); reproducing in a container and fixing. Its move.
 - After those: re-review of the R2 fixes, the full suite on the merged tip, the wrap-up.
 
 ## Things Jeff should know
