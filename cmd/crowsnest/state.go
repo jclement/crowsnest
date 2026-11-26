@@ -1,3 +1,5 @@
+// Where serve keeps its state, and how private it is.
+//
 // --demo gets throwaway state (R1 L2): a fresh temporary directory holds its database, its state
 // directory (the demo transcripts, CROWSNEST.md) and the orchestrator's working directory, and
 // is removed when serve returns. A demo run therefore never writes login sessions or an
@@ -28,4 +30,17 @@ func demoState(cfg config.Config) (config.Config, func(), error) {
 	cfg.StateDir = filepath.Join(root, "state")
 	cfg.Dir = filepath.Join(root, "orchestrator")
 	return cfg, func() { _ = os.RemoveAll(root) }, nil
+}
+
+// privateDir creates dir if needed and makes it 0700 even if it already existed with a looser
+// mode: the state directory holds the herdr server log, CROWSNEST.md and (later) the agent
+// socket (R1 L5). The data directory is made private by store.Open.
+func privateDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("creating %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("making %s private: %w", dir, err)
+	}
+	return nil
 }

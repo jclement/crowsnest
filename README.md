@@ -113,7 +113,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 |---|---|---|---|
 | `--username` | `CROWSNEST_USERNAME` | none | Login name |
 | `--password` | `CROWSNEST_PASSWORD` | none | Login password. Prefer the env var or `--password-file`: a flag is visible in `ps` |
-| `--password-file` | `CROWSNEST_PASSWORD_FILE` | none | File holding the password (first line) |
+| `--password-file` | `CROWSNEST_PASSWORD_FILE` | none | File holding the password (first line). Refused if its group or others can read or write it: `chmod 600` |
 | `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured, on a localhost-only bind) | `false` | No login. For a trusted localhost or tailnet only; on a tailnet, every peer your ACL lets reach the port has a shell, including nodes shared into your tailnet |
 | `--bind` | `CROWSNEST_BIND` | `localhost` | `localhost`, `tailnet`, an interface name, an IP, or `ip:port`. Repeatable |
 | `--port` | `CROWSNEST_PORT` | `2769` | Port for binds that do not name one (C-R-O-W on a keypad) |

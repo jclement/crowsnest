@@ -149,3 +149,41 @@ func TestKV(t *testing.T) {
 		t.Fatal("key survived delete")
 	}
 }
+
+// TestOpenMakesTheDatabasePrivate is R1 L5: an existing directory or file with loose modes is
+// tightened, and a new file is created 0600 whatever the umask.
+func TestOpenMakesTheDatabasePrivate(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "shared")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chmod(dir, 0o755)
+	path := filepath.Join(dir, "crow.db")
+	db, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.SetKV(context.Background(), "k", "v") // makes SQLite write its WAL
+	_ = db.Close()
+	assertMode(t, dir, 0o700)
+	assertMode(t, path, 0o600)
+
+	_ = os.Chmod(path, 0o644) // loosened by something else since
+	db, err = Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	assertMode(t, path, 0o600)
+}
+
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Errorf("%s has mode %s, want %s", path, got, want)
+	}
+}

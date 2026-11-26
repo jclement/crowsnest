@@ -201,3 +201,17 @@ func TestNoAuthWarningNamesTailnetPeers(t *testing.T) {
 	}
 }
 
+// TestPrivateDirTightensAnExistingDirectory is R1 L5 for the state directory.
+func TestPrivateDirTightensAnExistingDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chmod(dir, 0o755)
+	if err := privateDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o700 {
+		t.Fatalf("mode %s, want 0700", info.Mode().Perm())
+	}
+}

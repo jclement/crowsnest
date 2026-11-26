@@ -282,6 +282,8 @@ func TestPasswordFile(t *testing.T) {
 	}
 	good := write("good", "hunter2 two\r\nsecond line ignored\n")
 	empty := write("empty", "\nsecond\n")
+	readable := write("readable", "hunter2\n")
+	_ = os.Chmod(readable, 0o644) // R1 L5: others can read it
 	tests := []struct {
 		name    string
 		args    []string
@@ -294,6 +296,7 @@ func TestPasswordFile(t *testing.T) {
 		{name: "empty first line", args: []string{"--username", "u", "--password-file", empty}, wantErr: "first line is empty"},
 		{name: "missing file", args: []string{"--username", "u", "--password-file", filepath.Join(dir, "nope")}, wantErr: "reading --password-file"},
 		{name: "both password and file", args: []string{"--username", "u", "--password-file", good}, env: []string{"CROWSNEST_PASSWORD", "x"}, wantErr: "pass only one"},
+		{name: "readable by others", args: []string{"--username", "u", "--password-file", readable}, wantErr: "chmod 600"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -547,5 +550,25 @@ func TestUnsetSecretEnv(t *testing.T) {
 	}
 	if os.Getenv("CROWSNEST_PORT") != "2770" {
 		t.Error("an ordinary setting was removed too")
+	}
+}
+
+// TestConfigFileWithAReadablePasswordWarns is R1 L5's other half: a config file holding the
+// password that other users can read starts, with a warning to log.
+func TestConfigFileWithAReadablePasswordWarns(t *testing.T) {
+	h := newHarness(t).writeConfig("username: jeff\npassword: hunter2\n")
+	path := filepath.Join(h.home, ".config", "crowsnest", "config.yaml")
+	if cfg := h.mustLoad(); len(cfg.Warnings) != 0 {
+		t.Fatalf("a 0600 config file warned: %v", cfg.Warnings)
+	}
+	_ = os.Chmod(path, 0o644)
+	cfg := h.mustLoad()
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "chmod 600") {
+		t.Fatalf("warnings = %v", cfg.Warnings)
+	}
+	noPassword := newHarness(t).writeConfig("port: 2770\n")
+	_ = os.Chmod(filepath.Join(noPassword.home, ".config", "crowsnest", "config.yaml"), 0o644)
+	if cfg := noPassword.withEnv("CROWSNEST_USERNAME", "u", "CROWSNEST_PASSWORD", "p").mustLoad(); len(cfg.Warnings) != 0 {
+		t.Fatalf("a readable config file without a password warned: %v", cfg.Warnings)
 	}
 }

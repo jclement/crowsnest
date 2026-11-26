@@ -59,6 +59,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	logger := newLogger()
 	slog.SetDefault(logger)
 	logger.Info("starting crowsnest", "version", version, "config", cfg)
+	for _, warning := range cfg.Warnings {
+		logger.Warn(warning)
+	}
+	if err := privateDir(cfg.StateDir); err != nil {
+		return err
+	}
 	if cfg.NoAuth {
 		logger.Warn(noAuthWarning(cfg))
 	}
