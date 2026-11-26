@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // maxControlLine bounds one stdout line. A full redraw of a MaxCols x MaxRows screen with
@@ -33,7 +34,11 @@ type paneBridge struct {
 	*stream
 	binary, session, paneID string
 
-	mu      sync.Mutex // guards cmd and stdin writes
+	// mu guards cmd, stdin and started. It is never held across a write to the child: a child
+	// that stops reading its stdin would block that write for ever, and Close needs mu to find
+	// the process it must stop (R1-C01). writeMu orders the writes themselves.
+	mu      sync.Mutex
+	writeMu sync.Mutex
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	exited  chan struct{} // closed after cmd.Wait
@@ -128,34 +133,58 @@ func (b *paneBridge) Resize(cols, rows int) error {
 
 func (b *paneBridge) writeLine(line []byte) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.stdin == nil {
+	stdin := b.stdin
+	b.mu.Unlock()
+	if stdin == nil {
 		return ErrNotStarted
 	}
-	if _, err := b.stdin.Write(line); err != nil {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
+	if _, err := stdin.Write(line); err != nil {
 		return fmt.Errorf("writing to herdr terminal control: %w", err)
 	}
 	return nil
 }
 
-// Close releases the pane (so herdr detaches cleanly) and stops the control process.
+// releaseWait bounds the polite part of Close: how long the release line may take to reach a
+// control process before its stdin is closed anyway. A healthy process takes microseconds; one
+// that stopped reading would otherwise hold Close for ever.
+const releaseWait = 500 * time.Millisecond
+
+// Close releases the pane (so herdr detaches cleanly) and stops the control process. It does
+// not wait: the release, closing stdin and the signals happen on their own goroutine, so a
+// child that stopped reading cannot hold up the caller (R1-C01).
 func (b *paneBridge) Close() error {
 	if !b.stop() {
 		return nil
 	}
 	b.mu.Lock()
 	cmd, stdin := b.cmd, b.stdin
-	if stdin != nil {
-		_, _ = stdin.Write(EncodeRelease())
-		_ = stdin.Close()
-	}
 	b.mu.Unlock()
 	if cmd == nil {
 		close(b.out) // never started: nothing will ever finish the stream
 		return nil
 	}
-	go terminate(cmd, true, b.exited)
+	go b.shutdown(cmd, stdin)
 	return nil
+}
+
+// shutdown sends terminal.release if the child takes it within releaseWait, then closes stdin
+// (which also fails any write still blocked on the pipe) and stops the process group.
+func (b *paneBridge) shutdown(cmd *exec.Cmd, stdin io.WriteCloser) {
+	released := make(chan struct{})
+	go func() {
+		defer close(released)
+		b.writeMu.Lock()
+		defer b.writeMu.Unlock()
+		_, _ = stdin.Write(EncodeRelease())
+	}()
+	select {
+	case <-released:
+	case <-time.After(releaseWait):
+	}
+	_ = stdin.Close()
+	terminate(cmd, true, b.exited)
 }
 
 // exitReason explains a control process that ended without terminal.closed.

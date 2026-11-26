@@ -29,6 +29,8 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	case "tui":
 		fakeTUI()
+	case "tui-deaf":
+		fakeDeafTUI()
 	default:
 		fakeControl(os.Getenv(fakeEnv))
 	}
@@ -219,6 +221,60 @@ func TestPaneBridgeCloseBeforeStart(t *testing.T) {
 	}
 }
 
+// fillUntilBlocked writes to bridge from a goroutine until one write has been stuck for a
+// while, which means the child's input buffer is full. It returns once that is so.
+func fillUntilBlocked(t *testing.T, bridge Bridge) {
+	t.Helper()
+	progress := make(chan struct{}, 1)
+	go func() {
+		chunk := bytes.Repeat([]byte("x"), 16<<10)
+		for {
+			if _, err := bridge.Write(chunk); err != nil {
+				return
+			}
+			select {
+			case progress <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case <-progress:
+		case <-time.After(300 * time.Millisecond):
+			return // no write finished for 300 ms: the writer is blocked
+		case <-deadline:
+			t.Fatal("writes never blocked; the fake is reading after all")
+		}
+	}
+}
+
+// assertCloseUnblocks checks Close returns at once and the child is gone soon after, even
+// though a write is stuck on a child that never reads (R1-C01).
+func assertCloseUnblocks(t *testing.T, bridge Bridge) {
+	t.Helper()
+	fillUntilBlocked(t, bridge)
+	closed := make(chan struct{})
+	go func() { _ = bridge.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close blocked behind a write to a child that does not read")
+	}
+	waitClosed(t, bridge)
+}
+
+func TestPaneBridgeCloseWithBlockedWrite(t *testing.T) {
+	bridge := fakeLauncher(t, "deaf").Pane("w1:p1")
+	if err := bridge.Start(80, 24); err != nil {
+		t.Fatal(err)
+	}
+	var seen bytes.Buffer
+	waitFor(t, bridge, &seen, "deaf")
+	assertCloseUnblocks(t, bridge)
+}
+
 // fakeControl is the re-executed test binary standing in for `herdr terminal session control`.
 func fakeControl(mode string) {
 	args := strings.Join(os.Args[1:], " ")
@@ -238,6 +294,10 @@ func fakeControl(mode string) {
 		frame("hello")
 		closed("terminal attach taken over")
 		os.Exit(0)
+	case "deaf":
+		// Never reads stdin, so the bridge's writes fill the pipe and block.
+		frame("deaf")
+		time.Sleep(time.Hour)
 	}
 	var pane, cols, rows, session string
 	_, _ = fmt.Sscanf(strings.Replace(args, "--takeover ", "", 1), "--session %s terminal session control %s --cols %s --rows %s", &session, &pane, &cols, &rows)
@@ -310,6 +370,27 @@ func TestTUIBridgeClientExits(t *testing.T) {
 		t.Errorf("reason = %q, want detached (a clean client exit)", reason)
 	}
 	_ = bridge.Close()
+}
+
+func TestTUIBridgeCloseWithBlockedWrite(t *testing.T) {
+	bridge := fakeLauncher(t, "tui-deaf").TUI()
+	if err := bridge.Start(80, 24); err != nil {
+		t.Fatal(err)
+	}
+	var seen bytes.Buffer
+	waitFor(t, bridge, &seen, "deaf")
+	go func() { // keep draining output so only the input side is stuck
+		for range bridge.Output() {
+		}
+	}()
+	assertCloseUnblocks(t, bridge)
+}
+
+// fakeDeafTUI is a client in raw mode that never reads its terminal.
+func fakeDeafTUI() {
+	_, _ = xterm.MakeRaw(int(os.Stdin.Fd()))
+	fmt.Print("deaf\r\n")
+	time.Sleep(time.Hour)
 }
 
 // fakeTUI stands in for the herdr client: it reports what it was given and echoes lines.
