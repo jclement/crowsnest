@@ -23,6 +23,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
@@ -100,6 +101,9 @@ type harnessOptions struct {
 	jobs *jobs.Service
 	// M11: talk mode (voice_test.go); nil: the /voice routes answer 404
 	voice *voice.Service
+	// M8: the journal and the poker (journal_test.go)
+	journal *journal.Journal
+	poker   *orch.Poker
 }
 
 var testWeb = fstest.MapFS{
@@ -161,6 +165,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Questions:     opts.questions,
 		Jobs:          opts.jobs,
 		Voice:         opts.voice,
+		Journal:       opts.journal,
+		Poker:         opts.poker,
 	})
 	if err != nil {
 		t.Fatal(err)
