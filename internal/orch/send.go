@@ -7,6 +7,11 @@
 // agent.prompt appends to whatever is in the input box. After typing it waits for the turn to
 // start, since a submission alone does not prove Claude read it. Sending while the agent works is
 // allowed: Claude queues the input, and the result says so.
+//
+// Every text typed through here goes through termtext.Block first (R2-M1): line breaks survive,
+// escape sequences and every other control, format and private-use character do not. This is
+// the one door into a terminal (the web app's Chat and job messages, answers, pokes, briefs,
+// nudges), so a caller that forgets to clean its text still cannot type an ESC into a pane.
 
 package orch
 
@@ -19,6 +24,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 const (
@@ -32,6 +38,10 @@ const (
 type PromptRequest struct {
 	Text           string `json:"text"`
 	ForceOverDraft bool   `json:"force_over_draft"` // append even though a draft is in the input box
+	// ExpectAgent, when set, is the agent name the target pane must hold: the supervisor types
+	// into a job's pane by id, and herdr reuses pane ids, so a pane that now holds someone else is
+	// left alone (R2-I5). Never taken from a browser's request body.
+	ExpectAgent string `json:"-"`
 }
 
 // PromptResult says what happened to a prompt that was typed.
@@ -78,6 +88,10 @@ var ErrNotTyped = errors.New("nothing was typed")
 // notTyped wraps err so errors.Is(err, ErrNotTyped) holds.
 func notTyped(err error) error { return fmt.Errorf("%w: %w", ErrNotTyped, err) }
 
+// ErrWrongAgent refuses a send whose target pane no longer holds the expected agent. Nothing was
+// typed; it is also ErrNotTyped.
+var ErrWrongAgent = errors.New("the pane holds a different agent now")
+
 // ErrEmptyPrompt and ErrPromptTooLong are validation failures.
 var (
 	ErrEmptyPrompt   = errors.New("the prompt is empty")
@@ -87,12 +101,16 @@ var (
 // Prompt sends text to the agent target (a name or a pane id). It returns *BlockedError or
 // *DraftError when it refused to type; any herdr error (not found included) is returned wrapped.
 func Prompt(ctx context.Context, client herdr.Client, target string, request PromptRequest) (PromptResult, error) {
+	request.Text = termtext.Block(request.Text)
 	if err := validatePrompt(request.Text); err != nil {
 		return PromptResult{}, err
 	}
 	agent, err := callAgentGet(ctx, client, target)
 	if err != nil {
 		return PromptResult{}, notTyped(fmt.Errorf("finding agent %s: %w", target, err))
+	}
+	if request.ExpectAgent != "" && agent.Name != request.ExpectAgent {
+		return PromptResult{}, notTyped(fmt.Errorf("%w: pane %s holds %q, not %q", ErrWrongAgent, agent.PaneID, agent.Name, request.ExpectAgent))
 	}
 	if err := checkInput(ctx, client, agent, request.ForceOverDraft); err != nil {
 		return PromptResult{}, err

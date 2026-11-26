@@ -10,6 +10,13 @@
 // differently from its bytes, and zero-width characters), private-use characters (Co) and
 // invalid UTF-8. Quote wraps cleaned agent text in double quotes that it cannot close, and turns
 // square brackets into parentheses so it cannot imitate a `[crowsnest …]` header either.
+//
+// Block is the multi-line sibling of Clean (R2-M1): it keeps line breaks (a human's Chat prompt
+// or job message may be several lines, and herdr's agent.prompt delivers them as one paste) but
+// drops everything else Clean drops. orch.Prompt applies it to every text it types, so no caller
+// can forget it; the one-line typed headers (answers, pokes, briefs) still use Clean and Quote on
+// their parts, because one line is what they promise. DisarmHeaders is for agent-written text that
+// keeps its lines: a line starting with a bracket cannot pass for a `[crowsnest …]` header.
 package termtext
 
 import (
@@ -51,11 +58,56 @@ func invisible(r rune) bool {
 	return r == utf8.RuneError || r == 0x1b || unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Co, r)
 }
 
+// bracketsAndQuotes turns brackets into parentheses and double quotes into single ones, the
+// full-width forms included (R2-I1: `［crowsnest answer …］` reads like a header too).
+var bracketsAndQuotes = strings.NewReplacer(`"`, `'`, "\uff02", "'", "[", "(", "]", ")", "\uff3b", "(", "\uff3d", ")")
+
 // Quote cleans text written by an agent and wraps it in double quotes. Double quotes inside
 // become single quotes and square brackets become parentheses, so the quoted text can neither
 // end the quotation early nor pass for a `[crowsnest …]` header.
 func Quote(text string) string {
-	return `"` + strings.NewReplacer(`"`, `'`, "[", "(", "]", ")").Replace(Clean(text)) + `"`
+	return `"` + bracketsAndQuotes.Replace(Clean(text)) + `"`
+}
+
+// Block makes multi-line text safe to type into a terminal: line breaks stay (CR LF and the other
+// line and paragraph separators become one LF), tabs become four spaces (a tab can trigger
+// completion in an input box), and ANSI escape sequences, other control characters, format and
+// private-use characters and invalid UTF-8 go, as in Clean. Nothing else changes, so indentation
+// and blank lines survive.
+func Block(text string) string {
+	text = strings.NewReplacer("\r\n", "\n", "\t", "    ").Replace(text)
+	text = strings.Map(func(r rune) rune {
+		switch r {
+		case '\r', '\v', '\f', 0x85, 0x2028, 0x2029:
+			return '\n'
+		}
+		return r
+	}, text)
+	text = fleet.StripANSI(text)
+	return strings.Map(func(r rune) rune {
+		if r != '\n' && invisible(r) {
+			return -1
+		}
+		return r
+	}, text)
+}
+
+// DisarmHeaders turns the opening bracket of every line that starts with one (after any
+// indentation) into a parenthesis, so text an agent wrote cannot hold a line that passes for a
+// `[crowsnest …]` header once it is shown to another agent (R2-M1).
+func DisarmHeaders(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		indent := line[:len(line)-len(trimmed)]
+		switch {
+		case strings.HasPrefix(trimmed, "["):
+			lines[i] = indent + "(" + trimmed[1:]
+		case strings.HasPrefix(trimmed, "\uff3b"):
+			lines[i] = indent + "(" + strings.TrimPrefix(trimmed, "\uff3b")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // HasBidiControl reports whether text holds a bidirectional override or isolate (U+202A–U+202E,
