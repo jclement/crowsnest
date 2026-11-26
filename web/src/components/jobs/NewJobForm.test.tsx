@@ -72,3 +72,39 @@ describe("NewJobForm", () => {
     expect(screen.getByLabelText("What needs doing?")).toHaveValue("Second thought");
   });
 });
+
+describe("NewJobForm in a project", () => {
+  it("gives a job to the project's lead by default, with no directory", async () => {
+    const { makeProject } = await import("../../lib/projectFixtures");
+    const calls = stubForm();
+    renderWithClient(<NewJobForm project={makeProject()} />);
+    expect(screen.getByRole("radio", { name: "To the lead" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: /To Crowsnest's lead/ })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("What needs doing?"), "Plan the release");
+    await userEvent.click(screen.getByRole("button", { name: "Give job" }));
+    await waitFor(() => expect(calls.some((call) => call.method === "POST")).toBe(true));
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({ brief: "Plan the release", project_id: 1, to: "lead" });
+  });
+
+  it("as a job, prefills the project's directory and default role", async () => {
+    const { makeProject } = await import("../../lib/projectFixtures");
+    const calls = stubForm();
+    renderWithClient(<NewJobForm project={makeProject()} />);
+    await userEvent.click(screen.getByRole("radio", { name: "As a job" }));
+    await userEvent.click(screen.getByRole("button", { name: /To crowsnest · builder/ }));
+    expect(screen.getByLabelText(/Where/)).toHaveValue("/src/crowsnest");
+    await userEvent.type(screen.getByLabelText("What needs doing?"), "Fix the flaky test");
+    await userEvent.click(screen.getByRole("button", { name: "Give job" }));
+    await waitFor(() => expect(calls.some((call) => call.method === "POST")).toBe(true));
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+      brief: "Fix the flaky test", project_id: 1, to: "job", dir: "/src/crowsnest", role: "builder", engine: "claude",
+    });
+  });
+
+  it("says when the lead is off and will not start by itself", async () => {
+    const { makeProjectList } = await import("../../lib/projectFixtures");
+    stubForm();
+    renderWithClient(<NewJobForm project={makeProjectList().projects[2]} />);
+    expect(screen.getByText(/The lead is off; it holds the job once you start it/)).toBeInTheDocument();
+  });
+});

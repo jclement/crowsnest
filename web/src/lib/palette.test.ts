@@ -3,6 +3,8 @@ import { makeFleet } from "./fixtures";
 import { makeJob } from "./jobFixtures";
 import {
   buildItems,
+  completeInput,
+  viewKeys,
   doItems,
   flatten,
   keepSelection,
@@ -322,5 +324,39 @@ describe("recents", () => {
     expect(loadRecents(storage)).toEqual([]);
     store.set(RECENTS_KEY, JSON.stringify([1, "nav:/", null]));
     expect(loadRecents(storage)).toEqual(["nav:/"]);
+  });
+});
+
+describe("projects in the palette", () => {
+  it("offers each live project: open, a job for its lead, chat with it, start or stop the lead", async () => {
+    const { makeProjectList } = await import("./projectFixtures");
+    const list = makeProjectList();
+    list.projects.push({ ...list.projects[0]!, id: 9, slug: "old", name: "Old", archived: true });
+    const items = buildItems(sources({ projects: list.projects }));
+    const projects = items.filter((item) => item.group === "projects");
+    expect(projects.map((item) => item.title)).toEqual(["Crowsnest", "Website", "Infra"]);
+    const crowsnest = projects[0]!;
+    expect(crowsnest.command).toEqual({ kind: "navigate", to: "/projects/crowsnest" });
+    expect(crowsnest.chip?.label).toBe("Lead idle");
+    expect(crowsnest.actions?.map((action) => action.id)).toEqual(["open", "job", "chat", "stop", "board"]);
+    expect(crowsnest.actions?.find((action) => action.id === "chat")?.command).toEqual({ kind: "navigate", to: "/chat", search: { target: "lead-crowsnest" } });
+    expect(projects[2]!.actions?.find((action) => action.id === "start")?.command).toEqual({ kind: "leadAction", slug: "infra", name: "Infra", action: "start" });
+    // ⌘Enter gives a job: a text level that completes into a job for the lead.
+    const give = crowsnest.alt?.command;
+    expect(give?.kind).toBe("input");
+    if (give?.kind === "input") expect(completeInput(give.input, "Fix the build")).toEqual({ kind: "projectJob", projectId: 1, name: "Crowsnest", text: "Fix the build" });
+  });
+
+  it("finds a project by its slug or directory, and Projects is a view with g p", () => {
+    const items = buildItems(sources({ projects: [] }));
+    expect(items.some((item) => item.id === "nav:/projects")).toBe(true);
+    expect(viewKeys.find((view) => view.key === "p")?.to).toBe("/projects");
+    expect(items.some((item) => item.id === "sheet:instructions")).toBe(true);
+  });
+
+  it("ranks a project for its name", async () => {
+    const { makeProjectList } = await import("./projectFixtures");
+    const groups = rankItems(buildItems(sources({ projects: makeProjectList().projects })), "website", []);
+    expect(flatten(groups).find((row) => row.item.group === "projects")?.item.title).toBe("Website");
   });
 });

@@ -123,7 +123,7 @@ export function SchedulePanel({ projectId, onOpenJob }: SchedulePanelProps) {
                 <th scope="col" className="w-20 px-2 py-1 font-semibold">Last run</th>
                 <th scope="col" className="w-24 px-2 py-1 font-semibold">Next</th>
                 <th scope="col" className="w-14 px-2 py-1 font-semibold">On</th>
-                <th scope="col" className="w-40 px-2 py-1 font-semibold"><span className="sr-only">Actions</span></th>
+                <th scope="col" className="w-60 px-2 py-1 font-semibold"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
