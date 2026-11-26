@@ -74,7 +74,9 @@ func TestLoginBodyMustArrivePromptly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	fmt.Fprintf(conn, "POST /api/v1/auth/login HTTP/1.1\r\nHost: %s\r\nOrigin: http://%s\r\nX-Crowsnest: 1\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{", host, host)
+	if _, err := fmt.Fprintf(conn, "POST /api/v1/auth/login HTTP/1.1\r\nHost: %s\r\nOrigin: http://%s\r\nX-Crowsnest: 1\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{", host, host); err != nil {
+		t.Fatal(err)
+	}
 	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	status, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {

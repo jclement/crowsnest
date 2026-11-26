@@ -43,7 +43,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating data directory: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // a directory needs its search bit; 0700 is owner-only
 		return nil, fmt.Errorf("making data directory %s private: %w", dir, err)
 	}
 	if err := createPrivateFile(path); err != nil {
