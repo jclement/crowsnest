@@ -1,0 +1,125 @@
+// Package config turns flags, environment variables and the YAML config file into one plain,
+// validated Config struct. It is the only package that knows about Cobra flags, Viper or the
+// environment: everything else in crowsnest takes a Config and never looks anything up itself.
+//
+// Precedence is flag, then environment (CROWSNEST_*), then ~/.config/crowsnest/config.yaml, then
+// the built-in default (DESIGN.md section 3). Load parses and validates every value; CheckStartup
+// applies the fail-closed refusals that only matter when the server is about to listen.
+package config
+
+import (
+	"log/slog"
+	"net/netip"
+	"path/filepath"
+	"time"
+)
+
+// DefaultPort is C-R-O-W on a phone keypad.
+const DefaultPort = 2769
+
+// DefaultSession is the herdr session crowsnest creates or connects to when none is named.
+const DefaultSession = "crowsnest"
+
+// DefaultPermissionMode is the orchestrator's Claude Code permission mode.
+const DefaultPermissionMode = "auto"
+
+// DefaultPokeInterval is how often the timer considers poking the orchestrator.
+const DefaultPokeInterval = 15 * time.Minute
+
+// DefaultElevenLabsVoice is a stock ElevenLabs voice ("Rachel"), used until one is chosen.
+const DefaultElevenLabsVoice = "21m00Tcm4TlvDq8ikWAM"
+
+// DefaultElevenLabsURL is the ElevenLabs API base; tests point it at a fake.
+const DefaultElevenLabsURL = "https://api.elevenlabs.io"
+
+// Config is the fully resolved configuration. Every field has been parsed and validated by Load;
+// secrets (Password, ElevenLabsAPIKey) must never be logged, which is why LogValue omits them.
+type Config struct {
+	// ---- Authentication ----
+
+	Username string // login name; empty only when NoAuth
+	Password string // login password, already read from PasswordFile when that was given
+	NoAuth   bool   // serve without a login
+
+	// ---- Network ----
+
+	Binds        []string   // the bind values as given (localhost, tailnet, en0, an IP, ip:port)
+	Listeners    []Listener // the concrete addresses those binds resolved to
+	Port         int        // port used for binds that do not carry their own
+	AllowedHosts []string   // extra Host/Origin names from --allowed-host, lowercased
+	TLSCert      string     // path to a PEM certificate; empty means plain HTTP
+	TLSKey       string     // path to the matching PEM key
+
+	// HostNames is every name the Host header may carry: loopback names, bound IPs, this
+	// machine's hostname and AllowedHosts. The host check in httpd reads it (DESIGN.md 4.3).
+	HostNames []string
+
+	// ---- herdr and the orchestrator ----
+
+	Session        string        // herdr session name
+	Dir            string        // orchestrator working directory
+	Model          string        // orchestrator model; empty means Claude's default
+	PermissionMode string        // orchestrator permission mode
+	PokeInterval   time.Duration // timer poke interval; 0 disables timer pokes
+	NoOrchestrator bool          // serve the UI over the session without starting Claude
+
+	// ---- Talk mode and notices ----
+
+	ElevenLabsAPIKey string // enables talk mode when set
+	ElevenLabsVoice  string // TTS voice id
+	ElevenLabsURL    string // ElevenLabs API base URL
+	NotifyURL        string // ntfy-style URL for one-line notices
+
+	// ---- Modes and overrides ----
+
+	Demo                bool   // fake herdr and scripted orchestrator
+	IKnowThisIsOpen     bool   // allow --no-auth on a non-loopback, non-tailnet bind
+	AllowDefaultSession bool   // allow --session default
+	WebDev              bool   // UI is served by Vite; do not require embedded assets
+	DataDir             string // where the SQLite database lives
+	ConfigFile          string // the config file that was read, empty if none
+}
+
+// Listener is one address the server will listen on.
+type Listener struct {
+	Addr netip.AddrPort
+	// Optional listeners may fail to bind without stopping the server. `localhost` resolves to
+	// both 127.0.0.1 and ::1, and a machine without IPv6 should not refuse to start over ::1.
+	Optional bool
+	// Source is the bind value this address came from, for error messages.
+	Source string
+}
+
+// DatabasePath is the SQLite file for this session: one database per herdr session, so two
+// crowsnests on two sessions never share state.
+func (c Config) DatabasePath() string {
+	return filepath.Join(c.DataDir, c.Session+".db")
+}
+
+// TLS reports whether the server terminates HTTPS itself.
+func (c Config) TLS() bool { return c.TLSCert != "" }
+
+// VoiceEnabled reports whether talk mode can be offered.
+func (c Config) VoiceEnabled() bool { return c.ElevenLabsAPIKey != "" }
+
+// LogValue makes Config safe to pass to slog: secrets are reduced to whether they are set.
+func (c Config) LogValue() slog.Value {
+	addrs := make([]string, 0, len(c.Listeners))
+	for _, listener := range c.Listeners {
+		addrs = append(addrs, listener.Addr.String())
+	}
+	return slog.GroupValue(
+		slog.Bool("auth", !c.NoAuth),
+		slog.String("username", c.Username),
+		slog.Bool("password_set", c.Password != ""),
+		slog.Any("listen", addrs),
+		slog.Bool("tls", c.TLS()),
+		slog.String("session", c.Session),
+		slog.String("dir", c.Dir),
+		slog.String("data_dir", c.DataDir),
+		slog.Bool("voice", c.VoiceEnabled()),
+		slog.Bool("demo", c.Demo),
+		slog.Bool("no_orchestrator", c.NoOrchestrator),
+		slog.String("config_file", c.ConfigFile),
+	)
+}

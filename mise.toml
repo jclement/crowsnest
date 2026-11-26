@@ -1,0 +1,158 @@
+# Crowsnest: tools and the task contract (setup, dev, build, test, lint, fmt, check).
+# Agents and humans discover what this repo can do with `mise tasks`.
+
+[tools]
+go = "1.27.3"
+node = "26.13.0"          # current LTS line
+golangci-lint = "2.15.0"
+goreleaser = "2.18.0"
+
+[env]
+CGO_ENABLED = "0"
+
+# ---- Setup -------------------------------------------------------------------
+
+[tasks.setup]
+description = "Zero to runnable: tools, Go modules, web dependencies. Idempotent"
+run = [
+  "mise install",
+  "go mod download",
+  # npm ci only when node_modules is missing or older than the lockfile, so a second run is a no-op.
+  "if [ ! -f web/node_modules/.package-lock.json ] || [ web/package-lock.json -nt web/node_modules/.package-lock.json ]; then npm --prefix web ci --no-audit --no-fund; else echo 'web dependencies up to date'; fi",
+]
+
+# ---- Run ---------------------------------------------------------------------
+
+[tasks.dev]
+description = "Go server (no auth, localhost) on :2769 plus Vite on :5173 proxying /api to it. Long-running"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'kill 0' EXIT INT TERM
+CROWSNEST_DATA_DIR="${CROWSNEST_DATA_DIR:-$PWD/.dev}" \
+  go run ./cmd/crowsnest serve --no-auth --web-dev --port "${CROWSNEST_PORT:-2769}" &
+npm --prefix web run dev
+"""
+
+[tasks.build]
+description = "Build the web app, then the Go binary to ./bin/crowsnest with version ldflags"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+npm --prefix web run build
+VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.buildDate=$BUILD_DATE"
+mkdir -p bin
+go build -trimpath -ldflags="$LDFLAGS" -o bin/crowsnest ./cmd/crowsnest
+echo "built bin/crowsnest $VERSION ($COMMIT)"
+"""
+
+# ---- Verify ------------------------------------------------------------------
+
+[tasks.test]
+description = "Go tests with -race, then the web unit tests (Vitest, single run). Non-interactive"
+run = [
+  "CGO_ENABLED=1 go test -race -count=1 ./...",
+  "npm --prefix web run test",
+]
+
+[tasks.lint]
+description = "go vet, golangci-lint, gofmt check, tsc, eslint. Read-only"
+run = [
+  "go vet ./...",
+  "golangci-lint run ./...",
+  "test -z \"$(gofmt -l cmd internal web/*.go)\" || { echo 'gofmt needed on:'; gofmt -l cmd internal web/*.go; exit 1; }",
+  "npm --prefix web run typecheck",
+  "npm --prefix web run lint",
+]
+
+[tasks.fmt]
+description = "Format Go (gofmt) and web code (eslint --fix). Mutates"
+run = [
+  "gofmt -w cmd internal web/*.go",
+  "npm --prefix web run lint -- --fix",
+]
+
+[tasks.check]
+description = "The done-gate: lint and test"
+depends = ["lint", "test"]
+
+[tasks.e2e]
+description = "Playwright end-to-end suite against crowsnest --demo"
+run = "echo 'e2e: not built until M9 (DESIGN.md section 17)' >&2; exit 1"
+
+# ---- Ship --------------------------------------------------------------------
+
+[tasks.snapshot]
+description = "Prove the release packaging locally (GoReleaser snapshot, no publish)"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+if [ ! -f .goreleaser.yml ]; then
+  echo 'snapshot: .goreleaser.yml is not written until M10 (DESIGN.md section 17)' >&2
+  exit 1
+fi
+npm --prefix web run build
+goreleaser release --snapshot --clean
+"""
+
+[tasks.release]
+description = "Interactive release: bump version, tag, and push. Jeff's step"
+run = """
+#!/bin/bash
+set -e
+
+CURRENT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+echo "Current version: $CURRENT_TAG"
+
+VERSION_NUM=${CURRENT_TAG#v}
+IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUM"
+
+NEXT_PATCH="v$MAJOR.$MINOR.$((PATCH + 1))"
+NEXT_MINOR="v$MAJOR.$((MINOR + 1)).0"
+NEXT_MAJOR="v$((MAJOR + 1)).0.0"
+
+echo ""
+echo "Select release type:"
+echo "  1) patch  → $NEXT_PATCH"
+echo "  2) minor  → $NEXT_MINOR"
+echo "  3) major  → $NEXT_MAJOR"
+echo "  q) quit"
+echo ""
+read -p "Choice [1]: " CHOICE
+CHOICE=${CHOICE:-1}
+
+case $CHOICE in
+    1) NEW_VERSION=$NEXT_PATCH ;;
+    2) NEW_VERSION=$NEXT_MINOR ;;
+    3) NEW_VERSION=$NEXT_MAJOR ;;
+    q|Q) echo "Cancelled."; exit 0 ;;
+    *) echo "Invalid choice"; exit 1 ;;
+esac
+
+echo ""
+echo "Creating release: $NEW_VERSION"
+git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+echo "Created tag: $NEW_VERSION"
+
+read -p "Push tag to origin? [Y/n]: " CONFIRM
+CONFIRM=${CONFIRM:-Y}
+if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
+    git tag -d "$NEW_VERSION" >/dev/null 2>&1
+    echo "Cancelled. Tag removed."
+    exit 0
+fi
+
+git push origin "$NEW_VERSION"
+echo "Tag pushed! GitHub Actions will build and release."
+"""
+
+[tasks."dev:reset"]
+description = "Blow away local state: build output, web dist, Vite cache, the dev database"
+run = [
+  "rm -rf bin dist .dev web/node_modules/.vite",
+  "find web/dist -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true",
+  "echo 'local state cleared (web/node_modules kept; run mise run setup to reinstall)'",
+]
