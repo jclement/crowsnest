@@ -269,3 +269,12 @@ func storeOwner(ctx context.Context, db OwnerStore, owner Owner, now time.Time) 
 	_, err = db.DeleteStaleSessions(ctx, now, owner.digest())
 	return err
 }
+
+// SetArgon2Params changes the cost of new hashes and returns a function that restores it. It
+// exists for other packages' tests, which hash passwords and must stay fast under -race;
+// production code never calls it.
+func SetArgon2Params(params Argon2Params) (restore func()) {
+	previous := argon2Params
+	argon2Params = params
+	return func() { argon2Params = previous }
+}
