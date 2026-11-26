@@ -1407,17 +1407,17 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
     M2). The parent's root is fixed when its pane is made; git configuration and links in the
     agent's own tree are inputs it controls.
 
-43. **Every hermetic e2e test gets its own server** (M9). A demo instance starts in a third of a
+48. **Every hermetic e2e test gets its own server** (M9). A demo instance starts in a third of a
     second, so per-test isolation is cheaper than reasoning about which test answered which
     question first, and the suite runs in parallel. Shared state was the flake the screenshot
     specs already had (a reply counted twice).
-44. **A dialog press falls back to the pane** (M9). herdr's `agent.send_keys` works only for
+49. **A dialog press falls back to the pane** (M9). herdr's `agent.send_keys` works only for
     agents it started by name; a Claude someone started by hand is detected, can sit at a dialog,
     and refused every press (502). The bytes, already bound to the screen hash, go to the pane.
-45. **One typist per pane** (M9). `orch.Prompt` takes a per-pane lock around the draft check and
+50. **One typist per pane** (M9). `orch.Prompt` takes a per-pane lock around the draft check and
     the typing: crowsnest typing a poke or an answer while a person sent from Chat made the send
     read the half-typed poke as the person's own draft and refuse it.
-46. **A component's confirmation does not ride on mutate's callbacks** (M9). The mutation hooks
+51. **A component's confirmation does not ride on mutate's callbacks** (M9). The mutation hooks
     await a refetch that can replace the calling component (an answered form becomes its outcome,
     a cleared dialog leaves the list), and React Query drops an unmounted caller's callbacks; the
     toast and the sheet's close were lost now and then. `mutateAsync(...).then` settles anyway.
