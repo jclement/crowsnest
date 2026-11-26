@@ -9,6 +9,7 @@
 // (sessionStorage) because client-side navigation drops the query string.
 import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types";
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
+import type { AnswerRequest, InboxSummary, Question } from "./questions";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
 export class ApiError extends Error {
@@ -140,6 +141,15 @@ export const endpoints = {
   orchestrator: () => api<OrchestratorStatus>("/orchestrator"),
   orchestratorRestart: () => api<OrchestratorStatus>("/orchestrator/restart", { method: "POST" }),
   orchestratorNew: () => api<OrchestratorStatus>("/orchestrator/new", { method: "POST" }),
+  // ---- M6: the inbox ----
+  /** Questions with a status ("open", "answered,expired,cancelled", or "all"), without file contents. */
+  questions: (status: string) => api<Question[]>(`/questions?status=${encodeURIComponent(status)}`),
+  /** One question, with its files. */
+  question: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}`),
+  answerQuestion: (id: string, answer: AnswerRequest) =>
+    api<Question>(`/questions/${encodeURIComponent(id)}/answer`, { method: "POST", body: answer }),
+  cancelQuestion: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  inboxSummary: () => api<InboxSummary>("/inbox/summary"),
 };
 
 /** The terminal WebSockets (lib/termSocket.ts opens them). */
@@ -162,5 +172,9 @@ export const queryKeys = {
   agentMessages: (target: string) => ["agents", target, "messages"] as const,
   orchestrator: ["orchestrator"] as const,
   jobs: ["jobs"] as const,
+  /** Everything about questions sits under ["questions"], so one `question` event refreshes it all. */
   questions: ["questions"] as const,
+  questionList: (status: string) => ["questions", "list", status] as const,
+  question: (id: string) => ["questions", "one", id] as const,
+  inboxSummary: ["questions", "summary"] as const,
 };

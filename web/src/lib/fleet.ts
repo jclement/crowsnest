@@ -20,6 +20,11 @@ export function needsYouCount(fleet: Fleet | undefined): number {
   return allAgents(fleet).filter((agent) => agent.needs_you).length;
 }
 
+/** The Inbox badge: open questions plus agents waiting at a terminal dialog. */
+export function inboxCount(openQuestions: number | undefined, dialogs: number): number {
+  return (openQuestions ?? 0) + dialogs;
+}
+
 /** Finds the agent in a pane, with the workspace and tab it sits in. */
 export function findAgent(fleet: Fleet | undefined, paneId: string): { agent: Agent; workspace: Workspace; tab: Tab } | null {
   const agent = fleet?.agents.find((entry) => entry.pane_id === paneId);

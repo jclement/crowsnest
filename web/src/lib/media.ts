@@ -18,3 +18,6 @@ export function useMediaQuery(query: string): boolean {
     () => false,
   );
 }
+
+/** Tailwind's lg breakpoint: diffs go side by side from here. */
+export const LARGE_QUERY = "(min-width: 1024px)";

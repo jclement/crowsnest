@@ -9,7 +9,8 @@ import { LoginPage } from "./routes/LoginPage";
 import { NotFound } from "./routes/NotFound";
 import { FleetView } from "./routes/FleetView";
 import { ChatView } from "./routes/ChatView";
-import { InboxView, JobsView, TerminalView } from "./routes/views";
+import { InboxView } from "./routes/InboxView";
+import { JobsView, TerminalView } from "./routes/views";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -55,7 +56,15 @@ const appRoute = createRoute({
 
 const jobsRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: JobsView });
 const chatRoute = createRoute({ getParentRoute: () => appRoute, path: "/chat", component: ChatView });
-const inboxRoute = createRoute({ getParentRoute: () => appRoute, path: "/inbox", component: InboxView });
+const inboxRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/inbox",
+  // ?q=q_7 (a question) or ?q=dialog:<pane id> (a terminal dialog) selects an item.
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    q: typeof search.q === "string" && search.q ? search.q : undefined,
+  }),
+  component: InboxView,
+});
 const fleetRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/fleet",
