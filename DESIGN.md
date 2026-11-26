@@ -2328,9 +2328,10 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
   project's jobs and tasks; there is no timer poke for a lead. Task files are not read from inside
   project repositories. Archiving a project stops its lead but leaves its running jobs alone. A
   `Run now` of a lead's poke task waits for that lead's next check (2 s), not an immediate kick.
-  Chat with a lead sends attachments to the lead's pane inbox (`<state>/panes/<pane>/
-  attachments`), which has no Read allow rule, so under `default` permission mode the lead asks
-  before reading a pasted file. The InstructionsLoaded hook was seen (Claude Code 2.1.332) to
+  Files pasted in Chat with a lead go to the lead's own inbox (`<state>/leads/<slug>/
+  orchestrator/attachments`, readable by its allow rule), but files given with a job for a lead
+  go to the orchestrator's inbox (the no-directory rule of 8.6), which a lead has no allow rule
+  for: under `default` permission mode it asks before reading them. The InstructionsLoaded hook was seen (Claude Code 2.1.332) to
   report the project's `CLAUDE.md` at session start; whether it reports the user's
   `~/.claude/CLAUDE.md` too was not seen in the two runs made (only the project file appeared).
   Skills and slash commands available to an agent are not listed: no hook input or start-up
