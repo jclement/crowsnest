@@ -9,6 +9,9 @@ goreleaser = "2.18.0"
 
 [env]
 CGO_ENABLED = "0"
+# Go package patterns. Not ./... because web/node_modules can contain Go packages (flatted ships
+# one) and the Go tool does not skip node_modules.
+GO_PACKAGES = "./cmd/... ./internal/... ./web"
 
 # ---- Setup -------------------------------------------------------------------
 
@@ -54,15 +57,15 @@ echo "built bin/crowsnest $VERSION ($COMMIT)"
 [tasks.test]
 description = "Go tests with -race, then the web unit tests (Vitest, single run). Non-interactive"
 run = [
-  "CGO_ENABLED=1 go test -race -count=1 ./...",
+  "CGO_ENABLED=1 go test -race -count=1 $GO_PACKAGES",
   "npm --prefix web run test",
 ]
 
 [tasks.lint]
 description = "go vet, golangci-lint, gofmt check, tsc, eslint. Read-only"
 run = [
-  "go vet ./...",
-  "golangci-lint run ./...",
+  "go vet $GO_PACKAGES",
+  "golangci-lint run $GO_PACKAGES",
   "test -z \"$(gofmt -l cmd internal web/*.go)\" || { echo 'gofmt needed on:'; gofmt -l cmd internal web/*.go; exit 1; }",
   "npm --prefix web run typecheck",
   "npm --prefix web run lint",

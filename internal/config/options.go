@@ -73,7 +73,7 @@ var options = []option{
 	{name: optDir, env: []string{"CROWSNEST_DIR"}, usage: "orchestrator working directory (default <data-dir>/orchestrator)"},
 	{name: optModel, env: []string{"CROWSNEST_MODEL"}, usage: "orchestrator model (default: Claude's own)"},
 	{name: optPermissionMode, env: []string{"CROWSNEST_PERMISSION_MODE"}, def: DefaultPermissionMode, usage: "orchestrator permission mode"},
-	{name: optPokeInterval, env: []string{"CROWSNEST_POKE_INTERVAL"}, kind: kindDuration, def: DefaultPokeInterval.String(), usage: "timer poke interval; 0 disables timer pokes"},
+	{name: optPokeInterval, env: []string{"CROWSNEST_POKE_INTERVAL"}, kind: kindDuration, def: "15m", usage: "timer poke interval; 0 disables timer pokes"},
 	{name: optNoOrchestrator, env: []string{"CROWSNEST_NO_ORCHESTRATOR"}, kind: kindBool, def: "false", usage: "serve the UI over the session without starting Claude"},
 	{name: optAllowedHost, env: []string{"CROWSNEST_ALLOWED_HOSTS"}, kind: kindList, usage: "extra Host/Origin name, e.g. a reverse proxy or MagicDNS name (repeatable)"},
 	{name: optTLSCert, env: []string{"CROWSNEST_TLS_CERT"}, usage: "PEM certificate: serve HTTPS directly"},
