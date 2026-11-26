@@ -41,17 +41,20 @@ func claudeConfigDir(cfg config.Config) string {
 // startOrchestrator builds the orchestrator and the transcript manager, starts both running until
 // ctx ends, and returns them for the HTTP server. With --no-orchestrator the orchestrator reports
 // itself disabled and the conversations of other agents still work.
-func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
+func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, agentSocket string, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
 	claudeDir := claudeConfigDir(cfg)
-	binDir := ""
-	if executable, err := os.Executable(); err == nil {
-		binDir = filepath.Dir(executable)
+	binDir, executable := "", ""
+	if path, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			path = resolved
+		}
+		binDir, executable = filepath.Dir(path), path
 	}
 	var manager *transcript.Manager
 	orchestrator := orch.New(orch.Options{
 		Client: client, KV: db, Hub: events, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
 		StateDir: cfg.StateDir, Model: cfg.Model, PermissionMode: cfg.PermissionMode, Version: version,
-		BinDir: binDir, BasePath: os.Getenv("PATH"), ClaudeConfigDir: claudeDir, Disabled: cfg.NoOrchestrator,
+		BinDir: binDir, Executable: executable, AgentSocket: agentSocket, BasePath: os.Getenv("PATH"), ClaudeConfigDir: claudeDir, Disabled: cfg.NoOrchestrator,
 		OnStatus: func(status orch.Status) {
 			// Follow the orchestrator's conversation from the moment it has a pane, so its
 			// `message` events flow before any browser asks.

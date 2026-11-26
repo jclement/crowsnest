@@ -98,6 +98,12 @@ type Options struct {
 	Version        string // crowsnest version, written into CROWSNEST.md
 	// BinDir is prepended to PATH in the pane env so `crowsnest ask` resolves; empty skips it.
 	BinDir string
+	// Executable is the absolute path of the crowsnest binary, named in mcp.json as the command
+	// of the `crowsnest mcp` server. Empty: no MCP config is written or passed.
+	Executable string
+	// AgentSocket is the agent API's unix socket, exported to the pane as CROWSNEST_SOCKET and
+	// to the MCP server through mcp.json. Empty: neither is set.
+	AgentSocket string
 	// BasePath is the PATH that BinDir is prepended to (normally os.Getenv("PATH")).
 	BasePath string
 	// ClaudeConfigDir is where transcripts live, to decide between --resume and a new session.

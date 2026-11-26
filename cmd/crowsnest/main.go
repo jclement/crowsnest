@@ -2,7 +2,8 @@
 // Cobra root: `crowsnest` with no subcommand is `crowsnest serve`. Every configuration flag is
 // persistent on the root so `serve` and `health` resolve the same config the same way.
 //
-// Exit codes: 0 success, 1 runtime error, 2 usage error (go-cli house style).
+// Exit codes: 0 success, 1 runtime error, 2 usage error (go-cli house style), and 3 from
+// `ask --wait` when the question expired or was cancelled (DESIGN.md section 9).
 package main
 
 import (
@@ -31,6 +32,13 @@ func (e usageError) Unwrap() error { return e.err }
 func main() {
 	root := newRootCommand()
 	if err := root.Execute(); err != nil {
+		var exit exitCodeError
+		if errors.As(err, &exit) {
+			if exit.message != "" {
+				printError(err)
+			}
+			os.Exit(exit.code)
+		}
 		printError(err)
 		var usage usageError
 		if errors.As(err, &usage) {
@@ -54,7 +62,8 @@ func newRootCommand() *cobra.Command {
 	root.SetVersionTemplate("crowsnest {{.Version}}\n")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
 	config.RegisterFlags(root.PersistentFlags())
-	root.AddCommand(newServeCommand(), newVersionCommand(), newHealthCommand())
+	root.AddCommand(newServeCommand(), newVersionCommand(), newHealthCommand(),
+		newAskCommand(), newNotifyCommand(), newSayCommand(), newMCPCommand())
 	return root
 }
 
