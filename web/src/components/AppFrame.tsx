@@ -76,7 +76,7 @@ export function AppFrame() {
         )}
         {me.data && (
           <span
-            className="min-w-0 truncate rounded bg-chrome-hover px-1.5 py-0.5 font-mono text-xs text-chrome-fg"
+            className="hidden min-w-0 truncate rounded bg-chrome-hover px-1.5 py-0.5 font-mono text-xs text-chrome-fg sm:inline"
             title={`herdr session ${me.data.features.session}`}
           >
             {me.data.features.session}

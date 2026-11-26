@@ -107,7 +107,7 @@ export function MachineStrip({ className }: { className?: string }) {
   if (!stats.data || !sample) return null;
   const worst = [cpuLevel(sample.cpu), loadLevel(sample.load1, sample.cores), memLevel(sample.mem_used, sample.mem_total)].includes("saturated");
   return (
-    <div ref={rootRef} className={cn("relative flex min-w-0 items-center", className)} data-testid="machine-strip">
+    <div ref={rootRef} className={cn("relative flex shrink-0 items-center", className)} data-testid="machine-strip">
       <div className="hidden items-center gap-3 md:flex lg:hidden">
         <Figures stats={stats.data} />
       </div>

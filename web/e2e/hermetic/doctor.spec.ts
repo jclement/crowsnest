@@ -233,9 +233,9 @@ test.describe("system page", () => {
       await strip.getByRole("button", { name: /Machine:/ }).click();
       await expect(strip.getByRole("dialog", { name: "Machine" })).toBeVisible();
     } else {
-      await expect(strip.getByLabel(/^CPU:/).first()).toBeVisible();
-      await expect(strip.getByLabel(/^Memory:/).first()).toBeVisible();
-      await expect(strip.getByLabel(/^Load:/).first()).toBeVisible();
+      await expect(strip.getByLabel(/^CPU:/).filter({ visible: true })).toBeVisible();
+      await expect(strip.getByLabel(/^Memory:/).filter({ visible: true })).toBeVisible();
+      await expect(strip.getByLabel(/^Load:/).filter({ visible: true })).toBeVisible();
     }
     await expectNoSidewaysScroll(page);
   });

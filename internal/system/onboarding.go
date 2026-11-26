@@ -51,7 +51,8 @@ type OnboardingView struct {
 	Engine       string      `json:"engine"` // the setting: auto, claude or codex
 	Dir          string      `json:"dir"`    // the orchestrator's working directory
 	Orchestrator orch.Status `json:"orchestrator"`
-	// CodexGaps lists what Codex mode lacks, shown when Codex will run the orchestrator.
+	// CodexGaps lists what Codex mode lacks (sent whenever Codex is installed); the checklist shows
+	// them when Codex runs the orchestrator or is chosen to.
 	CodexGaps []string `json:"codex_gaps,omitempty"`
 	Bind      string   `json:"bind"` // the bind, for the optional tailnet step
 	Tailnet   string   `json:"tailnet,omitempty"`
@@ -85,8 +86,8 @@ func (s *Service) Onboarding(ctx context.Context, recheck bool) OnboardingView {
 	if orchestrator != nil {
 		view.Orchestrator = orchestrator.Status()
 	}
-	if report.Selection.Orchestrator == config.EngineCodex {
-		view.CodexGaps = CodexGaps
+	if codex.Installed {
+		view.CodexGaps = CodexGaps // the checklist shows them when Codex runs the orchestrator, or is chosen to
 	}
 	return view
 }

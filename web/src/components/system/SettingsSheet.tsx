@@ -135,7 +135,7 @@ function SettingRow({ setting, engineNow }: { setting: SettingView; engineNow?: 
         )}
       </div>
       <p className="text-2xs text-muted">
-        {setting.help}
+        {setting.help.replace(/\.?$/, ".")}
         {engineNow && setting.value === "auto" ? ` Now: ${engineNow}.` : ""} {applyLabels[setting.apply]}.
       </p>
       {setting.locked && <p className="text-2xs text-warning">{setting.locked}</p>}
