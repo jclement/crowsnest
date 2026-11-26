@@ -46,6 +46,7 @@ import (
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
+	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/transcript"
 )
@@ -61,6 +62,8 @@ type stopRig struct {
 	outMu     sync.Mutex
 	out       strings.Builder
 	session   string
+	meter     *spend.Meter
+	claudeDir string
 	trusted   map[string]bool
 	trustedAt map[string]time.Time
 }
@@ -134,8 +137,13 @@ func newStopRig(t *testing.T) *stopRig {
 	deliverer = questions.NewDeliverer(questions.DelivererOptions{Store: db, Prompt: questions.HerdrPrompter(session.Client), Logger: logger, Interval: time.Second})
 	go deliverer.Run(ctx)
 	identity := agentid.New(db, nil) // the hooks and tools are identified by their tokens, as in serve
+	// Spend is measured as serve measures it (7.11), on a fast interval, so testDone can compare
+	// crowsnest's totals with the transcript's own.
+	meter := spend.NewMeter(spend.Options{Store: db, Prices: spend.Embedded(), ClaudeConfigDir: claudeDir, Logger: logger, Interval: time.Second,
+		Sources: func(ctx context.Context) ([]spend.Source, error) { return jobService.SpendSources(ctx) }})
+	go meter.Run(ctx)
 	jobService = jobs.New(jobs.Options{
-		Store: db, Hub: events, Logger: logger, Herdr: session.Client,
+		Store: db, Hub: events, Logger: logger, Herdr: session.Client, Spend: meter,
 		Launch: jobs.LaunchOptions{
 			StateDir: filepath.Join(short, "state"), Executable: binary, AgentSocket: socket, BinDir: filepath.Dir(binary),
 			BasePath: os.Getenv("PATH"), Session: session.Name, PermissionMode: "auto", ClaudeConfigDir: claudeDir,
@@ -165,7 +173,7 @@ func newStopRig(t *testing.T) *stopRig {
 	}
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
-	return &stopRig{t: t, ts: ts, jobs: jobService, client: session.Client, repo: repo, session: session.Name}
+	return &stopRig{t: t, ts: ts, jobs: jobService, client: session.Client, repo: repo, session: session.Name, meter: meter, claudeDir: claudeDir}
 }
 
 // ---- The three parts -----------------------------------------------------------------------
@@ -201,6 +209,78 @@ func (r *stopRig) testDone(t *testing.T) {
 	if detail.Nudges != 0 {
 		t.Errorf("a job that called done was nudged %d time(s)", detail.Nudges)
 	}
+	r.checkSpend(t, detail)
+}
+
+// checkSpend is the real-Claude spend check (7.11): crowsnest's totals for a finished haiku job
+// equal what its transcripts say, summed here independently (unique message ids, the largest
+// copy of each field), subagent files included.
+func (r *stopRig) checkSpend(t *testing.T, detail jobs.Detail) {
+	t.Helper()
+	r.meter.Poll(context.Background())
+	path, err := transcript.Locate(r.claudeDir, detail.WorkDir, detail.SessionID)
+	if err != nil {
+		t.Fatalf("the job's transcript: %v", err)
+	}
+	want := transcriptSums(t, append([]string{path}, transcript.SubagentFiles(path)...))
+	got, ok, err := r.jobs.SpendOf(context.Background(), detail.Job)
+	if err != nil || !ok {
+		t.Fatalf("SpendOf: %v %v", ok, err)
+	}
+	t.Logf("spend: crowsnest %+v; transcript %+v", got, want)
+	if got.InputTokens != want.input || got.OutputTokens != want.output || got.CacheWriteTokens != want.cacheWrite ||
+		got.CacheReadTokens != want.cacheRead || got.Turns != want.calls {
+		t.Fatalf("crowsnest's spend differs from the transcript's sums:\n crowsnest %+v\ntranscript %+v", got, want)
+	}
+	if got.CostUSD == nil || *got.CostUSD <= 0 || len(got.Models) == 0 {
+		t.Fatalf("no cost for a haiku job: %+v", got)
+	}
+	r.record(t, fmt.Sprintf("(b) spend: %s, %d calls, %d tokens", spend.CostText(got), got.Turns, got.TotalTokens), detail)
+}
+
+type usageSums struct{ input, output, cacheWrite, cacheRead, calls int64 }
+
+// transcriptSums adds up assistant usage in files the plain way: one entry per message id, each
+// field the largest of its copies. Deliberately not internal/transcript's parser.
+func transcriptSums(t *testing.T, paths []string) usageSums {
+	t.Helper()
+	type fields struct{ input, output, cacheWrite, cacheRead int64 }
+	byID := map[string]fields{}
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			var rec struct {
+				Type    string `json:"type"`
+				Message struct {
+					ID    string `json:"id"`
+					Model string `json:"model"`
+					Usage *struct {
+						Input  int64 `json:"input_tokens"`
+						Output int64 `json:"output_tokens"`
+						Write  int64 `json:"cache_creation_input_tokens"`
+						Read   int64 `json:"cache_read_input_tokens"`
+					} `json:"usage"`
+				} `json:"message"`
+			}
+			if json.Unmarshal([]byte(line), &rec) != nil || rec.Type != "assistant" || rec.Message.Usage == nil || rec.Message.ID == "" || rec.Message.Model == "<synthetic>" {
+				continue
+			}
+			u, old := rec.Message.Usage, byID[rec.Message.ID]
+			byID[rec.Message.ID] = fields{max(old.input, u.Input), max(old.output, u.Output), max(old.cacheWrite, u.Write), max(old.cacheRead, u.Read)}
+		}
+	}
+	var sums usageSums
+	for _, f := range byID {
+		sums.input += f.input
+		sums.output += f.output
+		sums.cacheWrite += f.cacheWrite
+		sums.cacheRead += f.cacheRead
+		sums.calls++
+	}
+	return sums
 }
 
 func (r *stopRig) testAskAnswerDone(t *testing.T) {
