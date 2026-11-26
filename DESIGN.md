@@ -212,7 +212,7 @@ agent needs you, the same session reachable from terminal and phone).
 | `result_md` | Set by `done`: what was done, what was verified, what was not |
 | `pane_id`, `agent_name`, `claude_session_id` | The one agent that holds the job |
 | `last_activity_at`, `started_at`, `settled_at` | Heartbeat and timing |
-| `budget_minutes`, `budget_tokens`, `spent_tokens` | Optional caps (6.7) |
+| `budget_minutes`, `budget_tokens` | Optional caps (6.7). What a job has spent is measured by `internal/spend` and kept in its own tables keyed by the job id (7.11), not on this row |
 | `nudges`, `restarts` | Supervisor bookkeeping |
 
 A job has exactly one assignee and an agent holds at most one running job, so two agents never do
@@ -324,7 +324,7 @@ expensive step is an `ask(wait=true)` first: that is the approval gate.
 
 ### 6.7 Budgets and review gates (after the core)
 
-- **Budget**: optional minutes and tokens per job (tokens summed from the transcript's usage records). At 80% the card warns; at 100% the agent is told to stop at a safe point and the job goes `needs_you` with "raise the budget or stop". Nothing is killed.
+- **Budget**: optional minutes and tokens per job (tokens summed from the transcript's usage records: since the spend branch, `jobs.Service.SpendOf(job)` returns exactly that, 7.11; budgets are to read it and are not built). At 80% the card warns; at 100% the agent is told to stop at a safe point and the job goes `needs_you` with "raise the budget or stop". Nothing is killed.
 - **Review gate**: a job may name a reviewer engine. On `done` it becomes `in_review`; crowsnest starts a reviewer child job in the same worktree; findings go back to the builder as a message; at most two rounds; then `done` with the review attached.
 
 ### 6.8 As built in M7
@@ -639,7 +639,7 @@ terminal is how the user clears it. (On Jeff's machines `new-project` records tr
 | `assistant` `thinking` | collapsed, off by default |
 | everything else (`attachment`, `api-request*`, `mode`, …) | ignored |
 
-Sidechain (subagent) records are skipped (as built in M4: Claude 2.1.x writes a subagent's
+Sidechain (subagent) records are skipped in the conversation (as built in M4; spend counts them, 7.11: Claude 2.1.x writes a subagent's
 conversation to its own file, and the parent's Task/Agent tool card already carries its result).
 Unknown shapes are skipped, never fatal: the transcript format is not a public contract, so the parser is tolerant and has
 golden-file tests from real transcripts. If no transcript can be found, the view falls back to
@@ -899,6 +899,75 @@ door's `frontdoor-poke`, with its lessons:
 - **Job agents**: off by default; `--job-remote-control` adds `--remote-control "<name> <job id>
   <title, cleaned, 40 characters>"` to Claude job agents (Codex has no such flag).
 
+**7.11 Spend** (built on `wip/spend`; `internal/transcript/usage_meter.go`, `internal/spend`,
+`internal/store/spend.go`, migration `0010_spend.sql`, `internal/httpd/spend.go`,
+`cmd/crowsnest/spend.go`, `web/src/components/spend/`, `web/src/lib/spend.ts`). Jeff: "Add spend
+visibility per job."
+
+- **What "spend" means here** (decision 61): the tokens each job's own Claude agent used, read
+  from its transcripts, and what they would cost on the Claude API at list prices. It is an
+  estimate, always marked "est.": a subscription plan is not billed per token, partner clouds
+  price differently, negotiated discounts are unknown, and server-tool charges (web search at
+  $10 per 1000) are not counted. Wall time is a job's start to its settling (or now); the
+  orchestrator's is its first measured call to its last.
+- **Source.** `transcript.ParseUsage` reads one assistant record: `message.id`, `message.model`,
+  `usage.input_tokens`, `output_tokens`, `cache_read_input_tokens`, the cache writes split by
+  `usage.cache_creation.ephemeral_5m/1h_input_tokens` (no split: all 5-minute), `usage.speed`
+  (`fast`), `usage.inference_geo` (`us`), and its `tool_use` block ids. **Seen in Claude Code
+  2.1.332's real files (2026-11-26):** one API response is written as one record per content
+  block, each repeating the message's whole usage (7,677 duplicates in 80 recent files); 7 of
+  them differed, an early copy with fewer output tokens, so the largest value of each field
+  counts. Subagents write `<session>/subagents/agent-<id>.jsonl` beside the session's file
+  (`isSidechain` on every record); those are found (`transcript.SubagentFiles`) and counted as
+  the job's; old-style inline sidechain records count too. `<synthetic>` messages are skipped.
+  1-hour cache writes are common (Claude Code asks for them), and cost 2x input, not 1.25x.
+- **The meter** (`spend.Meter`, every 10 s): for each subject (a job, keyed `j_<n>`, or
+  `orchestrator`) it remembers every session id it has seen (so a restart under a new session
+  keeps accumulating, and a late record in an old session's subagent file still counts), finds
+  the session's file with `transcript.Locate` and its subagent files, and reads each from a
+  persisted cursor (offset to the end of the last complete line, and the inode, so a replaced
+  file is read again from the top). Calls are deduplicated by message id against the last 512
+  ids counted (persisted), tool calls by `tool_use` id. One read of a subject is one
+  transaction: totals, the day rollups, the chart's calls and the reader state together, so a
+  crash between them cannot double-count. A settled job is read once more two minutes after
+  settling and then marked final. Subjects: the board's newest 300 jobs with a Claude session of
+  their own (`jobs.Service.SpendSources`), plus the orchestrator's current session. A job the
+  orchestrator holds is the orchestrator's (its conversation), so it shows "counted on the
+  orchestrator's line"; a Codex job shows "not measured" (Codex keeps usage in its own rollout
+  files, not mapped to jobs; not worth it yet), never zero.
+- **Storage** (`0010_spend.sql`): `spend_totals` (running totals per subject plus the reader's
+  state JSON), `spend_daily` (per local day, subject and pricing key), `spend_turns` (the latest
+  400 calls per subject, upserted by message id, for the chart). The brief asked for totals "on
+  the job"; they are in `spend_totals` keyed by the job id rather than columns on `jobs`, so the
+  orchestrator, which has no job row, is stored the same way.
+- **Prices** (`internal/spend/prices.json`, embedded, checked 2026-11-26 against
+  https://platform.claude.com/docs/en/about-claude/pricing). Per model: input, output, 5-minute
+  and 1-hour cache writes, cache reads (0.025x input on Fable 5.1/5.2, 0.05x on Opus 5.5 and
+  Sonnet 5.5, 0.1x elsewhere), a fast-mode multiplier (2x, cache multipliers stacking on it),
+  Haiku 5.5's long-context tier (over 100,000 prompt tokens), and the 1.1x US-only multiplier.
+  Usage is stored per **pricing key**: the canonical model id plus `+fast`, `+long`, `+us` where
+  they change that model's price. Model names map onto rows by lower-casing and stripping
+  `anthropic.`, `[1m]`, `@…` and a `-YYYYMMDD` suffix, then by id or alias (`opus`, `sonnet`,
+  `haiku`, `fable`). Costs are computed when read (decision 62), in nano-dollars. An unknown
+  model keeps its tokens and has no cost (`cost_usd: null`, "cost unknown"); a mix is
+  `cost_partial` ("≥ $x est."). `~/.config/crowsnest/prices.json` (same shape, unknown keys
+  refused) replaces rows by id and adds new ones; a file that does not parse is logged and the
+  embedded table used.
+- **Days** are the server's local calendar (`time.Local`, injectable); a week starts on Monday.
+- **API**: `spend` on every job of `GET /jobs` and `/jobs/{id}`, plus `spend_turns` on the
+  detail; `GET /spend?from=&to=&group=job|model|day` and `GET /spend/summary`; a `spend` event
+  (`{at}`) after any read that added something, which refreshes the jobs and spend queries.
+  `job_get` (the MCP tool and `crowsnest job get`) ends with "## Spend so far" (`SpendBlock`).
+- **UI**: a chip on each card (cost, tokens when unpriced, "not measured"); the detail's Spend
+  card (the breakdown, a cache-hit meter, a bar per model call with a tooltip on hover and
+  focus, built to the dataviz skill: one hue from the accent token, chosen per theme, a baseline,
+  2 px gaps, the peak labelled once; more than 80 calls are grouped into 80 bars); today and this
+  week above the board, opening the Spend sheet (today / this week / 30 days; by job, model or
+  day; sortable; CSV with a BOM, formulas defused); the orchestrator's line in the Chat menu;
+  "Spend" in the palette, and each job row's spend as secondary text.
+- **`--demo`** seeds plausible spend through `Meter.Record` (the same counting path) for every
+  started job and a week of orchestrator use; the meter does not run there.
+
 ## 8. Needs-you: questions and dialogs
 
 Two sources feed one inbox.
@@ -1129,7 +1198,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /health` | Unauthenticated: `{status, version, update_available, latest_version?, release_url?}` (16.1) |
 | `POST /admin/update` | Self-update from the browser (16.1): verify, install, answer, exit for a supervisor to restart |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`, and the instance's `name`, 7.10) |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
@@ -1138,6 +1207,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, isolate?}`; `budget?` with M12) → `201` and the queued job; detail with `timeline` and `questions` (6.8) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
+| `GET /spend?from=&to=&group=job\|model\|day`, `GET /spend/summary` | Spend for a range of local days, grouped; today, this week and the orchestrator's line (7.11). Jobs carry `spend` on `/jobs` and `/jobs/{id}` (with `spend_turns` there) |
 | `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control` and `remote_control_note` (7.10) |
 | `GET /orchestrator/context`, `POST /orchestrator/compact` | The orchestrator's context size and upkeep `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}`; Compact now (409 when it cannot take it) (7.9) |
 | `GET /schedule`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin, every, after, schedule, as, dir, role, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now}], problems:[{path, error}], dirs}`; Run now; `{enabled}` (7.8). A `schedule` event (`{at}`) says a stamp or switch changed |
@@ -1225,6 +1295,7 @@ The client sends a resize first; the server starts the process on that first res
 - `jobs.root_dir` (migration `0008_job_root.sql`, R3-H1): the resolved directory a job's children may use without asking, recorded when crowsnest opens its pane; `''` grants nothing
 - `jobs.lifecycle_op`, `lifecycle_owner`, `lifecycle_at`, `lifecycle_gen` (migration `0006_job_lifecycle.sql`): the lifecycle claim (6.9); the same migration indexes `jobs(agent_name, state)`, `jobs(pane_id, state)` and `questions(job_id, status)`
 - `push_subscriptions(id, endpoint, p256dh, auth, user_agent, created_at, last_success_at, last_failure_at, failures)` (migration `0009_push.sql`, 8.5); `kv` keys `push.vapid` and `push.settings`
+- `spend_totals(subject, input, output, cache_write_5m, cache_write_1h, cache_read, turns, tool_calls, first_at, last_at, updated_at, state_json)`, `spend_daily(day, subject, model, …the same counts)` and `spend_turns(id, subject, message_id, at, model, …tokens)` (migration `0010_spend.sql`, 7.11): a subject is `j_<n>` or `orchestrator`; `model` is a pricing key
 - `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), settings
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -1572,7 +1643,8 @@ internal/agentcfg/           the --settings (hooks, allow rule) and --mcp-config
 internal/orch/               lifecycle, send, poke precheck and gate, poker, herdr-side backstop
 internal/journal/            journal entries (pokes, skips, sends, answers, restarts, alerts)
 internal/schedule/           scheduled task files: parse, due rules, stamps, job tasks (7.8)
-internal/transcript/         locate, tail, normalise Claude JSONL
+internal/transcript/         locate, tail, normalise Claude JSONL; usage records for spend
+internal/spend/              spend: price table, the meter over transcripts, summaries and reports (7.11)
 internal/questions/          store, long-poll, expiry
 internal/term/               PTY bridge, pane-control bridge
 internal/voice/              ElevenLabs client
@@ -1825,6 +1897,15 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
     sentence per reply costs a few tokens; it doubles as the caption. Whether it is heard is the
     browser's business (a remembered switch), and nothing is synthesised unless a browser asks.
 
+61. **Spend is an API-equivalent estimate from the transcripts** (wip/spend, 7.11). The
+    transcript is the one record of every call each agent made, subagents included, and it is
+    already read; a proxy or Claude Code's own cost line would see less or need more. The number
+    is useful as a comparison between jobs and days, not as a bill: a subscription is not billed
+    per token, so every figure says "est." and the views say why.
+62. **Tokens are stored per pricing key; costs are computed when read.** A wrong or late price is
+    one file away from being corrected for all of history, and an unknown model keeps its tokens
+    until a price arrives. Storing dollars would freeze every mistake in.
+
 ## 18. Milestones
 
 Each is one builder (Opus) in a herdr worktree; at most two build at once; each ends green on `mise run check`.
@@ -1885,6 +1966,13 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - Pokes (M8): the agent-settled trigger is herdr's `done`/`blocked`; an agent that goes `idle` without passing through `done` is not reported. The timer reports a change in the standing list, not elapsed time, so a stuck job that stays stuck is pushed once (at its event) and then only when the list changes. A poke whose delivery was uncertain is not resent, and the scheduled tasks it carried count as run.
 - Scheduled work (7.8) and upkeep (7.9): a task's run is "the poke carrying it was delivered", not "the orchestrator did it"; crowsnest cannot see the difference, and a task file should say what to report. `every: change` watches herdr's agent states, which flicker between turns, so it runs at most every 5 minutes rather than on every change. The context size is unknown after an auto compaction until the next call (Claude 2.1.332 records no `postTokens` for those). The hand-over is written by the orchestrator's own Write tool into the state directory, outside its working directory; whether that needs a permission prompt was not tested (under `default` it may stop at a dialog; the Inbox would then show it and the restart waits). The daily new conversation and compaction were exercised against the fake herdr only, not against a real Claude (the real tests cover the scheduled task and Remote Control). Job agents are not compacted by crowsnest.
 - The backstop's "stop handled by a hook" test is time-based (a Stop hook stamp within 15 s before the agent was seen to settle). An agent whose hook works on one turn and fails on the very next within that window would miss one backstop nudge; the next idle minute catches it.
+- **Spend (7.11)** is an estimate: list prices, no discounts, no server-tool charges (web
+  search), no Bedrock or Vertex pricing. Codex jobs are not measured. A job's transcript is found
+  by its session id, so a job whose session id crowsnest never saw (changed and changed back
+  within one 10 s read) loses that session's use. Deduplication remembers the last 512 calls per
+  subject: a transcript replaced wholesale with older content would be counted again. Only the
+  board's newest 300 jobs are read. Jobs settled before the spend branch first ran are read
+  once, in full, at its first start.
 - Answers are typed back only to the pane the question came from, as its token says. An agent restarted in another pane, or a caller without a token (a pane crowsnest did not create, a script), gets the answer only through the Inbox, `--wait`, `get_question` or `job_get`. A held delivery (dialog or draft) waits up to a week.
 - **Agent identity is per uid, not per process** (R1b N2, R2-M2): every agent in a session runs as the same uid, so any agent can read another's environment or its 0600 token file under the state directory with an ordinary file read, and then act as it on the socket (finish or fail its job, forge its hooks and so silence its supervision, ask or `say` as it, the orchestrator included). The token stops accidents and forged environment variables, not a hostile same-uid process; a separate uid for crowsnest would (4.6). Questions and jobs can still be read (`GET`) by any caller (R2-I3), and role overrides in `~/.config/crowsnest/roles/` are writable by every agent and join every future job's system prompt (R2-I6).
 - **Delegation limits are constants** (6.10): depth 3, 8 children per job (and 8 live jobs of the orchestrator's own while it holds none), 16 live agent-created jobs, 2 held requests per creator, not flags. A held job the human cancels from its card leaves its approval question open in the Inbox (answering it then does nothing).

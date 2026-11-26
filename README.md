@@ -401,6 +401,47 @@ on you?), `tidy.md` (hourly: bring the orchestrator's notes up to date) and `dig
 after 17:00: one notice with the day's digest). They do nothing until copied into a tasks
 directory.
 
+## Spend
+
+Every job shows what its agent has used, and the orchestrator's own conversation is a line of
+its own: tokens in, out, written to and read from the prompt cache, model calls, tool calls, wall
+time, and an **estimated** cost in USD. The figures come from each agent's Claude transcript
+(`~/.claude/projects/…/<session>.jsonl` and its subagents' files beside it), read every 10
+seconds and kept in crowsnest's database, so they survive a restart and a deleted transcript. A
+job that is restarted under a new Claude session keeps counting.
+
+- **It is an estimate, not a bill.** The cost is what the same tokens would cost on the Claude
+  API at list prices (input, output, 5-minute and 1-hour cache writes, cache reads; fast mode,
+  Haiku 5.5's long-context tier and US-only inference included). A Claude subscription is not
+  billed per token. Every cost is marked "est.".
+- **Prices** are built in, with the date they were checked against Anthropic's pricing page
+  (shown in the Spend sheet). To correct or add one, write `~/.config/crowsnest/prices.json` in
+  the same shape; its models replace built-in rows by id or add new ones, and it reprices
+  history too (costs are computed when read):
+
+  ```json
+  {"checked": "2027-01-15", "models": [
+    {"id": "claude-opus-5-5", "aliases": ["opus"], "input": 4, "output": 20,
+     "cache_write_5m": 5, "cache_write_1h": 8, "cache_read": 0.20, "fast": 2}
+  ]}
+  ```
+
+  Prices are USD per million tokens; `fast` multiplies every rate in fast mode; a `long` object
+  (`{"over": 100000, "input": …}`) is a long-context tier. An unknown key is an error, logged at
+  start, and the built-in table is used instead. A model with no price shows its tokens and
+  "cost unknown", never $0.
+- **Not measured**: Codex jobs (crowsnest does not read Codex's usage records), shown as "not
+  measured" rather than zero. Jobs the orchestrator holds itself are counted on the
+  orchestrator's line.
+- **Where it shows**: a chip on each job card; a Spend section in the job's detail (the
+  breakdown, the share of the prompt read from cache, and a small chart of tokens per model
+  call); today's and this week's totals above the board, which open the Spend sheet (by job, by
+  model or by day; today, this week or 30 days; sortable, CSV export); the orchestrator's line in
+  the Chat menu; "Spend" in the command palette. `crowsnest job get` and the `job_get` tool show
+  a job its own spend.
+
+Days are the server's local calendar days; weeks start on Monday.
+
 ## Configuration
 
 Precedence: flag, then environment, then `~/.config/crowsnest/config.yaml` (keys are the flag
@@ -487,7 +528,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
 | `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version, name}}`; `name` is this instance's (`--name`) |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (voice on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`, played by browsers with speak mode on; voice off: `{text, pane_id, at}`, which nothing plays); `job` (`{id, state, stuck, cause, title, change}`) when a job changes; `poke` (a poke's result, as `POST /orchestrator/poke` returns it) when a poke is sent or held; `journal` (`{id, kind, summary}`) for each new journal entry; `schedule` (`{at}`) when a scheduled task's stamp or switch changed |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (voice on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`, played by browsers with speak mode on; voice off: `{text, pane_id, at}`, which nothing plays); `job` (`{id, state, stuck, cause, title, change}`) when a job changes; `poke` (a poke's result, as `POST /orchestrator/poke` returns it) when a poke is sent or held; `journal` (`{id, kind, summary}`) for each new journal entry; `schedule` (`{at}`) when a scheduled task's stamp or switch changed; `spend` (`{at}`) when measured spend changed |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
@@ -501,15 +542,17 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /schedule` | session | Scheduled tasks: `{tasks: [{name, title, path, origin, every, after, schedule, as, dir, role, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now}], problems: [{path, error}], dirs}` |
 | `POST /schedule/{name}/run` | session | Run now: a poke task goes with the next poke the orchestrator can take, a job task starts its job → the list. `404` for an unknown name |
 | `PUT /schedule/{name}` | session | `{enabled}`: switch a task off or on (kept by crowsnest; the file is untouched) → the list |
+| `GET /spend?from=&to=&group=` | session | Spend for the local days `from`..`to` (YYYY-MM-DD, inclusive; default this week, Monday to today, at most a year) grouped by `job` (the orchestrator is its own row), `model` or `day`: `{from, to, group, rows: [{key, label, …summary}], total, prices_checked, prices_source, prices_file, note}`. A summary is `{measured, reason, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, total_tokens, turns, tool_calls, wall_seconds, cost_usd (null when unknown), cost_partial, unpriced_tokens, cache_hit_share, models, first_at, last_at}` |
+| `GET /spend/summary` | session | `{today, week, orchestrator_today, orchestrator_total, today_date, week_start, prices_checked, note}`: the Jobs header's totals and the Chat menu's line |
 | `GET /journal?kind=&before=&limit=` | session | The journal, newest first: `{entries: [{id, at, kind, summary, detail}], total, next_before}`. `kind` filters (comma-separated: `poke`, `skip`, `send`, `answer`, `restart`, `alert`, `backstop`, `task`, `upkeep`); `before` is the previous page's `next_before`; `limit` defaults to 50, at most 200 |
 | `GET /questions?status=` | session | Questions with a status (`open`, `answered`, `expired`, `cancelled`, a comma-separated list, or `all`), open first; file contents left out (`file_count` says how many) |
 | `GET /questions/{id}` | session | One question with its `files` |
 | `POST /questions/{id}/answer` | session | `{answer_value, answer_note}`: a key, an array of keys for a multi-select, nothing for ack/notice; a `manual` answer is the note. `409 CONFLICT` once settled |
 | `DELETE /questions/{id}` | session | Cancel an open question; the asker is told |
 | `GET /inbox/summary` | session | `{open, blocking}` for the Inbox badge |
-| `GET /jobs?state=` | session | The board: every job, newest first (`state` filters, comma-separated) |
+| `GET /jobs?state=` | session | The board: every job, newest first (`state` filters, comma-separated), each with its `spend` summary |
 | `POST /jobs` | session | `{brief, dir?, role?, done_when?, engine?, model?, isolate?}` → the queued job (`201`); the agent starts in the background. No `dir`: the orchestrator takes it |
-| `GET /jobs/{id}` | session | The job with its `timeline` (state changes, progress, nudges, hooks, questions, restarts, retries, messages) and `questions` |
+| `GET /jobs/{id}` | session | The job with its `timeline` (state changes, progress, nudges, hooks, questions, restarts, retries, messages), `questions`, `spend` and `spend_turns` (its latest model calls, oldest first: `{at, model, tokens, output, cost_usd}`) |
 | `POST /jobs/{id}/message` | session | `{text, force_over_draft}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
 | `POST /jobs/{id}/cancel`, `/nudge`, `/resume` | session | Cancel (Esc to the agent, then `cancelled`; the pane stays), nudge by hand, or resume a stuck job (retry now after a limit, restart a gone agent, else nudge) |
 | `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
@@ -593,6 +636,7 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` and the supervisor's hooks |
 | `~/.local/state/crowsnest/<session>/jobs/j_<n>/` | A job agent's `prompt.md` (role prompt and job protocol), `brief.md`, `settings.json` (hooks with `--job j_<n>`, the allow rule) `mcp.json` (with the agent's token) and `agent-token` (the token, for the hooks); each written fresh and read-only (0400) |
 | `~/.config/crowsnest/roles/*.md` | Optional role prompts that add to or replace the built-in ones |
+| `~/.config/crowsnest/prices.json` | Optional price overrides for the spend estimate (see Spend) |
 | `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server, its `CROWSNEST_SOCKET` and its agent token (`0600`); `agent-token` beside it holds the same start's token for the hooks |
 | `~/.local/state/crowsnest/<session>/agent.sock` | The agent API socket (when `XDG_RUNTIME_DIR` is unset) |
 | `$TMPDIR/crowsnest-demo-*/` | `--demo` only: the demo's database, state (the demo agents' transcripts, its agent socket) and orchestrator directory, removed on exit |
