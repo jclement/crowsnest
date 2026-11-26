@@ -28,7 +28,7 @@ func TestMigrationsApplyAndAreIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	version, err := first.SchemaVersion(ctx)
-	if err != nil || version != 2 {
+	if err != nil || version != 3 {
 		t.Fatalf("version %d err %v", version, err)
 	}
 	if err := first.SetKV(ctx, "k", "v"); err != nil {
