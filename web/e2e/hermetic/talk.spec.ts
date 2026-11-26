@@ -234,6 +234,10 @@ test("Cancel during the review sends nothing", async ({ page, browserName }) => 
 // ---- Hold Space, with real key events ----------------------------------------------------------
 
 test.describe("hold Space", () => {
+  // These record from a microphone. Chromium has its fake device everywhere; Playwright's WebKit has
+  // a mock capture device on macOS but none on Linux, where the recorder never leaves "idle" (seen in
+  // CI). So on Linux the WebKit half is skipped: CI covers Chromium, a Mac run covers both.
+  test.skip(({ browserName }) => browserName === "webkit" && process.platform === "linux", "Playwright's WebKit has no mock microphone on Linux");
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openChat(page);
