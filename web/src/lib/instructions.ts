@@ -120,7 +120,7 @@ export function layerId(layer: Pick<Layer, "scope" | "key">): string {
 }
 
 /** The badge for where a layer's text comes from. */
-export function sourceBadge(layer: Pick<Layer, "scope" | "source">): { label: string; tone: ChipTone } {
+export function sourceBadge(layer: { scope: string; source: LayerSource }): { label: string; tone: ChipTone } {
   switch (layer.source) {
     case "file":
       return { label: "from file", tone: "warning" };

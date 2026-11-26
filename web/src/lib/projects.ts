@@ -249,3 +249,26 @@ function safeStorage(): Storage | undefined {
     return undefined;
   }
 }
+
+// ---- Confirmations -----------------------------------------------------------------------------------
+
+/** The words a lead's interrupting actions ask with, worded as the orchestrator's are. */
+export function leadConfirmations(name: string): Record<"restart" | "new" | "stop", { title: string; body: string; button: string }> {
+  return {
+    restart: {
+      title: `Restart ${name}'s lead?`,
+      body: "Claude is stopped (anything the lead is doing is interrupted) and started again on the same conversation, with the instructions as they are now.",
+      button: "Restart",
+    },
+    new: {
+      title: `Start a new conversation for ${name}'s lead?`,
+      body: "Claude is stopped and started with an empty conversation. The current one stays in its transcript file but leaves Chat.",
+      button: "New conversation",
+    },
+    stop: {
+      title: `Stop ${name}'s lead?`,
+      body: "Claude is stopped and its pane closed. Its conversation is kept, so Start lead picks it up again. Jobs it holds wait until then.",
+      button: "Stop lead",
+    },
+  };
+}
