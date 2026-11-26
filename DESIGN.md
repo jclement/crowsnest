@@ -564,10 +564,6 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 12. **One core agent API on a unix socket; the CLI, the hooks and the MCP server are thin clients of it.** Claude gets real tools, Codex and scripts get the same verbs, and there is one implementation to test.
 13. **Crowsnest assigns jobs; agents do not pull them.** One assignee by construction, so no checkout protocol is needed yet.
 14. **One session per process.** Run two crowsnests on two ports for two sessions.
-
-## 18. Milestones
-||||||| 1c3439e
-## 17. Milestones
 15. **The built SPA is embedded from `web/dist` with a committed placeholder.** `web/dist/.gitkeep`
     is committed (and copied back from `web/public` by every Vite build) so the Go code always
     compiles and `go test` needs no Node. A binary built without the web app has no
@@ -578,7 +574,7 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
     at 200, each under 60 characters, no duplicates.
 17. **TypeScript is pinned to 6.0.x**, not 7: typescript-eslint 8.x supports `<6.1`.
 
-## 17. Milestones
+## 18. Milestones
 
 Each is one builder (Opus) in a herdr worktree; at most two build at once; each ends green on `mise run check`.
 
