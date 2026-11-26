@@ -1,0 +1,30 @@
+{
+  "checked": "2026-11-26",
+  "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "currency": "USD per million tokens, Claude API first-party rates",
+  "us_multiplier": 1.1,
+  "models": [
+    {"id": "claude-fable-5-2", "aliases": ["fable"], "input": 8, "output": 40, "cache_write_5m": 10, "cache_write_1h": 16, "cache_read": 0.20, "fast": 2},
+    {"id": "claude-mythos-5-2", "aliases": ["mythos"], "input": 8, "output": 40, "cache_write_5m": 10, "cache_write_1h": 16, "cache_read": 0.20, "fast": 2},
+    {"id": "claude-fable-5-1", "input": 10, "output": 50, "cache_write_5m": 12.50, "cache_write_1h": 20, "cache_read": 0.25},
+    {"id": "claude-mythos-5-1", "input": 10, "output": 50, "cache_write_5m": 12.50, "cache_write_1h": 20, "cache_read": 0.25},
+    {"id": "claude-fable-5", "input": 10, "output": 50, "cache_write_5m": 12.50, "cache_write_1h": 20, "cache_read": 1},
+    {"id": "claude-mythos-5", "input": 10, "output": 50, "cache_write_5m": 12.50, "cache_write_1h": 20, "cache_read": 1},
+    {"id": "claude-opus-5-5", "aliases": ["opus"], "input": 4, "output": 20, "cache_write_5m": 5, "cache_write_1h": 8, "cache_read": 0.20, "fast": 2},
+    {"id": "claude-opus-5", "input": 5, "output": 25, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.50, "fast": 2},
+    {"id": "claude-opus-4-8", "input": 5, "output": 25, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.50, "fast": 2},
+    {"id": "claude-opus-4-7", "input": 5, "output": 25, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.50},
+    {"id": "claude-opus-4-6", "input": 5, "output": 25, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.50},
+    {"id": "claude-opus-4-5", "input": 5, "output": 25, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.50},
+    {"id": "claude-opus-4-1", "input": 15, "output": 75, "cache_write_5m": 18.75, "cache_write_1h": 30, "cache_read": 1.50},
+    {"id": "claude-opus-4", "input": 15, "output": 75, "cache_write_5m": 18.75, "cache_write_1h": 30, "cache_read": 1.50},
+    {"id": "claude-sonnet-5-5", "aliases": ["sonnet"], "input": 2, "output": 10, "cache_write_5m": 2.50, "cache_write_1h": 4, "cache_read": 0.10},
+    {"id": "claude-sonnet-5", "input": 2, "output": 10, "cache_write_5m": 2.50, "cache_write_1h": 4, "cache_read": 0.20},
+    {"id": "claude-sonnet-4-6", "input": 3, "output": 15, "cache_write_5m": 3.75, "cache_write_1h": 6, "cache_read": 0.30},
+    {"id": "claude-sonnet-4-5", "input": 3, "output": 15, "cache_write_5m": 3.75, "cache_write_1h": 6, "cache_read": 0.30},
+    {"id": "claude-sonnet-4", "input": 3, "output": 15, "cache_write_5m": 3.75, "cache_write_1h": 6, "cache_read": 0.30},
+    {"id": "claude-haiku-5-5", "aliases": ["haiku"], "input": 0.10, "output": 0.50, "cache_write_5m": 0.125, "cache_write_1h": 0.20, "cache_read": 0.01,
+      "long": {"over": 100000, "input": 0.50, "output": 2.50, "cache_write_5m": 0.625, "cache_write_1h": 1, "cache_read": 0.05}},
+    {"id": "claude-haiku-4-5", "input": 1, "output": 5, "cache_write_5m": 1.25, "cache_write_1h": 2, "cache_read": 0.10}
+  ]
+}
