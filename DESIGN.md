@@ -406,11 +406,15 @@ Claude Code 2.1.332 by `mise run test:claude`):
 - **Messages**: each has a stable `id` and `index` and a `seq` that grows when it is added or
   changed (a tool card gains its result). A cursor is `<generation>.<seq>`; the generation
   changes when the conversation starts over (new session, truncated or replaced file, the switch
-  between transcript and pane text), and a stale cursor gets a `reset` page of the newest
-  messages. Text blocks of one reply merge; thinking is kept only when it has text (2.1.332
+  between transcript and pane text, a new session id even while neither session has a
+  transcript yet), and a stale cursor gets a `reset` page of the newest messages. Generations
+  start at a random 48-bit point in each process, so a cursor a browser kept across a crowsnest
+  restart never matches a different conversation (R1-C05). Text blocks of one reply merge; thinking is kept only when it has text (2.1.332
   writes it redacted, so usually it has none); tool input is cut to 2 KB and results to 4 KB
   with ANSI removed. Unpinned conversations are followed for 10 minutes after their last read
-  and polled every second; the orchestrator's is pinned.
+  and polled every second, and dropped at once when their agent is gone; the orchestrator's is
+  pinned, and the pin moves with it when it is restarted in another pane (R1-C06). A change is
+  announced with a `message` event whoever found it, the timer or a browser's read (R1-C07).
 - **Send** (7.3): the result is `{pane_id, status, queued, started, note}`. A dialog (herdr
   `blocked`, or one on screen) is `409 BLOCKED` with the dialog in `error.detail`; a draft is
   `409 DRAFT` with the draft; nothing is typed in either case. A draft check that cannot find the

@@ -231,6 +231,10 @@ func TestManagerFollowsSessionChanges(t *testing.T) {
 		t.Fatal("pane id and name gave different conversations")
 	}
 
+	// Reads announce what they found too (R1-C07); count only what the poll finds from here.
+	notifyMu.Lock()
+	notified = nil
+	notifyMu.Unlock()
 	appendFile(t, first, userLine("2", "again"))
 	manager.PollAll(ctx)
 	notifyMu.Lock()

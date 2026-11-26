@@ -8,6 +8,8 @@
 package transcript
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"sort"
 	"strconv"
@@ -27,11 +29,28 @@ const (
 	MaxPageLimit     = 1000
 )
 
-// generations numbers every conversation reset in the process, so two conversations never hand
-// out the same cursor.
+// generations numbers every conversation reset, so two conversations never hand out the same
+// cursor. The count starts at a random point in each process: a browser keeps its cursors across
+// a crowsnest restart, and a count that started at 1 every time would hand a different
+// transcript the cursor that browser already holds, so it would be sent a diff against the
+// wrong conversation instead of a reset (R1-C05). 48 random bits make a repeat across restarts
+// vanishingly unlikely while staying well inside what JSON and JavaScript carry exactly.
 var generations struct {
 	sync.Mutex
 	next uint64
+}
+
+func init() { startGenerations() }
+
+// startGenerations picks the random starting point for this process's generations.
+func startGenerations() {
+	var seed [8]byte
+	if _, err := rand.Read(seed[:]); err != nil {
+		panic(fmt.Sprintf("reading random bytes for cursor generations: %v", err))
+	}
+	generations.Lock()
+	defer generations.Unlock()
+	generations.next = binary.BigEndian.Uint64(seed[:]) >> 16
 }
 
 func nextGeneration() uint64 {
@@ -98,6 +117,13 @@ func sameMessage(a, b Message) bool {
 		return false
 	}
 	return a.Tool == nil || *a.Tool == *b.Tool
+}
+
+// SessionID is the session the conversation belongs to.
+func (c *Conversation) SessionID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sessionID
 }
 
 // Len is the number of messages.
