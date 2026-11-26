@@ -108,12 +108,25 @@ func (s *Service) launch(ctx context.Context, id string) {
 		s.DispatchStanding(ctx)
 		return
 	}
+	held := ""
 	cl, err := s.claimStep(ctx, id, opLaunch, func(r *store.JobRecord, _ *change) error {
 		if State(r.State) != StateQueued || r.PaneID != "" {
 			return errSkip // launched already; an interrupted launch with a pane is the tick's
 		}
+		// The slot limit, the load hold and the pause, weighed under the same lock as the
+		// claim, so two launches never both take the last slot (holds.go).
+		if held = s.startHoldLocked(ctx, *r); held != "" {
+			return errHeld
+		}
+		if Cause(r.Cause) == CauseHeld {
+			r.Cause, r.CauseDetail = "", ""
+		}
 		return nil
 	})
+	if errors.Is(err, errHeld) {
+		s.markHeld(ctx, id, held)
+		return
+	}
 	if err != nil {
 		return
 	}

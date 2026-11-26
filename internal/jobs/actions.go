@@ -186,6 +186,9 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 	if s.opts.Herdr == nil {
 		return false, nil
 	}
+	if s.heldWhilePaused(ctx, "backstop:"+job.ID, "a backstop nudge for "+job.ID) {
+		return false, nil
+	}
 	var decision Decision
 	var cl claim
 	var spent budgetSpent

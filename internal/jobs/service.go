@@ -112,6 +112,12 @@ type Options struct {
 	// Instructions composes the instruction layers a job agent is started with (global, role,
 	// project; DESIGN.md 21.3) and records them. Nil: the bare role prompt, as before layers.
 	Instructions InstructionLayers
+	// Pause is the automation's pause switch (DESIGN.md 6.13): while paused nothing automatic
+	// reaches an agent. Nil: never paused.
+	Pause PauseSwitch
+	// Throttle limits the job agents running at once and holds new starts on a busy machine
+	// (6.12). Nil: no limit.
+	Throttle StartThrottle
 }
 
 // InstructionLayers is what the launcher needs of internal/instructions, as an interface so that

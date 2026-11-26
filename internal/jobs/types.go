@@ -98,6 +98,12 @@ const (
 	// CauseApprovalTool: needs_you while one of the agent's tool calls waits for the human's
 	// approval (DESIGN.md 8.7). CauseDetail is the call in one line.
 	CauseApprovalTool Cause = "approval-tool"
+	// CauseHeld: queued, waiting to start: every slot is taken, the machine is busy, or the
+	// automation is paused (DESIGN.md 6.12, 6.13). CauseDetail is the reason in words.
+	CauseHeld Cause = "held"
+	// CauseReview: needs_you after the review gate: the reviewer still objects after the last
+	// round, or the review could not run (6.7). CauseDetail says which.
+	CauseReview Cause = "review"
 )
 
 // Describe is the cause in words, for the card and notices.
@@ -131,6 +137,10 @@ func (c Cause) Describe() string {
 		return "Waiting for your approval: an agent asked for it"
 	case CauseApprovalTool:
 		return "A tool call is waiting for your approval"
+	case CauseHeld:
+		return "Waiting to start"
+	case CauseReview:
+		return "The review needs you"
 	}
 	return ""
 }
