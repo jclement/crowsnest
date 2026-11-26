@@ -458,36 +458,14 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
 
-**Fleet and screen shapes** (M3 builds against these; the herdr objects pass through in herdr's
-own snake_case with crowsnest's additions marked). `{target}` is the agent's **pane id**
-(`w1:p1`, URL-encoded as `w1%3Ap1`); the server may also accept an agent name, but the web app
-always sends the pane id because names are not guaranteed unique.
-
-```jsonc
-// GET /api/v1/fleet
-{"data": {"session": "crowsnest", "herdr_version": "0.9.5", "workspaces": [
-  {"workspace_id": "w1", "label", "number", "active_tab_id", "agent_status", "focused", "pane_count", "tab_count",
-   "tabs": [
-     {"tab_id": "w1:t1", "workspace_id", "label", "number", "agent_status", "focused", "pane_count",
-      "panes": [
-        {"pane_id": "w1:p1", "tab_id", "workspace_id", "terminal_id", "cwd", "foreground_cwd", "agent_status",
-         "focused", "revision",
-         "agent": null | {"name", "agent": "claude" | "codex" | …,
-                          "agent_status": "idle" | "done" | "working" | "blocked" | "unknown",
-                          "pane_id", "tab_id", "workspace_id", "cwd", "terminal_title_stripped",
-                          "agent_session": {"value"} | null, "state_change_seq",
-                          "has_dialog": bool,       // crowsnest: section 8.2 detection
-                          "has_transcript": bool}}  // crowsnest: a transcript was found
-      ]}]}]}}
-
-// GET /api/v1/agents/{target}/screen
-{"data": {"text": "…verbatim…", "hash": "…", "status": "blocked",
-          "dialog": null | {"options": [{"digit": "1", "text": "Yes"}], "multi_form": false},
-          "draft": "empty" | "draft" | "unknown"}}
-```
-
-The TypeScript mirror is `web/src/lib/types.ts`; `web/src/lib/fixtures.ts` holds a fleet and
-screens in exactly this shape.
+**Addressing and the TypeScript mirror.** The table rows above are the authority for every shape.
+The web app addresses an agent by its **pane id** (`w1:p1`, URL-encoded as `w1%3Ap1`) even though
+the server also accepts an agent name, because names are not guaranteed unique. The TypeScript
+mirror of the Go structs is `web/src/lib/types.ts` (the tree's agent is `PaneAgent`; an entry of
+the flat `agents` list, with its pane, tab and workspace, is `Agent`); `web/src/lib/fixtures.ts`
+holds a fleet and screens in exactly that shape, with `agents` and `counts` derived the way
+`internal/fleet/view.go` derives them. (M2 and M3 were built in parallel against an earlier draft
+of these shapes; M5 reconciled the web app to the server and removed the draft.)
 
 **Terminal WebSocket protocol**: binary frames are terminal bytes in both directions. Text frames
 are JSON control: client `{"type":"resize","cols":N,"rows":N}`, server `{"type":"exit","reason":…}`.

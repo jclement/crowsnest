@@ -79,7 +79,7 @@ export function FleetView() {
           title={
             found && (
               <>
-                <StatusDot status={found.agent.agent_status} />
+                <StatusDot status={found.agent.status} />
                 <span className="truncate">{found.agent.name}</span>
               </>
             )

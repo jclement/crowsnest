@@ -6,7 +6,7 @@ import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { queryKeys } from "./api";
 import { useEventStream, type StreamState } from "./sse";
-import type { EventName } from "./types";
+import type { EventName, Fleet } from "./types";
 
 /**
  * What each event invalidates. `null` means everything (hello: a fresh connection may have
@@ -24,6 +24,21 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   say: [],
 };
 
+/**
+ * Events whose data is the new state itself, so the cache is written instead of refetched. A
+ * `fleet` event carries the whole fleet (the same shape as GET /fleet); anything that does not
+ * look like one falls back to the invalidation above.
+ */
+export const payloads: Partial<Record<EventName, { key: QueryKey; accept: (data: unknown) => boolean }>> = {
+  fleet: { key: queryKeys.fleet, accept: isFleet },
+};
+
+/** True when data has the shape of a Fleet (enough of it to render). */
+export function isFleet(data: unknown): data is Fleet {
+  const candidate = data as Partial<Fleet> | null;
+  return !!candidate && Array.isArray(candidate.workspaces) && Array.isArray(candidate.agents) && typeof candidate.revision === "number";
+}
+
 /** Opens the app's one event stream and wires it to the query cache. Returns its state. */
 export function useLiveQueries(): StreamState {
   const queryClient = useQueryClient();
@@ -32,9 +47,16 @@ export function useLiveQueries(): StreamState {
       Object.fromEntries(
         Object.entries(invalidations).map(([name, keys]) => [
           name,
-          () => {
+          (data: unknown) => {
+            const payload = payloads[name as EventName];
+            const written = !!payload && payload.accept(data);
+            if (written) queryClient.setQueryData(payload.key, data);
             if (keys === null) void queryClient.invalidateQueries();
-            else for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey });
+            else
+              for (const queryKey of keys) {
+                if (written && queryKey === payload.key) continue;
+                void queryClient.invalidateQueries({ queryKey });
+              }
           },
         ]),
       ),

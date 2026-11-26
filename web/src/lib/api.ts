@@ -7,7 +7,7 @@
 // answered in memory from lib/fixtures.ts, so the UI can be worked on, and screenshotted,
 // without a server. `?fixtures=0` turns it off. The choice is kept for the tab's lifetime
 // (sessionStorage) because client-side navigation drops the query string.
-import type { AgentScreen, Fleet, SendKeysRequest } from "./types";
+import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
 export class ApiError extends Error {
@@ -125,7 +125,7 @@ export const endpoints = {
   agentScreen: (target: string) => api<AgentScreen>(`/agents/${encodeURIComponent(target)}/screen`),
   /** Sends keys to an agent, bound to the screen they answer: 409 CONFLICT if it changed. */
   sendKeys: (target: string, request: SendKeysRequest) =>
-    api<{ sent: boolean }>(`/agents/${encodeURIComponent(target)}/keys`, { method: "POST", body: request }),
+    api<KeysResponse>(`/agents/${encodeURIComponent(target)}/keys`, { method: "POST", body: request }),
 };
 
 /**

@@ -141,6 +141,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
 | `mise run e2e` | Playwright suite (not built until M9; fails with a message) |
+| `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures, and the terminals on a throwaway `crowsnest-test-*` herdr session. Each spec starts and stops its own instance on a random localhost port |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run snapshot` | GoReleaser snapshot (needs `.goreleaser.yml`, written in M10) |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |

@@ -7,7 +7,20 @@
 // and a long terminal title. fixtureApi() answers API calls from it in memory, so pressing a
 // dialog option in fixtures mode behaves like the real thing (the dialog goes away).
 import { ApiError } from "./api";
-import type { Agent, AgentScreen, AgentStatus, Fleet, Pane, SendKeysRequest, Tab, Workspace } from "./types";
+import type {
+  Agent,
+  AgentScreen,
+  AgentStatus,
+  DialogOption,
+  Fleet,
+  FleetCounts,
+  KeysResponse,
+  Pane,
+  PaneAgent,
+  SendKeysRequest,
+  Tab,
+  Workspace,
+} from "./types";
 
 // ---- Builders ----------------------------------------------------------------
 
@@ -37,66 +50,105 @@ function rollUp(statuses: AgentStatus[]): AgentStatus {
   return order.find((status) => statuses.includes(status)) ?? "unknown";
 }
 
+function buildAgent(spec: AgentSpec, paneId: string, sessionId: string): PaneAgent {
+  const kind = spec.kind ?? "claude";
+  const transcript = spec.transcript ?? kind === "claude";
+  return {
+    name: spec.name,
+    target: spec.name || paneId,
+    kind,
+    status: spec.status,
+    ...(transcript ? { session_id: sessionId } : {}),
+    title: spec.title ?? "",
+    has_dialog: spec.dialog ?? false,
+    has_transcript: transcript,
+    interactive_ready: spec.status !== "unknown",
+  };
+}
+
 function buildWorkspace(number: number, label: string, tabs: TabSpec[]): Workspace {
   const workspaceId = `w${number}`;
   let paneCounter = 0;
   const builtTabs: Tab[] = tabs.map((tabSpec, tabIndex) => {
-    const tabId = `${workspaceId}:t${tabIndex + 1}`;
     const panes: Pane[] = tabSpec.panes.map((paneSpec) => {
       paneCounter += 1;
       const paneId = `${workspaceId}:p${paneCounter}`;
-      const status = paneSpec.agent?.status ?? "unknown";
-      const agent: Agent | null = paneSpec.agent
-        ? {
-            name: paneSpec.agent.name,
-            agent: paneSpec.agent.kind ?? "claude",
-            agent_status: status,
-            pane_id: paneId,
-            tab_id: tabId,
-            workspace_id: workspaceId,
-            cwd: paneSpec.cwd,
-            terminal_title_stripped: paneSpec.agent.title ?? "",
-            agent_session: { value: `5f0c${number}a2e-${paneCounter}b7d-4e1a-9c3f-0d2b8e6f1a${number}${paneCounter}` },
-            state_change_seq: 10 * number + paneCounter,
-            has_dialog: paneSpec.agent.dialog ?? false,
-            has_transcript: paneSpec.agent.transcript ?? (paneSpec.agent.kind ?? "claude") === "claude",
-          }
-        : null;
+      const sessionId = `5f0c${number}a2e-${paneCounter}b7d-4e1a-9c3f-0d2b8e6f1a${number}${paneCounter}`;
       return {
-        pane_id: paneId,
-        tab_id: tabId,
-        workspace_id: workspaceId,
-        terminal_id: `term-${number}-${paneCounter}`,
+        id: paneId,
         cwd: paneSpec.cwd,
-        foreground_cwd: paneSpec.cwd,
-        agent_status: status,
+        title: paneSpec.agent?.title ?? "",
         focused: paneSpec.focused ?? false,
-        revision: 100 + paneCounter,
-        agent,
+        agent_status: paneSpec.agent?.status ?? "unknown",
+        agent: paneSpec.agent ? buildAgent(paneSpec.agent, paneId, sessionId) : null,
       };
     });
     return {
-      tab_id: tabId,
-      workspace_id: workspaceId,
-      label: tabSpec.label,
+      id: `${workspaceId}:t${tabIndex + 1}`,
       number: tabIndex + 1,
-      agent_status: rollUp(panes.filter((pane) => pane.agent).map((pane) => pane.agent_status)),
+      label: tabSpec.label,
       focused: tabIndex === 0,
-      pane_count: panes.length,
+      agent_status: rollUp(panes.filter((pane) => pane.agent).map((pane) => pane.agent_status)),
       panes,
     };
   });
   return {
-    workspace_id: workspaceId,
-    label,
+    id: workspaceId,
     number,
-    active_tab_id: builtTabs[0]?.tab_id ?? "",
-    agent_status: rollUp(builtTabs.map((tab) => tab.agent_status)),
+    label,
     focused: number === 1,
-    pane_count: builtTabs.reduce((sum, tab) => sum + tab.pane_count, 0),
-    tab_count: builtTabs.length,
+    agent_status: rollUp(builtTabs.map((tab) => tab.agent_status)),
     tabs: builtTabs,
   };
+}
+
+/** The flat agent list and counts, derived from the tree exactly as internal/fleet/view.go does. */
+function withAgents(session: string, workspaces: Workspace[]): Fleet {
+  const agents: Agent[] = [];
+  let panes = 0;
+  for (const workspace of workspaces)
+    for (const tab of workspace.tabs)
+      for (const pane of tab.panes) {
+        panes += 1;
+        if (!pane.agent) continue;
+        const needs = pane.agent.status === "blocked" || pane.agent.has_dialog;
+        agents.push({
+          ...pane.agent,
+          pane_id: pane.id,
+          tab_id: tab.id,
+          workspace_id: workspace.id,
+          workspace: workspace.label,
+          cwd: pane.cwd,
+          needs_you: needs,
+        });
+      }
+  return {
+    session,
+    herdr_version: "0.9.5",
+    revision: 1,
+    updated_at: "2026-11-26T03:10:00Z",
+    workspaces,
+    agents,
+    counts: countAgents(agents, panes, workspaces.length),
+  };
+}
+
+function countAgents(agents: Agent[], panes: number, workspaces: number): FleetCounts {
+  const counts: FleetCounts = { agents: agents.length, working: 0, blocked: 0, ready: 0, unknown: 0, dialogs: 0, settled: 0, panes, workspaces };
+  for (const agent of agents) {
+    if (agent.needs_you) counts.blocked += 1;
+    else if (agent.status === "working") counts.working += 1;
+    else if (agent.status === "idle" || agent.status === "done") counts.ready += 1;
+    else counts.unknown += 1;
+    if (agent.has_dialog) counts.dialogs += 1;
+    if (agent.status === "done") counts.settled += 1;
+  }
+  return counts;
+}
+
+/** Recomputes the flat list after a fixture changed the tree. */
+function refreshAgents(fleet: Fleet): Fleet {
+  return { ...withAgents(fleet.session, fleet.workspaces), revision: fleet.revision + 1 };
 }
 
 // ---- The fleet ---------------------------------------------------------------
@@ -105,10 +157,7 @@ const HOME = "/Users/jsc";
 
 /** A fresh copy of the fixture fleet (tests may mutate what they get). */
 export function makeFleet(): Fleet {
-  return {
-    session: "crowsnest",
-    herdr_version: "0.9.5",
-    workspaces: [
+  return withAgents("crowsnest", [
       buildWorkspace(1, "orchestrator", [
         {
           label: "lead",
@@ -177,8 +226,7 @@ export function makeFleet(): Fleet {
           ],
         },
       ]),
-    ],
-  };
+  ]);
 }
 
 // ---- Screens -----------------------------------------------------------------
@@ -242,39 +290,69 @@ interface ScreenState {
   after?: AgentScreen;
 }
 
-function screen(text: string, status: AgentStatus, hash: string, dialog: AgentScreen["dialog"] = null): AgentScreen {
-  return { text, hash, status, dialog, draft: "empty" };
+const noDialog = (): AgentScreen["dialog"] => ({ present: false, options: [], form: false, warnings: [] });
+
+function option(key: string, label: string, extra: Partial<DialogOption> = {}): DialogOption {
+  return { key, label, selected: key === "1", ...extra };
+}
+
+function screen(target: string, name: string, text: string, status: AgentStatus, hash: string, dialog = noDialog()): AgentScreen {
+  return {
+    target,
+    pane_id: target,
+    name,
+    kind: "claude",
+    status,
+    text,
+    ansi: text,
+    screen_hash: hash,
+    revision: 1,
+    dialog,
+    draft: { input_found: false, present: false, text: "" },
+  };
 }
 
 /** A fresh copy of the fixture screens, keyed by pane id. */
 export function makeScreens(): Record<string, ScreenState> {
   return {
-    "w1:p1": { screen: screen(workingScreen, "working", "h-orch-1") },
-    "w2:p1": { screen: screen(doneScreen, "done", "h-m3-1") },
-    "w2:p3": { screen: screen(idleScreen, "idle", "h-rev-1") },
+    "w1:p1": { screen: screen("w1:p1", "orchestrator", workingScreen, "working", "h-orch-1") },
+    "w2:p1": { screen: screen("w2:p1", "m3-builder", doneScreen, "done", "h-m3-1") },
+    "w2:p3": { screen: { ...screen("w2:p3", "m3-review", idleScreen, "idle", "h-rev-1"), kind: "codex" } },
     "w3:p1": {
-      screen: screen(pushDialogScreen, "blocked", "h-push-1", {
+      screen: screen("w3:p1", "head-loss", pushDialogScreen, "blocked", "h-push-1", {
+        present: true,
         options: [
-          { digit: "1", text: "Yes" },
-          { digit: "2", text: "Yes, and don't ask again for git push commands in /Users/jsc/Developer/pumpcurves" },
-          { digit: "3", text: "No, and tell Claude what to do differently (esc)" },
+          option("1", "Yes"),
+          option("2", "Yes, and don't ask again for git push commands in /Users/jsc/Developer/pumpcurves", {
+            warning: "stops asking",
+          }),
+          option("3", "No, and tell Claude what to do differently (esc)"),
         ],
-        multi_form: false,
+        form: false,
+        warnings: ["stops asking"],
       }),
-      after: screen(workingScreen.replace("Reviewing M2 fleet cache", "Pushing feature/head-loss"), "working", "h-push-2"),
+      after: screen(
+        "w3:p1",
+        "head-loss",
+        workingScreen.replace("Reviewing M2 fleet cache", "Pushing feature/head-loss"),
+        "working",
+        "h-push-2",
+      ),
     },
     "w3:p2": {
-      screen: screen(formScreen, "blocked", "h-form-1", {
+      screen: screen("w3:p2", "head-loss-tests", formScreen, "blocked", "h-form-1", {
+        present: true,
         options: [
-          { digit: "1", text: "The 2019 field data (412 points)" },
-          { digit: "2", text: "The synthetic set from the design doc" },
-          { digit: "3", text: "Both, tagged separately" },
-          { digit: "4", text: "Type something." },
+          option("1", "The 2019 field data (412 points)"),
+          option("2", "The synthetic set from the design doc"),
+          option("3", "Both, tagged separately"),
+          option("4", "Type something."),
         ],
-        multi_form: true,
+        form: true,
+        warnings: [],
       }),
     },
-    "w4:p1": { screen: screen(unknownScreen, "unknown", "h-probe-1") },
+    "w4:p1": { screen: { ...screen("w4:p1", "probe", unknownScreen, "unknown", "h-probe-1"), kind: "opencode" } },
   };
 }
 
@@ -298,9 +376,9 @@ export function resetFixtures(): void {
   screenState = makeScreens();
 }
 
-function findAgent(paneId: string): Agent | undefined {
+function findAgent(paneId: string): PaneAgent | undefined {
   for (const workspace of fleetState.workspaces)
-    for (const tab of workspace.tabs) for (const pane of tab.panes) if (pane.pane_id === paneId) return pane.agent ?? undefined;
+    for (const tab of workspace.tabs) for (const pane of tab.panes) if (pane.id === paneId) return pane.agent ?? undefined;
   return undefined;
 }
 
@@ -309,21 +387,21 @@ function notFound(target: string): never {
 }
 
 /** Applies a dialog key press to the fixture state, as the server would. */
-function pressKeys(target: string, body: SendKeysRequest): { sent: boolean } {
+function pressKeys(target: string, body: SendKeysRequest): KeysResponse {
   const state = screenState[target];
   const agent = findAgent(target);
   if (!state || !agent) notFound(target);
-  if (body.screen_hash !== state.screen.hash) {
+  if (body.screen_hash !== state.screen.screen_hash) {
     throw new ApiError(409, "CONFLICT", "The screen changed since you looked. It has been refreshed.");
   }
   if (state.after) {
     state.screen = state.after;
     state.after = undefined;
-    agent.agent_status = state.screen.status;
-    agent.has_dialog = state.screen.dialog !== null;
-    agent.state_change_seq += 1;
+    agent.status = state.screen.status;
+    agent.has_dialog = state.screen.dialog.present;
+    fleetState = refreshAgents(fleetState);
   }
-  return { sent: true };
+  return { sent: body.keys, pane_id: target, screen_hash: body.screen_hash };
 }
 
 /**

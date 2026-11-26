@@ -46,6 +46,22 @@ describe("DialogCard", () => {
     expect(await screen.findByText("Sent “1” to head-loss")).toBeInTheDocument();
   });
 
+  it("badges an option the server marked risky even when no client pattern matches", () => {
+    stubApi(() => undefined);
+    const marked = {
+      ...pushScreen,
+      dialog: { ...pushScreen.dialog, options: [{ key: "1", label: "Proceed", selected: true, warning: "bypasses permissions" }] },
+    };
+    renderWithClient(<DialogCard target="w3:p1" agentName="head-loss" screen={marked} onOpenTerminal={() => {}} />);
+    expect(screen.getByText("Risky").closest("button")).toHaveTextContent(/^1Proceed/);
+  });
+
+  it("shows the dialog-level warnings the server found", () => {
+    stubApi(() => undefined);
+    renderWithClient(<DialogCard target="w3:p1" agentName="head-loss" screen={pushScreen} onOpenTerminal={() => {}} />);
+    expect(screen.getByText(/mentions something risky: stops asking/)).toBeInTheDocument();
+  });
+
   it("offers only the terminal for a multi-question form", async () => {
     const user = userEvent.setup();
     stubApi(() => undefined);
@@ -65,7 +81,7 @@ describe("DialogCard conflict", () => {
     const user = userEvent.setup();
     const changed: AgentScreen = {
       ...pushScreen,
-      hash: "h-push-9",
+      screen_hash: "h-push-9",
       text: pushScreen.text.replace("git push -u origin feature/head-loss", "git push origin main"),
     };
     let current = pushScreen;
