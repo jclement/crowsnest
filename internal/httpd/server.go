@@ -24,6 +24,7 @@ import (
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
@@ -118,6 +119,8 @@ type Deps struct {
 	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
 	// answers 409 with the reason.
 	Updater Updater
+	// Instructions serves /instructions and /agents-instructions (DESIGN.md 21.3). Nil: 503.
+	Instructions *instructions.Service
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -209,6 +212,7 @@ func (s *Server) routes() http.Handler {
 	s.registerPushRoutes(mux)
 	s.registerSpendRoutes(mux)
 	s.registerAttachmentRoutes(mux)
+	s.registerInstructionRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)

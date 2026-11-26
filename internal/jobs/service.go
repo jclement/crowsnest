@@ -106,6 +106,18 @@ type Options struct {
 	// Attachments hands a job the files the human gave with it (internal/attach, wired in
 	// serve). Nil: a job given with attachments is refused.
 	Attachments BriefAttacher
+	// Instructions composes the instruction layers a job agent is started with (global, role,
+	// project; DESIGN.md 21.3) and records them. Nil: the bare role prompt, as before layers.
+	Instructions InstructionLayers
+}
+
+// InstructionLayers is what the launcher needs of internal/instructions, as an interface so that
+// package can import this one (it reads the built-in roles) without a cycle.
+type InstructionLayers interface {
+	// JobLayers returns the markdown that takes the place of the bare role prompt for job's
+	// agent: the global, role and project layers in that order. With record set it also records
+	// what the agent is being started with, for "instructions changed since start".
+	JobLayers(ctx context.Context, job Job, record bool) (string, error)
 }
 
 // BriefAttacher is what the jobs service needs of attachments (DESIGN.md 8.6): to check the

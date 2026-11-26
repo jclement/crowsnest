@@ -203,17 +203,22 @@ func newTender(cfg config.Config, client herdr.Client, db *store.Store, journalL
 // it created or holds that are still live. It answers only for the orchestrator's own pane.
 func standingContext(cfg config.Config, refs *jobRefs, questionService func() *questions.Service, jobService *jobs.Service) func(context.Context, string, string) string {
 	return func(ctx context.Context, pane, source string) string {
-		if refs.orchestrator == nil || refs.orchestrator.Status().PaneID != pane {
-			return ""
-		}
+		origin := "orchestrator"
 		var parts []string
-		if notes := handoffNotes(filepath.Join(cfg.StateDir, HandoffFile)); notes != "" {
-			parts = append(parts, notes)
+		switch {
+		case refs.orchestrator != nil && refs.orchestrator.Status().PaneID == pane:
+			if notes := handoffNotes(filepath.Join(cfg.StateDir, HandoffFile)); notes != "" {
+				parts = append(parts, notes)
+			}
+		case refs.projects != nil && refs.projects.leadInPane(pane) != "":
+			origin = refs.projects.leadInPane(pane) // a project's lead: the same, less the hand-over
+		default:
+			return ""
 		}
 		if open := openQuestions(ctx, questionService(), pane); open != "" {
 			parts = append(parts, open)
 		}
-		if live := liveJobs(ctx, jobService, pane); live != "" {
+		if live := liveJobs(ctx, jobService, pane, origin); live != "" {
 			parts = append(parts, live)
 		}
 		if len(parts) == 0 {
@@ -260,7 +265,7 @@ func openQuestions(ctx context.Context, service *questions.Service, pane string)
 	return "## Questions you asked that are still open\n\nThe answers arrive as `[crowsnest answer q_N]` messages.\n\n" + strings.Join(lines, "\n")
 }
 
-func liveJobs(ctx context.Context, service *jobs.Service, pane string) string {
+func liveJobs(ctx context.Context, service *jobs.Service, pane, origin string) string {
 	if service == nil {
 		return ""
 	}
@@ -271,7 +276,7 @@ func liveJobs(ctx context.Context, service *jobs.Service, pane string) string {
 	var lines []string
 	for _, job := range list {
 		mine := job.PaneID == pane
-		if !mine && job.Origin != "orchestrator" {
+		if !mine && job.Origin != origin {
 			continue
 		}
 		who := "created by you"

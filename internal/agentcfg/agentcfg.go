@@ -30,6 +30,8 @@ var Hooks = []struct {
 	// PostToolUse is not in DESIGN 6.3's first list: it is what tells the nudge budget that the
 	// agent made progress (a tool call), and gives "doing now" its fallback.
 	{"PostToolUse", "post-tool-use", 30},
+	// InstructionsLoaded reports each CLAUDE.md or rules file Claude loads (DESIGN.md 21.3).
+	{"InstructionsLoaded", "instructions-loaded", 10},
 }
 
 // ClaudeSettings is the --settings file. With executable and socket set it carries the

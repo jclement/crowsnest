@@ -15,6 +15,7 @@ import (
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
@@ -44,7 +45,7 @@ func claudeConfigDir(cfg config.Config) string {
 // startOrchestrator builds the orchestrator and the transcript manager, starts both running until
 // ctx ends, and returns them for the HTTP server. With --no-orchestrator the orchestrator reports
 // itself disabled and the conversations of other agents still work.
-func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, agentSocket string, talk *voice.Service, journalLog *journal.Journal, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
+func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, agentSocket string, talk *voice.Service, journalLog *journal.Journal, layers *instructions.Service, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
 	claudeDir := claudeConfigDir(cfg)
 	binDir, executable := "", ""
 	if path, err := os.Executable(); err == nil {
@@ -55,7 +56,24 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 	}
 	var manager *transcript.Manager
 	var replies *voice.ReplyWatcher // talk mode: speaks the orchestrator's SAY lines
+	// The orchestrator's CROWSNEST.md, then the human's global instruction layer (DESIGN.md 21.3),
+	// recorded so "instructions changed since start" works for it too.
+	render := func() (string, error) {
+		body, err := orch.RenderInstructions(orch.InstructionData{Session: cfg.Session, Dir: cfg.Dir, Version: version})
+		if err != nil || layers == nil {
+			return body, err
+		}
+		extra, _, err := layers.ForStandingAgent(ctx, orch.Name, 0, "")
+		if err != nil {
+			logger.Warn("composing the orchestrator's instruction layers", "err", err)
+		}
+		if extra != "" {
+			body += "\n\n" + extra
+		}
+		return body, nil
+	}
 	orchestrator := orch.New(orch.Options{
+		Render: render,
 		Client: client, KV: db, Hub: events, Journal: journalLog, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
 		StateDir: cfg.StateDir, Model: cfg.Model, PermissionMode: cfg.PermissionMode, Version: version,
 		RemoteControlName: orchestratorRemoteControl(cfg),

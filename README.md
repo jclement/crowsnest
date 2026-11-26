@@ -410,6 +410,14 @@ Roles are prompts: `lead`, `builder`, `reviewer` and `tester` are built in; a fi
 `~/.config/crowsnest/roles/<name>.md` adds a role or replaces a built-in one. The job protocol is
 appended to every role's prompt.
 
+Instruction layers: standing instructions you manage in the app, added to the prompt file of every
+agent crowsnest starts, in order global (every agent), role (the built-in roles, editable, with
+reset to the built-in text; a role file wins and shows read-only), project, then the job's brief.
+Each change is a revision (the newest 20 kept, any one restorable). Crowsnest never edits your
+`AGENTS.md`, `CLAUDE.md` or skills; it records which of those files Claude loaded (the
+`InstructionsLoaded` hook) by path only, and tells you when an agent's layers changed after it
+started (DESIGN.md 21.3).
+
 ## Scheduled work
 
 Periodic work is a markdown file in `<--dir>/tasks/` or `~/.config/crowsnest/tasks/` (the first
@@ -635,6 +643,9 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /jobs/{id}/message` | session | `{text, force_over_draft, attachments}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
 | `POST /jobs/{id}/cancel`, `/nudge`, `/resume` | session | Cancel (Esc to the agent, then `cancelled`; the pane stays), nudge by hand, or resume a stuck job (retry now after a limit, restart a gone agent, else nudge) |
 | `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
+| `GET /instructions`, `GET /instructions/{scope}/{key}` | session | Instruction layers: every layer with its source (`none`, `builtin`, `db`, `file`) and text; one layer with its revisions. The global layer's key is `-` |
+| `PUT /instructions/{scope}/{key}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` | session | `{body_md}` (at most 32 KB): a new revision; reset a role to its built-in; `{revision}`: that text again. `409` for a role that comes from a file |
+| `GET /agents-instructions/{subject}` | session | `j_<n>`, `orchestrator` or `lead:<slug>`: the layers it was started with, `changed` since, and the instruction files Claude loaded (paths only) |
 | `POST /voice/stt` | session | Talk mode. The body is one recording as MediaRecorder made it (`audio/webm`, `audio/mp4`, `audio/ogg`, …; up to five minutes: at most 8.2 MB, and it must arrive within 2 minutes) → `{text}`. 12 a minute per session (`429` with `Retry-After`); ElevenLabs failures are `502`/`503`/`422` with code `VOICE_UPSTREAM` and never its own error text |
 | `GET /voice/tts?text_id=` | session | The speech of a server-held text (a `say`, a SAY line, a read-aloud), streamed (`audio/mpeg`). `404` for an unknown or expired id (texts live an hour). 30 a minute per session; a replay comes from a cache |
 | `POST /voice/read` | session | `{question_id}` → `{text_id}`: the question's title and options, to play through `/voice/tts` |

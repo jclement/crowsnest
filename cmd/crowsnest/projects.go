@@ -18,6 +18,7 @@ import (
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
@@ -180,6 +181,43 @@ func (w *projectWiring) leadInstructions(session string, project projects.Projec
 		}
 	}
 	return body, nil
+}
+
+// subjectOf names the agent in a pane for the instruction records: "lead:<slug>" for a lead's
+// pane, "" for anything else (the agent socket then files it as the orchestrator's).
+func (w *projectWiring) subjectOf(_ context.Context, paneID string) string {
+	if leads := w.leads.Load(); leads != nil {
+		if lead := leads.ByPane(paneID); lead != nil {
+			return projects.Subject(lead.Project.Slug)
+		}
+	}
+	return ""
+}
+
+// leadInPane is the agent name of the lead in paneID, "" when none is there.
+func (w *projectWiring) leadInPane(paneID string) string {
+	if leads := w.leads.Load(); leads != nil {
+		if lead := leads.ByPane(paneID); lead != nil {
+			return lead.Agent.AgentName()
+		}
+	}
+	return ""
+}
+
+// useInstructions makes leads start with the human's global and project layers, recorded per
+// lead so "instructions changed since start" works for them as for jobs.
+func (w *projectWiring) useInstructions(layers *instructions.Service, logger *slog.Logger) {
+	if layers == nil {
+		return
+	}
+	extra := func(ctx context.Context, project projects.Project) string {
+		text, _, err := layers.ForStandingAgent(ctx, projects.Subject(project.Slug), project.ID, project.Name)
+		if err != nil {
+			logger.Warn("composing a lead's instruction layers", "project", project.Slug, "err", err)
+		}
+		return text
+	}
+	w.extra.Store(&extra)
 }
 
 // startLeads builds the lead manager, publishes `lead` events, and resumes the leads that were

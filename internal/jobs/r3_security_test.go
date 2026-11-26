@@ -270,7 +270,7 @@ func TestHeldApprovalsLeaveTheLiveCapForRealWork(t *testing.T) {
 func TestBriefIsNeverWrittenThroughALink(t *testing.T) {
 	r := newRig(t, nil)
 	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
-	path, err := r.svc.writeBrief(job.Job)
+	path, err := r.svc.writeBrief(context.Background(), job.Job)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestBriefIsNeverWrittenThroughALink(t *testing.T) {
 	if err := os.Symlink(victim, path); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.svc.writeBrief(job.Job); err != nil {
+	if _, err := r.svc.writeBrief(context.Background(), job.Job); err != nil {
 		t.Fatal(err)
 	}
 	if body, _ := os.ReadFile(victim); string(body) != "mine" {

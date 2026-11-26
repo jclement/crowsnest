@@ -49,6 +49,7 @@ import (
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
@@ -129,6 +130,9 @@ type Server struct {
 
 	attachments AgentAttacher
 	attachRoots func(ctx context.Context, caller questions.Caller) []string
+
+	instructions LoadedRecorder
+	subjectOf    func(ctx context.Context, paneID string) string
 }
 
 // ServerOptions configure a Server. Questions is required.
@@ -153,6 +157,17 @@ type ServerOptions struct {
 	// AttachRoots returns the directories a caller may attach files from: its working directory
 	// and its job directory (DESIGN.md 8.6). Nil or empty: the caller may attach nothing.
 	AttachRoots func(ctx context.Context, caller questions.Caller) []string
+	// Instructions records the instruction files agents report loading (the InstructionsLoaded
+	// hook, DESIGN.md 21.3). Nil: those hooks are accepted and dropped.
+	Instructions LoadedRecorder
+	// SubjectOf names the agent behind a pane whose token holds no job ("lead:<slug>" for a
+	// project lead). Nil, or "" from it: such a caller is the orchestrator.
+	SubjectOf func(ctx context.Context, paneID string) string
+}
+
+// LoadedRecorder is what the socket needs of internal/instructions.
+type LoadedRecorder interface {
+	RecordLoaded(ctx context.Context, subject string, input instructions.LoadedInput) error
 }
 
 // AgentAttacher is what the socket needs of internal/attach.
@@ -171,6 +186,7 @@ func NewServer(opts ServerOptions) *Server {
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext,
 		attachments: opts.Attachments, attachRoots: opts.AttachRoots,
+		instructions: opts.Instructions, subjectOf: opts.SubjectOf,
 		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
 		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
 		creates: ratelimit.New(createBurst, createRefill, opts.Now),

@@ -334,7 +334,9 @@ own work), `builder` (implements in a worktree, tests, reports evidence), `revie
 findings to a file, a different engine from the builder by default), `tester` (drives the real
 thing and reports what it saw). Four are embedded; files in `~/.config/crowsnest/roles/*.md` add
 or override. Every role prompt ends with the job protocol and the rule that an irreversible or
-expensive step is an `ask(wait=true)` first: that is the approval gate.
+expensive step is an `ask(wait=true)` first: that is the approval gate. Since the instruction
+layers (21.3) a built-in role's text can also be edited in the app and reset to the built-in; a
+file in the roles directory still wins.
 
 ### 6.7 Budgets and review gates (after the core)
 
@@ -1397,7 +1399,7 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`, and the instance's `name`, 7.10) |
 | `GET /setup`, `POST /setup` | First-run setup (4.14), unauthenticated: `{required, default_name?, min_password_length}`; `{token, username, password, name}` → `201` + session cookie, `403 BAD_TOKEN`, `400`, `429` + `Retry-After`, `410` once done. While setup waits every other `/api/` path is `403 SETUP_REQUIRED` (`503 STARTING` between completion and the full server) |
 | `GET /account`, `POST /account/password`, `PUT /account/name` | The Account sheet: `{username, source: database\|config\|none, name, name_managed, min_password_length}`; `{current_password, new_password}` (`403 WRONG_PASSWORD`, `409` for a configured login; signs every other session out and re-issues this one's cookie); `{name}` (`409` under `--name`). The name is live in `/auth/me` at once; push titles and the Remote Control name take it at the next start |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend`, `instructions` events (`instructions`: `{at}`, a layer changed, 21.3; `poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
@@ -1406,6 +1408,9 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, isolate?}`; `budget?` with M12) → `201` and the queued job; detail with `timeline` and `questions` (6.8) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
+| `GET /instructions` | Instruction layers (21.3): `{global: Layer, roles: [Layer], projects: [Layer], max_bytes}`; a `Layer` is `{scope, key, name, source: none\|builtin\|db\|file, effective_md, saved_md, builtin_md, file_path, editable, revision, updated_at, size}` |
+| `GET /instructions/{scope}/{key}`, `PUT` the same `{body_md}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` `{revision}` | One layer with its revisions `{layer: Layer, revisions: [{revision, body_md, deleted, created_at, size}]}` (newest first), which every write also answers. Key `-` is the global layer. `400` bad scope, key, body (over 32 KB, an empty role), `404` unknown role, project or revision, `409` a role that comes from a file. An `instructions` event (`{at}`) says a layer changed |
+| `GET /agents-instructions/{subject}` | `{subject, started_at, hash, layers: [{layer, scope, key, revision, source, size, hash}], changed, changes: [{layer, scope, key, was_source, now_source, was_revision, now_revision}], loaded: [{path, memory_type, load_reason, size, at}], skills_note}` for `j_<n>`, `orchestrator` or `lead:<slug>` (21.3) |
 | `GET /spend?from=&to=&group=job\|model\|day`, `GET /spend/summary` | Spend for a range of local days, grouped; today, this week and the orchestrator's line (7.11). Jobs carry `spend` on `/jobs` and `/jobs/{id}` (with `spend_turns` there) |
 | `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control` and `remote_control_note` (7.10) |
 | `GET /orchestrator/context`, `POST /orchestrator/compact` | The orchestrator's context size and upkeep `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}`; Compact now (409 when it cannot take it) (7.9) |
@@ -1500,6 +1505,9 @@ The client sends a resize first; the server starts the process on that first res
 - `attachments(id, name, type, size, sha256, has_thumb, origin, origin_pane, owner_kind, owner_id, role, ref, path, created_at, attached_at, released_at)` (migration `0010_attachments.sql`, 8.6): one row per upload or agent file; the bytes are `<data-dir>/attachments/<sha256>` (and `.thumb.jpg`); `owner_kind` is `''` (pending), `job`, `orchestrator`, `pane` or `question`; `role` is `brief`, `message`, `prompt`, `answer` (with `ref` the question), `ask` or `result`; `path` is the agent's copy
 - `schedules(id, name, every, after, run_as, project_id, body_md, dir, role, engine, created_at, updated_at)` (migration `0012_projects.sql`, 7.8): schedules made in the app; `name` unique and shared with task files (a file wins); `every`/`after` in the task-file grammar; `run_as` `poke` (to the orchestrator, `project_id` 0, or that project's lead) or `job` (`project_id` the job's project)
 - `schedule_runs(id, name, at, outcome, job_id)` (migration `0012_projects.sql`, 7.8): the run history of every scheduled task, file or app, keyed by name, the newest 20 per task kept
+- `instruction_layers(scope, key, body_md, revision, updated_at)` and `instruction_revisions(id, scope, key, revision, body_md, deleted, created_at)` (migration `0012_projects.sql`, 21.3): the human's text per layer, scope `global` (key `''`), `role` (the role name) or `project` (the project id in decimal); a row exists only while the text is in effect, and a reset or clear is a revision with `deleted = 1`. The newest 20 revisions per layer are kept
+- `agent_layers(subject, started_at, hash, layers_json)` (0012, 21.3): what an agent was last started with, replaced at every start: the manifest of its layers (scope, key, revision, source, size, sha256) and the sha256 of the composed text; `subject` is `j_<n>`, `orchestrator` or `lead:<slug>`
+- `agent_instructions(id, subject, session_id, at, path, memory_type, load_reason, size)` (0012, 21.3): the instruction files Claude reported loading (the `InstructionsLoaded` hook), paths and a stat's size only, at most 200 rows per subject
 - `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -2264,3 +2272,80 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
     or worries about jobs it did not start. It costs a turn each time.
   - The Jobs form has no model field; a job from the browser runs on Claude's default model
     (the API takes `model`). `e2e:claude` adds `haiku` to the browser's request.
+
+## 21. Projects, leads, instruction layers and app schedules
+
+### 21.3 Instruction layers
+
+**What it is.** Standing instructions the human manages in the app, which crowsnest adds to every
+agent it starts. Crowsnest does **not** edit the user's `AGENTS.md`, `CLAUDE.md`, rules or
+skills: those still load as Claude loads them. It injects its own layered markdown through the
+prompt file it already writes for each agent (`--append-system-prompt-file`, 6.2), so nothing
+lands in a repository or the user's own settings. `internal/instructions` owns the layering;
+the store keeps the text and its revisions (migration 0012, section 11).
+
+**Layers, in order:**
+
+1. **global**: every agent. Heading `## Instructions from the human (global)`.
+2. **role**: the job's role. The four embedded roles (`internal/jobs/roles/*.md`) become
+   editable copies with reset to the built-in. A role's text keeps its own heading (`# Role:
+   builder`); one saved without a heading gets one.
+3. **project**: the job's project (`jobs.project_id`). Heading `## Instructions from the human
+   (project <name>)`.
+4. **job**: the brief. It already travels as `brief.md` (6.10), so it is listed in the manifest
+   (size and hash) and never inlined.
+
+Empty layers are left out of the text. A job agent's prompt file is the composed layers followed
+by the job protocol; a Codex agent, which has no prompt file, gets the same text at the top of
+its brief file. Without the service wired (`jobs.Options.Instructions` nil) the prompt is the
+bare role prompt, as before. A failure to read the layers fails the start rather than starting
+an agent without the human's standing instructions.
+
+**Where a role's text comes from**, strongest first: a file `~/.config/crowsnest/roles/<name>.md`
+(source `file`), the text saved in the app (`db`), the built-in (`builtin`). The file wins
+because it is the older, explicit mechanism: someone who keeps roles in a dotfiles repo must not
+have them silently shadowed by an edit made on a phone. A file role is shown read-only "from
+file" with its path; saving it is refused (`409`), and text saved before the file appeared is
+kept (shown as `saved_md`) and applies again if the file goes. Files are re-read at every
+listing and every start, so an edited file applies at the next start without a restart. Only
+existing roles are editable (built-in or file); new roles are still made as files.
+
+**Revisions.** Every save is a revision; the newest 20 per layer are kept. Restore saves the old
+text again as a new revision (history only grows). Reset (roles) and clearing a global or
+project layer (saving empty text) are revisions marked `deleted`; restoring one resets or clears
+again. A body is at most 32 KB, the role file cap. An empty role is refused: Reset is how to go
+back to the built-in. Every change publishes an `instructions` SSE event `{at}`.
+
+**What an agent was started with.** At every start (restarts included) the manifest is recorded
+in `agent_layers` under the agent's subject: `j_<n>`, `orchestrator`, `lead:<slug>`. It lists
+every layer that applies, empty ones too, each with scope, key, revision, source, size and the
+sha256 of its text, plus the sha256 of the composed text. "Instructions changed since start"
+compares each recorded layer's hash with the layer as it applies now, so a global text written
+after the start, a role reset, or an edited role file all show; a save that leaves the text as
+it was does not. Nothing is done about a change: the agent keeps what it started with until its
+next start, and the UI says so.
+
+**Standing agents.** `Service.ForStandingAgent(ctx, subject, projectID, projectName)` composes
+and records the layers for the orchestrator (`"orchestrator"`, project 0) or a project lead
+(`"lead:<slug>"`): global, then the project's. No role layer: a standing agent's own template
+(7.1) already says what it is. The orchestrator wiring calls it at each start and appends the
+text to the agent's prompt file.
+
+**What Claude loaded.** The `InstructionsLoaded` hook (Claude Code fires it when a `CLAUDE.md` or
+`.claude/rules/*.md` file loads, at session start and lazily; input `file_path`, `memory_type`
+`User|Project|Local|Managed`, `load_reason` `session_start|nested_traversal|path_glob_match|include|compact`,
+plus `globs`, `trigger_file_path`, `parent_file_path`; no decision control, exit code ignored,
+runs async) is in every agent's settings as `crowsnest hook instructions-loaded`. The agent
+socket records it in `agent_instructions`: subject the token's job, else the token's pane's
+standing agent (`agentapi.ServerOptions.SubjectOf`, "" meaning the orchestrator), and nothing at
+all for a caller with no token. The size comes from a stat; the file is never read. The hook
+always answers empty and 200: a lost record costs one line in a view.
+
+**Viewer rule.** Crowsnest serves the text of its own layers only: what is saved in the app, the
+built-in roles, and role override files (they are crowsnest's own configuration, and their text
+is what it injects). The user's own instruction files are listed by path, memory type, reason and
+size, and never served: their text is theirs and never leaves the machine through crowsnest.
+
+**Skills and slash commands are not listed.** No hook input carries them (SessionStart has no such
+field) and Claude Code has no cheap way to ask; `GET /agents-instructions/{subject}` says so in
+`skills_note`.

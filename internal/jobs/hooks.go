@@ -47,6 +47,9 @@ const (
 	HookPermissionDenied = "permission-denied"
 	HookSessionEnd       = "session-end"
 	HookPostToolUse      = "post-tool-use"
+	// HookInstructionsLoaded is recorded by the agent socket (internal/instructions), not
+	// here: it says which instruction files Claude loaded, nothing about the job's state.
+	HookInstructionsLoaded = "instructions-loaded"
 )
 
 // maxDenials is how many auto-mode denials in a row make a job stuck: permissions.
@@ -70,7 +73,7 @@ type HookReply struct {
 // its pane, whose running job is then used. A hook for no job is a no-op (and Stop is allowed).
 func (s *Service) HandleHook(ctx context.Context, event, jobID, callerPane string, input HookInput) (HookReply, error) {
 	id := s.resolveHookJob(ctx, jobID, callerPane)
-	if id == "" {
+	if id == "" || event == HookInstructionsLoaded {
 		return HookReply{}, nil
 	}
 	switch event {
