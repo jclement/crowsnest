@@ -94,8 +94,9 @@ description = "The done-gate: lint and test"
 depends = ["lint", "test"]
 
 [tasks.e2e]
-description = "Playwright end-to-end suite against crowsnest --demo"
-run = "echo 'e2e: not built until M9 (DESIGN.md section 17)' >&2; exit 1"
+description = "The hermetic browser suite: Playwright against the built binary in --demo (a fresh instance per test; the auth specs with the login on), desktop Chromium 1440x900 plus 375x812 Chromium and WebKit. Report in web/playwright-report"
+depends = ["build"]
+run = "npm --prefix web run e2e"
 
 [tasks."e2e:real"]
 description = "Build, then Playwright against the real binary (web/e2e/real): --demo fleet, and terminals on a throwaway herdr session. Needs herdr"
@@ -103,6 +104,11 @@ run = [
   "mise run build",
   "npm --prefix web run e2e:real",
 ]
+
+[tasks."e2e:claude"]
+description = "Real Claude through the browser (opt-in, costs a few cents, haiku): jobs given from the Jobs box run to done, a question answered in the Inbox, a nudge on the timeline, a chat reply, `crowsnest ask --wait` from a pane. Throwaway crowsnest-test-* herdr session, your real HOME for Claude's login"
+depends = ["build"]
+run = "npm --prefix web run e2e:claude"
 
 [tasks.screenshots]
 description = "Fleet view with fixtures at 375 and 1440 px, light and dark, into web/screenshots; plus the 375 px layout checks"
@@ -124,7 +130,7 @@ depends = ["build"]
 run = "npm --prefix web run screenshots:chat"
 
 [tasks."e2e:voice"]
-description = "Talk mode against the built binary in --demo mode and a fake ElevenLabs (never the real one), with Chromium's fake microphone: hold to talk, transcript sent, SAY reply played; plus Chat-with-talk screenshots at 375 and 1440 px into web/screenshots"
+description = "Talk mode alone (it is also part of e2e): the built binary in --demo mode and a fake ElevenLabs (never the real one), with Chromium's fake microphone: hold to talk, transcript sent, SAY reply played; plus Chat-with-talk screenshots at 375 and 1440 px into web/screenshots"
 depends = ["build"]
 run = "npm --prefix web run e2e:voice"
 
