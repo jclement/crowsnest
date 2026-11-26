@@ -33,6 +33,9 @@ type CreateInput struct {
 	// Attachments are uploads (a_…) given with the job from the browser: copied into the job's
 	// inbox and listed in its brief. Agents cannot pass them (CreateForAgent refuses).
 	Attachments []string `json:"attachments,omitempty"`
+	// ProjectID files the job under a project (0: unfiled). Recorded as given: a scheduled job
+	// task's project was checked when the schedule was loaded; the projects work validates it.
+	ProjectID int64 `json:"project_id,omitempty"`
 }
 
 // maxTitleRunes caps the title taken from the brief's first line.
@@ -172,7 +175,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	}
 	return store.JobRecord{
 		Title: titleOf(brief), BriefMD: brief, DoneWhen: strings.TrimSpace(input.DoneWhen), Role: role, Dir: dir,
-		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent,
+		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent, ProjectID: input.ProjectID,
 		State: string(StateQueued), VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: s.opts.Now(),
 	}, nil
 }

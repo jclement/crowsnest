@@ -1,11 +1,13 @@
 // Package schedule is scheduled work (DESIGN.md 7.8): markdown task files with `every:`
 // frontmatter that the poke precheck turns into poke reasons when they are due, or that are
 // started as crowsnest jobs (`as: job`). The file format is the front door's (claude-agent's
-// frontdoor/tasks/*.md), so a task written for it runs here unchanged.
+// frontdoor/tasks/*.md), so a task written for it runs here unchanged. Schedules made in the app
+// (app.go) become the same Task, so the due rules, stamps and runs have one shape for both.
 //
 // The pieces: this file parses one task file; due.go decides, as a pure function of the task,
-// its stamps and the time, whether a task is due and when it next will be; service.go reads the
-// task directories on every tick, keeps the stamps in kv and creates the jobs.
+// its stamps and the time, whether a task is due and when it next will be; app.go validates,
+// stores and materialises app schedules; service.go reads the task directories and the app
+// schedules on every tick, keeps the stamps in kv, records the runs and creates the jobs.
 //
 // A task file:
 //
@@ -15,6 +17,7 @@
 //	as: job             # optional: run as a crowsnest job instead of a poke reason
 //	dir: ~/Work/thing   # as: job only: where the job runs (none: the orchestrator holds it)
 //	role: builder       # as: job only: the job's role
+//	project: crowsnest  # optional: a project's slug; a poke goes to that project's lead, a job joins it
 //	---
 //	# What to do
 //	The body is the instruction: the orchestrator (or the job's agent) reads the file and does it.
@@ -64,18 +67,44 @@ const (
 	RunAsJob  RunAs = "job"  // a crowsnest job, with the full supervisor
 )
 
-// Task is one parsed task file.
+// Task is one parsed task file or app schedule.
 type Task struct {
 	Name   string     `json:"name"`   // the file name without .md
-	Path   string     `json:"path"`   // absolute path of the file
-	Origin string     `json:"origin"` // "dir" (the orchestrator's) or "user" (~/.config/crowsnest)
+	Path   string     `json:"path"`   // absolute path of the file (an app poke task: its materialised copy)
+	Origin string     `json:"origin"` // "dir" (the orchestrator's), "user" (~/.config/crowsnest) or "app"
 	Every  Cadence    `json:"-"`
 	After  *TimeOfDay `json:"-"`
 	As     RunAs      `json:"as"`
 	Dir    string     `json:"dir,omitempty"`
 	Role   string     `json:"role,omitempty"`
-	Title  string     `json:"title"` // the body's first heading or line, for the UI
-	Body   string     `json:"-"`
+	Engine string     `json:"engine,omitempty"` // as: job, app schedules only: claude or codex ("" the default)
+	// Project is the `project:` slug a task file names ("" none). Load resolves it to ProjectID;
+	// an app schedule carries ProjectID and Load fills Project from it, for display.
+	Project   string `json:"project,omitempty"`
+	ProjectID int64  `json:"project_id"`
+	Title     string `json:"title"` // the body's first heading or line, for the UI
+	Body      string `json:"-"`
+}
+
+// Target is who carries out a task.
+type Target string
+
+// Targets.
+const (
+	TargetOrchestrator Target = "orchestrator" // a poke to the orchestrator
+	TargetLead         Target = "lead"         // a poke to the lead of the task's project
+	TargetJob          Target = "job"          // a crowsnest job
+)
+
+// Target says who carries the task out: a job, a project's lead, or the orchestrator.
+func (t Task) Target() Target {
+	switch {
+	case t.As == RunAsJob:
+		return TargetJob
+	case t.ProjectID != 0:
+		return TargetLead
+	}
+	return TargetOrchestrator
 }
 
 // namePattern is the front door's task-name rule: a name is also a key and a reason line.
@@ -83,6 +112,9 @@ var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // rolePattern bounds a role named in a task (the jobs service validates it properly).
 var rolePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+
+// slugPattern bounds a project slug named in a task (Load checks that the project exists).
+var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 // maxTaskBytes bounds a task file: it is an instruction, not a document.
 const maxTaskBytes = 64 << 10
@@ -161,10 +193,16 @@ func frontLine(front map[string]string, line string) error {
 func (t *Task) apply(front map[string]string) error {
 	for key := range front {
 		switch key {
-		case "every", "after", "as", "dir", "role":
+		case "every", "after", "as", "dir", "role", "project":
 		default:
-			return fmt.Errorf("unknown frontmatter key %q; a task takes every, after, as, dir and role", key)
+			return fmt.Errorf("unknown frontmatter key %q; a task takes every, after, as, dir, role and project", key)
 		}
+	}
+	if slug := front["project"]; slug != "" {
+		if !slugPattern.MatchString(slug) {
+			return fmt.Errorf("project: %q is not a project slug (lower-case letters, digits and -)", slug)
+		}
+		t.Project = slug
 	}
 	every, err := ParseCadence(front["every"])
 	if err != nil {
