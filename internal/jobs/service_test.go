@@ -263,6 +263,18 @@ func TestJobAgentsCarryTheirTokens(t *testing.T) {
 	if info, _ := os.Stat(tokenFile); info.Mode().Perm() != 0o600 {
 		t.Fatalf("token file mode %v", info.Mode().Perm())
 	}
+	if info, _ := os.Stat(filepath.Dir(tokenFile)); info.Mode().Perm() != 0o700 {
+		t.Fatalf("job directory mode %v", info.Mode().Perm())
+	}
+	// R2-L1: once the job is finished, none of its tokens identify anyone.
+	if _, err := r.svc.Done(ctx, job.ID, DoneInput{ResultMD: "ok", Verified: []string{}, NotVerified: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{r.fake.PaneEnv(job.PaneID)[agentid.EnvToken], mcp.Servers["crowsnest"].Env[agentid.EnvToken], fromFile} {
+		if _, ok, _ := registry.Resolve(ctx, token); ok {
+			t.Fatal("a finished job's token still resolves")
+		}
+	}
 }
 
 func TestLaunchInAnOpenWorkspaceUsesANewTab(t *testing.T) {

@@ -128,6 +128,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	identity := agentid.New(db, nil)
+	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
 	journalLog := journal.New(db, events, logger, nil)
 	refs := &jobRefs{}

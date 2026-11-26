@@ -264,6 +264,9 @@ func (s *Service) mutate(ctx context.Context, id string, fn func(record *store.J
 	if err := s.save(ctx, record, c); err != nil {
 		return Job{}, err
 	}
+	if State(record.State).Terminal() && !State(before.State).Terminal() {
+		s.revokeTokensLocked(ctx, record) // R2-L1 (tokens.go)
+	}
 	job := s.toJob(record, open)
 	changeName := "updated"
 	if before.State != record.State {
