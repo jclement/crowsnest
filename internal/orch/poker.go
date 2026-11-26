@@ -320,7 +320,7 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 	input := p.precheckInput(now, manual)
 	input.Tasks, input.RideAlong = p.dueTasks(ctx, now)
 	due := Precheck(input)
-	result := PokeResult{Outcome: OutcomeNothing, Reasons: ReasonTexts(due.Reasons), Manual: manual, At: now}
+	result := PokeResult{Outcome: OutcomeNothing, Reasons: ReasonTexts(due.Reasons), Manual: manual, At: now, Agent: status.Name}
 	if len(due.Reasons) == 0 {
 		if manual {
 			result.Outcome, result.Reason = OutcomeSkipped, "nothing is due"
