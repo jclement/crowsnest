@@ -10,7 +10,6 @@ export function PaletteButton({ className }: { className?: string }) {
     <button
       type="button"
       onClick={openPalette}
-      aria-label="Search or run a command"
       aria-keyshortcuts={chord === "⌘K" ? "Meta+K" : "Control+K"}
       title={`Search or run a command (${chord})`}
       className={cn(
@@ -19,8 +18,9 @@ export function PaletteButton({ className }: { className?: string }) {
       )}
     >
       <Search className="h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5" aria-hidden />
-      <span className="hidden truncate text-xs sm:inline">Search or run…</span>
-      <kbd className="ml-auto hidden rounded border border-chrome-border px-1 font-mono text-2xs sm:inline">{chord}</kbd>
+      {/* The visible words are the name (label-in-name), read out on a phone too. */}
+      <span className="sr-only truncate text-xs sm:not-sr-only">Search or run…</span>
+      <kbd aria-hidden className="ml-auto hidden rounded border border-chrome-border px-1 font-mono text-2xs sm:inline">{chord}</kbd>
     </button>
   );
 }
