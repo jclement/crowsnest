@@ -1,13 +1,16 @@
-// ChatMenu: the Chat view's menu: Poke now (the result comes back as a toast: sent, or skipped
-// and why), the Journal, show or hide thinking, Restart (same conversation, --resume), and New
-// conversation (fresh session). Both relaunches ask for confirmation first, in a Sheet, because
-// they interrupt whatever the orchestrator is doing.
-import { BellRing, Brain, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
+// ChatMenu: the Chat view's menu: the orchestrator's context size (tokens and a bar against the
+// compaction threshold, DESIGN.md 7.9), Poke now (the result comes back as a toast: sent, or
+// skipped and why), Compact now, the Journal and the Schedule, show or hide thinking, Restart
+// (same conversation, --resume), and New conversation (fresh session). Both relaunches ask for
+// confirmation first, in a Sheet, because they interrupt whatever the orchestrator is doing.
+import { BellRing, Brain, CalendarClock, Minimize2, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useOrchestratorAction } from "../../lib/conversation-queries";
 import { pokeToast } from "../../lib/journal";
-import { usePokeNow } from "../../lib/queries";
+import { useCompactNow, useOrchestratorContext, usePokeNow } from "../../lib/queries";
+import { contextLine, contextPercent, type ContextInfo } from "../../lib/schedule";
 import { JournalSheet } from "../journal/JournalPanel";
+import { ScheduleSheet } from "../schedule/SchedulePanel";
 import { Button, IconButton } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
@@ -39,8 +42,11 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
   const [confirming, setConfirming] = useState<Action | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const action = useOrchestratorAction();
   const poke = usePokeNow();
+  const compact = useCompactNow();
+  const context = useOrchestratorContext(open && canRelaunch);
   const toast = useToast();
 
   useEffect(() => {
@@ -74,6 +80,13 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
     });
   };
 
+  const compactNow = () => {
+    compact
+      .mutateAsync()
+      .then(() => toast.show({ tone: "success", title: "Compacting the orchestrator" }))
+      .catch((error: Error) => toast.show({ tone: "warning", title: "Not compacted", description: error.message }));
+  };
+
   const pick = (fn: () => void) => () => {
     setOpen(false);
     fn();
@@ -83,7 +96,13 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
     <div ref={rootRef} className="relative">
       <IconButton icon={MoreVertical} label="Conversation menu" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} />
       {open && (
-        <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl">
+        <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl">
+          {canRelaunch && context.data && <ContextUsage info={context.data} />}
+          {canRelaunch && (
+            <MenuItem icon={<Minimize2 className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(compactNow)} disabled={compact.isPending}>
+              {compact.isPending ? "Compacting…" : "Compact now"}
+            </MenuItem>
+          )}
           {canRelaunch && (
             <MenuItem icon={<BellRing className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(pokeNow)} disabled={poke.isPending}>
               {poke.isPending ? "Poking…" : "Poke now"}
@@ -91,6 +110,9 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
           )}
           <MenuItem icon={<NotebookText className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(() => setJournalOpen(true))}>
             Journal
+          </MenuItem>
+          <MenuItem icon={<CalendarClock className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(() => setScheduleOpen(true))}>
+            Schedule
           </MenuItem>
           <MenuItem icon={<Brain className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(onToggleThinking)}>
             {showThinking ? "Hide thinking" : "Show thinking"}
@@ -108,6 +130,7 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
         </div>
       )}
       <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
+      <ScheduleSheet open={scheduleOpen} onClose={() => setScheduleOpen(false)} />
       <Sheet open={confirming !== null} onClose={() => setConfirming(null)} title={confirming ? confirmations[confirming].title : ""} size="md">
         {confirming && (
           <div className="flex flex-col gap-4 p-4">
@@ -139,5 +162,27 @@ function MenuItem({ icon, onClick, disabled, children }: { icon: ReactNode; onCl
       {icon}
       {children}
     </button>
+  );
+}
+
+/** The orchestrator's context size: a line of text and a bar, amber past 80 % of the threshold. */
+export function ContextUsage({ info }: { info: ContextInfo }) {
+  const percent = contextPercent(info);
+  return (
+    <div className="border-b border-border px-3 pb-2 pt-1" aria-label="Context usage">
+      <div className="text-xs text-muted">Context: {contextLine(info)}</div>
+      {percent !== null && (
+        <div
+          role="meter"
+          aria-label="Context used"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-sunken"
+        >
+          <div className={`h-full ${percent >= 80 ? "bg-warning" : "bg-accent"}`} style={{ width: `${percent}%` }} />
+        </div>
+      )}
+    </div>
   );
 }

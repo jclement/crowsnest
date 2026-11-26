@@ -87,7 +87,7 @@ test.describe("real herdr: fleet and Inbox", () => {
     await page.goto(`${instance.baseURL}/inbox`);
     const row = page.getByRole("list", { name: "Needs you" }).getByRole("button", { name: /is waiting at a dialog/ });
     await expect(row).toBeVisible({ timeout: 20_000 });
-    await expect(page).toHaveTitle(/^\(1\) crowsnest$/);
+    await expect(page).toHaveTitle(/^\(1\) crowsnest/);
     await row.click();
     const card = page.getByRole("region", { name: "Selected item" }).getByLabel(/^Dialog from /);
     await expect(card.getByLabel("Screen text")).toContainText("Do you want to proceed?");

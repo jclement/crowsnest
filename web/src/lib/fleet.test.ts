@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeFleet } from "./fixtures";
-import { allAgents, cleanTitle, cwdTail, filterFleet, findAgent, needsYou, needsYouCount, sortFleet } from "./fleet";
+import { allAgents, cleanTitle, cwdTail, filterFleet, findAgent, needsYou, needsYouCount, pageTitle, sortFleet } from "./fleet";
 import type { Workspace } from "./types";
 
 const labels = (workspaces: Workspace[]) => workspaces.map((workspace) => workspace.label);
@@ -112,5 +112,13 @@ describe("helpers", () => {
   it("strips Claude's spinner glyph from titles", () => {
     expect(cleanTitle("✳ Reviewing M2")).toBe("Reviewing M2");
     expect(cleanTitle("codex: waiting")).toBe("codex: waiting");
+  });
+});
+
+describe("pageTitle", () => {
+  it("names the instance and counts what needs you", () => {
+    expect(pageTitle(0)).toBe("crowsnest");
+    expect(pageTitle(0, "quark")).toBe("crowsnest · quark");
+    expect(pageTitle(3, "quark")).toBe("(3) crowsnest · quark");
   });
 });

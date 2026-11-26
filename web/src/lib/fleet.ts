@@ -118,3 +118,9 @@ export function cwdTail(path: string, segments = 2): string {
 export function cleanTitle(title: string): string {
   return title.replace(/^[\s✳✻✽✶·*⠁-⣿]+/u, "").trim();
 }
+
+/** The tab title: the count of what needs the human, then crowsnest and the instance's name. */
+export function pageTitle(needsYou: number, name?: string): string {
+  const base = name ? `crowsnest · ${name}` : "crowsnest";
+  return needsYou > 0 ? `(${needsYou}) ${base}` : base;
+}
