@@ -1,8 +1,9 @@
 // A fake ElevenLabs API for the voice Playwright spec (test harness only; crowsnest is pointed at
-// it with CROWSNEST_ELEVENLABS_URL). It answers the two endpoints crowsnest calls:
+// it with CROWSNEST_ELEVENLABS_URL). It answers the endpoints crowsnest calls:
 //
 //   POST /v1/speech-to-text                    multipart (model_id, file) → {"text": TRANSCRIPT}
-//   POST /v1/text-to-speech/{voice}/stream     JSON {text, model_id} → a short WAV tone
+//   POST /v1/text-to-speech/{voice}/stream     JSON {text, model_id, voice_settings} → a short WAV tone
+//   GET  /v2/voices                            two voices, in the real API's shape
 //
 // and refuses any call without the expected xi-api-key. GET /__requests lists what it received
 // (paths, the key header, the uploaded file's type and size, TTS text), so the spec can assert
@@ -80,6 +81,14 @@ createServer((req, res) => {
     }
     if (req.method === "POST" && req.url === "/v1/speech-to-text") {
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ language_code: "en", text: transcript, words: [] }));
+      return;
+    }
+    if (req.method === "GET" && (req.url ?? "").startsWith("/v2/voices")) {
+      const voices = [
+        { voice_id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel", category: "premade", labels: { accent: "american", gender: "female", age: "young" } },
+        { voice_id: "nPczCjzI2devNBz1zQrb", name: "Brian", category: "premade", labels: { accent: "american", gender: "male", age: "middle_aged" } },
+      ];
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ voices, has_more: false, next_page_token: null }));
       return;
     }
     if (req.method === "POST" && /^\/v1\/text-to-speech\/[^/]+\/stream/.test(req.url ?? "")) {
