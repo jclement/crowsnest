@@ -48,7 +48,7 @@ var shellNames = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": 
 // findShellPane returns a pane at a bare shell for the orchestrator: the pane it last ran in,
 // else a shell pane of the orchestrator workspace, else a new tab there, else a new workspace.
 func (o *Orchestrator) findShellPane(ctx context.Context) (string, error) {
-	if paneID, err := o.opts.KV.GetKV(ctx, kvPaneID); err == nil && o.atShell(ctx, paneID) {
+	if paneID, err := o.opts.KV.GetKV(ctx, o.kvKey(kvPaneID)); err == nil && o.atShell(ctx, paneID) {
 		return paneID, nil
 	}
 	workspaceID, err := o.findWorkspace(ctx)
@@ -75,7 +75,7 @@ func (o *Orchestrator) findWorkspace(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("listing workspaces: %w", err)
 	}
 	for _, workspace := range workspaces {
-		if workspace.Label == WorkspaceLabel {
+		if workspace.Label == o.workspaceLabel() {
 			return workspace.ID, nil
 		}
 	}
@@ -113,7 +113,7 @@ func (o *Orchestrator) createPane(ctx context.Context, workspaceID string) (stri
 	var paneID string
 	if workspaceID != "" {
 		created, err := o.opts.Client.TabCreate(ctx, herdr.TabCreateParams{
-			WorkspaceID: workspaceID, Label: WorkspaceLabel, Cwd: o.opts.Dir, Env: env,
+			WorkspaceID: workspaceID, Label: o.workspaceLabel(), Cwd: o.opts.Dir, Env: env,
 		})
 		if err != nil {
 			return "", fmt.Errorf("creating a tab for the orchestrator: %w", err)
@@ -121,7 +121,7 @@ func (o *Orchestrator) createPane(ctx context.Context, workspaceID string) (stri
 		paneID = created.RootPane.ID
 	} else {
 		created, err := o.opts.Client.WorkspaceCreate(ctx, herdr.WorkspaceCreateParams{
-			Label: WorkspaceLabel, Cwd: o.opts.Dir, Env: env,
+			Label: o.workspaceLabel(), Cwd: o.opts.Dir, Env: env,
 		})
 		if err != nil {
 			return "", fmt.Errorf("creating the orchestrator workspace: %w", err)
@@ -210,7 +210,7 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 	prior := o.knownSession
 	o.mu.Unlock()
 	o.opts.Logger.Info("starting the orchestrator", "pane", paneID, "session", sessionID, "resume", resuming)
-	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: Name, Kind: "claude", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
+	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: o.agentName(), Kind: "claude", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
 	if err == nil {
 		agent, err = o.waitForLaunch(ctx, agent)
 	}
@@ -325,7 +325,7 @@ func (o *Orchestrator) waitForLaunch(ctx context.Context, agent herdr.Agent) (he
 // chooseSession returns the session id to start with, and whether that is a resume: the stored
 // one when asked to resume and its transcript exists, else a new one.
 func (o *Orchestrator) chooseSession(ctx context.Context, resume bool) (string, bool) {
-	stored, err := o.opts.KV.GetKV(ctx, kvSessionID)
+	stored, err := o.opts.KV.GetKV(ctx, o.kvKey(kvSessionID))
 	if resume && err == nil && stored != "" && o.opts.ClaudeConfigDir != "" {
 		if _, locateErr := transcript.Locate(o.opts.ClaudeConfigDir, o.opts.Dir, stored); locateErr == nil {
 			return stored, true
@@ -378,7 +378,11 @@ func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFile
 		instructions: filepath.Join(o.opts.StateDir, InstructionsFile),
 		settings:     filepath.Join(o.opts.StateDir, SettingsFile),
 	}
-	body, err := o.Instructions()
+	render := o.Instructions
+	if o.opts.Render != nil {
+		render = o.opts.Render
+	}
+	body, err := render()
 	if err != nil {
 		return startFiles{}, err
 	}
@@ -398,6 +402,9 @@ func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFile
 	}
 	if err := writeJSONFile(files.settings, o.claudeSettings(tokenFile)); err != nil {
 		return startFiles{}, err
+	}
+	if o.opts.OnStart != nil {
+		o.opts.OnStart(ctx)
 	}
 	if o.mcpEnabled() {
 		files.mcpConfig = filepath.Join(o.opts.StateDir, MCPConfigFile)

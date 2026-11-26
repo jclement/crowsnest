@@ -119,7 +119,7 @@ func (o *Orchestrator) relaunchLocked(ctx context.Context, resume bool) (Status,
 		}
 	}
 	if !resume {
-		if err := o.opts.KV.DeleteKV(ctx, kvSessionID); err != nil {
+		if err := o.opts.KV.DeleteKV(ctx, o.kvKey(kvSessionID)); err != nil {
 			o.opts.Logger.Warn("forgetting the orchestrator session id", "err", err)
 		}
 		o.update(func(s *Status) { s.SessionID = "" })
