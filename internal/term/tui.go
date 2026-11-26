@@ -21,6 +21,7 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 // tuiTerm is the terminal type the PTY advertises; xterm.js speaks it.
@@ -31,16 +32,17 @@ type tuiBridge struct {
 	*stream
 	binary, session string
 
-	// mu guards pty. Write and Resize hold it shared while they use the PTY, and the PTY is
-	// closed (and set to nil) only under the exclusive lock, so neither can use a closed
-	// descriptor.
-	mu  sync.RWMutex
+	// mu guards the pty field only, and is never held across I/O: Write and Resize copy the
+	// pointer and let go. The PTY master is non-blocking and owned by Go's poller (pollable),
+	// so closing it while a write is blocked on it wakes that write with an error, and an
+	// *os.File never hands a closed descriptor to a syscall. That is what lets readOutput close
+	// the PTY behind a write stuck on a client that stopped reading (R1-C01 on Linux, where
+	// such a write is not woken by the client dying, only by the close).
+	mu  sync.Mutex
 	pty *os.File
-	// procMu guards cmd and the start transition, and is never held across I/O. Close takes
-	// only procMu: a write blocked on a client that stopped reading holds mu shared, and Close
-	// must still be able to signal that client (R1-C01). Once it dies the blocked write fails.
-	// started is atomic so Write can report "not started" without taking procMu (Start holds
-	// procMu while it takes mu; the reverse order would deadlock).
+	// procMu guards cmd and the start transition, and is never held across I/O, so Close can
+	// always signal the client. started is atomic so Write can report "not started" without
+	// taking procMu.
 	procMu  sync.Mutex
 	cmd     *exec.Cmd
 	exited  chan struct{}
@@ -67,8 +69,14 @@ func (b *tuiBridge) Start(cols, rows int) error {
 	b.started.Store(true)
 	cmd := exec.Command(b.binary, "--session", b.session) //nolint:gosec // fixed argv; session name is validated at startup
 	cmd.Env = childEnv(tuiTerm)
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}) //nolint:gosec // ValidSize bounds both
+	started, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}) //nolint:gosec // ValidSize bounds both
 	if err != nil {
+		return fmt.Errorf("starting the herdr client in a terminal: %w", err)
+	}
+	ptmx, err := pollable(started)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		return fmt.Errorf("starting the herdr client in a terminal: %w", err)
 	}
 	b.cmd = cmd
@@ -77,6 +85,35 @@ func (b *tuiBridge) Start(cols, rows int) error {
 	b.mu.Unlock()
 	go b.readOutput(cmd, ptmx)
 	return nil
+}
+
+// pollable returns the PTY master as a non-blocking file in Go's poller, and closes the one it
+// was given. creack/pty hands back a blocking descriptor (it calls Fd, which switches a file to
+// blocking mode), and a blocking write to a client that stopped reading cannot be woken by
+// anything on Linux: not the client's death, not closing the file. A poller-owned file wakes
+// its blocked calls when it is closed. The descriptor is duplicated (close-on-exec) because
+// the original *os.File would close it again when collected.
+func pollable(ptmx *os.File) (*os.File, error) {
+	defer func() { _ = ptmx.Close() }()
+	raw, err := ptmx.SyscallConn()
+	if err != nil {
+		return nil, fmt.Errorf("reaching the terminal's descriptor: %w", err)
+	}
+	dup := -1
+	var dupErr error
+	if err := raw.Control(func(fd uintptr) {
+		dup, dupErr = unix.FcntlInt(fd, unix.F_DUPFD_CLOEXEC, 0)
+	}); err != nil {
+		return nil, fmt.Errorf("reaching the terminal's descriptor: %w", err)
+	}
+	if dupErr != nil {
+		return nil, fmt.Errorf("duplicating the terminal's descriptor: %w", dupErr)
+	}
+	if err := unix.SetNonblock(dup, true); err != nil {
+		_ = unix.Close(dup)
+		return nil, fmt.Errorf("making the terminal non-blocking: %w", err)
+	}
+	return os.NewFile(uintptr(dup), ptmx.Name()), nil // non-blocking, so NewFile puts it in the poller
 }
 
 // readOutput copies PTY output to Output until the client exits. After Close it keeps reading
@@ -117,14 +154,21 @@ func clientExitReason(err error) string {
 	}
 }
 
-// Write sends keystrokes to the client.
+// file is the PTY, or nil before Start and after the client exited.
+func (b *tuiBridge) file() *os.File {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.pty
+}
+
+// Write sends keystrokes to the client. A write blocked on a client that stopped reading ends
+// with an error once readOutput closes the PTY (see pollable).
 func (b *tuiBridge) Write(p []byte) (int, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	if b.pty == nil {
+	ptmx := b.file()
+	if ptmx == nil {
 		return 0, b.notRunning()
 	}
-	n, err := b.pty.Write(p)
+	n, err := ptmx.Write(p)
 	if err != nil {
 		return n, fmt.Errorf("writing to the herdr client: %w", err)
 	}
@@ -136,13 +180,23 @@ func (b *tuiBridge) Resize(cols, rows int) error {
 	if err := ValidSize(cols, rows); err != nil {
 		return err
 	}
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	if b.pty == nil {
+	ptmx := b.file()
+	if ptmx == nil {
 		return b.notRunning()
 	}
-	if err := pty.Setsize(b.pty, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}); err != nil { //nolint:gosec // ValidSize bounds both
+	// Through SyscallConn rather than pty.Setsize: that calls Fd, which would put the PTY back
+	// in blocking mode.
+	raw, err := ptmx.SyscallConn()
+	if err != nil {
 		return fmt.Errorf("resizing the terminal: %w", err)
+	}
+	size := &unix.Winsize{Col: uint16(cols), Row: uint16(rows)} //nolint:gosec // ValidSize bounds both
+	var setErr error
+	if err := raw.Control(func(fd uintptr) { setErr = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, size) }); err != nil { //nolint:gosec // a descriptor fits in an int
+		return fmt.Errorf("resizing the terminal: %w", err)
+	}
+	if setErr != nil {
+		return fmt.Errorf("resizing the terminal: %w", setErr)
 	}
 	return nil
 }
