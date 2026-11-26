@@ -35,9 +35,13 @@ export function SpendButton({ onOpen }: { onOpen: () => void }) {
   const data = summary.data;
   const money = (row: SpendRow | undefined) => (!row ? "…" : row.cost_usd === null ? formatTokens(row.total_tokens) + " tok" : formatUSD(row.cost_usd));
   return (
-    <Button compact variant="ghost" icon={Coins} onClick={onOpen} title={`Estimated spend. ${SPEND_NOTE}`} aria-label={`Spend: today ${money(data?.today)}, this week ${money(data?.week)} (estimates)`}>
+    <Button compact variant="ghost" icon={Coins} onClick={onOpen} title={`Estimated spend. ${SPEND_NOTE}`}>
+      {/* The accessible name starts and ends with words only a screen reader needs, and contains the
+          visible text whole (axe's label-in-name rule). */}
       <span className="font-mono">
+        <span className="sr-only">Spend: </span>
         {money(data?.today)} <span className="text-muted">today</span> · {money(data?.week)} <span className="text-muted">wk</span>
+        <span className="sr-only"> (estimates)</span>
       </span>
     </Button>
   );

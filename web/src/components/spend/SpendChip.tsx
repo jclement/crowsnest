@@ -11,7 +11,9 @@ export function SpendChip({ spend }: { spend: SpendSummary | undefined }) {
   return (
     <Chip mono title={chip.title}>
       <Coins className="h-3 w-3" aria-hidden />
-      <span aria-label={`Spend: ${chip.title}`}>{chip.text}</span>
+      <span className="sr-only">Spend: </span>
+      <span data-testid="spend-chip">{chip.text}</span>
+      <span className="sr-only"> (estimate)</span>
     </Chip>
   );
 }

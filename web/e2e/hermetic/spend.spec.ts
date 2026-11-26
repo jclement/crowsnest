@@ -21,10 +21,10 @@ const money = /\$\d+\.\d{2,3}/;
 test("cards carry an estimated cost; the job held by the orchestrator does not", async ({ page }) => {
   await openBoard(page);
   const running = page.getByRole("region", { name: "In progress" }).getByRole("button", { name: /Add retry back-off/ });
-  await expect(running.getByLabel(/^Spend: .*est\./)).toHaveText(money);
+  await expect(running.getByTestId("spend-chip")).toHaveText(money);
   const held = page.getByRole("button", { name: /Decide the release date/ });
   await expect(held).toBeVisible();
-  await expect(held.getByLabel(/^Spend:/)).toHaveCount(0);
+  await expect(held.getByTestId("spend-chip")).toHaveCount(0);
 });
 
 test("a job's Spend section breaks the cost down, charts its calls and says it is an estimate", async ({ page }, testInfo) => {
@@ -47,7 +47,7 @@ test("a job's Spend section breaks the cost down, charts its calls and says it i
 
 test("the header's totals open a breakdown by job, model and day that sorts and exports CSV", async ({ page }) => {
   await openBoard(page);
-  const button = page.getByRole("button", { name: /^Spend: today \$.*, this week \$.* \(estimates\)$/ });
+  const button = page.getByRole("button", { name: /^Spend: \$\S+ today · \$\S+ wk \(estimates\)$/ });
   await expect(button).toBeVisible();
   await button.click();
   const sheet = page.getByRole("dialog", { name: "Spend (estimated)" });
@@ -116,7 +116,7 @@ for (const size of [
     if (phone) await expectNoSidewaysScroll(page);
     await page.screenshot({ path: `screenshots/spend-job-${size.name}.png`, animations: "disabled", caret: "hide" });
     if (phone) await page.getByRole("button", { name: "Close" }).click();
-    await page.getByRole("button", { name: /^Spend: today/ }).click();
+    await page.getByRole("button", { name: /^Spend: .* today/ }).click();
     const sheet = page.getByRole("dialog", { name: "Spend (estimated)" });
     await expect(sheet.getByRole("table")).toBeVisible();
     if (phone) await expectNoSidewaysScroll(page);

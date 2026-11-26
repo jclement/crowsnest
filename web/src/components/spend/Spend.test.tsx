@@ -13,7 +13,7 @@ describe("SpendChip", () => {
   it("shows the estimated cost, tokens for an unknown model, and nothing before any call", () => {
     const { rerender } = render(<SpendChip spend={makeSpend()} />);
     expect(screen.getByText("$1.20")).toBeInTheDocument();
-    expect(screen.getByLabelText(/Spend: .*est\..*not billed per token/)).toBeInTheDocument();
+    expect(screen.getByTitle(/est\..*not billed per token/)).toHaveTextContent("Spend: $1.20 (estimate)");
     rerender(<SpendChip spend={makeSpend({ cost_usd: null, total_tokens: 12_000 })} />);
     expect(screen.getByText("12k tok")).toBeInTheDocument();
     rerender(<SpendChip spend={makeSpend({ turns: 0, total_tokens: 0 })} />);
@@ -81,7 +81,7 @@ describe("the Spend sheet", () => {
         <SpendPanel />
       </>,
     );
-    expect(await screen.findByRole("button", { name: /Spend: today \$1\.50, this week \$12\.44/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Spend: ?\$1\.50 today · \$12\.44 wk ?\(estimates\)$/ })).toBeInTheDocument();
     expect(await screen.findByText("≥ $3.69 est.")).toBeInTheDocument();
     expect(calls.some((call) => call.path === "/spend?group=job&from=2026-11-23&to=2026-11-26")).toBe(true);
     await userEvent.click(screen.getByRole("tab", { name: "By model" }));
