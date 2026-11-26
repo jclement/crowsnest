@@ -35,3 +35,12 @@ export function applyTheme(choice: ThemeChoice): void {
   const dark = choice === "dark" || (choice === "system" && systemPrefersDark());
   document.documentElement.classList.toggle("dark", dark);
 }
+
+/** The window event setTheme fires, so the header toggle follows a change made elsewhere. */
+export const THEME_EVENT = "crowsnest-theme";
+
+/** Applies a choice and tells the header toggle (used by the command palette). */
+export function setTheme(choice: ThemeChoice): void {
+  applyTheme(choice);
+  window.dispatchEvent(new CustomEvent<ThemeChoice>(THEME_EVENT, { detail: choice }));
+}

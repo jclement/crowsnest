@@ -8,6 +8,8 @@ export interface ToastInput {
   tone?: ToastTone;
   title: string;
   description?: string;
+  /** One follow-up, shown as a link-style button ("Open j_12"); the toast closes when it is used. */
+  action?: { label: string; onClick: () => void };
 }
 
 export interface ToastApi {

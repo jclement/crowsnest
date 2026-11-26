@@ -25,12 +25,14 @@ interface AgentDetailProps {
   onClose?: () => void;
   /** Hide the name row (the mobile sheet shows it in its own header). */
   hideHeading?: boolean;
+  /** Which tab to open on (the URL's &view=); by default Conversation when there is a transcript. */
+  initialView?: DetailView;
 }
 
-export function AgentDetail({ agent, workspace, tab, onClose, hideHeading }: AgentDetailProps) {
+export function AgentDetail({ agent, workspace, tab, onClose, hideHeading, initialView }: AgentDetailProps) {
   const target = agent.pane_id;
   const screen = useAgentScreen(target);
-  const [view, setView] = useState<DetailView>(agent.has_transcript ? "conversation" : "terminal");
+  const [view, setView] = useState<DetailView>(initialView ?? (agent.has_transcript ? "conversation" : "terminal"));
   const showDialog = !!screen.data && (screen.data.dialog.present || agent.needs_you);
   const tabsId = `agent-${target.replace(/[^a-zA-Z0-9]/g, "-")}`;
 

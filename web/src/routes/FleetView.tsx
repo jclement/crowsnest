@@ -18,7 +18,7 @@ import { useFleet } from "../lib/queries";
 
 export function FleetView() {
   const fleet = useFleet();
-  const { agent: selected } = useSearch({ strict: false }) as { agent?: string };
+  const { agent: selected, view } = useSearch({ strict: false }) as { agent?: string; view?: "conversation" | "terminal" };
   const navigate = useNavigate();
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const select = (paneId: string | undefined) => void navigate({ to: "/fleet", search: { agent: paneId } });
@@ -54,8 +54,9 @@ export function FleetView() {
   const close = desktop ? () => select(undefined) : undefined;
   const detail = found ? (
     <AgentDetail
-      key={found.agent.pane_id}
+      key={`${found.agent.pane_id}:${view ?? ""}`}
       agent={found.agent}
+      initialView={view}
       workspace={found.workspace}
       tab={found.tab}
       onClose={close}

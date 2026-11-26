@@ -63,6 +63,18 @@ function Toast({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => void }
       <div className="min-w-0 flex-1 py-0.5">
         <p className="text-xs font-medium text-heading">{toast.title}</p>
         {toast.description && <p className="mt-0.5 text-xs text-muted">{toast.description}</p>}
+        {toast.action && (
+          <button
+            type="button"
+            onClick={() => {
+              toast.action?.onClick();
+              onDismiss();
+            }}
+            className="-ml-1 mt-0.5 inline-flex min-h-11 items-center rounded px-1 text-xs font-medium text-accent underline-offset-2 hover:underline md:min-h-6"
+          >
+            {toast.action.label}
+          </button>
+        )}
       </div>
       <button
         type="button"
