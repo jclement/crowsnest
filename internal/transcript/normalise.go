@@ -25,15 +25,28 @@ import (
 
 // record is the part of a transcript line the normaliser reads. Every other field is ignored.
 type record struct {
-	Type        string    `json:"type"`
-	UUID        string    `json:"uuid"`
-	IsSidechain bool      `json:"isSidechain"`
-	IsMeta      bool      `json:"isMeta"`
-	Timestamp   time.Time `json:"timestamp"`
-	Message     *struct {
+	Type             string    `json:"type"`
+	Subtype          string    `json:"subtype"` // system records: compact_boundary
+	UUID             string    `json:"uuid"`
+	IsSidechain      bool      `json:"isSidechain"`
+	IsMeta           bool      `json:"isMeta"`
+	IsCompactSummary bool      `json:"isCompactSummary"` // the summary a compaction starts the conversation with
+	Timestamp        time.Time `json:"timestamp"`
+	CompactMetadata  *struct {
+		PostTokens int `json:"postTokens"`
+	} `json:"compactMetadata"`
+	Message *struct {
 		ID      string          `json:"id"`
 		Content json.RawMessage `json:"content"`
+		Usage   *usageRecord    `json:"usage"`
 	} `json:"message"`
+}
+
+// usageRecord is an assistant message's token usage: what the call read is the context size.
+type usageRecord struct {
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
 // block is one content block of a user or assistant message.
@@ -55,7 +68,28 @@ type Normaliser struct {
 	tools    map[string]Message // tool_use id → its card, kept so a result can complete it
 	lastText *Message           // the assistant text message the next text block may extend
 	lastMsg  string             // message.id lastText belongs to
+	usage    Usage              // context size and the human's last word, as read so far
 }
+
+// Usage is what the transcript says about the conversation's size and the human's presence
+// (DESIGN.md 7.9): read by the orchestrator's upkeep to decide on compaction and the daily new
+// conversation.
+type Usage struct {
+	// Tokens is the context size now: the latest call's input (fresh, cache-created and
+	// cache-read tokens), or what a compaction left (compactMetadata.postTokens). Known is false
+	// before the first reading and right after a compaction that did not record its size.
+	Tokens int       `json:"tokens"`
+	Known  bool      `json:"known"`
+	At     time.Time `json:"at,omitzero"` // when Tokens was read
+	// CompactedAt is the last compaction boundary (automatic or /compact).
+	CompactedAt time.Time `json:"compacted_at,omitzero"`
+	// HumanAt is when someone last typed to the agent: a Chat prompt or a voice message, not a
+	// poke, an answer, a command or anything else crowsnest typed.
+	HumanAt time.Time `json:"human_at,omitzero"`
+}
+
+// Usage returns what has been read so far.
+func (n *Normaliser) Usage() Usage { return n.usage }
 
 // NewNormaliser returns a normaliser at the start of a transcript.
 func NewNormaliser() *Normaliser {
@@ -70,16 +104,55 @@ func (n *Normaliser) Line(line []byte) []Message {
 		return nil
 	}
 	var rec record
-	if err := json.Unmarshal(line, &rec); err != nil || rec.Message == nil || rec.IsSidechain || rec.IsMeta {
+	if err := json.Unmarshal(line, &rec); err != nil || rec.IsSidechain {
+		return nil
+	}
+	n.track(rec)
+	if rec.Message == nil || rec.IsMeta {
 		return nil
 	}
 	switch rec.Type {
 	case "user":
-		return n.user(rec)
+		messages := n.user(rec)
+		n.trackHuman(rec, messages)
+		return messages
 	case "assistant":
 		return n.assistant(rec)
 	}
 	return nil
+}
+
+// track follows the context size: each assistant call's usage, and compaction boundaries.
+func (n *Normaliser) track(rec record) {
+	switch {
+	case rec.Type == "system" && rec.Subtype == "compact_boundary":
+		n.usage.CompactedAt = rec.Timestamp
+		n.usage.Tokens, n.usage.Known, n.usage.At = 0, false, rec.Timestamp
+		if rec.CompactMetadata != nil && rec.CompactMetadata.PostTokens > 0 {
+			n.usage.Tokens, n.usage.Known = rec.CompactMetadata.PostTokens, true
+		}
+	case rec.Type == "assistant" && rec.Message != nil && rec.Message.Usage != nil:
+		u := rec.Message.Usage
+		n.usage.Tokens = u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+		n.usage.Known, n.usage.At = true, rec.Timestamp
+	}
+}
+
+// trackHuman notes a user message someone typed (untagged or voice, and not one of crowsnest's
+// own bracketed lines, which are typed by the server).
+func (n *Normaliser) trackHuman(rec record, messages []Message) {
+	if rec.IsCompactSummary {
+		return
+	}
+	for _, msg := range messages {
+		if msg.Kind != KindUser {
+			continue
+		}
+		human := msg.Tag == TagVoice || (msg.Tag == "" && !strings.HasPrefix(msg.Text, "[crowsnest "))
+		if human && rec.Timestamp.After(n.usage.HumanAt) {
+			n.usage.HumanAt = rec.Timestamp
+		}
+	}
 }
 
 // ---- User records --------------------------------------------------------------------

@@ -122,6 +122,7 @@ func (t *Tailer) consume(data []byte) bool {
 			changed = t.conv.Apply(upserts) || changed
 		}
 	}
+	t.conv.SetUsage(t.norm.Usage())
 	return changed
 }
 

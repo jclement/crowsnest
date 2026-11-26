@@ -109,6 +109,16 @@ func (m *Manager) Messages(ctx context.Context, target, after string, limit int)
 	return w.conv.Page(after, limit), nil
 }
 
+// Usage is the context size of target's conversation as last read (see Usage). It starts
+// following the conversation if nobody was, like Messages, but does not wait for a poll.
+func (m *Manager) Usage(ctx context.Context, target string) (Usage, error) {
+	w, err := m.watcherFor(ctx, target, false)
+	if err != nil {
+		return Usage{}, err
+	}
+	return w.conv.Usage(), nil
+}
+
 // Pin follows target's conversation for as long as the manager runs (the orchestrator's), so
 // `message` events flow even when no browser has asked for it yet. Pinning a target again after
 // it moved to another pane moves the pin; the old pane's conversation is then unpinned and is
