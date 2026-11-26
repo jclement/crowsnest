@@ -32,15 +32,17 @@ export function AnswerForm({ question, onAnswered }: AnswerFormProps) {
   const submit = (keys: string[]) => {
     if (!canSubmit(question, keys, note)) return;
     setError(null);
-    answer.mutate(buildAnswer(question, keys, note), {
-      onSuccess: () => {
+    // mutateAsync rather than mutate's own callbacks: the hook awaits a refetch that replaces this
+    // component (see DialogCard), and React Query drops an unmounted caller's callbacks (M9).
+    answer.mutateAsync(buildAnswer(question, keys, note)).then(
+      () => {
         toast.show({ tone: "success", title: `Answered ${question.id}`, description: question.title });
         onAnswered?.();
       },
-      onError: (failure) => {
-        setError(failure instanceof ApiError && failure.status === 409 ? "Someone already answered this, or it expired." : failure.message);
+      (failure: unknown) => {
+        setError(failure instanceof ApiError && failure.status === 409 ? "Someone already answered this, or it expired." : failure instanceof Error ? failure.message : String(failure));
       },
-    });
+    );
   };
   const toggle = (key: string) => setPicked((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
 

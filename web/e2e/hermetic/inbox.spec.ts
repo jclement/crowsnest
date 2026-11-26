@@ -16,10 +16,14 @@ async function openItem(page: Page, testInfo: TestInfo, id: string) {
   return detailRegion(page, testInfo, "Selected item");
 }
 
-/** Waits for an answered question's outcome; on a phone the sheet may close, so open it again. */
+/**
+ * Waits for an answered question's outcome. On a phone the sheet closes after an answer (M9 bug:
+ * it stayed open now and then, because the close was dropped with the unmounted form), so the
+ * question is opened again to read its outcome.
+ */
 async function expectAnswered(page: Page, testInfo: TestInfo, id: string, summary: string | RegExp) {
   if (isPhone(testInfo)) {
-    await expect.poll(async () => ((await (await page.request.get(`/api/v1/questions/${id}`)).json()) as { data: { status: string } }).data.status).not.toBe("open");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.goto(`/inbox?q=${id}`);
   }
   await expect(detailRegion(page, testInfo, "Selected item").getByRole("region", { name: "Outcome" })).toContainText(summary, { timeout: 10_000 });

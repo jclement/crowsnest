@@ -25,7 +25,8 @@ async function roundTrip(page: Page, text: string) {
   await page.getByRole("textbox", { name: /Message to the orchestrator/ }).fill(text);
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByTestId("chat-state")).toHaveText("Working");
-  await expect(replies).toHaveCount(before + 1, { timeout: 15_000 });
+  // At least one more: a fresh demo may also be answering the answer it was typed at start-up.
+  await expect.poll(() => replies.count(), { timeout: 15_000 }).toBeGreaterThan(before);
   await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 10_000 });
 }
 

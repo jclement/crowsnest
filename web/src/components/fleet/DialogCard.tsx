@@ -35,17 +35,18 @@ export function DialogCard({ target, agentName, screen, onOpenTerminal }: Dialog
 
   const press = (option: DialogOption) => {
     setConflict(false);
-    sendKeys.mutate(
-      { keys: [option.key], screen_hash: screen.screen_hash },
-      {
-        onSuccess: () => toast.show({ tone: "success", title: `Sent “${option.key}” to ${agentName}`, description: option.label }),
-        onError: (error) => {
-          if (error instanceof ApiError && error.status === 409) {
-            setConflict(true);
-            return;
-          }
-          toast.show({ tone: "danger", title: "Answer not sent", description: error.message });
-        },
+    // mutateAsync, not mutate's own callbacks: the hook refetches the fleet before those run, and
+    // an answered dialog leaves the fleet's needs-you list, which unmounts this card, and React
+    // Query drops the callbacks of an unmounted caller. The confirmation was lost every time the
+    // dialog cleared quickly (found by the M9 fixtures run). A promise settles regardless.
+    sendKeys.mutateAsync({ keys: [option.key], screen_hash: screen.screen_hash }).then(
+      () => toast.show({ tone: "success", title: `Sent “${option.key}” to ${agentName}`, description: option.label }),
+      (error: unknown) => {
+        if (error instanceof ApiError && error.status === 409) {
+          setConflict(true);
+          return;
+        }
+        toast.show({ tone: "danger", title: "Answer not sent", description: error instanceof Error ? error.message : String(error) });
       },
     );
   };

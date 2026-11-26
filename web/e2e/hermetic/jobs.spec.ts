@@ -131,6 +131,8 @@ test("a job waiting on a question is answered inline and goes back to running", 
   const question = detail.getByRole("article", { name: "Ship v0.2 on Friday?" });
   await question.getByRole("textbox", { name: /Note/ }).fill("Friday, after the docs pass");
   await question.getByRole("button", { name: /Friday/ }).click();
+  // The confirmation survives the form being replaced by the answer (M9 bug: it was dropped).
+  await expect(page.getByText("Answered q_8")).toBeVisible();
   await expect(detail.getByText("Running", { exact: true }).first()).toBeVisible({ timeout: 10_000 });
   await expect(detail.getByRole("alert")).toHaveCount(0);
   await expect(detail.getByText(/q_8 Ship v0\.2 on Friday\? → Friday/)).toBeVisible();
