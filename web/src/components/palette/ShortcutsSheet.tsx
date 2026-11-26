@@ -10,6 +10,7 @@ interface Shortcut {
 
 function sections(mac: boolean): Array<{ title: string; shortcuts: Shortcut[] }> {
   const mod = mac ? "⌘" : "Ctrl";
+  const talkChord = mac ? "⌥" : "Ctrl";
   return [
     {
       title: "Anywhere",
@@ -36,7 +37,8 @@ function sections(mac: boolean): Array<{ title: string; shortcuts: Shortcut[] }>
         { keys: [`${mod} ↵`], what: "Jobs: give the job in the text box" },
         { keys: ["↵"], what: "Chat: send (Shift ↵ for a new line), from a wide screen" },
         { keys: ["/"], what: "Fleet: filter the agents" },
-        { keys: ["Space"], what: "Chat with talk on: hold to talk, tap to lock" },
+        { keys: ["Space"], what: "Chat: hold to talk, let go to send (outside a text field; a quick tap does nothing)" },
+        { keys: [`${talkChord} Space`], what: "Chat, in the message box: hold to talk" },
         { keys: ["esc"], what: "Close a sheet or menu; cancel a recording" },
         { keys: ["←", "→"], what: "Move between tabs" },
       ],

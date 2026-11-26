@@ -352,6 +352,27 @@ test("Voice sheet: the account's voices, a preview, and a saved voice and speed 
   await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.playbackRate)).toBe(1.25);
 });
 
+// ---- The command palette ----------------------------------------------------------------------
+
+test("the palette turns speak mode on and off and opens the Voice sheet", async ({ page, browserName }) => {
+  chromiumOnly(browserName);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const toggle = page.getByTestId("speak-toggle");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  const palette = async (query: string) => {
+    await page.getByRole("button", { name: "Search or run…" }).click();
+    await page.keyboard.type(query);
+    await page.keyboard.press("Enter");
+  };
+  await palette("speak replies");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await palette("speak replies");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await palette("voice settings");
+  await expect(page.getByRole("dialog", { name: "Voice" }).getByRole("combobox", { name: "Voice" })).toBeVisible();
+});
+
 // ---- Screenshots -------------------------------------------------------------------------------
 
 for (const size of [

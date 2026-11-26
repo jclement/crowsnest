@@ -1,6 +1,8 @@
 // The command palette's owner: the global shortcuts (lib/hotkeys.ts: ⌘K / Ctrl K, ?, g j…), the
 // open state, focus coming back to where it was on close, the recents list, and the sheets the
-// palette can open (shortcuts, journal, notifications). AppFrame mounts it once around the views.
+// palette can open (shortcuts, journal, notifications, voice). AppFrame mounts it once around the
+// views. With voice on (an ElevenLabs key) the palette also offers "Speak replies: on/off", wired
+// to lib/voice/speak.ts, and "Voice settings".
 //
 // The key listener sits on the window in the capture phase, so a terminal (xterm stops the
 // events it handles) or a view's own handler never sees the chord first.
@@ -11,6 +13,9 @@ import { chordLabel, focusContext, hotkeyFor, initialSequence, isMacPlatform, ty
 import { loadRecents, pushRecent, saveRecents, type PaletteSheet } from "../../lib/palette";
 import { JournalSheet } from "../journal/JournalPanel";
 import { NotificationSettings } from "../push/NotificationSettings";
+import { VoiceSettingsSheet } from "../voice/VoiceSettings";
+import { useMe } from "../../lib/queries";
+import { useSpeakMode } from "../../lib/voice/speak";
 import { CommandPalette } from "./CommandPalette";
 import { PaletteContext, type PaletteApi } from "./palette-context";
 import { ShortcutsSheet } from "./ShortcutsSheet";
@@ -29,6 +34,9 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
     openRef.current = open;
   }, [open]);
   const navigate = useNavigate();
+  const voice = useMe().data?.features.voice ?? false;
+  const [speakOn, setSpeak] = useSpeakMode();
+  const speak = useMemo(() => (voice ? { on: speakOn } : null), [voice, speakOn]);
 
   const openPalette = useCallback(() => {
     if (openRef.current) {
@@ -87,7 +95,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
     };
   }, [open]);
 
-  const run = useRunCommand({ openSheet: setSheet, signOut: onSignOut });
+  const run = useRunCommand({ openSheet: setSheet, signOut: onSignOut, setSpeak });
   const onRan = useCallback((itemId: string) => {
     setRecents((current) => {
       const next = pushRecent(current, itemId);
@@ -102,11 +110,12 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
     <PaletteContext.Provider value={api}>
       {children}
       {open && (
-        <CommandPalette inputRef={inputRef} onClose={closePalette} run={run} recents={recents} onRan={onRan} mac={mac} speak={null} voiceSettings={false} />
+        <CommandPalette inputRef={inputRef} onClose={closePalette} run={run} recents={recents} onRan={onRan} mac={mac} speak={speak} voiceSettings={voice} />
       )}
       <ShortcutsSheet open={sheet === "shortcuts"} onClose={() => setSheet(null)} mac={mac} />
       <JournalSheet open={sheet === "journal"} onClose={() => setSheet(null)} />
       <NotificationSettings open={sheet === "notifications"} onClose={() => setSheet(null)} />
+      {voice && <VoiceSettingsSheet open={sheet === "voice"} onClose={() => setSheet(null)} />}
     </PaletteContext.Provider>
   );
 }
