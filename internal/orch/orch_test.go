@@ -321,3 +321,27 @@ func TestLingeringAgentRecordCountsAsGone(t *testing.T) {
 		t.Fatalf("new conversation over a lingering record: %+v, %v, starts %d", fresh, err, len(f.Starts()))
 	}
 }
+
+func TestRunFollowsFleetEvents(t *testing.T) {
+	f := fake.New()
+	events := hub.New()
+	rig := newRig(t, f, func(o *Options) { o.Hub, o.WatchInterval = events, time.Hour })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go rig.orch.Run(ctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for rig.orch.Status().State != StateIdle {
+		if time.Now().After(deadline) {
+			t.Fatalf("never started: %+v", rig.orch.Status())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = f.SetStatus(Name, herdr.StatusWorking)
+	events.Publish(hub.Event{Type: "fleet", Data: "changed"})
+	for rig.orch.Status().State != StateWorking {
+		if time.Now().After(deadline) {
+			t.Fatalf("a fleet event did not refresh the status (the watch tick is an hour): %+v", rig.orch.Status())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

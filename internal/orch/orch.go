@@ -170,12 +170,54 @@ func (o *Orchestrator) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(o.opts.WatchInterval)
 	defer ticker.Stop()
+	fleetChanged := o.fleetEvents(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			o.Watch(ctx)
+		case <-fleetChanged:
+			o.Watch(ctx) // herdr reported a change; follow it now rather than at the next tick
+		}
+	}
+}
+
+// fleetEvents returns a channel that receives whenever the fleet cache publishes a change, so
+// the status follows herdr's own state-change events. Nil (never ready) without a hub. A
+// subscription the hub closes (it fell behind) is simply renewed.
+func (o *Orchestrator) fleetEvents(ctx context.Context) <-chan struct{} {
+	if o.opts.Hub == nil {
+		return nil
+	}
+	changed := make(chan struct{}, 1)
+	go func() {
+		for ctx.Err() == nil {
+			sub := o.opts.Hub.Subscribe(0)
+			forwardFleet(ctx, sub, changed)
+			sub.Close()
+			time.Sleep(100 * time.Millisecond) // a closed hub must not spin this loop
+		}
+	}()
+	return changed
+}
+
+func forwardFleet(ctx context.Context, sub *hub.Subscription, changed chan<- struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-sub.Events():
+			if !ok {
+				return
+			}
+			if event.Type != "fleet" {
+				continue
+			}
+			select {
+			case changed <- struct{}{}:
+			default: // a check is already pending
+			}
 		}
 	}
 }

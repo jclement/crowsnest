@@ -387,6 +387,8 @@ Claude Code 2.1.332 by `mise run test:claude`):
   launch (`/clear`).
 - **States** (`GET /orchestrator`, `orchestrator` events): `idle` (herdr idle or done),
   `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed`, `disabled`.
+- **Watch**: every 2 s, and at once whenever the fleet cache publishes a `fleet` event (herdr's
+  own state-change events), so the Chat status chip follows the agent without a tick of lag.
 - **Restart budget**: at most 3 automatic restarts an hour, then `failed` until a manual Restart
   (which also clears the budget). Restart and New send Esc if a dialog is up, then `/exit`, wait
   15 s for the shell, then Ctrl+C twice and wait again.
