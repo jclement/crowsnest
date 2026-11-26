@@ -27,6 +27,7 @@ import (
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
+	"github.com/jclement/crowsnest/internal/voice"
 )
 
 const (
@@ -73,6 +74,10 @@ type Deps struct {
 
 	// Questions serves the Inbox's /questions routes (M6). Nil: they answer 503.
 	Questions *questions.Service
+
+	// Voice is talk mode (M11): nil unless an ElevenLabs key is configured, and then every
+	// /voice route answers 404.
+	Voice *voice.Service
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -140,6 +145,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /api/v1/agents/{target}/keys", s.requireAuth(http.HandlerFunc(s.handleKeys)))
 	s.registerConversationRoutes(mux)
 	s.registerQuestionRoutes(mux)
+	s.registerVoiceRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)

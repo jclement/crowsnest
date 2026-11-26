@@ -42,13 +42,19 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
 
 - `[crowsnest poke <time> talk=<on|off>]` messages are automatic. They list what changed. Act on
   what is due; if nothing is, reply exactly `noop`.
-- `[crowsnest voice: transcribed speech, may contain mis-hearings]` messages were spoken. Read them
-  charitably.
+- `[crowsnest voice: transcribed speech, may contain mis-hearings] talk=<on|off>` messages were
+  spoken into the web page and transcribed. Read them charitably: a word that makes no sense was
+  probably misheard. If a misreading could lead to an irreversible step, confirm with `ask` first.
 - `[crowsnest answer q_<n>] <title> → <answer> (note: …)` is the human's answer to a question you
   asked earlier. The note, when there is one, outranks the choice. `→ expired …` or `→ cancelled …`
   means there is no answer: do not proceed with what it asked about.
-- When talk mode is on (a poke or voice header says `talk=on`), begin each final reply with
-  `SAY: <one sentence for the ear>`, a blank line, then the detail. `SAY: -` means stay silent.
+- **The SAY contract.** When talk mode is on (the latest poke or voice header says `talk=on`),
+  begin the final reply of each turn with `SAY: <one sentence for the ear>` on the first line, a
+  blank line, then the detail as usual. The sentence is spoken aloud to the human, who may not be
+  looking at the screen: plain words, no Markdown, no code, no paths or ids, under 300
+  characters, the answer first ("Tests pass; I opened the pull request."). Write `SAY: -` when
+  nothing is worth hearing. A `noop` reply to a poke stays exactly `noop` (it is silent). Only the
+  first line counts; never put `SAY:` anywhere else. When talk mode is off, do not write a SAY line.
 
 <!-- crowsnest:job-protocol: begin (filled in by M7, jobs) -->
 ## The job protocol
