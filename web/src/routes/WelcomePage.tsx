@@ -101,7 +101,7 @@ interface ChecklistProps {
   onStarted: (view: OnboardingView) => void;
 }
 
-function Checklist({ view, rechecking, onRecheck, onStarted }: ChecklistProps) {
+export function Checklist({ view, rechecking, onRecheck, onStarted }: ChecklistProps) {
   const report = view.report;
   const [engine, setEngine] = useState<"claude" | "codex">(report.selection.orchestrator === "codex" ? "codex" : "claude");
   const [terminalPane, setTerminalPane] = useState<string | null>(null);
