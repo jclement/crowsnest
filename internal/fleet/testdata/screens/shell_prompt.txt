@@ -1,0 +1,7 @@
+
+/Users/jsc/Work/crowsnest on  wip/m2-herdr via 🐹 v1.27.3
+❯ go test ./internal/fleet/
+ok  	github.com/jclement/crowsnest/internal/fleet	0.412s
+
+/Users/jsc/Work/crowsnest on  wip/m2-herdr via 🐹 v1.27.3
+❯ 

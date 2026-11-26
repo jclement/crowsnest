@@ -1,0 +1,15 @@
+
+⏺ Two ways to cache the snapshot; I need a call from you.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Cache
+
+Which cache strategy should the fleet use?
+
+❯ 1. Event-driven with poll fallback
+     Refetch on herdr events, 3 s poll as the backstop
+  2. Poll only
+     Simpler; up to 3 s stale
+  3. Type something.
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

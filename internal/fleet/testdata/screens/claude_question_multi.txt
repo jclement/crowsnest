@@ -1,0 +1,12 @@
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Scope  ☐ Tests  ✔ Submit  →
+
+What should this milestone cover?
+
+❯ 1. Backend only
+     Client, fleet cache, API
+  2. Backend and UI
+  3. Type something.
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

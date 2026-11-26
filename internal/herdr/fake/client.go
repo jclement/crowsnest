@@ -410,7 +410,7 @@ func (f *Fake) Subscribe(ctx context.Context, subscriptions []herdr.Subscription
 	if err := f.takeFailure("events.subscribe"); err != nil {
 		return nil, err
 	}
-	s := &stream{events: make(chan herdr.Event, 256), lifecycle: map[string]bool{}, panes: map[string]bool{}}
+	s := &stream{owner: f, events: make(chan herdr.Event, 256), lifecycle: map[string]bool{}, panes: map[string]bool{}}
 	for _, sub := range subscriptions {
 		requiresPane := herdr.RequiresPane(sub.Type)
 		if requiresPane != (sub.PaneID != "") {
@@ -460,6 +460,7 @@ func (f *Fake) emitStatus(paneID, workspaceID string, status herdr.AgentStatus) 
 // stream is one fake subscription. A stream whose consumer stops reading is ended with
 // events_lost, as herdr does.
 type stream struct {
+	owner     *Fake
 	events    chan herdr.Event
 	lifecycle map[string]bool // event kinds, underscore form ("pane_created")
 	panes     map[string]bool // pane ids for agent status changes
@@ -477,6 +478,9 @@ func (s *stream) Err() error {
 }
 
 func (s *stream) Close() error {
+	s.owner.mu.Lock()
+	delete(s.owner.streams, s)
+	s.owner.mu.Unlock()
 	s.end(nil)
 	return nil
 }
