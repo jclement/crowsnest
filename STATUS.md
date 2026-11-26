@@ -4,7 +4,7 @@ Living record kept by the lead agent. Last updated: 2026-11-26 04:55 by the mach
 
 ## In one paragraph
 
-Crowsnest is built and on `main` (tip `8d93449` plus this file): one Go binary that starts a herdr session and a Claude orchestrator and serves a phone-friendly web app with Jobs, Chat, Inbox, Fleet, Terminal and talk mode. The centre is the job supervisor: an agent that ends a turn without declaring done, blocked or waiting is refused by a Stop hook and sent back to work, and this was proven against real Claude. Three review rounds by Codex and Opus found and fixed about 90 issues. It has not been used by a human yet, never touched a real phone, and the last review still holds an honest "not fully sound" on crash-recovery edges (below).
+Crowsnest is built and on `main` (code tip `4fe6655`; later commits are this file only): one Go binary that starts a herdr session and a Claude orchestrator and serves a phone-friendly web app with Jobs, Chat, Inbox, Fleet, Terminal and talk mode. The centre is the job supervisor: an agent that ends a turn without declaring done, blocked or waiting is refused by a Stop hook and sent back to work, and this was proven against real Claude. Three review rounds by Codex and Opus found and fixed about 90 issues. It has not been used by a human yet, never touched a real phone, and the last review still holds an honest "not fully sound" on crash-recovery edges (below).
 
 ## Try it
 
@@ -19,7 +19,7 @@ For a phone on the tailnet: `--bind tailnet`, and `tailscale serve` in front if 
 
 ## What is built, and how each part was verified
 
-"Lead ran" means I ran it myself on the final tip `8d93449`; otherwise it is the builder's run, which I read but did not repeat.
+"Lead ran" means I ran it myself on `8d93449`, the last commit that changed product code (`4fe6655` after it changes one browser test); otherwise it is the builder's run, which I read but did not repeat.
 
 | Part | State | Verified how |
 |---|---|---|
@@ -34,7 +34,7 @@ For a phone on the tailnet: `--bind tailnet`, and `tailscale serve` in front if 
 | Hermetic browser suite | merged | Lead ran `mise run e2e`: 202 pass on desktop Chromium, mobile Chromium and mobile WebKit at 375 px, with accessibility checks |
 | Release pipeline (GoReleaser, workflow) | merged | `mise run snapshot` built four archives and the darwin one served the app (builder). **The release workflow has never run: it needs a tag, which I left to you** |
 | Devbox image | merged | Built locally (about 1 GB, arm64); container proof by the builder: health, login, refusals, non-root, mise installed Claude Code. **Nothing pushed to ghcr; amd64 build untried** |
-| CI on GitHub | see "CI" below | The `check` job (lint, Go and web unit tests on Linux) is green. The new browser job failed its first complete run on one test of mine-to-fix kind: the Jobs board test asserted an exact "Finished today" list, true only in the first five hours after midnight. Fixed (it now passes under four timezones on three browsers locally); the result of the CI run with the fix is in the last line of this file |
+| CI on GitHub | see "CI" below | The `check` job (lint, Go and web unit tests on Linux) is green. The new browser job failed its first complete run on one test of mine-to-fix kind: the Jobs board test asserted an exact "Finished today" list, true only in the first five hours after midnight. Fixed (it now passes under four timezones on three browsers locally); CI is green with the fix (see the end of this file) |
 
 ## Reviews
 
@@ -85,4 +85,4 @@ Nothing. All worktrees, branches, agents and review tabs I created are closed.
 
 ## CI
 
-Last run on GitHub: see `gh run list --limit 1` in the repo. Recorded here when it finished: PENDING.
+Green at `4fe6655`: both jobs passed on GitHub (`check`: lint plus Go and web unit tests; `e2e`: the hermetic browser suite on desktop Chromium, mobile Chromium and mobile WebKit, its first complete run on Linux). The commit that records this line is documentation only.
