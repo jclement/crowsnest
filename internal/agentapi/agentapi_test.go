@@ -555,3 +555,49 @@ func TestSayGoesToTheSpeakerWhenTalkModeIsOn(t *testing.T) {
 		t.Fatalf("%d %v", response.Code, speaker.said)
 	}
 }
+
+// R2-L5: a job agent may hold fewer open questions than the orchestrator, and the orchestrator
+// still gets through when agents have filled the inbox.
+func TestOpenQuestionCapsSpareTheOrchestrator(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	var apiErr *APIError
+	agent := NewClient(f.socket, f.token(t, "w3:p1", "j_5"))
+	for i := range maxOpenPerJob {
+		if _, err := f.service.Ask(ctx, questions.AskInput{Title: fmt.Sprintf("Mine %d", i), Kind: questions.KindAck}, questions.Caller{PaneID: "w3:p1", JobID: "j_5"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := agent.Ask(ctx, questions.AskInput{Title: "One more", Kind: questions.KindAck}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests {
+		t.Fatalf("a job agent past its own cap: %v", err)
+	}
+	for i := range maxOpenTotal {
+		if _, err := f.service.Ask(ctx, questions.AskInput{Title: fmt.Sprintf("Filler %d", i), Kind: questions.KindAck}, questions.Caller{PaneID: fmt.Sprintf("w%d:p9", 100+i/maxOpenPerJob)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := NewClient(f.socket, f.token(t, "w4:p1", "j_6")).Ask(ctx, questions.AskInput{Title: "Full inbox", Kind: questions.KindAck}); !errors.As(err, &apiErr) || !strings.Contains(apiErr.Message, "inbox already holds") {
+		t.Fatalf("a job agent with the inbox full: %v", err)
+	}
+	if _, err := NewClient(f.socket, f.token(t, "w1:p1", "")).Ask(ctx, questions.AskInput{Title: "The lead still asks", Kind: questions.KindAck}); err != nil {
+		t.Fatalf("the orchestrator was locked out by a full inbox: %v", err)
+	}
+}
+
+// R2-H1: job_create is rate limited per caller.
+func TestJobCreateIsRateLimited(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	id, dir := startRunningJobIn(t, f)
+	agent := NewClient(f.socket, f.token(t, "w5:p1", id))
+	var apiErr *APIError
+	for i := range createBurst + 1 {
+		_, err := agent.CreateJob(ctx, jobs.CreateInput{Brief: fmt.Sprintf("child %d", i), Dir: dir, Role: "tester"})
+		if i < createBurst && err != nil {
+			t.Fatalf("child %d: %v", i, err)
+		}
+		if i == createBurst && (!errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests) {
+			t.Fatalf("past the burst: %v", err)
+		}
+	}
+}
