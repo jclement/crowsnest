@@ -28,15 +28,29 @@ export const TERMINAL_FONT_FAMILIES = [
   "Noto Sans Symbols 2",
 ] as const;
 
+/**
+ * Set this localStorage key to "off" to skip the installed JetBrainsMono Nerd Font Mono and use
+ * the self-hosted chain alone: for an installed copy that renders badly, and for the E2E, which
+ * must test the webfonts on a machine that has the real font.
+ */
+export const LOCAL_FONT_KEY = "crowsnest-terminal-local-font";
+
 /** The font-family value for the terminal: the chain, then the platform's monospace. */
-export const TERMINAL_FONT_FAMILY = [
-  ...TERMINAL_FONT_FAMILIES.map((family) => `"${family}"`),
-  "ui-monospace",
-  "SFMono-Regular",
-  "Menlo",
-  "Consolas",
-  "monospace",
-].join(", ");
+export function terminalFontFamily(useLocal: boolean): string {
+  const families = useLocal ? TERMINAL_FONT_FAMILIES : TERMINAL_FONT_FAMILIES.slice(1);
+  return [...families.map((family) => `"${family}"`), "ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"].join(", ");
+}
+
+function localFontAllowed(): boolean {
+  try {
+    return localStorage.getItem(LOCAL_FONT_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+/** The family the terminals use, settled once per page load. */
+export const TERMINAL_FONT_FAMILY = terminalFontFamily(localFontAllowed());
 
 /** How long the terminal waits for its text font before opening with whatever is there. */
 export const FONT_WAIT_MS = 2_000;
@@ -61,21 +75,31 @@ export async function loadTerminalFonts(size: number, timeoutMs = FONT_WAIT_MS):
 }
 
 /**
- * Calls onLoaded (at most once a frame) whenever the document finishes loading fonts. Returns
- * the unsubscribe function.
+ * Calls onLoaded (at most once a frame) whenever a font face finishes loading. Returns the
+ * unsubscribe function.
+ *
+ * It waits on each face's own `loaded` promise rather than only the set's `loadingdone` event:
+ * WebKit does not fire `loadingdone` for loads that text on the page started (found by the E2E),
+ * which is how every fallback chunk loads. The event still catches faces added after this ran.
  */
 export function watchFontLoads(onLoaded: () => void): () => void {
   const fonts = typeof document === "undefined" ? undefined : document.fonts;
-  if (!fonts?.addEventListener) return () => {};
+  if (!fonts) return () => {};
   let frame = 0;
+  let stopped = false;
   const handler = () => {
+    if (stopped) return;
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(onLoaded);
   };
-  fonts.addEventListener("loadingdone", handler);
+  fonts.forEach((face) => {
+    if (face.status !== "loaded") face.loaded.then(handler, () => {});
+  });
+  fonts.addEventListener?.("loadingdone", handler);
   return () => {
+    stopped = true;
     cancelAnimationFrame(frame);
-    fonts.removeEventListener("loadingdone", handler);
+    fonts.removeEventListener?.("loadingdone", handler);
   };
 }
 

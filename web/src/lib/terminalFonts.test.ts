@@ -2,7 +2,7 @@
 // opens (bounded, so a font that never arrives cannot keep it closed), the font-load watcher, and
 // the two spellings that make xterm.js measure again.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FONT_WAIT_MS, loadTerminalFonts, otherSpelling, TERMINAL_FONT_FAMILY, watchFontLoads } from "./terminalFonts";
+import { FONT_WAIT_MS, loadTerminalFonts, otherSpelling, TERMINAL_FONT_FAMILY, terminalFontFamily, watchFontLoads } from "./terminalFonts";
 
 /** A stand-in for document.fonts whose load never settles unless told to. */
 function fakeFonts() {
@@ -12,7 +12,10 @@ function fakeFonts() {
   const pending = new Promise<FontFace[]>((resolve) => {
     settle = () => resolve([]);
   });
+  const faces: { status: string; loaded: Promise<unknown> }[] = [];
   const fonts = {
+    faces,
+    forEach: (callback: (face: { status: string; loaded: Promise<unknown> }) => void) => faces.forEach(callback),
     load: (font: string) => {
       loads.push(font);
       return pending;
@@ -21,7 +24,7 @@ function fakeFonts() {
     removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
   };
   Object.defineProperty(document, "fonts", { value: fonts, configurable: true });
-  return { loads, listeners, settle };
+  return { loads, listeners, settle, faces };
 }
 
 afterEach(() => {
@@ -31,10 +34,15 @@ afterEach(() => {
 
 describe("terminal fonts", () => {
   it("lists Ghostty's chain in order, then the platform monospace", () => {
+    expect(terminalFontFamily(true)).toBe(TERMINAL_FONT_FAMILY);
     expect(TERMINAL_FONT_FAMILY).toBe(
       '"JetBrainsMono Nerd Font Mono", "JetBrains Mono Variable", "Symbols Nerd Font Mono", "DejaVu Sans Mono", ' +
         '"Noto Sans Math", "Noto Sans Symbols 2", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     );
+  });
+
+  it("can leave out the installed Nerd Font", () => {
+    expect(terminalFontFamily(false)).toBe(TERMINAL_FONT_FAMILY.replace('"JetBrainsMono Nerd Font Mono", ', ""));
   });
 
   it("loads the text faces, regular and bold, at the terminal's size", async () => {
@@ -59,6 +67,24 @@ describe("terminal fonts", () => {
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(done).toBe(true);
+  });
+
+  it("calls back when a face that was not loaded yet arrives, which WebKit does not announce", async () => {
+    const fonts = fakeFonts();
+    let arrive: () => void = () => {};
+    fonts.faces.push({ status: "unloaded", loaded: new Promise<void>((resolve) => (arrive = resolve)) });
+    fonts.faces.push({ status: "loaded", loaded: Promise.resolve() });
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const onLoaded = vi.fn();
+    const stop = watchFontLoads(onLoaded);
+    await Promise.resolve();
+    expect(onLoaded).not.toHaveBeenCalled(); // the already-loaded face is not news
+    arrive();
+    await vi.waitFor(() => expect(onLoaded).toHaveBeenCalledTimes(1));
+    stop();
   });
 
   it("calls back once a frame when fonts finish loading, until unsubscribed", () => {

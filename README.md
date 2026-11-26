@@ -102,6 +102,11 @@ Fleet view, an agent's Terminal tab, or any plain shell pane, opens just that pa
 herdr's pane-control stream, which fits a phone. One browser controls a pane at a time: opening
 it elsewhere takes it over and the first browser says so and offers Reconnect. On phones a key
 bar under the terminal supplies Esc, Tab, a sticky Ctrl, arrows, Enter, Paste and the font size.
+The terminals use the font chain of Jeff's Ghostty: JetBrainsMono Nerd Font Mono if it is
+installed, else self-hosted JetBrains Mono with the Nerd Font symbols, DejaVu Sans Mono, Noto Sans
+Math and Noto Sans Symbols 2 behind it, each cut into small files a browser fetches only when a
+glyph in them is on screen (DESIGN.md 12, "Terminal font"). Setting localStorage
+`crowsnest-terminal-local-font` to `off` skips the installed font.
 Note that herdr's TUI shows every machine your herdr config names, remote ones included, so the
 Terminal view reaches those too.
 
@@ -426,6 +431,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
 | `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, the pane and TUI terminal bridges, and the fleet cache following herdr's events. Also self-update's real Sigstore check of a published release's bundle (needs the network) |
 | `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; a manual poke with one synthetic reason is delivered through `POST /orchestrator/poke` and answered; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript. Then **the stop test**: three haiku job agents in a scratch git repo, where an undeclared stop is refused by the Stop hook, `done` stops cleanly, and a non-blocking `ask` answered through the browser API reaches the agent, which finishes |
+| `mise run fonts:terminal` | Regenerate the terminal's fallback webfonts (`web/src/fonts/terminal/`, committed) with `web/scripts/terminal-fonts.py`: downloads the pinned Nerd Fonts symbols release and Unicode emoji data (checked by SHA-256), reads DejaVu and Noto from the pinned `@fontsource` devDependencies, and writes the unicode-range chunks and their CSS. Run after changing a pin |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
