@@ -82,6 +82,8 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Orchestrator permission mode |
 | `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke; `0` disables timer pokes |
 | `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | false | Serve the UI over the session without starting Claude |
+| `--engine` | `CROWSNEST_ENGINE` | `auto` | The orchestrator's agent and the engine of jobs that name none: `auto` (Claude when installed and signed in, else Codex), `claude`, `codex` (3.2) |
+| `--open` | `CROWSNEST_OPEN` | `auto` | Open a browser at start: the setup link in setup mode, else the app. `auto` only from a desktop terminal (3.3) |
 | `--name` | `CROWSNEST_NAME` | the short hostname | This instance's name: header, title, push titles, `/auth/me`, Remote Control (7.10) |
 | `--no-remote-control` | `CROWSNEST_NO_REMOTE_CONTROL` | false | Start the orchestrator without Remote Control (7.10) |
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | false | Start Claude job agents with Remote Control too (7.10) |

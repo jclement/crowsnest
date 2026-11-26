@@ -526,6 +526,8 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Orchestrator permission mode (`acceptEdits`, `auto`, `bypassPermissions`, `dontAsk`, `manual`, `plan`) |
 | `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke interval; `0` disables timer pokes |
 | `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | `false` | Serve the UI over the session without starting Claude |
+| `--engine` | `CROWSNEST_ENGINE` | `auto` | Agent for the orchestrator and for jobs that name none: `auto` (Claude when signed in, else Codex), `claude` or `codex`. Editable in Settings |
+| `--open` | `CROWSNEST_OPEN` | `auto` | Open a browser at start on the setup link (or the app): `auto` only from a desktop terminal, `always`, `never` |
 | `--name` | `CROWSNEST_NAME` | the name chosen at setup or in the Account sheet, else the short hostname | This instance's name (letters, digits, `-`, `_`; up to 32): in the header, page title, notices, `/auth/me` and Remote Control. Given here, it wins over the stored one and the Account sheet shows it read-only |
 | `--no-remote-control` | `CROWSNEST_NO_REMOTE_CONTROL` | `false` | Start the orchestrator without Claude Code's Remote Control (on by default, named `<name> crowsnest`) |
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | `false` | Start job agents with Remote Control too, named `<name> <job id> <title>` |

@@ -33,6 +33,11 @@ type Options struct {
 	Hostname func() (string, error)
 	// HomeDir returns the user's home directory; nil means os.UserHomeDir.
 	HomeDir func() (string, error)
+	// Stored are the settings saved in the app (kv rows settings.<option>), by option name, in
+	// the text form a flag would take. They sit between the environment and the config file:
+	// whoever starts the process with a flag or a variable wins, then the app, then the file
+	// (DESIGN.md 3). Only options in EditableOptions are read from here; anything else is ignored.
+	Stored map[string]string
 }
 
 func (o *Options) fillDefaults() {
@@ -58,6 +63,8 @@ type loader struct {
 	home  string
 	// warnings are things worth telling the user that do not stop the load (Config.Warnings).
 	warnings []string
+	// sources records where each option looked up came from (Config.Sources).
+	sources map[string]string
 }
 
 // source is where a value came from, for error messages that tell the user what to fix.
@@ -75,25 +82,43 @@ func Load(flags *pflag.FlagSet, opts Options) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("finding home directory: %w", err)
 	}
-	l := &loader{flags: flags, opts: opts, home: home}
+	l := &loader{flags: flags, opts: opts, home: home, sources: map[string]string{}}
 	cfg := Config{}
 	if cfg.ConfigFile, err = l.readFile(); err != nil {
 		return Config{}, err
 	}
-	steps := []func(*Config) error{l.loadAuth, l.loadNetwork, l.loadOrchestrator, l.loadExtras, l.loadUpkeep, l.loadAttachments, l.loadGuard}
+	steps := []func(*Config) error{l.loadAuth, l.loadNetwork, l.loadOrchestrator, l.loadExtras, l.loadUpkeep, l.loadAttachments, l.loadGuard, l.loadEngine}
 	for _, step := range steps {
 		if err := step(&cfg); err != nil {
 			return Config{}, err
 		}
 	}
 	cfg.Warnings = l.warnings
+	cfg.Sources = l.allSources()
 	return cfg, nil
 }
 
 // ---- Value sources -----------------------------------------------------------
 
-// lookup applies the precedence rule for one option.
+// lookup applies the precedence rule for one option and records where the value came from.
 func (l *loader) lookup(name string) source {
+	src := l.resolve(name)
+	l.sources[name] = src.where
+	return src
+}
+
+// allSources is where every option's value came from, looked up or not.
+func (l *loader) allSources() map[string]string {
+	for _, opt := range options {
+		if _, seen := l.sources[opt.name]; !seen {
+			l.lookup(opt.name)
+		}
+	}
+	return l.sources
+}
+
+// resolve is the precedence rule: flag, environment, the app's stored settings, file, default.
+func (l *loader) resolve(name string) source {
 	opt := lookupOption(name)
 	if flag := l.flags.Lookup(name); flag != nil && flag.Changed {
 		return l.flagValue(flag, opt)
@@ -102,6 +127,9 @@ func (l *loader) lookup(name string) source {
 		if value, ok := l.opts.Getenv(env); ok && (value != "" || opt.emptyIsValue) {
 			return source{raw: value, where: env}
 		}
+	}
+	if value, ok := l.opts.Stored[name]; ok && Editable(name) {
+		return source{raw: value, where: SourceDatabase}
 	}
 	if l.file != nil && l.file.IsSet(name) {
 		return source{raw: l.file.Get(name), where: filepath.Base(l.file.ConfigFileUsed())}
