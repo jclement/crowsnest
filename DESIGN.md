@@ -1451,7 +1451,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 2. **Should the orchestrator get its own CLAUDE.md?** No: an appended system prompt pointing at a state file, so `--dir` can be an existing repo without crowsnest writing into it. Taken.
 3. **Does crowsnest relay to Meat Prompt as well?** No. It replaces it; `--notify-url` covers "tell my phone". Taken.
 4. **Cosign and the Homebrew tap**: both deferred while the repo is private. Keyless cosign writes the repo and workflow identity to a public transparency log, which cannot be undone, and a tap formula cannot fetch from a private repo. The config carries both, commented, to switch on when Jeff makes it public. Self-update waits for the same reason. **Jeff to confirm.**
-5. **Proving the release workflow** needs a tag. Recommendation: one prerelease tag (`v0.1.0-rc.1`) on the private repo to prove the pipeline, deletable. Taken unless something argues against it on the night; real versions stay Jeff's.
+5. **Proving the release workflow** needs a tag. Recommendation: one prerelease tag (`v0.1.0-rc.1`) on the private repo to prove the pipeline, deletable. Not taken on the night: a tag also publishes the devbox image to ghcr, and releases are Jeff's step. The workflow is therefore unproven until he cuts one.
 6. **Windows**: skipped. Taken.
 7. **MCP tools or a CLI for the job protocol?** Both, over one socket API: MCP for Claude agents crowsnest starts (declared tools get used; a CLI named in a prompt gets forgotten), CLI for everything else. Taken.
 8. **Should a refused stop ever be overridden?** Yes, after three nudges with no progress: an agent in a loop costs money and tells Jeff nothing. It becomes `stuck` and he is told. Taken.
