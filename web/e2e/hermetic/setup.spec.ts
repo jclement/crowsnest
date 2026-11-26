@@ -3,26 +3,10 @@
 // goes to /setup, and the log holds a link with a one-time token. The test reads that link as a
 // person would, opens it, completes the form, lands signed in, and sees the orchestrator start.
 // Then the Account sheet's password change signs a second browser out.
-import type { Page } from "@playwright/test";
 import { expect, expectAccessible, expectNoSidewaysScroll, sameOriginHeaders, smallTapTargets, test, isPhone } from "../support/fixtures";
-import type { Instance } from "../support/instance";
+import { completeSetup, finishChecklist, OWNER } from "../support/setup";
 
 test.use({ appOptions: { demo: true, setup: true } });
-
-const OWNER = { username: "owner", password: "e2e setup password one" } as const;
-
-async function completeSetup(page: Page, app: Instance, name = "e2e-box") {
-  const link = app.setupLink();
-  await page.goto(link);
-  // The token is moved out of the address bar at once, and prefilled.
-  await expect(page).toHaveURL(/\/setup$/);
-  await expect(page.getByLabel("Setup token")).toHaveValue(new URL(link).hash.replace("#token=", ""));
-  await page.getByLabel("Username").fill(OWNER.username);
-  await page.getByLabel("Password", { exact: true }).fill(OWNER.password);
-  await page.getByLabel("Password again").fill(OWNER.password);
-  await page.getByLabel("Instance name").fill(name);
-  await page.getByRole("button", { name: "Set up crowsnest" }).click();
-}
 
 test("a fresh instance is locked: the API refuses, every page goes to /setup", async ({ page, app }) => {
   const health = await (await page.request.get("/api/v1/health")).json();
@@ -56,8 +40,10 @@ test("a wrong token is refused with a message, and the form keeps its fields", a
 
 test("setup from the link in the log signs in, names the instance and starts the orchestrator", async ({ page, app }) => {
   await completeSetup(page, app);
-  // The setup server hands over to the full one; the page waits, then opens the app.
-  await expect(page).toHaveURL(new RegExp(`^${app.baseURL}/(\\?.*)?$`), { timeout: 20_000 });
+  // The setup server hands over to the full one; the page waits, then opens the first-run
+  // checklist, whose Start starts the orchestrator and opens Chat.
+  await finishChecklist(page);
+  await page.goto("/");
   await expect(page.getByRole("textbox", { name: /What needs doing/i })).toBeVisible();
   await expect(page).toHaveTitle(/e2e-box/);
 
@@ -98,7 +84,7 @@ test("the setup page fits a phone and passes axe", async ({ page, app }, testInf
 
 test("changing the password in the Account sheet signs a second browser out", async ({ page, app, browser }) => {
   await completeSetup(page, app);
-  await expect(page.getByRole("textbox", { name: /What needs doing/i })).toBeVisible({ timeout: 20_000 });
+  await finishChecklist(page);
 
   const other = await browser.newContext({ baseURL: app.baseURL });
   const signIn = await other.request.post("/api/v1/auth/login", { headers: sameOriginHeaders(app), data: OWNER });
