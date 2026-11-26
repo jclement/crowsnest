@@ -4,6 +4,8 @@ package agentapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -19,12 +22,25 @@ import (
 const maxSocketPath = 103
 
 // SocketPath is where the agent socket lives (DESIGN.md section 11): under $XDG_RUNTIME_DIR when
-// it is set (crowsnest/<session>.sock), else in the session's state directory (agent.sock).
+// it is set (crowsnest/<session>.sock), else in the session's state directory (agent.sock). When
+// that path would be too long for a unix socket (a deep XDG_STATE_HOME, such as macOS's per-user
+// temporary directories), it falls back to crowsnest-<uid>/<hash of the state dir>.sock under the
+// OS temporary directory; Listen checks that directory belongs to this user.
 func SocketPath(runtimeDir, stateDir, session string) string {
+	return socketPath(runtimeDir, stateDir, session, os.TempDir(), os.Getuid())
+}
+
+func socketPath(runtimeDir, stateDir, session, tempDir string, uid int) string {
 	if runtimeDir != "" {
-		return filepath.Join(runtimeDir, "crowsnest", session+".sock")
+		if path := filepath.Join(runtimeDir, "crowsnest", session+".sock"); len(path) <= maxSocketPath {
+			return path
+		}
 	}
-	return filepath.Join(stateDir, "agent.sock")
+	if path := filepath.Join(stateDir, "agent.sock"); len(path) <= maxSocketPath {
+		return path
+	}
+	sum := sha256.Sum256([]byte(stateDir))
+	return filepath.Join(tempDir, fmt.Sprintf("crowsnest-%d", uid), hex.EncodeToString(sum[:6])+".sock")
 }
 
 // Listen prepares the socket's directory (created 0700, and tightened to 0700 if it exists),
@@ -37,6 +53,9 @@ func Listen(ctx context.Context, path string) (net.Listener, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating the agent socket directory %s: %w", dir, err)
+	}
+	if err := checkOwnDirectory(dir); err != nil {
+		return nil, err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // a directory needs x to be entered; 0700 is owner-only
 		return nil, fmt.Errorf("restricting the agent socket directory %s to its owner: %w", dir, err)
@@ -54,6 +73,22 @@ func Listen(ctx context.Context, path string) (net.Listener, error) {
 		return nil, fmt.Errorf("restricting the agent socket %s to its owner: %w", path, err)
 	}
 	return listener, nil
+}
+
+// checkOwnDirectory refuses a socket directory that is a symlink or belongs to another user: in a
+// shared temporary directory someone else could have created it first to catch the socket.
+func checkOwnDirectory(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("checking the agent socket directory %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("the agent socket directory %s is not a plain directory (a symlink?); remove it", dir)
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok && int(stat.Uid) != os.Getuid() {
+		return fmt.Errorf("the agent socket directory %s belongs to another user; remove it or set XDG_RUNTIME_DIR", dir)
+	}
+	return nil
 }
 
 // removeStale deletes path if it is a socket nobody answers on. Anything else at that path (a

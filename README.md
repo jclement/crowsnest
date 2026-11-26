@@ -117,7 +117,9 @@ they fail with exit 1 and say so.
 | `crowsnest mcp` | A stdio MCP server exposing `ask` and `say` (M7 adds the job tools), proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes |
 
 The socket is `$XDG_RUNTIME_DIR/crowsnest/<session>.sock` when `XDG_RUNTIME_DIR` is set, else
-`~/.local/state/crowsnest/<session>/agent.sock`; its directory is `0700` and the socket `0600`.
+`~/.local/state/crowsnest/<session>/agent.sock` (or, when that path is too long for a unix socket,
+`crowsnest-<uid>/<hash>.sock` under the OS temporary directory); `serve` logs it at start. Its
+directory is `0700` and must belong to you; the socket is `0600`.
 Its routes are Meat Prompt's (`POST /api/v1/questions`, `GET /api/v1/questions/{id}?wait=90`,
 `GET /api/v1/questions?status=`, `DELETE /api/v1/questions/{id}`) plus `POST /api/v1/say` and
 `GET /api/v1/health`.

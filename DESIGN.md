@@ -496,8 +496,12 @@ comes in M12.
   released only when the attempt provably typed nothing (`orch.ErrNotTyped`, a dialog, a draft);
   an attempt whose outcome is unknown is recorded in `delivery_error` and never retried, and a
   claim left by a crash is marked "interrupted" at the next start, not retried.
-- **The socket**: `$XDG_RUNTIME_DIR/crowsnest/<session>.sock`, else `<state>/agent.sock`.
-  `Listen` creates the directory `0700` (and tightens an existing one), removes a stale socket
+- **The socket**: `$XDG_RUNTIME_DIR/crowsnest/<session>.sock`, else `<state>/agent.sock`; when
+  that is over the 104-byte unix-socket limit (a deep `XDG_STATE_HOME`, found when the M5 e2e
+  suite's `/var/folders/…` state dirs stopped `serve` from starting), `crowsnest-<uid>/<hash of
+  the state dir>.sock` under the OS temporary directory. `Listen` refuses a socket directory that
+  is a symlink or owned by another user (the fallback may sit in a shared `/tmp`), creates it
+  `0700` (and tightens an existing one), removes a stale socket
   nobody answers on, refuses to take over a live one or to delete a non-socket file, and chmods
   the socket `0600`. Routes: Meat Prompt's four, plus `POST /api/v1/say` and `GET
   /api/v1/health` (the CLI's "is crowsnest running" check). Identity headers set by the client

@@ -126,12 +126,35 @@ func TestListenRemovesAStaleSocketButNotALiveOneOrAFile(t *testing.T) {
 	}
 }
 
-func TestSocketPathPrefersRuntimeDir(t *testing.T) {
-	if got := SocketPath("/run/user/1000", "/state", "crow"); got != "/run/user/1000/crowsnest/crow.sock" {
-		t.Fatalf("got %s", got)
+func TestSocketPath(t *testing.T) {
+	if got := socketPath("/run/user/1000", "/state", "crow", "/tmp", 1000); got != "/run/user/1000/crowsnest/crow.sock" {
+		t.Fatalf("runtime dir: %s", got)
 	}
-	if got := SocketPath("", "/state/crowsnest/crow", "crow"); got != "/state/crowsnest/crow/agent.sock" {
-		t.Fatalf("got %s", got)
+	if got := socketPath("", "/state/crowsnest/crow", "crow", "/tmp", 1000); got != "/state/crowsnest/crow/agent.sock" {
+		t.Fatalf("state dir: %s", got)
+	}
+	deep := "/var/folders/zt/5mndvdys68v75kz57f0nm_c00000gn/T/crowsnest-e2e-phgpaO/state/crowsnest/crowsnest-demo"
+	got := socketPath("", deep, "crowsnest-demo", "/var/folders/zt/5mndvdys68v75kz57f0nm_c00000gn/T", 501)
+	if len(got) > maxSocketPath || !strings.HasPrefix(got, "/var/folders/zt/5mndvdys68v75kz57f0nm_c00000gn/T/crowsnest-501/") {
+		t.Fatalf("too-long state dir should fall back to the temp dir: %s (%d bytes)", got, len(got))
+	}
+	if other := socketPath("", deep+"x", "crowsnest-demo", "/tmp", 501); other == socketPath("", deep, "crowsnest-demo", "/tmp", 501) {
+		t.Fatal("two state dirs must not share a fallback socket")
+	}
+}
+
+func TestListenRefusesASymlinkedDirectory(t *testing.T) {
+	dir := shortDir(t)
+	target := filepath.Join(dir, "real")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Listen(context.Background(), filepath.Join(link, "a.sock")); err == nil || !strings.Contains(err.Error(), "not a plain directory") {
+		t.Fatalf("a symlinked socket directory must be refused: %v", err)
 	}
 }
 
