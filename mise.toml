@@ -6,6 +6,7 @@ go = "1.27.3"
 node = "26.13.0"          # current LTS line
 golangci-lint = "2.15.0"
 goreleaser = "2.18.0"
+uv = "0.13.7"              # runs web/scripts/terminal-fonts.py (fonts:terminal) with its pinned fonttools
 
 [env]
 CGO_ENABLED = "0"
@@ -72,6 +73,10 @@ mkdir -p bin
 go build -trimpath -ldflags="$LDFLAGS" -o bin/crowsnest ./cmd/crowsnest
 echo "built bin/crowsnest $VERSION ($COMMIT)"
 """
+
+[tasks."fonts:terminal"]
+description = "Regenerate the terminal's fallback webfonts (web/src/fonts/terminal: Nerd Font symbols, DejaVu Sans Mono, Noto Sans Math and Symbols 2, chunked by unicode-range) from pinned sources. Downloads the Nerd Fonts release; the output is committed"
+run = "uv run --script web/scripts/terminal-fonts.py"
 
 # ---- Verify ------------------------------------------------------------------
 

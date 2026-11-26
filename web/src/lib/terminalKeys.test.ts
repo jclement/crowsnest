@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { clampFontSize, DEFAULT_FONT_SIZE, FONT_SIZE_KEY, keySequence, readFontSize, saveFontSize, withCtrl } from "./terminalKeys";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { clampFontSize, DEFAULT_FONT_SIZE, defaultFontSize, FONT_SIZE_KEY, keySequence, readFontSize, saveFontSize, TOUCH_FONT_SIZE, withCtrl } from "./terminalKeys";
 import { fittedHeight } from "./viewport";
 
 describe("keySequence", () => {
@@ -41,7 +41,25 @@ describe("withCtrl", () => {
 describe("font size", () => {
   afterEach(() => localStorage.clear());
 
+  /** Makes matchMedia answer as a desktop (fine pointer, wide) or a phone would. */
+  const device = (kind: "desktop" | "phone") =>
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: kind === "desktop" ? query === "(min-width: 768px)" : query === "(pointer: coarse)",
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+
+  it("defaults to Ghostty's 12 on a desktop and a size up on a phone", () => {
+    device("desktop");
+    expect(defaultFontSize()).toBe(DEFAULT_FONT_SIZE);
+    expect(DEFAULT_FONT_SIZE).toBe(12);
+    device("phone");
+    expect(defaultFontSize()).toBe(TOUCH_FONT_SIZE);
+    expect(readFontSize()).toBe(TOUCH_FONT_SIZE);
+  });
+
   it("clamps to a readable range", () => {
+    device("desktop");
     expect(clampFontSize(3)).toBe(9);
     expect(clampFontSize(99)).toBe(24);
     expect(clampFontSize(13.6)).toBe(14);
@@ -49,6 +67,7 @@ describe("font size", () => {
   });
 
   it("is remembered", () => {
+    device("desktop");
     expect(readFontSize()).toBe(DEFAULT_FONT_SIZE);
     saveFontSize(17);
     expect(localStorage.getItem(FONT_SIZE_KEY)).toBe("17");

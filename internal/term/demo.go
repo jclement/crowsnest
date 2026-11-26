@@ -1,7 +1,9 @@
 // The demo bridge, for --demo: a tiny built-in terminal toy written in Go, so the UI and the
 // hermetic E2E can exercise the whole WebSocket path with no herdr and no process at all. It
 // never starts a shell (a --demo instance must be harmless to expose), it just draws a coloured
-// banner, echoes what you type with simple line editing, and answers a few words.
+// banner, echoes what you type with simple line editing, and answers a few words. The banner
+// includes a glyph test line (DemoGlyphs) so the terminal's font chain can be checked by eye and
+// by the hermetic E2E (web/e2e/hermetic/terminal-fonts.spec.ts).
 
 package term
 
@@ -14,6 +16,15 @@ import (
 
 // demoPrompt is drawn before every input line.
 const demoPrompt = "\x1b[1;36mdemo\x1b[0m \x1b[2m$\x1b[0m "
+
+// DemoGlyphs is one character or run from each face of the terminal's font chain (DESIGN.md 12,
+// "Terminal font"), ending in a "|" whose column shows whether the cells stayed on the grid:
+// powerline separators and the branch symbol, devicons (Node.js, Rust) and Font Awesome's GitHub
+// mark from the Nerd Font symbols; box drawing and ⌘ from DejaVu Sans Mono; braille and a
+// legacy-computing sextant from Noto Sans Symbols 2; a contour integral and a maths italic x
+// from Noto Sans Math; and an emoji, which no face carries (the system's colour emoji font draws
+// it) and which takes two cells. The E2E reads it from the screen; change both together.
+const DemoGlyphs = "glyphs \ue0a0 \ue0b0\ue0b1\ue0b2\ue0b3 \ue718 \ue7a8 \uf09b ┌─┐│⌘ ⠃⡇🬀 ∮𝑥 😀 |"
 
 // maxDemoLine caps the input line; nobody needs more to try a toy.
 const maxDemoLine = 512
@@ -69,7 +80,8 @@ func demoBanner(title string, cols, rows int) string {
 		"\x1b[1;35m  ▲ crowsnest\x1b[0m  demo terminal\r\n" +
 		fmt.Sprintf("\x1b[2m  standing in for %s · %dx%d\x1b[0m\r\n", title, cols, rows) +
 		"\x1b[2m  No shell runs here. Type something and press Enter; try \x1b[0m\x1b[33mcolors\x1b[0m\x1b[2m, \x1b[0m" +
-		"\x1b[33msize\x1b[0m\x1b[2m or \x1b[0m\x1b[33mexit\x1b[0m\x1b[2m.\x1b[0m\r\n\r\n"
+		"\x1b[33msize\x1b[0m\x1b[2m, \x1b[0m\x1b[33mglyphs\x1b[0m\x1b[2m or \x1b[0m\x1b[33mexit\x1b[0m\x1b[2m.\x1b[0m\r\n" +
+		"  " + DemoGlyphs + "\r\n\r\n"
 }
 
 // Write feeds keystrokes to the line editor.
@@ -153,6 +165,8 @@ func (b *demoBridge) answerLocked(line string) string {
 		return fmt.Sprintf("%d columns x %d rows\r\n", b.cols, b.rows)
 	case "colors", "colours":
 		return demoPalette()
+	case "glyphs":
+		return DemoGlyphs + "\r\n"
 	default:
 		return fmt.Sprintf("you typed: \x1b[1m%s\x1b[0m\r\n", line)
 	}

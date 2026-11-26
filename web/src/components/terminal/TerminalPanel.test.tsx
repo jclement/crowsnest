@@ -4,6 +4,7 @@
 import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_FONT_SIZE } from "../../lib/terminalKeys";
 import type { TerminalState } from "../../lib/termSocket";
 import { renderWithClient } from "../../test/render";
 import { TerminalPanel } from "./TerminalPanel";
@@ -110,6 +111,7 @@ describe("TerminalPanel", () => {
     renderWithClient(<TerminalPanel path="/api/v1/term/tui" label="t" fill="fixed" />);
     await user.click(screen.getByRole("button", { name: "A+ (larger text)" }));
     await user.click(screen.getByRole("button", { name: "A+ (larger text)" }));
-    expect(localStorage.getItem("crowsnest-terminal-font-size")).toBe("15");
+    // jsdom has no matchMedia, so the starting size is the desktop default.
+    expect(localStorage.getItem("crowsnest-terminal-font-size")).toBe(String(DEFAULT_FONT_SIZE + 2));
   });
 });

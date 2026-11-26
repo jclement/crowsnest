@@ -1,16 +1,27 @@
 // XTerm: an xterm.js terminal wired to a terminal WebSocket (lib/termSocket.ts). It fits its
 // container (a ResizeObserver refits and tells the server the new size), follows the app's
 // light and dark theme, opens links in a new tab without an opener, and reconnects by itself
-// (the socket's rules). Fonts are the self-hosted JetBrains Mono: the CSP forbids font CDNs.
+// (the socket's rules).
+//
+// Fonts: the terminal font chain of lib/terminalFonts.ts (Jeff's Ghostty chain, self-hosted:
+// the CSP forbids font CDNs). The text faces are loaded before the terminal opens, since xterm
+// sizes its cells from the font then, and it measures again whenever a font arrives later (a
+// fallback chunk is fetched when its first glyph is drawn), so cells stay on the grid. Widths
+// follow Unicode 11 (the unicode11 addon): emoji and CJK take two cells, as herdr, Claude Code
+// and Ghostty count them; xterm's default Unicode 6 table counts emoji as one and the rest of
+// the line would drift.
 //
 // The parent drives it through a handle (send, paste, focus, reconnect) so the mobile key bar
 // can type into it, and may transform typed input (the key bar's sticky Ctrl).
 import "@xterm/xterm/css/xterm.css";
+import "../../fonts/terminal/terminal-fonts.css";
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { cn } from "../../lib/cn";
+import { loadTerminalFonts, otherSpelling, TERMINAL_FONT_FAMILY, watchFontLoads } from "../../lib/terminalFonts";
 import { TerminalSocket, type TerminalState } from "../../lib/termSocket";
 
 /** What the parent can do to a mounted terminal. */
@@ -39,106 +50,54 @@ interface XTermProps {
   className?: string;
 }
 
-const FONT_FAMILY = '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+/** The parent's callbacks, read through a ref: they change on every render. */
+interface Callbacks {
+  onState?: (state: TerminalState) => void;
+  transformInput?: (data: string) => string;
+  handleRef?: (handle: XTermHandle | null) => void;
+}
+
+/** A terminal opened in a container, with what the component needs to drive and close it. */
+interface OpenedTerminal {
+  terminal: Terminal;
+  refit: () => void;
+  dispose: () => void;
+}
+
 const SCROLLBACK_LINES = 5000;
 
 export function XTerm({ path, label, fontSize, onState, transformInput, handleRef, className }: XTermProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const refitRef = useRef<() => void>(() => {});
+  const openedRef = useRef<OpenedTerminal | null>(null);
   // Callbacks change on every render; the terminal is built once per path and reads them here.
-  const latest = useRef({ onState, transformInput, handleRef });
+  const latest = useRef<Callbacks>({ onState, transformInput, handleRef });
+  const fontSizeRef = useRef(fontSize);
   useEffect(() => {
     latest.current = { onState, transformInput, handleRef };
+    fontSizeRef.current = fontSize;
   });
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const terminal = new Terminal({
-      fontFamily: FONT_FAMILY,
-      fontSize,
-      cursorBlink: true,
-      scrollback: SCROLLBACK_LINES,
-      theme: themeFromCSS(),
-      allowProposedApi: false,
+    let cancelled = false;
+    // Open only once the text font is in (or has had its chance): see the file comment.
+    void loadTerminalFonts(fontSizeRef.current).then(() => {
+      if (cancelled) return;
+      openedRef.current = openTerminal(container, path, fontSizeRef.current, latest);
     });
-    const fit = new FitAddon();
-    terminal.loadAddon(fit);
-    terminal.loadAddon(new WebLinksAddon((_event, uri) => window.open(uri, "_blank", "noopener,noreferrer")));
-    terminal.open(container);
-    terminalRef.current = terminal;
-
-    const socket = new TerminalSocket({
-      path,
-      size: () => ({ cols: terminal.cols, rows: terminal.rows }),
-      onData: (data) => terminal.write(data),
-      onOpen: () => terminal.reset(),
-      onState: (state) => latest.current.onState?.(state),
-    });
-    const refit = () => {
-      if (container.clientWidth === 0 || container.clientHeight === 0) return; // hidden: keep the old size
-      try {
-        fit.fit();
-      } catch {
-        return; // not laid out yet
-      }
-      socket.resize({ cols: terminal.cols, rows: terminal.rows });
-    };
-    refitRef.current = refit;
-    refit();
-
-    const typed = terminal.onData((data) => socket.send(latest.current.transformInput?.(data) ?? data));
-    const binary = terminal.onBinary((data) => socket.send(Uint8Array.from(data, (char) => char.charCodeAt(0) & 0xff)));
-    socket.connect();
-
-    let frame = 0;
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(refit);
-    });
-    observer.observe(container);
-
-    // Measure again once the web font is in: xterm sizes its cells from the font on open.
-    void document.fonts?.load(`${fontSize}px "JetBrains Mono Variable"`).then(() => {
-      if (terminalRef.current !== terminal) return;
-      terminal.options.fontFamily = FONT_FAMILY;
-      refit();
-    });
-
-    const themeWatcher = new MutationObserver(() => {
-      terminal.options.theme = themeFromCSS();
-    });
-    themeWatcher.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-
-    latest.current.handleRef?.({
-      send: (data) => socket.send(data),
-      paste: (text) => terminal.paste(text),
-      focus: () => terminal.focus(),
-      reconnect: () => socket.reconnect(),
-      applicationCursor: () => terminal.modes.applicationCursorKeysMode,
-    });
-
     return () => {
-      latest.current.handleRef?.(null);
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      themeWatcher.disconnect();
-      typed.dispose();
-      binary.dispose();
-      socket.dispose();
-      terminal.dispose();
-      terminalRef.current = null;
+      cancelled = true;
+      openedRef.current?.dispose();
+      openedRef.current = null;
     };
-    // fontSize is applied by the next effect; rebuilding the terminal for it would drop the session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
   useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal || terminal.options.fontSize === fontSize) return;
-    terminal.options.fontSize = fontSize;
-    refitRef.current();
+    const opened = openedRef.current;
+    if (!opened || opened.terminal.options.fontSize === fontSize) return;
+    opened.terminal.options.fontSize = fontSize;
+    opened.refit();
   }, [fontSize]);
 
   return (
@@ -150,6 +109,87 @@ export function XTerm({ path, label, fontSize, onState, transformInput, handleRe
       className={cn("min-h-0 min-w-0 overflow-hidden bg-surface-sunken p-1", className)}
     />
   );
+}
+
+/** Opens a terminal in container on the socket at path, and hands the parent its handle. */
+function openTerminal(container: HTMLElement, path: string, fontSize: number, latest: { current: Callbacks }): OpenedTerminal {
+  const terminal = new Terminal({
+    fontFamily: TERMINAL_FONT_FAMILY,
+    fontSize,
+    cursorBlink: true,
+    scrollback: SCROLLBACK_LINES,
+    theme: themeFromCSS(),
+    // The unicode11 addon switches widths through terminal.unicode, which xterm still calls proposed.
+    allowProposedApi: true,
+  });
+  const fit = new FitAddon();
+  terminal.loadAddon(fit);
+  terminal.loadAddon(new Unicode11Addon());
+  terminal.unicode.activeVersion = "11";
+  terminal.loadAddon(new WebLinksAddon((_event, uri) => window.open(uri, "_blank", "noopener,noreferrer")));
+  terminal.open(container);
+
+  const socket = new TerminalSocket({
+    path,
+    size: () => ({ cols: terminal.cols, rows: terminal.rows }),
+    onData: (data) => terminal.write(data),
+    onOpen: () => terminal.reset(),
+    onState: (state) => latest.current.onState?.(state),
+  });
+  const refit = () => {
+    if (container.clientWidth === 0 || container.clientHeight === 0) return; // hidden: keep the old size
+    try {
+      fit.fit();
+    } catch {
+      return; // not laid out yet
+    }
+    socket.resize({ cols: terminal.cols, rows: terminal.rows });
+  };
+  refit();
+
+  const typed = terminal.onData((data) => socket.send(latest.current.transformInput?.(data) ?? data));
+  const binary = terminal.onBinary((data) => socket.send(Uint8Array.from(data, (char) => char.charCodeAt(0) & 0xff)));
+  socket.connect();
+
+  let frame = 0;
+  const observer = new ResizeObserver(() => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(refit);
+  });
+  observer.observe(container);
+
+  // A font arrived (the text face after a slow start, or a fallback chunk for a glyph just
+  // drawn): measure the cell and the cached glyph widths again, then refit to the new cell.
+  const stopWatchingFonts = watchFontLoads(() => {
+    terminal.options.fontFamily = otherSpelling(terminal.options.fontFamily ?? TERMINAL_FONT_FAMILY);
+    refit();
+  });
+
+  const themeWatcher = new MutationObserver(() => {
+    terminal.options.theme = themeFromCSS();
+  });
+  themeWatcher.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
+  latest.current.handleRef?.({
+    send: (data) => socket.send(data),
+    paste: (text) => terminal.paste(text),
+    focus: () => terminal.focus(),
+    reconnect: () => socket.reconnect(),
+    applicationCursor: () => terminal.modes.applicationCursorKeysMode,
+  });
+
+  const dispose = () => {
+    latest.current.handleRef?.(null);
+    cancelAnimationFrame(frame);
+    observer.disconnect();
+    stopWatchingFonts();
+    themeWatcher.disconnect();
+    typed.dispose();
+    binary.dispose();
+    socket.dispose();
+    terminal.dispose();
+  };
+  return { terminal, refit, dispose };
 }
 
 /** Builds the xterm theme from the app's CSS tokens, so it follows light and dark. */

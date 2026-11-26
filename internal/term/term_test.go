@@ -447,6 +447,9 @@ func TestDemoBridge(t *testing.T) {
 	}
 	var seen bytes.Buffer
 	waitFor(t, bridge, &seen, "pane w1:p1 (demo) · 80x24")
+	waitFor(t, bridge, &seen, "  "+DemoGlyphs+"\r\n")
+	_, _ = bridge.Write([]byte("glyphs\r"))
+	waitFor(t, bridge, &seen, "glyphs\r\n"+DemoGlyphs+"\r\n")
 	// An arrow key is swallowed, backspace edits, Enter answers.
 	_, _ = bridge.Write([]byte("hx\x1b[A\x7fi\r"))
 	waitFor(t, bridge, &seen, "you typed: \x1b[1mhi\x1b[0m")

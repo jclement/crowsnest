@@ -1,6 +1,8 @@
 // What the mobile key bar sends (components/terminal/KeyBar.tsx), and the sticky Ctrl modifier.
 // A phone keyboard has no Esc, Tab, Ctrl or arrows, and those are exactly the keys a terminal
-// program needs, so the bar supplies them as the byte sequences a real keyboard would.
+// program needs, so the bar supplies them as the byte sequences a real keyboard would. The
+// terminal's font size (the bar's and the status line's -/+) is kept here too.
+import { DESKTOP_QUERY } from "./media";
 
 /** The keys on the bar that send something. */
 export type BarKey = "esc" | "tab" | "enter" | "up" | "down" | "left" | "right";
@@ -44,20 +46,33 @@ export function withCtrl(data: string): string | null {
 export const FONT_SIZE_KEY = "crowsnest-terminal-font-size";
 export const MIN_FONT_SIZE = 9;
 export const MAX_FONT_SIZE = 24;
-export const DEFAULT_FONT_SIZE = 13;
+/**
+ * Desktop default: Jeff's Ghostty uses 12 pt, and a macOS point is a CSS pixel, so 12 px JetBrains
+ * Mono reads the same in the browser.
+ */
+export const DEFAULT_FONT_SIZE = 12;
+/** Phone and touch default: a size larger, since a phone is held further from small text. */
+export const TOUCH_FONT_SIZE = 13;
+
+/** The default for this device: the touch size on a coarse pointer or below md, else the desktop size. */
+export function defaultFontSize(): number {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return DEFAULT_FONT_SIZE;
+  const touch = window.matchMedia("(pointer: coarse)").matches || !window.matchMedia(DESKTOP_QUERY).matches;
+  return touch ? TOUCH_FONT_SIZE : DEFAULT_FONT_SIZE;
+}
 
 export function clampFontSize(size: number): number {
-  if (!Number.isFinite(size)) return DEFAULT_FONT_SIZE;
+  if (!Number.isFinite(size)) return defaultFontSize();
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(size)));
 }
 
-/** The saved terminal font size, or the default. */
+/** The saved terminal font size, or this device's default. */
 export function readFontSize(): number {
   try {
     const saved = localStorage.getItem(FONT_SIZE_KEY);
-    return saved === null ? DEFAULT_FONT_SIZE : clampFontSize(Number(saved));
+    return saved === null ? defaultFontSize() : clampFontSize(Number(saved));
   } catch {
-    return DEFAULT_FONT_SIZE;
+    return defaultFontSize();
   }
 }
 
