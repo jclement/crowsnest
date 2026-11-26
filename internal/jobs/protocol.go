@@ -33,6 +33,12 @@ type CreateInput struct {
 	// Attachments are uploads (a_…) given with the job from the browser: copied into the job's
 	// inbox and listed in its brief. Agents cannot pass them (CreateForAgent refuses).
 	Attachments []string `json:"attachments,omitempty"`
+	// ProjectID gives the job to a project (DESIGN.md 21.1); 0 lets a directory inside a
+	// project's choose it, else the job is Unfiled.
+	ProjectID int64 `json:"project_id,omitempty"`
+	// To is, for a job in a project, "lead" (no directory: the project's lead holds it) or "job"
+	// (a job agent in the project's directory). Empty: "lead" without a directory, else "job".
+	To string `json:"to,omitempty"`
 }
 
 // maxTitleRunes caps the title taken from the brief's first line.
@@ -49,10 +55,15 @@ const maxRememberedDirs = 20
 // agent's job_create goes through CreateForAgent (delegate.go), which adds R2-H1's limits;
 // parentID here is for tests and the demo.
 func (s *Service) Create(ctx context.Context, input CreateInput, parentID string) (Job, error) {
+	input, projectID, err := s.applyProject(ctx, input)
+	if err != nil {
+		return Job{}, err
+	}
 	record, err := s.newRecord(input, parentID)
 	if err != nil {
 		return Job{}, err
 	}
+	record.ProjectID = projectID
 	if err := s.checkAttachments(ctx, input.Attachments); err != nil {
 		return Job{}, err
 	}
@@ -70,6 +81,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput, parentID string
 	s.publish(job, "created")
 	if parentID != "" {
 		_ = s.Journal(ctx, parentID, EventChild, "Delegated "+job.ID+": "+job.Title, map[string]any{"child": job.ID})
+	}
+	if job.ProjectID != 0 && job.Dir == "" && s.opts.Projects != nil {
+		s.opts.Projects.GivenJob(ctx, job.ProjectID) // the lead's start policy
 	}
 	s.goBackground(ctx, job.ID, func(ctx context.Context) { s.launch(ctx, job.ID) })
 	return job, nil
@@ -172,7 +186,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	}
 	return store.JobRecord{
 		Title: titleOf(brief), BriefMD: brief, DoneWhen: strings.TrimSpace(input.DoneWhen), Role: role, Dir: dir,
-		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent,
+		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent, ProjectID: input.ProjectID,
 		State: string(StateQueued), VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: s.opts.Now(),
 	}, nil
 }

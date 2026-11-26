@@ -410,7 +410,7 @@ func TestMCPToolList(t *testing.T) {
 			t.Errorf("tool %s has a thin description; it is the agent's instruction", tool.Name)
 		}
 	}
-	if strings.Join(names, ",") != "ask,done,fail,get_question,job_create,job_get,job_update,say" {
+	if strings.Join(names, ",") != "ask,done,fail,get_question,job_create,job_get,job_update,project_get,project_list,say" {
 		t.Fatalf("tools %v", names)
 	}
 	if !strings.Contains(session.InitializeResult().Instructions, "never consent") {

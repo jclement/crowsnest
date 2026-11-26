@@ -391,6 +391,7 @@ withdraw questions. Without `CROWSNEST_SOCKET`, or with no server answering, the
 | `crowsnest notify "text" [--urgency low\|normal\|blocking]` | A notice (no answer needed); the first line is its title. Prints the id |
 | `crowsnest say "sentence"` | Speak one sentence in every browser with speak mode on; a no-op without an ElevenLabs key. Only an agent crowsnest started (with its `CROWSNEST_TOKEN`) may speak |
 | `crowsnest mcp` | A stdio MCP server exposing `ask`, `get_question`, `say`, `job_update`, `done`, `fail`, `job_create` and `job_get`, proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes. `ask` with `wait=true` returns the whole answer and note; `ask` with `job_id` (the orchestrator, for the job it holds) files the question under that job, and the socket refuses a job the caller does not hold |
+| `crowsnest project list`, `crowsnest project get <slug>` | The projects with their leads and job counts; one project with its defaults and live jobs |
 | `crowsnest job update "doing now" [--state blocked --reason "…"] [--waiting]` | The job protocol for agents without MCP (Codex) and scripts: a heartbeat with a progress line; `--state blocked` with a reason, or `running`; `--waiting` declares that nothing is left the open questions do not block (refused with no open question). The job is `--job j_<n>` or `CROWSNEST_JOB` |
 | `crowsnest job done --result "…" --verified "…" --not-verified "…" [--attach file]` | The job is finished, with evidence (repeat the list flags; `none` for an empty list; `--result-file` reads the result; `--attach`, repeatable, attaches a file from your working or job directory to the result) |
 | `crowsnest job fail "reason"` | It cannot be finished |
@@ -422,10 +423,39 @@ Roles are prompts: `lead`, `builder`, `reviewer` and `tester` are built in; a fi
 `~/.config/crowsnest/roles/<name>.md` adds a role or replaces a built-in one. The job protocol is
 appended to every role's prompt.
 
+Instruction layers: standing instructions you manage in the app, added to the prompt file of every
+agent crowsnest starts, in order global (every agent), role (the built-in roles, editable, with
+reset to the built-in text; a role file wins and shows read-only), project, then the job's brief.
+Each change is a revision (the newest 20 kept, any one restorable). Crowsnest never edits your
+`AGENTS.md`, `CLAUDE.md` or skills; it records which of those files Claude loaded (the
+`InstructionsLoaded` hook) by path only, and tells you when an agent's layers changed after it
+started (DESIGN.md 21.3).
+
+## Projects and leads
+
+A project is a repository's main checkout: a name, its directory, defaults for the jobs given in
+it (role, engine, model, worktree or not), its own instruction layer, and optionally a **lead**:
+a long-lived Claude agent in that checkout, kept exactly as the orchestrator is (same hooks, MCP
+tools, SAY line, recovery), with Remote Control named `<instance> <project>`. Make them in the
+**Projects** view ("New project" picks from directories you have used); archive, never delete.
+
+- A job given **to the project** with no directory goes to its lead, which plans it and may
+  delegate child jobs inside the project's directory (anything wider asks you first). Given
+  **as a job**, or with a directory inside the project, a job agent runs it directly, as before.
+  A job whose directory is inside a project joins it by itself; others are "Unfiled".
+- The lead starts when you press **Start lead**, or by itself when the project is opened or
+  given a job (the project's "lead starts" setting), and comes back after a crowsnest restart
+  until you stop it.
+- The orchestrator stays the front door: it sees every project (`project_list`, `project_get`,
+  `crowsnest project list|get`) and can hand one work. `--no-orchestrator` works with leads alone.
+- The Jobs board filters by project (remembered per browser); Chat can talk to the orchestrator
+  or any lead (`/chat?target=lead-<slug>`); each standing agent can speak in its own voice,
+  opted into per agent, with spoken replies queued so two never overlap.
+
 ## Scheduled work
 
-Periodic work for the orchestrator is a markdown file in `<--dir>/tasks/` or
-`~/.config/crowsnest/tasks/` (the first wins on a name clash). The files are re-read at every
+Periodic work is a markdown file in `<--dir>/tasks/` or `~/.config/crowsnest/tasks/` (the first
+wins on a name clash), or a schedule made in the app (below). The files are re-read at every
 check, so adding, editing or removing one needs no restart. The format is claude-agent's front
 door's, so its task files run unchanged:
 
@@ -436,6 +466,7 @@ after: 17:00      # optional: not before this local time of day
 as: job           # optional: start a crowsnest job instead of telling the orchestrator
 dir: ~/Work/thing # as: job only: where the job runs (none: the orchestrator takes it)
 role: builder     # as: job only
+project: webapp   # optional: a project's slug; a poke goes to that project's lead, a job joins it
 ---
 # Daily digest
 
@@ -451,12 +482,25 @@ What to do, in plain words. The orchestrator (or the job's agent) reads this fil
   every 5 minutes). Neither can be `as: job`.
 - `as: job` starts a crowsnest job with the body as its brief and the full supervisor; a job
   task whose previous job is still live waits for it rather than stacking a second copy.
-- A file that cannot be used (no frontmatter, an unknown key, `every: 1w`) is skipped and
-  reported once in the Journal, and listed in the Schedule view.
+- `project: <slug>` sends a poke task to that project's lead instead of the orchestrator (same
+  due rules, stamps and gate), and files an `as: job` task's job under the project. A slug that
+  names no live project is a problem.
+- A file that cannot be used (no frontmatter, an unknown key, `every: 1w`, an unknown project)
+  is skipped and reported once in the Journal, and listed in the Schedule view.
+- **App schedules** are made, edited and deleted in the app (`POST`/`PUT`/`DELETE /schedule`)
+  and stored in the database: a name, a cadence (every N minutes of at least 5, hours or days;
+  daily at HH:MM; on poke; on change, which are `every`/`after` in the file grammar), a target
+  (the orchestrator, a project's lead, or a job with its directory, role and engine) and a
+  body. They follow exactly the rules a file does. A poke-type schedule's body is written to
+  `<state dir>/schedules/<name>.md` so the poke line can name it. Names are shared with task
+  files and a **file wins**: an app schedule whose name a file has is listed as shadowed and
+  never runs, and making one with a file's name is refused.
+- Every run (a poke delivered, a job created, a job that could not be created, waiting for the
+  previous run) is kept in a short history, the last 20 per task, shown in the Schedule view.
 - The **Schedule** view (Chat menu, the Jobs view's Schedule button, or the command palette)
-  lists every task with its cadence, last run, next time and last outcome, a Run now button and
-  an on/off switch. The switch is crowsnest's (kept in its database); the file stays the source
-  of what the task says.
+  lists every task with its cadence, target, last run, next time, last outcome and recent runs,
+  a Run now button and an on/off switch. The switch is crowsnest's (kept in its database) for
+  both kinds; a file stays the source of what it says, and only app schedules are editable.
 
 `examples/tasks/` holds three to copy: `check.md` (every 15 minutes: anything stuck or waiting
 on you?), `tidy.md` (hourly: bring the orchestrator's notes up to date) and `digest.md` (daily
@@ -613,9 +657,11 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /orchestrator/poke` | session | "Poke now" → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}`. Skips the two-minute limit between agent pokes; `skipped` with `reason` "nothing is due" when there is nothing to say, or why the orchestrator cannot take one (working, a dialog, a draft) |
 | `GET /orchestrator/context` | session | The orchestrator's context: `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}` (`known` is false before the first reading and right after a compaction that recorded no size) |
 | `POST /orchestrator/compact` | session | "Compact now": `/compact` with the focus, at any size → the context as above; `409 CONFLICT` when the orchestrator is busy, at a dialog or has a draft |
-| `GET /schedule` | session | Scheduled tasks: `{tasks: [{name, title, path, origin, every, after, schedule, as, dir, role, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now}], problems: [{path, error}], dirs}` |
+| `GET /schedule?project=` | session | Scheduled tasks: `{tasks: [{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md, shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs: [{at, outcome, job_id}]}], problems: [{path, name, error}], dirs}`; `project=<id>` keeps one project's tasks (`0`: the orchestrator's and unfiled) |
+| `POST /schedule` | session | A new app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list. `400` invalid, `409` the name is taken (by a file or app schedule) |
 | `POST /schedule/{name}/run` | session | Run now: a poke task goes with the next poke the orchestrator can take, a job task starts its job → the list. `404` for an unknown name |
-| `PUT /schedule/{name}` | session | `{enabled}`: switch a task off or on (kept by crowsnest; the file is untouched) → the list |
+| `PUT /schedule/{name}` | session | `{enabled}`: switch a task off or on (kept by crowsnest; a file is untouched); and/or every field of `POST /schedule` (but `name`) to replace an app schedule → the list. `409` "read-only: edit the file" for a task file's edit |
+| `DELETE /schedule/{name}` | session | Delete an app schedule (its history stays) → the list. `409` for a task file, `404` unknown |
 | `GET /spend?from=&to=&group=` | session | Spend for the local days `from`..`to` (YYYY-MM-DD, inclusive; default this week, Monday to today, at most a year) grouped by `job` (the orchestrator is its own row), `model` or `day`: `{from, to, group, rows: [{key, label, …summary}], total, prices_checked, prices_source, prices_file, note}`. A summary is `{measured, reason, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, total_tokens, turns, tool_calls, wall_seconds, cost_usd (null when unknown), cost_partial, unpriced_tokens, cache_hit_share, models, first_at, last_at}` |
 | `GET /spend/summary` | session | `{today, week, orchestrator_today, orchestrator_total, today_date, week_start, prices_checked, note}`: the Jobs header's totals and the Chat menu's line |
 | `GET /journal?kind=&before=&limit=` | session | The journal, newest first: `{entries: [{id, at, kind, summary, detail}], total, next_before}`. `kind` filters (comma-separated: `poke`, `skip`, `send`, `answer`, `restart`, `alert`, `backstop`, `task`, `upkeep`); `before` is the previous page's `next_before`; `limit` defaults to 50, at most 200 |
@@ -637,7 +683,14 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /jobs/{id}` | session | The job with its `timeline` (state changes, progress, nudges, hooks, questions, restarts, retries, messages), `questions`, `spend` and `spend_turns` (its latest model calls, oldest first: `{at, model, tokens, output, cost_usd}`) |
 | `POST /jobs/{id}/message` | session | `{text, force_over_draft, attachments}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
 | `POST /jobs/{id}/cancel`, `/nudge`, `/resume` | session | Cancel (Esc to the agent, then `cancelled`; the pane stays), nudge by hand, or resume a stuck job (retry now after a limit, restart a gone agent, else nudge) |
+| `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}`, `PUT /projects/{ref}` | session | Projects with their lead and job counts; create `{name, dir, …}`; one by id or slug (`?open=1` when opened in the app); edit or `{archived}` |
+| `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | session | Running leads; a project's lead controls |
+| `POST /jobs/{id}/restart-agent` | session | Restart the job's agent on the same conversation with fresh instructions |
+| `GET /voice/agents`, `PUT /voice/agents/{agent}` | session | Each standing agent's voice (`{voice_id}`, empty for the instance's) |
 | `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
+| `GET /instructions`, `GET /instructions/{scope}/{key}` | session | Instruction layers: every layer with its source (`none`, `builtin`, `db`, `file`) and text; one layer with its revisions. The global layer's key is `-` |
+| `PUT /instructions/{scope}/{key}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` | session | `{body_md}` (at most 32 KB): a new revision; reset a role to its built-in; `{revision}`: that text again. `409` for a role that comes from a file |
+| `GET /agents-instructions/{subject}` | session | `j_<n>`, `orchestrator` or `lead:<slug>`: the layers it was started with, `changed` since, and the instruction files Claude loaded (paths only) |
 | `POST /voice/stt` | session | Talk mode. The body is one recording as MediaRecorder made it (`audio/webm`, `audio/mp4`, `audio/ogg`, …; up to five minutes: at most 8.2 MB, and it must arrive within 2 minutes) → `{text}`. 12 a minute per session (`429` with `Retry-After`); ElevenLabs failures are `502`/`503`/`422` with code `VOICE_UPSTREAM` and never its own error text |
 | `GET /voice/tts?text_id=` | session | The speech of a server-held text (a `say`, a SAY line, a read-aloud), streamed (`audio/mpeg`). `404` for an unknown or expired id (texts live an hour). 30 a minute per session; a replay comes from a cache |
 | `POST /voice/read` | session | `{question_id}` → `{text_id}`: the question's title and options, to play through `/voice/tts` |

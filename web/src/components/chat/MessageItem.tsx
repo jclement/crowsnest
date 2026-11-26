@@ -26,13 +26,14 @@ const tagLabels: Record<MessageTag, { label: string; tone: ChipTone }> = {
   command: { label: "command", tone: "neutral" },
 };
 
-/** playTarget, when set (voice on), is the API target a reply's SAY line is played through. */
-export function MessageItem({ message, playTarget }: { message: Message; playTarget?: string }) {
+/** playTarget, when set (voice on), is the API target a reply's SAY line is played through;
+ * speaker names the agent in the now-playing strip ("orchestrator", "lead-<slug>"). */
+export function MessageItem({ message, playTarget, speaker }: { message: Message; playTarget?: string; speaker?: string }) {
   switch (message.kind) {
     case "user":
       return message.tag === "poke" ? <PokeRow text={message.text ?? ""} /> : <UserMessage message={message} />;
     case "assistant":
-      return <AssistantMessage id={message.id} text={message.text ?? ""} playTarget={playTarget} />;
+      return <AssistantMessage id={message.id} text={message.text ?? ""} playTarget={playTarget} speaker={speaker} />;
     case "tool":
       return message.tool ? <ToolCard tool={message.tool} /> : null;
     case "thinking":
@@ -53,14 +54,14 @@ export function MessageItem({ message, playTarget }: { message: Message; playTar
 }
 
 /** A reply: Markdown, with a leading `SAY:` line shown as a small spoken caption instead. */
-function AssistantMessage({ id, text, playTarget }: { id: string; text: string; playTarget?: string }) {
+function AssistantMessage({ id, text, playTarget, speaker }: { id: string; text: string; playTarget?: string; speaker?: string }) {
   const { spoken, body } = splitSay(text);
   return (
     <article aria-label="Reply" className="min-w-0 text-sm">
       {spoken && (
         <p className="mb-1.5 flex items-start gap-1.5 text-xs italic text-muted" data-testid="spoken-caption">
           {playTarget ? (
-            <PlaySayButton target={playTarget} messageId={id} />
+            <PlaySayButton target={playTarget} messageId={id} speaker={speaker} />
           ) : (
             <Volume2 aria-label="Spoken" className="mt-0.5 h-3.5 w-3.5 shrink-0 not-italic" />
           )}
@@ -77,7 +78,7 @@ function AssistantMessage({ id, text, playTarget }: { id: string; text: string; 
  * by message id (the browser never sends the words), and the audio is synthesised only now, or
  * comes from the cache if speak mode already played it.
  */
-function PlaySayButton({ target, messageId }: { target: string; messageId: string }) {
+function PlaySayButton({ target, messageId, speaker }: { target: string; messageId: string; speaker?: string }) {
   const [busy, setBusy] = useState(false);
   const play = () => {
     player.unlock(); // inside the click, before any await
@@ -85,7 +86,7 @@ function PlaySayButton({ target, messageId }: { target: string; messageId: strin
     endpoints
       .replySay(target, messageId)
       .then(
-        (result) => player.playNow({ textId: result.text_id, text: result.text }),
+        (result) => player.playNow({ textId: result.text_id, text: result.text, agent: speaker }),
         () => {},
       )
       .finally(() => setBusy(false));

@@ -80,13 +80,22 @@ type AgentCaller struct {
 type creator struct {
 	origin string
 	paneID string
-	parent *store.JobRecord // the caller's job (the orchestrator's held job, if any)
+	parent *store.JobRecord // the caller's job (the orchestrator's or a lead's held job, if any)
+	// lead is set when a project's lead is the caller (origin is its agent name, lead-<slug>):
+	// its children run inside its project's root without asking (DESIGN.md 21.2).
+	lead *StandingAgent
 }
+
+// standing reports whether the creator is a standing agent (the orchestrator or a lead).
+func (c creator) standing() bool { return c.origin == OriginOrchestrator || c.lead != nil }
 
 // label names the creator in the human's question.
 func (c creator) label() string {
 	if c.origin == OriginOrchestrator {
 		return "The orchestrator"
+	}
+	if c.lead != nil {
+		return "The project lead " + c.lead.Name
 	}
 	return "Job " + FormatID(c.parent.ID)
 }
@@ -123,11 +132,27 @@ func (s *Service) CreateForAgent(ctx context.Context, input CreateInput, caller 
 		return Job{}, err
 	}
 	input = who.inherit(input)
+	projectID := int64(0)
+	if who.origin == OriginOrchestrator {
+		// The front door may hand a job to a project (DESIGN.md 21.2), validated like the human's.
+		if input, projectID, err = s.applyProject(ctx, input); err != nil {
+			return Job{}, err
+		}
+	} else {
+		input.ProjectID, input.To = 0, "" // a job agent's or a lead's child stays in its creator's project
+	}
 	record, err := s.newRecord(input, who.parentID())
 	if err != nil {
 		return Job{}, err
 	}
 	record.Origin = who.origin
+	record.ProjectID = projectID
+	switch {
+	case who.lead != nil:
+		record.ProjectID = who.lead.ProjectID
+	case who.parent != nil:
+		record.ProjectID = who.parent.ProjectID // a child stays in its parent's project
+	}
 	// The directory is resolved once, here, and that resolved path is what is checked, stored,
 	// shown to the human and launched (R3-H1): a link the agent flips afterwards cannot move the
 	// child, and the launcher refuses a path that no longer resolves to itself.
@@ -182,16 +207,20 @@ func (s *Service) creatorOf(ctx context.Context, caller AgentCaller) (creator, e
 		}
 		return creator{origin: OriginAgent, paneID: caller.PaneID, parent: &parent}, nil
 	}
-	if s.opts.Orchestrator == nil || s.opts.Orchestrator().PaneID != caller.PaneID {
-		return creator{}, invalid("only job agents and the orchestrator can create jobs")
+	agent, ok := s.standingOf(caller.PaneID)
+	if !ok {
+		return creator{}, invalid("only job agents, project leads and the orchestrator can create jobs")
 	}
 	who := creator{origin: OriginOrchestrator, paneID: caller.PaneID}
+	if agent.ProjectID != 0 {
+		who.origin, who.lead = agent.Name, &agent
+	}
 	held, err := s.opts.Store.ListJobs(ctx, []string{string(StateRunning), string(StateNeedsYou), string(StateBlocked)}, listLimit)
 	if err != nil {
 		return creator{}, err
 	}
 	for i := range held {
-		if held[i].AgentName == OrchestratorName && held[i].PaneID == caller.PaneID {
+		if held[i].AgentName == agent.Name && held[i].PaneID == caller.PaneID {
 			who.parent = &held[i]
 			break
 		}
@@ -202,6 +231,9 @@ func (s *Service) creatorOf(ctx context.Context, caller AgentCaller) (creator, e
 // inherit fills what a job agent's child leaves unset from its parent: the engine, the model
 // (when the engine is the same) and the isolation (a child of an isolated job is isolated).
 func (c creator) inherit(input CreateInput) CreateInput {
+	if c.lead != nil && strings.TrimSpace(input.Dir) == "" {
+		input.Dir = c.lead.RootDir // a lead's child works in the project unless it says where
+	}
 	if c.origin != OriginAgent {
 		return input
 	}
@@ -224,6 +256,17 @@ func (c creator) inherit(input CreateInput) CreateInput {
 // or asks git again, since the agent could have changed either since (R3-H1).
 func (s *Service) widerThanAllowed(ctx context.Context, who creator, record store.JobRecord) []string {
 	var wider []string
+	if who.lead != nil {
+		// A lead is held to the orchestrator's engine rule and confined to its project's root,
+		// recorded resolved when the project was made (never recomputed, R3-H1).
+		if record.Engine != EngineClaude {
+			wider = append(wider, fmt.Sprintf("as %s (crowsnest's agents run as %s)", record.Engine, EngineClaude))
+		}
+		if !withinRoots(record.Dir, safeRoots([]string{who.lead.RootDir})) {
+			wider = append(wider, "in "+mdCode(displayPath(record.Dir))+", outside its project's directory")
+		}
+		return wider
+	}
 	if who.origin == OriginOrchestrator {
 		// The orchestrator is held to the same engine rule as any agent (R3-M2): Codex runs with
 		// approvals off, so only the human starts one.
@@ -376,15 +419,15 @@ func (s *Service) checkLimitsLocked(ctx context.Context, who creator, held bool)
 			return invalid("you already have %d jobs waiting for the human's approval, the most crowsnest allows; wait for their answers, or do it within your own directory", waiting)
 		}
 	}
-	if who.parent == nil && who.origin == OriginOrchestrator {
-		// Holding no job, the orchestrator has no parent row to count children against: its own
-		// live jobs are capped instead (R3-M2).
-		own, err := s.opts.Store.CountLiveOwnJobs(ctx, OriginOrchestrator)
+	if who.parent == nil && who.standing() {
+		// Holding no job, a standing agent has no parent row to count children against: its own
+		// live jobs are capped instead (R3-M2). Each lead's origin is its own agent name.
+		own, err := s.opts.Store.CountLiveOwnJobs(ctx, who.origin)
 		if err != nil {
 			return err
 		}
 		if !held && own >= limits.MaxChildren {
-			return invalid("the orchestrator already has %d jobs of its own running, the most crowsnest allows; wait for some to finish", own)
+			return invalid("%s already has %d jobs of its own running, the most crowsnest allows; wait for some to finish", strings.ToLower(who.label()[:1])+who.label()[1:], own)
 		}
 	}
 	if who.parent != nil {

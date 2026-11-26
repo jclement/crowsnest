@@ -50,6 +50,7 @@ import (
 	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
@@ -131,6 +132,10 @@ type Server struct {
 	attachments AgentAttacher
 	attachRoots func(ctx context.Context, caller questions.Caller) []string
 	approvals   *approvals.Service
+
+	instructions LoadedRecorder
+	subjectOf    func(ctx context.Context, paneID string) string
+	projects     ProjectReader
 }
 
 // ServerOptions configure a Server. Questions is required.
@@ -158,6 +163,20 @@ type ServerOptions struct {
 	// Approvals serves the PermissionRequest hook (DESIGN.md 8.7). Nil: those routes answer 503
 	// and every hook falls through to Claude's own dialog.
 	Approvals *approvals.Service
+	// Instructions records the instruction files agents report loading (the InstructionsLoaded
+	// hook, DESIGN.md 21.3). Nil: those hooks are accepted and dropped.
+	Instructions LoadedRecorder
+	// SubjectOf names the agent behind a pane whose token holds no job ("lead:<slug>" for a
+	// project lead). Nil, or "" from it: such a caller is the orchestrator.
+	SubjectOf func(ctx context.Context, paneID string) string
+	// Projects describes the projects and their leads for project_list and project_get
+	// (DESIGN.md 21.2). Nil: those routes answer 503.
+	Projects ProjectReader
+}
+
+// LoadedRecorder is what the socket needs of internal/instructions.
+type LoadedRecorder interface {
+	RecordLoaded(ctx context.Context, subject string, input instructions.LoadedInput) error
 }
 
 // AgentAttacher is what the socket needs of internal/attach.
@@ -176,6 +195,7 @@ func NewServer(opts ServerOptions) *Server {
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext,
 		attachments: opts.Attachments, attachRoots: opts.AttachRoots, approvals: opts.Approvals,
+		instructions: opts.Instructions, subjectOf: opts.SubjectOf, projects: opts.Projects,
 		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
 		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
 		creates: ratelimit.New(createBurst, createRefill, opts.Now),
@@ -189,6 +209,8 @@ func NewServer(opts ServerOptions) *Server {
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", server.handleCancel)
 	mux.HandleFunc("POST /api/v1/questions/{id}/collected", server.handleCollected)
 	mux.HandleFunc("POST /api/v1/say", server.handleSay)
+	mux.HandleFunc("GET /api/v1/projects", server.handleProjects)
+	mux.HandleFunc("GET /api/v1/projects/{ref}", server.handleProject)
 	server.registerJobRoutes(mux)
 	server.registerApprovalRoutes(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {

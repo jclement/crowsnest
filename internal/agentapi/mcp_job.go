@@ -48,6 +48,9 @@ type JobCreateArgs struct {
 	Engine   string `json:"engine,omitempty" jsonschema:"claude or codex; default: your own engine (another one needs the human's approval)"`
 	Model    string `json:"model,omitempty" jsonschema:"model name, when not your own"`
 	Isolate  *bool  `json:"isolate,omitempty" jsonschema:"force a git worktree on or off (default: yours, or the role's)"`
+	// Project and To are the orchestrator's: hand the work to a project (DESIGN.md 21.2).
+	Project string `json:"project,omitempty" jsonschema:"orchestrator only: a project's short name or id (project_list). With no dir the job goes to that project's lead"`
+	To      string `json:"to,omitempty" jsonschema:"with project: lead (the default with no dir) or job (a job agent of its own in the project's directory)"`
 }
 
 // JobGetArgs are job_get's arguments.
@@ -116,7 +119,15 @@ func init() {
 	registerTool("job_create", func(server *mcp.Server, client *Client) {
 		mcp.AddTool(server, &mcp.Tool{Name: "job_create", Title: "Delegate a child job", Description: jobCreateDescription},
 			func(ctx context.Context, _ *mcp.CallToolRequest, args JobCreateArgs) (*mcp.CallToolResult, any, error) {
-				job, err := client.CreateJob(ctx, jobs.CreateInput{Brief: args.Brief, Role: args.Role, Dir: args.Dir, DoneWhen: args.DoneWhen, Engine: args.Engine, Model: args.Model, Isolate: args.Isolate})
+				input := jobs.CreateInput{Brief: args.Brief, Role: args.Role, Dir: args.Dir, DoneWhen: args.DoneWhen, Engine: args.Engine, Model: args.Model, Isolate: args.Isolate, To: args.To}
+				if args.Project != "" {
+					id, err := client.ProjectID(ctx, args.Project)
+					if err != nil {
+						return errorResult(toolError("The job was not created", err)), nil, nil
+					}
+					input.ProjectID = id
+				}
+				job, err := client.CreateJob(ctx, input)
 				if err != nil {
 					return errorResult(toolError("The job was not created", err)), nil, nil
 				}

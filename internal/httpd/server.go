@@ -25,9 +25,11 @@ import (
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
@@ -96,6 +98,9 @@ type Deps struct {
 	Poker *orch.Poker
 	// Push serves the /push routes (Web Push, 8.5). Nil: they answer 503.
 	Push *push.Service
+	// Projects serves /projects and Leads the lead actions (DESIGN.md 21). Nil: 503.
+	Projects *projects.Service
+	Leads    *projects.Leads
 	// Schedule serves /schedule (scheduled tasks, 7.8). Nil: those routes answer 503.
 	Schedule *schedule.Service
 	// Spend serves /spend and /spend/summary (7.11). Nil: they answer 503.
@@ -120,6 +125,8 @@ type Deps struct {
 	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
 	// answers 409 with the reason.
 	Updater Updater
+	// Instructions serves /instructions and /agents-instructions (DESIGN.md 21.3). Nil: 503.
+	Instructions *instructions.Service
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).
@@ -211,10 +218,12 @@ func (s *Server) routes() http.Handler {
 	s.registerJobRoutes(mux)
 	s.registerJournalRoutes(mux)
 	s.registerScheduleRoutes(mux)
+	s.registerProjectRoutes(mux)
 	s.registerVoiceRoutes(mux)
 	s.registerPushRoutes(mux)
 	s.registerSpendRoutes(mux)
 	s.registerAttachmentRoutes(mux)
+	s.registerInstructionRoutes(mux)
 	s.registerApprovalRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))

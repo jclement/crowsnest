@@ -5,12 +5,20 @@
 // thinking, Restart (same conversation, --resume), and New conversation (fresh session). Both
 // relaunches ask for confirmation first, in a Sheet, because they interrupt whatever the
 // orchestrator is doing.
-import { BellRing, Brain, CalendarClock, Coins, Cpu, Minimize2, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
+//
+// For a project's lead (Chat's target switcher, DESIGN.md 21.2) the same menu acts on the lead:
+// Poke now, Restart and New conversation go to the lead's own routes, the Schedule opens
+// filtered to its project, and the context size, Compact now and spend are left out (those are
+// the orchestrator's upkeep). Both show Instructions: what the agent was started with.
+import { BellRing, BookText, Brain, CalendarClock, Coins, Cpu, Minimize2, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { relaunchConfirmations, type RelaunchAction } from "../../lib/conversation";
 import { useOrchestratorAction } from "../../lib/conversation-queries";
-import { pokeToast } from "../../lib/journal";
-import { useCompactNow, useOrchestratorContext, usePokeNow, useSpendSummary } from "../../lib/queries";
+import { leadSubject } from "../../lib/instructions";
+import { pokeToast, type PokeResult } from "../../lib/journal";
+import { leadConfirmations, type ProjectView } from "../../lib/projects";
+import { useCompactNow, useLeadAction, useOrchestratorContext, usePokeNow, useSpendSummary } from "../../lib/queries";
+import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
 import { costText, formatTokens } from "../../lib/spend";
 import { contextLine, contextPercent, type ContextInfo } from "../../lib/schedule";
 import { JournalSheet } from "../journal/JournalPanel";
@@ -30,20 +38,35 @@ interface ChatMenuProps {
   onToggleThinking: () => void;
   /** Restart and New conversation are offered only when there is an orchestrator to relaunch. */
   canRelaunch: boolean;
+  /** The menu acts on this project's lead instead of the orchestrator. */
+  lead?: ProjectView;
 }
 
-export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }: ChatMenuProps) {
+export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch, lead }: ChatMenuProps) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<Action | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [journalOpen, setJournalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [spendOpen, setSpendOpen] = useState(false);
-  const action = useOrchestratorAction();
-  const poke = usePokeNow();
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const orchestratorAction = useOrchestratorAction();
+  const orchestratorPoke = usePokeNow();
+  const leadAction = useLeadAction(lead?.slug ?? "");
   const compact = useCompactNow();
-  const context = useOrchestratorContext(open && canRelaunch);
+  const context = useOrchestratorContext(open && canRelaunch && !lead);
   const toast = useToast();
+  const words = lead ? leadConfirmations(lead.name) : confirmations;
+  const action = lead
+    ? { isPending: leadAction.isPending, mutate: (which: Action, callbacks: { onSuccess: () => void; onError: (error: Error) => void }) => leadAction.mutate(which, callbacks) }
+    : orchestratorAction;
+  const poke = lead
+    ? {
+        isPending: leadAction.isPending,
+        mutate: (_: undefined, callbacks: { onSuccess: (result: PokeResult) => void; onError: (error: Error) => void }) =>
+          leadAction.mutate("poke", { onSuccess: (result) => callbacks.onSuccess(result as PokeResult), onError: callbacks.onError }),
+      }
+    : orchestratorPoke;
 
   useEffect(() => {
     if (!open) return;
@@ -63,7 +86,7 @@ export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }:
     action.mutate(which, {
       onSuccess: () => {
         setConfirming(null);
-        toast.show({ tone: "success", title: which === "restart" ? "Orchestrator restarted" : "New conversation started" });
+        toast.show({ tone: "success", title: which === "restart" ? (lead ? "Lead restarted" : "Orchestrator restarted") : "New conversation started" });
       },
       onError: (error) => toast.show({ tone: "danger", title: "That did not work", description: error.message }),
     });
@@ -93,14 +116,14 @@ export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }:
       <IconButton icon={MoreVertical} label="Conversation menu" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} />
       {open && (
         <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl">
-          <div className="flex items-center gap-2 border-b border-border px-3 pb-1.5 pt-1 text-xs" data-testid="orchestrator-model" title="Set with --model or CROWSNEST_MODEL">
+          <div className="flex items-center gap-2 border-b border-border px-3 pb-1.5 pt-1 text-xs" data-testid="orchestrator-model" title={lead ? "The project's default model, else Claude's" : "Set with --model or CROWSNEST_MODEL"}>
             <Cpu className="h-4 w-4 text-muted" aria-hidden />
             <span className="text-muted">Model</span>
             <span className="ml-auto font-mono text-heading">{model || "Claude's default"}</span>
           </div>
-          {canRelaunch && context.data && <ContextUsage info={context.data} />}
-          <OrchestratorSpend onOpen={pick(() => setSpendOpen(true))} enabled={open} />
-          {canRelaunch && (
+          {!lead && canRelaunch && context.data && <ContextUsage info={context.data} />}
+          {!lead && <OrchestratorSpend onOpen={pick(() => setSpendOpen(true))} enabled={open} />}
+          {!lead && canRelaunch && (
             <MenuItem icon={<Minimize2 className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(compactNow)} disabled={compact.isPending}>
               {compact.isPending ? "Compacting…" : "Compact now"}
             </MenuItem>
@@ -115,6 +138,9 @@ export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }:
           </MenuItem>
           <MenuItem icon={<CalendarClock className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(() => setScheduleOpen(true))}>
             Schedule
+          </MenuItem>
+          <MenuItem icon={<BookText className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(() => setInstructionsOpen(true))}>
+            Instructions
           </MenuItem>
           <MenuItem icon={<Brain className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(onToggleThinking)}>
             {showThinking ? "Hide thinking" : "Show thinking"}
@@ -132,18 +158,30 @@ export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }:
         </div>
       )}
       <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
-      <ScheduleSheet open={scheduleOpen} onClose={() => setScheduleOpen(false)} />
+      <ScheduleSheet open={scheduleOpen} onClose={() => setScheduleOpen(false)} projectId={lead?.id} />
       <SpendSheet open={spendOpen} onClose={() => setSpendOpen(false)} />
-      <Sheet open={confirming !== null} onClose={() => setConfirming(null)} title={confirming ? confirmations[confirming].title : ""} size="md">
+      <Sheet open={instructionsOpen} onClose={() => setInstructionsOpen(false)} title={lead ? `${lead.name} lead: instructions` : "Orchestrator: instructions"} size="md">
+        {instructionsOpen && (
+          <div className="p-3">
+            <AgentInstructionsCard
+              subject={lead ? leadSubject(lead.slug) : "orchestrator"}
+              restart={lead ? { kind: "lead", slug: lead.slug } : { kind: "orchestrator" }}
+              who={lead ? `${lead.name}'s lead` : "the orchestrator"}
+              canRestart={canRelaunch}
+            />
+          </div>
+        )}
+      </Sheet>
+      <Sheet open={confirming !== null} onClose={() => setConfirming(null)} title={confirming ? words[confirming].title : ""} size="md">
         {confirming && (
           <div className="flex flex-col gap-4 p-4">
-            <p className="text-sm text-body">{confirmations[confirming].body}</p>
+            <p className="text-sm text-body">{words[confirming].body}</p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setConfirming(null)}>
                 Cancel
               </Button>
               <Button variant="danger" onClick={() => run(confirming)} disabled={action.isPending}>
-                {action.isPending ? "Working…" : confirmations[confirming].button}
+                {action.isPending ? "Working…" : words[confirming].button}
               </Button>
             </div>
           </div>

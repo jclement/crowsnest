@@ -12,18 +12,22 @@ import { relaunchConfirmations } from "./conversation";
 import { cwdTail, cleanTitle } from "./fleet";
 import { cardLine, isFinished, stateChip, stateLabels, type Job } from "./jobs";
 import { compareQuestions, kindLabels, type Question } from "./questions";
+import { leadAgentName, leadChip, leadRunning, type ProjectView } from "./projects";
 import type { ThemeChoice } from "./theme";
 import type { AgentStatus, Fleet } from "./types";
 import type { ChipTone } from "../components/ui/Chip";
 
 // ---- Commands -------------------------------------------------------------------------------
 
-export type ViewPath = "/" | "/chat" | "/inbox" | "/fleet" | "/terminal";
-export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend";
+export type ViewPath = "/" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal";
+export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions";
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
 export type PaletteCommand =
-  | { kind: "navigate"; to: ViewPath; search?: Record<string, string> }
+  | { kind: "navigate"; to: ViewPath | `/projects/${string}`; search?: Record<string, string> }
+  /** A job for a project's lead (to: "lead"). */
+  | { kind: "projectJob"; projectId: number; name: string; text: string }
+  | { kind: "leadAction"; slug: string; name: string; action: "start" | "stop" }
   | { kind: "giveJob"; brief: string; open: boolean }
   | { kind: "jobForm"; brief: string }
   | { kind: "ask"; text: string; open?: boolean }
@@ -55,23 +59,25 @@ export interface InputSpec {
   title: string;
   placeholder: string;
   /** The command the typed text completes. */
-  target: { kind: "jobMessage"; id: string };
+  target: { kind: "jobMessage"; id: string } | { kind: "projectJob"; projectId: number; name: string };
 }
 
 /** The command an input level runs with the text that was typed. */
 export function completeInput(input: InputSpec, text: string): PaletteCommand {
+  if (input.target.kind === "projectJob") return { kind: "projectJob", projectId: input.target.projectId, name: input.target.name, text };
   return { kind: "jobMessage", id: input.target.id, text };
 }
 
 // ---- Items ----------------------------------------------------------------------------------
 
-export type PaletteGroupId = "recent" | "do" | "needs" | "jobs" | "navigate" | "agents" | "actions";
+export type PaletteGroupId = "recent" | "do" | "needs" | "jobs" | "projects" | "navigate" | "agents" | "actions";
 
 export const groupLabels: Record<PaletteGroupId, string> = {
   recent: "Recent",
   do: "Do",
   needs: "Needs you",
   jobs: "Jobs",
+  projects: "Projects",
   navigate: "Go to",
   agents: "Agents and panes",
   actions: "Actions",
@@ -105,7 +111,9 @@ export type PaletteIcon =
   | "theme-dark"
   | "signout"
   | "speak"
-  | "voice";
+  | "voice"
+  | "project"
+  | "instructions";
 
 /** A secondary action of an item: reached with → (or the row's chevron), or ⌘Enter for the first. */
 export interface PaletteAction {
@@ -151,10 +159,13 @@ export interface PaletteSources {
   speak: { on: boolean } | null;
   /** A voice settings sheet exists to open. */
   voiceSettings: boolean;
+  /** The projects (archived ones are left out of the palette). */
+  projects?: ProjectView[];
 }
 
 const views: Array<{ to: ViewPath; label: string; icon: PaletteIcon; keywords: string[]; key: string }> = [
   { to: "/", label: "Jobs", icon: "jobs", keywords: ["board", "home"], key: "j" },
+  { to: "/projects", label: "Projects", icon: "project", keywords: ["leads", "repos", "directories"], key: "p" },
   { to: "/chat", label: "Chat", icon: "chat", keywords: ["orchestrator", "conversation"], key: "c" },
   { to: "/inbox", label: "Inbox", icon: "inbox", keywords: ["questions", "dialogs", "answer"], key: "i" },
   { to: "/fleet", label: "Fleet", icon: "fleet", keywords: ["agents", "workspaces", "panes"], key: "f" },
@@ -324,6 +335,41 @@ function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
   return items;
 }
 
+/** A project: open it; give its lead a job; chat with its lead; start or stop the lead. */
+export function projectItem(project: ProjectView): PaletteItem {
+  const open: PaletteCommand = { kind: "navigate", to: `/projects/${project.slug}` };
+  const running = leadRunning(project.lead);
+  const chat: PaletteAction = { id: "chat", label: "Chat with its lead", command: { kind: "navigate", to: "/chat", search: { target: leadAgentName(project.slug) } } };
+  const give: PaletteAction = {
+    id: "job",
+    label: `Give a job to ${project.name}'s lead…`,
+    command: { kind: "input", input: { title: `Job for ${project.name}`, placeholder: "What needs doing?", target: { kind: "projectJob", projectId: project.id, name: project.name } } },
+  };
+  const actions: PaletteAction[] = [
+    { id: "open", label: "Open project", command: open },
+    give,
+    chat,
+    running
+      ? { id: "stop", label: "Stop its lead", command: { kind: "leadAction", slug: project.slug, name: project.name, action: "stop" } }
+      : { id: "start", label: "Start its lead", command: { kind: "leadAction", slug: project.slug, name: project.name, action: "start" } },
+    { id: "board", label: "Its jobs on the board", command: { kind: "navigate", to: "/", search: { project: project.slug } } },
+  ];
+  const counts = [project.counts.needs_you ? `${project.counts.needs_you} need you` : "", project.counts.running ? `${project.counts.running} running` : ""].filter(Boolean);
+  return {
+    id: `project:${project.slug}`,
+    group: "projects",
+    title: project.name,
+    subtitle: [project.slug, cwdTail(project.dir), ...counts].filter(Boolean).join(" · "),
+    keywords: [project.slug, project.dir, leadAgentName(project.slug), "project", "lead", project.description].filter(Boolean),
+    icon: "project",
+    chip: leadChip(project.lead),
+    command: open,
+    verb: "Open",
+    actions,
+    alt: give,
+  };
+}
+
 /** Everything the palette can offer apart from the query's own Give job and Ask items. */
 export function buildItems(sources: PaletteSources): PaletteItem[] {
   const items: PaletteItem[] = [];
@@ -361,6 +407,7 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
   items.push(sheet("journal", "Journal", "journal", ["pokes", "history", "log"]));
   items.push(sheet("schedule", "Schedule", "schedule", ["scheduled", "tasks", "cron", "periodic", "every"]));
   items.push(sheet("spend", "Spend", "spend", ["cost", "tokens", "usage", "money", "budget", "price"]));
+  items.push(sheet("instructions", "Instructions", "instructions", ["settings", "roles", "global", "layers", "prompt", "claude.md", "agents.md"]));
   items.push(sheet("shortcuts", "Keyboard shortcuts", "keyboard", ["help", "keys", "?"]));
   if (sources.voiceSettings) items.push(sheet("voice", "Voice settings", "voice", ["talk", "speak", "elevenlabs", "microphone"]));
   for (const choice of ["system", "light", "dark"] as const) {
@@ -381,6 +428,7 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
 
   const jobs = [...(sources.jobs ?? [])].sort((a, b) => jobRank(a) - jobRank(b) || (b.last_activity_at ?? b.created_at).localeCompare(a.last_activity_at ?? a.created_at));
   items.push(...jobs.map(jobItem));
+  items.push(...(sources.projects ?? []).filter((project) => !project.archived).map(projectItem));
   items.push(...fleetItems(sources.fleet).filter((item) => item.group === "agents"));
 
   if (sources.orchestrator) {
@@ -547,7 +595,7 @@ export function matchQuality(score: number, tokens: string[]): number {
   return length === 0 ? 0 : score / (length * PERFECT_CHAR_SCORE);
 }
 
-const emptyOrder: PaletteGroupId[] = ["recent", "needs", "navigate", "jobs", "actions"];
+const emptyOrder: PaletteGroupId[] = ["recent", "needs", "navigate", "jobs", "projects", "actions"];
 
 /**
  * The groups to show for a query. With no query: recent items, what needs Jeff, the views,

@@ -20,6 +20,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -331,6 +332,13 @@ func (s *Server) inboxForPane(ctx context.Context, paneID string) attach.Inbox {
 	layout := s.deps.AttachLayout
 	if s.deps.Orchestrator != nil && paneID != "" && s.deps.Orchestrator.Status().PaneID == paneID {
 		return layout.Orchestrator()
+	}
+	if s.deps.Leads != nil && paneID != "" {
+		if lead := s.deps.Leads.ByPane(paneID); lead != nil {
+			// A project's lead reads its own inbox, under its state directory, which its
+			// settings allow (DESIGN.md 21.2), as the orchestrator reads its own.
+			return attach.Layout{StateDir: filepath.Join(layout.StateDir, "leads", lead.Project.Slug)}.Orchestrator()
+		}
 	}
 	if s.deps.Jobs != nil && paneID != "" {
 		if jobID := s.deps.Jobs.JobInPane(ctx, paneID); jobID != "" {

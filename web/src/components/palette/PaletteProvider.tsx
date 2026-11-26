@@ -13,6 +13,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { chordLabel, focusContext, hotkeyFor, initialSequence, isMacPlatform, type SequenceState } from "../../lib/hotkeys";
 import { loadRecents, pushRecent, saveRecents, type PaletteSheet } from "../../lib/palette";
 import { JournalSheet } from "../journal/JournalPanel";
+import { InstructionsSheet } from "../instructions/InstructionsSheet";
 import { ScheduleSheet } from "../schedule/SchedulePanel";
 import { SpendSheet } from "../spend/SpendSheet";
 import { NotificationSettings } from "../push/NotificationSettings";
@@ -120,6 +121,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
       <JournalSheet open={sheet === "journal"} onClose={() => setSheet(null)} />
       <ScheduleSheet open={sheet === "schedule"} onClose={() => setSheet(null)} />
       <SpendSheet open={sheet === "spend"} onClose={() => setSheet(null)} />
+      <InstructionsSheet open={sheet === "instructions"} onClose={() => setSheet(null)} />
       <NotificationSettings open={sheet === "notifications"} onClose={() => setSheet(null)} />
       {voice && <VoiceSettingsSheet open={sheet === "voice"} onClose={() => setSheet(null)} />}
     </PaletteContext.Provider>

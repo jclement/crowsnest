@@ -142,7 +142,7 @@ func (t *Tender) CompactNow(ctx context.Context, status Status) error {
 func (t *Tender) compact(ctx context.Context, now time.Time, status Status, usage transcript.Usage, how string) bool {
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pokeSendTimeout)
 	defer cancel()
-	result, err := Prompt(sendCtx, t.opts.Client, status.PaneID, PromptRequest{Text: "/compact " + CompactFocus, ExpectAgent: Name})
+	result, err := Prompt(sendCtx, t.opts.Client, status.PaneID, PromptRequest{Text: "/compact " + CompactFocus, ExpectAgent: status.Name})
 	if err != nil && provablyNotTyped(err) {
 		return false
 	}
@@ -175,7 +175,7 @@ func (t *Tender) fresh(ctx context.Context, now time.Time, status Status, step F
 	case FreshHandoff:
 		sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pokeSendTimeout)
 		defer cancel()
-		_, err := Prompt(sendCtx, t.opts.Client, status.PaneID, PromptRequest{Text: HandoffPrompt(t.opts.HandoffFile), ExpectAgent: Name})
+		_, err := Prompt(sendCtx, t.opts.Client, status.PaneID, PromptRequest{Text: HandoffPrompt(t.opts.HandoffFile), ExpectAgent: status.Name})
 		if err != nil && provablyNotTyped(err) {
 			return false
 		}

@@ -64,6 +64,8 @@ type PokeResult struct {
 	Started bool      `json:"started,omitempty"` // the orchestrator was seen to start a turn
 	Note    string    `json:"note,omitempty"`    // what Prompt said about an uncertain send
 	At      time.Time `json:"at"`
+	// Agent is the standing agent this poke was for ("orchestrator" or "lead-<slug>").
+	Agent string `json:"agent,omitempty"`
 }
 
 // QuestionInfo is a settled question, as the poker needs it.
@@ -110,6 +112,31 @@ type PokerOptions struct {
 	// CheckInterval overrides DefaultPokeCheckInterval.
 	CheckInterval time.Duration
 	Now           func() time.Time
+
+	// ---- A poker for a standing agent other than the orchestrator (DESIGN.md 21.2) ----
+
+	// StateKey is the kv key of this poker's bookkeeping (kvPokeState when empty), so each
+	// standing agent remembers its own delivered reasons.
+	StateKey string
+	// Label names the agent in journal lines and results ("the orchestrator" when empty).
+	Label string
+	// NoAgentReasons drops the "another agent settled" reasons: they are the orchestrator's to
+	// hear, as the session's front door; a project's lead hears about its own project's jobs.
+	NoAgentReasons bool
+}
+
+func (p *Poker) stateKey() string {
+	if p.opts.StateKey != "" {
+		return p.opts.StateKey
+	}
+	return kvPokeState
+}
+
+func (p *Poker) label() string {
+	if p.opts.Label != "" {
+		return p.opts.Label
+	}
+	return "the orchestrator"
 }
 
 // ScheduledTask is a due task as the poker needs it (internal/schedule adapts to this).
@@ -293,7 +320,7 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 	input := p.precheckInput(now, manual)
 	input.Tasks, input.RideAlong = p.dueTasks(ctx, now)
 	due := Precheck(input)
-	result := PokeResult{Outcome: OutcomeNothing, Reasons: ReasonTexts(due.Reasons), Manual: manual, At: now}
+	result := PokeResult{Outcome: OutcomeNothing, Reasons: ReasonTexts(due.Reasons), Manual: manual, At: now, Agent: status.Name}
 	if len(due.Reasons) == 0 {
 		if manual {
 			result.Outcome, result.Reason = OutcomeSkipped, "nothing is due"
@@ -377,7 +404,9 @@ func (p *Poker) precheckInput(now time.Time, manual bool) PrecheckInput {
 	p.loadLocked(context.Background())
 	agents := make([]AgentSeen, 0, len(p.agents))
 	for _, agent := range p.agents {
-		agents = append(agents, agent)
+		if !p.opts.NoAgentReasons {
+			agents = append(agents, agent)
+		}
 	}
 	pushed := make(map[string]string, len(p.state.Pushed))
 	for pane, mark := range p.state.Pushed {
@@ -485,7 +514,7 @@ func (p *Poker) skipped(ctx context.Context, result PokeResult, decision GateDec
 func (p *Poker) send(ctx context.Context, result PokeResult, status Status, due PrecheckResult) PokeResult {
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pokeSendTimeout)
 	defer cancel()
-	sent, err := Prompt(sendCtx, p.opts.Client, status.PaneID, PromptRequest{Text: PokeText(result.At, due.Reasons)})
+	sent, err := Prompt(sendCtx, p.opts.Client, status.PaneID, PromptRequest{Text: PokeText(result.At, due.Reasons), ExpectAgent: status.Name})
 	var blocked *BlockedError
 	var draft *DraftError
 	if errors.Is(err, ErrNotTyped) || errors.As(err, &blocked) || errors.As(err, &draft) {
@@ -507,7 +536,7 @@ func (p *Poker) send(ctx context.Context, result PokeResult, status Status, due 
 	}
 	result.Outcome, result.Started, result.Note = OutcomeSent, sent.Started, sent.Note
 	p.delivered(ctx, result.At, due)
-	summary := "Poked the orchestrator: " + strings.Join(result.Reasons, "; ")
+	summary := "Poked " + p.label() + ": " + strings.Join(result.Reasons, "; ")
 	if result.Manual {
 		summary = "Poke now: " + strings.Join(result.Reasons, "; ")
 	}
@@ -566,7 +595,7 @@ func (p *Poker) loadLocked(ctx context.Context) {
 		return
 	}
 	p.loaded = true
-	raw, err := p.opts.KV.GetKV(ctx, kvPokeState)
+	raw, err := p.opts.KV.GetKV(ctx, p.stateKey())
 	if err != nil {
 		return
 	}
@@ -602,7 +631,7 @@ func (p *Poker) saveLocked(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	if err := p.opts.KV.SetKV(context.WithoutCancel(ctx), kvPokeState, string(body)); err != nil {
+	if err := p.opts.KV.SetKV(context.WithoutCancel(ctx), p.stateKey(), string(body)); err != nil {
 		p.opts.Logger.Warn("storing poke bookkeeping", "err", err)
 	}
 }
@@ -636,6 +665,9 @@ func (p *Poker) journal(ctx context.Context, kind journal.Kind, summary string, 
 }
 
 func (p *Poker) publish(result PokeResult) {
+	if status := p.opts.Status(); status.Name != "" {
+		result.Agent = status.Name
+	}
 	if p.opts.Hub != nil {
 		p.opts.Hub.Publish(hub.Event{Type: "poke", Data: result})
 	}

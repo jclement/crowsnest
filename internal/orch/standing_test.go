@@ -1,0 +1,246 @@
+// The standing-agent generalisation (DESIGN.md 21.2): a project's lead runs the very lifecycle
+// the orchestrator does, under its own agent name, workspace label, kv keys and instructions.
+// The orchestrator's own tests (orch_test.go) run unchanged; this table runs the same
+// scenarios for both kinds, and checks that the two never take each other's pane, kv or name.
+
+package orch
+
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/herdr/fake"
+	"github.com/jclement/crowsnest/internal/transcript"
+)
+
+type standingKind struct {
+	name      string
+	agent     string
+	workspace string
+	kvPrefix  string
+	adjust    func(*Options)
+}
+
+func standingKinds() []standingKind {
+	return []standingKind{
+		{name: "orchestrator", agent: Name, workspace: WorkspaceLabel, kvPrefix: "orchestrator", adjust: func(*Options) {}},
+		{name: "lead", agent: "lead-alpha", workspace: "lead alpha", kvPrefix: "lead.alpha", adjust: func(o *Options) {
+			o.AgentName, o.Workspace, o.KVPrefix = "lead-alpha", "lead alpha", "lead.alpha"
+			o.RemoteControlName = "quark alpha"
+			o.Render = func() (string, error) { return "# You are the lead of project alpha\n", nil }
+		}},
+	}
+}
+
+func TestStandingAgentLifecycle(t *testing.T) {
+	for _, kind := range standingKinds() {
+		t.Run(kind.name+"/creates its workspace and starts", func(t *testing.T) {
+			f := fake.New()
+			rig := newRig(t, f, kind.adjust)
+			status, err := rig.orch.Ensure(context.Background())
+			if err != nil || status.State != StateIdle || status.Name != kind.agent {
+				t.Fatalf("status %+v err %v", status, err)
+			}
+			starts := f.Starts()
+			if len(starts) != 1 || starts[0].Name != kind.agent {
+				t.Fatalf("starts %+v", starts)
+			}
+			workspaces, _ := f.WorkspaceList(context.Background())
+			if len(workspaces) != 1 || workspaces[0].Label != kind.workspace {
+				t.Fatalf("workspaces %+v", workspaces)
+			}
+			if stored, _ := rig.db.GetKV(context.Background(), kind.kvPrefix+".session_id"); stored != status.SessionID {
+				t.Fatalf("session stored under %s: %q", kind.kvPrefix, stored)
+			}
+			body, _ := os.ReadFile(argValue(starts[0].Args, "--append-system-prompt-file"))
+			if kind.name == "lead" && !strings.Contains(string(body), "lead of project alpha") {
+				t.Fatalf("instructions are the lead's: %q", body)
+			}
+			if kind.name == "lead" && argValue(starts[0].Args, "--remote-control") != "quark alpha" {
+				t.Fatalf("remote control: %v", starts[0].Args)
+			}
+		})
+		t.Run(kind.name+"/adopts a live agent", func(t *testing.T) {
+			f := fake.New()
+			_, _, pane := f.AddWorkspace(kind.workspace, "/somewhere")
+			_ = f.AddAgent(pane, kind.agent, "claude", herdr.StatusWorking, "existing")
+			rig := newRig(t, f, kind.adjust)
+			status, err := rig.orch.Ensure(context.Background())
+			if err != nil || status.State != StateWorking || status.PaneID != pane || len(f.Starts()) != 0 {
+				t.Fatalf("status %+v starts %d err %v", status, len(f.Starts()), err)
+			}
+		})
+		t.Run(kind.name+"/resumes its stored conversation", func(t *testing.T) {
+			f := fake.New()
+			rig := newRig(t, f, kind.adjust)
+			first, _ := rig.orch.Ensure(context.Background())
+			writeTranscript(t, rig.claude, rig.opts.Dir, first.SessionID)
+			_ = f.ExitAgent(first.PaneID)
+			rig.orch.Watch(context.Background())
+			starts := f.Starts()
+			if len(starts) != 2 || argValue(starts[1].Args, "--resume") != first.SessionID {
+				t.Fatalf("second start %+v", starts)
+			}
+		})
+		t.Run(kind.name+"/restart and new conversation", func(t *testing.T) {
+			f := fake.New()
+			rig := newRig(t, f, kind.adjust)
+			first, _ := rig.orch.Ensure(context.Background())
+			writeTranscript(t, rig.claude, rig.opts.Dir, first.SessionID)
+			if _, err := rig.orch.Restart(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			fresh, err := rig.orch.NewConversation(context.Background())
+			if err != nil || fresh.SessionID == first.SessionID {
+				t.Fatalf("new conversation %+v err %v", fresh, err)
+			}
+		})
+	}
+}
+
+// TestLeadAndOrchestratorCoexist: both in one session never share a pane, a name or a kv key.
+func TestLeadAndOrchestratorCoexist(t *testing.T) {
+	f := fake.New()
+	orchestrator := newRig(t, f)
+	lead := newRig(t, f, standingKinds()[1].adjust)
+	lead.orch.opts.KV = orchestrator.db // one database, as in serve
+	oStatus, err := orchestrator.orch.Ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lStatus, err := lead.orch.Ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oStatus.PaneID == lStatus.PaneID || oStatus.SessionID == lStatus.SessionID {
+		t.Fatalf("shared pane or session: %+v %+v", oStatus, lStatus)
+	}
+	o, _ := orchestrator.db.GetKV(context.Background(), "orchestrator.session_id")
+	l, _ := orchestrator.db.GetKV(context.Background(), "lead.alpha.session_id")
+	if o != oStatus.SessionID || l != lStatus.SessionID {
+		t.Fatalf("kv o=%q l=%q", o, l)
+	}
+	// The lead exiting is the lead's business: the orchestrator's watch leaves it alone.
+	_ = f.ExitAgent(lStatus.PaneID)
+	orchestrator.orch.Watch(context.Background())
+	if len(f.Starts()) != 2 {
+		t.Fatalf("the orchestrator's watch restarted the lead: %+v", f.Starts())
+	}
+	lead.orch.Watch(context.Background())
+	if starts := f.Starts(); len(starts) != 3 || starts[2].Name != "lead-alpha" {
+		t.Fatalf("the lead's watch restarts it: %+v", starts)
+	}
+}
+
+func writeTranscript(t *testing.T, configDir, cwd, session string) {
+	t.Helper()
+	path := transcript.Path(configDir, cwd, session)
+	if err := os.MkdirAll(dirOf(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"role":"user","content":"hi"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func dirOf(path string) string { return path[:strings.LastIndex(path, "/")] }
+
+// TestInstructionsForALead: a lead's CROWSNEST.md names its project and keeps the orchestrator's
+// contracts word for word; the orchestrator's mentions the project tools, the lead's does not.
+func TestInstructionsForALead(t *testing.T) {
+	lead, err := RenderInstructions(InstructionData{Session: "s", Dir: "/w/alpha", Version: "v", Project: "alpha", ProjectName: "Alpha", Description: "the thing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orchestrator, err := RenderInstructions(InstructionData{Session: "s", Dir: "/w/o", Version: "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"lead of project Alpha", "`/w/alpha`", "the thing", "SAY contract", "[crowsnest poke", "The job protocol"} {
+		if !strings.Contains(lead, want) {
+			t.Errorf("lead instructions lack %q", want)
+		}
+	}
+	if strings.Contains(lead, "project_list") || !strings.Contains(orchestrator, "project_list") || strings.Contains(orchestrator, "lead of project") {
+		t.Error("the project tools paragraph is on the wrong agent")
+	}
+}
+
+// fixedTasks is a TaskSource with one task due until it is delivered.
+type fixedTasks struct {
+	due       []ScheduledTask
+	delivered []string
+}
+
+func (f *fixedTasks) DueTasks(context.Context, time.Time) []ScheduledTask {
+	if len(f.delivered) > 0 {
+		return nil
+	}
+	return f.due
+}
+
+func (f *fixedTasks) Delivered(_ context.Context, _ time.Time, names []string) {
+	f.delivered = append(f.delivered, names...)
+}
+
+// TestALeadsPokerDeliversItsScheduledTaskUnderTheGate: a lead's poker (its own state key, no
+// "another agent settled" reasons) types its project's scheduled task into the lead only, and
+// only when the lead is idle with an empty input box; the task is stamped once delivered.
+func TestALeadsPokerDeliversItsScheduledTaskUnderTheGate(t *testing.T) {
+	tasks := &fixedTasks{due: []ScheduledTask{{Name: "evening-review", Text: "scheduled task evening-review is due (daily after 18:00, never run): read /s/evening-review.md and do what it says"}}}
+	r := newPokeRig(t)
+	_, _, leadPane := r.fake.AddWorkspace("lead alpha", "/w/alpha")
+	_ = r.fake.AddAgent(leadPane, "lead-alpha", "claude", herdr.StatusWorking, "s-lead")
+	leadStatus := func() Status {
+		agent, _ := r.fake.AgentGet(context.Background(), "lead-alpha")
+		return Status{State: stateOf(agent, StateIdle), PaneID: leadPane, Name: "lead-alpha"}
+	}
+	poker := NewPoker(PokerOptions{
+		Client: r.fake, KV: r.db, Journal: r.journal, Status: leadStatus, Tasks: tasks, Now: r.clock.Now,
+		StateKey: "lead.alpha.poke.state", Label: "the lead of Alpha", NoAgentReasons: true,
+	})
+	leadPrompts := func() []string {
+		var out []string
+		for _, prompt := range r.fake.Prompts() {
+			if prompt.PaneID == leadPane {
+				out = append(out, prompt.Text)
+			}
+		}
+		return out
+	}
+	// Working: held.
+	if result := poker.Check(context.Background(), false); result.Outcome == OutcomeSent || len(leadPrompts()) != 0 {
+		t.Fatalf("poked a working lead: %+v", result)
+	}
+	// Idle with a draft in the box: held.
+	r.set(leadPane, herdr.StatusIdle)
+	r.screen(leadPane, draftInput)
+	if result := poker.Check(context.Background(), false); result.Outcome == OutcomeSent {
+		t.Fatalf("poked over a draft: %+v", result)
+	}
+	// Idle and empty: delivered, to the lead only, and stamped.
+	r.screen(leadPane, emptyInput)
+	result := poker.Check(context.Background(), false)
+	if result.Outcome != OutcomeSent || result.Agent != "lead-alpha" {
+		t.Fatalf("not delivered: %+v", result)
+	}
+	if prompts := leadPrompts(); len(prompts) != 1 || !strings.Contains(prompts[0], "scheduled task evening-review") {
+		t.Fatalf("lead prompts %v", prompts)
+	}
+	if len(r.pokes()) != 0 {
+		t.Fatalf("the orchestrator was poked with the lead's task: %v", r.pokes())
+	}
+	if len(tasks.delivered) != 1 || tasks.delivered[0] != "evening-review" {
+		t.Fatalf("stamped %v", tasks.delivered)
+	}
+	if raw, err := r.db.GetKV(context.Background(), "lead.alpha.poke.state"); err != nil || raw == "" {
+		t.Fatalf("the lead's poker kept no state of its own: %q %v", raw, err)
+	}
+	if _, err := r.db.GetKV(context.Background(), "poke.state"); err == nil {
+		t.Fatal("the lead's poker wrote the orchestrator's state")
+	}
+}

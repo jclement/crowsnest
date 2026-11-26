@@ -18,6 +18,7 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/termtext"
@@ -34,6 +35,9 @@ type pokeServices struct {
 	alert        func(text string)
 	tasks        orch.TaskSource // scheduled tasks (7.8)
 	tender       orch.Upkeep     // compaction and the daily new conversation (7.9)
+	// leads are the projects' leads; each has a poker of its own for its project's jobs and
+	// the questions those jobs asked (DESIGN.md 21.2). Nil: none.
+	leads func() *projects.Leads
 }
 
 // startPoker builds the poker, feeds it from the hub, and runs it until ctx ends.
@@ -90,10 +94,14 @@ func handlePokeEvent(ctx context.Context, event hub.Event, poker *orch.Poker, se
 			logger.Debug("poker could not read a job", "job", data.ID, "err", err)
 			return
 		}
-		poker.JobChanged(ctx, orch.JobInfo{
+		info := orch.JobInfo{
 			ID: data.ID, Title: data.Title, State: string(data.State), Stuck: data.Stuck,
 			Cause: detail.CauseText, PaneID: detail.PaneID,
-		})
+		}
+		poker.JobChanged(ctx, info)
+		if lead := leadOf(services, detail.ProjectID); lead != nil {
+			lead.JobChanged(ctx, info) // the lead hears about its own project's jobs
+		}
 	case questions.Event:
 		if data.Change != "answered" && data.Change != "expired" && data.Change != "cancelled" {
 			return
@@ -102,10 +110,29 @@ func handlePokeEvent(ctx context.Context, event hub.Event, poker *orch.Poker, se
 		if err != nil {
 			return
 		}
-		poker.QuestionSettled(ctx, orch.QuestionInfo{
+		info := orch.QuestionInfo{
 			ID: question.ID, Title: question.Title, Status: string(question.Status), Kind: string(question.Kind), SourcePane: question.SourcePane,
-		})
+		}
+		poker.QuestionSettled(ctx, info)
+		if question.JobID != "" && services.jobs != nil {
+			if job, err := services.jobs.Get(ctx, question.JobID); err == nil {
+				if lead := leadOf(services, job.ProjectID); lead != nil {
+					lead.QuestionSettled(ctx, info)
+				}
+			}
+		}
 	}
+}
+
+// leadOf is the poker of a project's running lead, or nil.
+func leadOf(services pokeServices, projectID int64) *orch.Poker {
+	if projectID == 0 || services.leads == nil || services.leads() == nil {
+		return nil
+	}
+	if lead := services.leads().Get(projectID); lead != nil {
+		return lead.Poker
+	}
+	return nil
 }
 
 // replaySettled feeds the poker every job and question that settled (or job that is stuck) since

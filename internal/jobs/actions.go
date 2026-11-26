@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -147,7 +148,7 @@ func (s *Service) Resume(ctx context.Context, id string) (Job, error) {
 	switch {
 	case detail.Stuck && (detail.Cause == CauseLimit || detail.Cause == CauseServerError):
 		s.RetryNow(ctx, id)
-	case detail.AgentName != OrchestratorName && s.gone(ctx, detail.PaneID):
+	case !IsStanding(detail.AgentName) && s.gone(ctx, detail.PaneID):
 		record, err := s.opts.Store.GetJob(ctx, mustParse(id))
 		if err != nil {
 			return Job{}, err
@@ -300,4 +301,60 @@ func (s *Service) QuestionChanged(ctx context.Context, jobID, questionID, title,
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		s.opts.Logger.Warn("recording a job's question", "job", jobID, "err", err)
 	}
+}
+
+// RestartAgent is "restart with new instructions" (DESIGN.md 21.3): the job's agent exits (Esc,
+// /exit, then Ctrl+C) and is started again in its pane on the same conversation (--resume when
+// its transcript exists), with its start-up files, the prompt file and its instruction layers
+// included, written afresh. It is a manual restart, so the hourly budget is cleared. A standing
+// agent's job is refused: restart the orchestrator or the lead itself.
+func (s *Service) RestartAgent(ctx context.Context, id string) (Job, error) {
+	detail, err := s.Get(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	switch {
+	case detail.State.Terminal():
+		return Job{}, invalid("job %s is already %s", id, detail.State)
+	case detail.PaneID == "" || s.opts.Herdr == nil:
+		return Job{}, ErrNoAgent
+	case IsStanding(detail.AgentName):
+		return Job{}, invalid("job %s is held by %s; restart that agent itself", id, detail.AgentName)
+	}
+	if err := s.stopAgent(ctx, detail.PaneID, detail.AgentName); err != nil {
+		return Job{}, err
+	}
+	_ = s.Journal(ctx, id, EventRestart, "Restarting the agent with the instructions as they are now", nil)
+	record, err := s.opts.Store.GetJob(ctx, mustParse(id))
+	if err != nil {
+		return Job{}, err
+	}
+	s.restart(ctx, record, true)
+	refreshed, err := s.Get(ctx, id)
+	return refreshed.Job, err
+}
+
+// stopAgent ends the agent in paneID and waits for its shell, as the orchestrator's Restart does.
+func (s *Service) stopAgent(ctx context.Context, paneID, agentName string) error {
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if agent, err := s.opts.Herdr.AgentGet(callCtx, paneID); err == nil {
+		if agent.Name != agentName {
+			return invalid("the pane now holds %q, not this job's agent; nothing was stopped", agent.Name)
+		}
+		if agent.AgentStatus == herdr.StatusBlocked {
+			_ = s.opts.Herdr.AgentSendKeys(callCtx, paneID, []string{"esc"})
+		}
+	}
+	_, _ = s.opts.Herdr.AgentPrompt(callCtx, paneID, "/exit", nil)
+	if s.waitForShell(ctx, paneID) == nil {
+		return nil
+	}
+	for range 2 {
+		_ = s.opts.Herdr.PaneSendKeys(callCtx, paneID, []string{"ctrl+c"})
+	}
+	if err := s.waitForShell(ctx, paneID); err != nil {
+		return invalid("the agent did not exit; open its terminal: %v", err)
+	}
+	return nil
 }

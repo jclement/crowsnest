@@ -51,14 +51,15 @@ func (s *Service) jobDir(jobID string) (string, error) {
 
 // writeBrief writes the job's brief file and returns its path. A Codex agent has no system
 // prompt file, so its brief file starts with the job protocol.
-func (s *Service) writeBrief(job Job) (string, error) {
+func (s *Service) writeBrief(ctx context.Context, job Job) (string, error) {
 	dir, err := s.jobDir(job.ID)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
 	if job.Engine == EngineCodex {
-		protocol, err := s.opts.Roles.Prompt(job.Role, job.ID, false)
+		// Not recorded again: writeJobFiles recorded this start's layers moments ago.
+		protocol, err := s.agentPrompt(ctx, job, false, false)
 		if err != nil {
 			return "", err
 		}

@@ -88,3 +88,29 @@ export async function expectAccessible(page: Page, testInfo: TestInfo, what: str
 export function sameOriginHeaders(app: Instance): Record<string, string> {
   return { Origin: app.baseURL, "X-Crowsnest": "1", "Content-Type": "application/json" };
 }
+
+/**
+ * Waits until the demo orchestrator has taken the job seeded for it (j_10, queued with no
+ * directory) and finished that turn. Since standing agents take their waiting job as soon as a
+ * lead reports ready, the orchestrator starts a 2.5 s turn of its own a moment after start-up;
+ * a test that times its own sends (queued while working, never scrolls while held) must not
+ * overlap it.
+ */
+export async function waitForOrchestratorSettled(page: Page) {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          fetch("/api/v1/jobs")
+            .then((response) => response.json())
+            .then((body: { data: Array<{ dir: string; project_id?: number; state: string; agent_name: string }> }) =>
+              body.data.filter((job) => !job.dir && !job.project_id && job.state === "queued" && !job.agent_name).length,
+            ),
+        ),
+      { timeout: 15_000 },
+    )
+    .toBe(0);
+  await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
+  // The turn's reply lands in the transcript just after the state goes idle.
+  await page.waitForTimeout(500);
+}

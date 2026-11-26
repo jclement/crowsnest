@@ -80,6 +80,19 @@ func LoadRoles(dir string) (*Roles, []error) {
 	return roles, problems
 }
 
+// ValidRoleName reports whether name may name a role (a role file's name, or a role a job names).
+func ValidRoleName(name string) bool { return roleName.MatchString(name) }
+
+// Text is a role's own prompt, without the job protocol, and whether the role exists.
+func (r *Roles) Text(name string) (string, bool) {
+	text, ok := r.prompts[name]
+	return text, ok
+}
+
+// FromFile reports whether the role's prompt came from the override directory (a file that
+// adds a role or replaces a built-in one).
+func (r *Roles) FromFile(name string) bool { return r.custom[name] }
+
 // Has reports whether the role exists.
 func (r *Roles) Has(name string) bool {
 	_, ok := r.prompts[name]

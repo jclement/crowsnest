@@ -5,11 +5,21 @@
 // database, and they apply from the next reply. The sheet says where the voice comes from when
 // nothing is stored: the --elevenlabs-voice flag, its environment variable, the config file, or
 // crowsnest's stock default.
+//
+// Agents (per-agent voices): each standing agent (the orchestrator and each project's lead) is
+// listed with its own "speak replies" switch (per browser, off by default; the header toggle is
+// the master mute) and its own ElevenLabs voice (PUT /voice/agents/{agent}, saved at once; the
+// default is the instance voice above), so the human tells them apart by voice. Job agents'
+// `say` lines share one switch and speak in the instance voice.
 import { Loader2, Play, RotateCcw, Save } from "lucide-react";
 import { useState } from "react";
 import { endpoints, type VoiceInfo, type VoiceSettings as Settings } from "../../lib/api";
 import { player } from "../../lib/voice/player";
 import { useSaveVoiceSettings, useVoiceSettings, useVoices } from "../../lib/voice/settings";
+import { useAgentVoices, useSetAgentVoice } from "../../lib/queries";
+import { JOB_AGENTS } from "../../lib/voice/queue";
+import { useAgentSpeak } from "../../lib/voice/speak";
+import { Switch } from "../ui/Switch";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
@@ -34,7 +44,74 @@ function VoiceSettingsBody({ onSaved }: { onSaved: () => void }) {
       </Banner>
     );
   }
-  return <VoiceForm saved={settings.data} onSaved={onSaved} />;
+  return (
+    <>
+      <VoiceForm saved={settings.data} onSaved={onSaved} />
+      <AgentVoicesSection />
+    </>
+  );
+}
+
+/** Each standing agent: its speak switch and its own voice. */
+function AgentVoicesSection() {
+  const agents = useAgentVoices(true);
+  const voices = useVoices(true);
+  const set = useSetAgentVoice();
+  const toast = useToast();
+  const choose = (agent: string, voiceId: string) =>
+    set.mutate(
+      { agent, voiceId },
+      {
+        onSuccess: () => toast.show({ tone: "success", title: "Voice saved", description: "Its next reply uses it." }),
+        onError: (error) => toast.show({ tone: "danger", title: "Not saved", description: error.message }),
+      },
+    );
+  return (
+    <section aria-label="Agents" className="flex flex-col gap-2 border-t border-border p-4 text-sm">
+      <h3 className="font-medium text-heading">Agents</h3>
+      <p className="text-2xs text-muted">
+        Speak is per agent and per browser; the header's speaker is the mute for all of them. Give each agent its own voice to tell them apart.
+      </p>
+      {agents.isPending ? (
+        <SkeletonRows rows={2} label="Loading the agents" />
+      ) : agents.isError ? (
+        <Banner tone="warning" className="rounded">
+          Could not list the agents: {agents.error.message}
+        </Banner>
+      ) : (
+        <ul className="flex flex-col divide-y divide-border rounded border border-border">
+          {agents.data.agents.map((entry) => (
+            <li key={entry.agent} className="flex flex-wrap items-center gap-2 px-2 py-1">
+              <AgentSwitch agent={entry.agent} label={entry.label} />
+              <select
+                aria-label={`${entry.label} voice`}
+                value={entry.voice_id}
+                onChange={(event) => choose(entry.agent, event.target.value)}
+                disabled={set.isPending || voices.isPending}
+                className="ml-auto h-11 min-w-0 max-w-full rounded border border-border-strong bg-surface px-2 text-xs text-heading md:h-7"
+              >
+                <option value="">Instance voice ({nameOf(voices.data, agents.data.default_voice)})</option>
+                {(voices.data ?? []).map((voice) => (
+                  <option key={voice.voice_id} value={voice.voice_id}>
+                    {voiceLabel(voice)}
+                  </option>
+                ))}
+              </select>
+            </li>
+          ))}
+          <li className="flex flex-wrap items-center gap-2 px-2 py-1">
+            <AgentSwitch agent="" label="Job agents (say)" />
+            <span className="ml-auto text-2xs text-muted">Instance voice</span>
+          </li>
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function AgentSwitch({ agent, label }: { agent: string; label: string }) {
+  const [on, setOn] = useAgentSpeak(agent || JOB_AGENTS);
+  return <Switch checked={on} onChange={setOn} label={`Speak ${label}'s replies`} text={label} />;
 }
 
 /** Where the default voice comes from, in words. */

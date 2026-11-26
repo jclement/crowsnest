@@ -31,6 +31,9 @@ type Text struct {
 	// Override, when set, is how this one text must be spoken whatever the settings say: a
 	// preview of a voice or speed in the settings sheet before it is saved.
 	Override *Effective
+	// Agent is the standing agent whose words these are ("orchestrator", "lead-<slug>"), so
+	// its own voice speaks them (DESIGN.md 13.5); "" for crowsnest's own texts.
+	Agent string
 	// audio is the finished mp3 of a previous fetch, when it fit under maxCachedAudio, and
 	// variant names the voice, model and speed it was made with: a settings change makes it
 	// stale rather than wrong.
@@ -59,22 +62,27 @@ func NewTexts(now func() time.Time) *Texts {
 // sentence added again within its lifetime gets the same id back, so a reply heard when it
 // arrived and played again from Chat costs one synthesis, not two.
 func (t *Texts) Add(text string) string {
-	return t.add(text, nil)
+	return t.add(text, nil, "")
+}
+
+// AddFor stores text an agent said, spoken later in that agent's voice.
+func (t *Texts) AddFor(text, agent string) string {
+	return t.add(text, nil, agent)
 }
 
 // AddWithOverride stores text that must be spoken as override says (a preview). It is never
 // shared with an ordinary entry of the same text.
 func (t *Texts) AddWithOverride(text string, override Effective) string {
-	return t.add(text, &override)
+	return t.add(text, &override, "")
 }
 
-func (t *Texts) add(text string, override *Effective) string {
+func (t *Texts) add(text string, override *Effective, agent string) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if override == nil {
 		for _, id := range t.order {
 			entry := t.byID[id]
-			if entry.Override == nil && entry.Text == text && t.now().Sub(entry.CreatedAt) <= textTTL {
+			if entry.Override == nil && entry.Text == text && entry.Agent == agent && t.now().Sub(entry.CreatedAt) <= textTTL {
 				return id
 			}
 		}
@@ -82,7 +90,7 @@ func (t *Texts) add(text string, override *Effective) string {
 	raw := make([]byte, 12)
 	_, _ = rand.Read(raw) // crypto/rand.Read never fails on supported platforms
 	id := "t_" + hex.EncodeToString(raw)
-	t.byID[id] = &Text{ID: id, Text: text, CreatedAt: t.now(), Override: override}
+	t.byID[id] = &Text{ID: id, Text: text, CreatedAt: t.now(), Override: override, Agent: agent}
 	t.order = append(t.order, id)
 	for len(t.order) > maxTexts {
 		delete(t.byID, t.order[0])

@@ -28,7 +28,7 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
 
   return useCallback(
     (command: PaletteCommand) => {
-      const go = (to: ViewPath, search: Record<string, string> = {}) =>
+      const go = (to: ViewPath | `/projects/${string}`, search: Record<string, string> = {}) =>
         void router.navigate({ to, search } as unknown as Parameters<typeof router.navigate>[0]);
       const failed = (title: string) => (error: unknown) =>
         toast.show({ tone: "danger", title, description: error instanceof Error ? error.message : String(error) });
@@ -102,6 +102,33 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
             .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.jobs }));
           return;
         }
+        case "projectJob":
+          endpoints
+            .createJob({ brief: command.text, project_id: command.projectId, to: "lead" })
+            .then((job) =>
+              toast.show({
+                tone: "success",
+                title: `Job ${job.id} given`,
+                description: `To ${command.name}'s lead`,
+                action: { label: `Open ${job.id}`, onClick: () => go("/", { job: job.id }) },
+              }),
+            )
+            .catch(failed("The job was not created"))
+            .finally(() => {
+              void queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+              void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+            });
+          return;
+        case "leadAction":
+          endpoints
+            .leadAction(command.slug, command.action)
+            .then(() => toast.show({ tone: "success", title: `${command.name}: lead ${command.action === "start" ? "started" : "stopped"}` }))
+            .catch(failed(`${command.name}: the lead did not ${command.action}`))
+            .finally(() => {
+              void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+              void queryClient.invalidateQueries({ queryKey: queryKeys.fleet });
+            });
+          return;
         case "jobMessage":
           endpoints
             .jobMessage(command.id, command.text)

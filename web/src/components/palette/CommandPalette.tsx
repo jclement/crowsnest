@@ -44,6 +44,8 @@ import {
   Bot,
   BellRing,
   Volume2,
+  FolderKanban,
+  BookText,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
@@ -68,7 +70,7 @@ import {
   type RankedItem,
 } from "../../lib/palette";
 import { queryTokens } from "../../lib/fuzzy";
-import { useApprovals, useFleet, useJobs, useMe, useQuestions } from "../../lib/queries";
+import { useApprovals, useFleet, useJobs, useMe, useProjects, useQuestions } from "../../lib/queries";
 import { readTheme, THEME_EVENT, type ThemeChoice } from "../../lib/theme";
 import { Chip, StatusDot } from "../ui/Chip";
 
@@ -100,6 +102,8 @@ const icons: Record<PaletteIcon, LucideIcon> = {
   signout: LogOut,
   speak: Volume2,
   voice: Mic,
+  project: FolderKanban,
+  instructions: BookText,
 };
 
 const ROOT = { kind: "root" } as const;
@@ -422,6 +426,7 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
   const fleet = useFleet();
   const me = useMe();
   const orchestrator = useOrchestrator();
+  const projects = useProjects();
   const [theme, setTheme] = useState<ThemeChoice>(readTheme);
   useEffect(() => {
     const follow = (event: Event) => setTheme((event as CustomEvent<ThemeChoice>).detail);
@@ -439,8 +444,9 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
       theme,
       speak,
       voiceSettings,
+      projects: projects.data?.projects,
     }),
-    [jobs.data, questions.data, approvals.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings],
+    [jobs.data, questions.data, approvals.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings, projects.data],
   );
 }
 
