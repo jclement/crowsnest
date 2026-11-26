@@ -172,7 +172,22 @@ func (s *Service) Live(_ context.Context) doctor.Live {
 	return live
 }
 
-func (s *Service) herdrConnected() bool { return s.opts.Herdr == nil || s.opts.Herdr.Connected() }
+// herdrConnected reports whether herdr is reachable. Without a Lazy client (the demo's fake
+// herdr, tests) it asks the doctor's view of the machine whether herdr is installed, which is how
+// the demo's "herdr missing" state holds the orchestrator.
+func (s *Service) herdrConnected() bool {
+	if s.opts.Herdr != nil {
+		return s.opts.Herdr.Connected()
+	}
+	s.mu.Lock()
+	lookPath := s.opts.Env.LookPath
+	s.mu.Unlock()
+	if lookPath == nil {
+		return true
+	}
+	_, err := lookPath("herdr")
+	return err == nil
+}
 
 // Agents returns the agents found, re-detected when the cached detection is older than maxAge.
 func (s *Service) Agents(ctx context.Context, maxAge time.Duration) []doctor.Agent {
@@ -201,7 +216,9 @@ func (s *Service) Gate(ctx context.Context) string {
 	}
 	if !s.herdrConnected() {
 		reason := "herdr is not running yet."
-		if last := s.opts.Herdr.LastError(); last != "" {
+		if s.opts.Herdr == nil {
+			reason = "herdr is not installed."
+		} else if last := s.opts.Herdr.LastError(); last != "" {
 			reason = "herdr is not available: " + last
 		}
 		return reason + " The orchestrator starts as soon as it is."
