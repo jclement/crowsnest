@@ -13,6 +13,7 @@ import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
 import type { ContextInfo, ScheduleView } from "./schedule";
+import type { AttachmentLimits } from "./attachments";
 import type { PushDevice, PushKind, PushSettings, PushSubscriptionJSON, PushTestResult } from "./push";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
@@ -122,6 +123,8 @@ export interface Features {
   session: string;
   /** This instance's name (--name, else the short hostname): header, page title. */
   name?: string;
+  /** Upload limits; absent when attachments are off (DESIGN.md 8.6). */
+  attachments?: AttachmentLimits;
 }
 
 export interface Me {
@@ -311,4 +314,8 @@ export const queryKeys = {
   /** Everything about the journal sits under ["journal"]; a `journal` or `poke` event refreshes it. */
   journal: ["journal"] as const,
   journalPage: (kinds: string) => ["journal", kinds] as const,
+  /** Everything about attachments sits under ["attachments"]; an `attachment` event refreshes it. */
+  attachments: ["attachments"] as const,
+  attachmentList: (owner: string, role = "") => ["attachments", "list", owner, role] as const,
+  attachmentMeta: (id: string) => ["attachments", "meta", id] as const,
 };

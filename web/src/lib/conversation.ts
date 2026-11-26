@@ -138,6 +138,8 @@ export interface PromptRequest {
   force_over_draft?: boolean;
   /** Transcribed speech (talk mode): the server adds the voice header and the talk flag. */
   voice?: boolean;
+  /** Uploads (a_…) sent with the prompt: copied into the agent's inbox, named after the text. */
+  attachments?: string[];
 }
 
 export interface PromptResult {
