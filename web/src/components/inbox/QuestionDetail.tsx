@@ -1,10 +1,11 @@
 // QuestionDetail: one question in full (DESIGN.md 8.1 and 12): title, context chips, the body
 // through the one Markdown renderer (mermaid and code included), the files as a diff, and the
-// answer form while it is open, or the outcome once it has settled.
+// answer form while it is open, or the outcome once it has settled. With voice on, an open
+// question has "Read aloud".
 import { Ban, Clock, RefreshCw } from "lucide-react";
 import { relativeTime } from "../../lib/format";
 import { answerSummary, kindLabels, statusLabels, type Question } from "../../lib/questions";
-import { useCancelQuestion, useQuestion } from "../../lib/queries";
+import { useCancelQuestion, useMe, useQuestion } from "../../lib/queries";
 import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
@@ -13,6 +14,7 @@ import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
 import { AnswerForm } from "./AnswerForm";
 import { DiffView } from "./DiffView";
+import { ReadAloudButton } from "../voice/VoiceButtons";
 
 interface QuestionDetailProps {
   id: string;
@@ -34,9 +36,13 @@ export function QuestionDetail({ id, onDone }: QuestionDetailProps) {
 }
 
 export function QuestionBody({ question, onDone }: { question: Question; onDone?: () => void }) {
+  const voice = useMe().data?.features.voice ?? false;
   return (
     <article aria-label={question.title} className="flex max-w-4xl flex-col gap-3 p-3 md:p-4">
-      <h2 className="break-words text-base font-semibold leading-snug text-heading">{question.title}</h2>
+      <div className="flex items-start gap-2">
+        <h2 className="min-w-0 flex-1 break-words text-base font-semibold leading-snug text-heading">{question.title}</h2>
+        {voice && question.status === "open" && <ReadAloudButton questionId={question.id} />}
+      </div>
       <QuestionMeta question={question} />
       {question.body_md.trim() && <Markdown className="text-sm">{question.body_md}</Markdown>}
       {question.files && question.files.length > 0 && <DiffView files={question.files} />}

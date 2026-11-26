@@ -3,7 +3,7 @@
 // list follows new messages only while the reader is at the bottom (useStickToBottom) and offers
 // a "new messages" pill otherwise.
 import { ArrowDown, MessagesSquare, RefreshCw } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { visibleMessages, type ChatState } from "../../lib/conversation";
 import { useAgentMessages } from "../../lib/conversation-queries";
@@ -31,6 +31,9 @@ export interface ConversationViewProps {
    * it on the first prompt, so a fresh conversation has none): it gets the empty state instead.
    */
   paneFallback?: boolean;
+  /** Extra controls at the top of the composer area (talk mode's push-to-talk panel); given the
+   * function that scrolls the conversation to its newest message. */
+  composerExtra?: (scrollToBottom: () => void) => ReactNode;
 }
 
 export function ConversationView({
@@ -41,6 +44,7 @@ export function ConversationView({
   showThinking = false,
   onOpenTerminal,
   paneFallback = true,
+  composerExtra,
 }: ConversationViewProps) {
   const query = useAgentMessages(target);
   const desktop = useMediaQuery(DESKTOP_QUERY);
@@ -80,7 +84,8 @@ export function ConversationView({
           page ? "sticky bottom-0 pb-2 md:static" : "pb-2",
         )}
       >
-        <div className={cn("mx-auto min-w-0", page && "max-w-3xl")}>
+        <div className={cn("mx-auto flex min-w-0 flex-col gap-2", page && "max-w-3xl")}>
+          {composerExtra?.(scrollToBottom)}
           <Composer target={target} agentName={agentName} state={state} onSent={scrollToBottom} onOpenTerminal={onOpenTerminal} />
         </div>
       </div>

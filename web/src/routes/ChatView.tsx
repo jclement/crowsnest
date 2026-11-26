@@ -1,19 +1,22 @@
 // The Chat view (DESIGN.md section 12): the orchestrator's conversation, a sticky composer, its
 // status chip (driven by `orchestrator` events), and a menu with thinking, Restart and New
 // conversation. When the orchestrator needs the terminal (a start-up prompt) or is not running,
-// a banner says why and links to its pane in Fleet.
+// a banner says why and links to its pane in Fleet. With voice on, the header has the talk-mode
+// toggle and the composer area the push-to-talk panel (components/voice/TalkPanel.tsx).
 import { useNavigate } from "@tanstack/react-router";
 import { MessageSquare, SquareTerminal } from "lucide-react";
 import { useState } from "react";
 import { ChatMenu } from "../components/chat/ChatMenu";
 import { ChatStatusChip } from "../components/chat/ChatStatusChip";
 import { ConversationView } from "../components/chat/ConversationView";
+import { TalkPanel, TalkToggle } from "../components/voice/TalkPanel";
 import { Banner } from "../components/ui/Banner";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SkeletonRows } from "../components/ui/Skeleton";
 import { chatStateOf } from "../lib/conversation";
 import { useOrchestrator } from "../lib/conversation-queries";
+import { useMe } from "../lib/queries";
 
 /** The orchestrator's API target: the server resolves the name to its pane. */
 const ORCHESTRATOR = "orchestrator";
@@ -22,6 +25,7 @@ export function ChatView() {
   const status = useOrchestrator();
   const navigate = useNavigate();
   const [showThinking, setShowThinking] = useState(false);
+  const voice = useMe().data?.features.voice ?? false;
 
   if (status.isPending) return <SkeletonRows rows={6} label="Loading the orchestrator" />;
   if (status.isError) {
@@ -46,7 +50,8 @@ export function ChatView() {
             {orchestrator.session_id.slice(0, 8)}
           </span>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1.5">
+          {voice && <TalkToggle />}
           <ChatMenu
             showThinking={showThinking}
             onToggleThinking={() => setShowThinking((value) => !value)}
@@ -82,6 +87,13 @@ export function ChatView() {
           showThinking={showThinking}
           onOpenTerminal={openTerminal}
           paneFallback={false}
+          composerExtra={
+            voice
+              ? (scrollToBottom) => (
+                  <TalkPanel target={ORCHESTRATOR} onSent={scrollToBottom} disabled={state === "blocked" || state === "needs_terminal" || state === "failed"} />
+                )
+              : undefined
+          }
         />
       ) : (
         <EmptyState icon={MessageSquare} title="Starting the orchestrator">

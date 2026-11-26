@@ -2,11 +2,12 @@
 // renderer, DESIGN.md 4.8); user messages are plain text in a bubble, with a small label when
 // crowsnest typed them (poke, voice, answer) or they are a slash command; tool calls are cards;
 // thinking is a collapsed block (and hidden altogether unless asked for); the pane-text fallback
-// is preformatted.
-import { Brain, ChevronRight } from "lucide-react";
+// is preformatted. A reply's leading `SAY:` line (talk mode) becomes a small spoken caption.
+import { Brain, ChevronRight, Volume2 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/cn";
 import type { Message, MessageTag } from "../../lib/conversation";
+import { splitSay } from "../../lib/voice/say";
 import { Markdown } from "../Markdown";
 import { Chip, type ChipTone } from "../ui/Chip";
 import { ToolCard } from "./ToolCard";
@@ -23,11 +24,7 @@ export function MessageItem({ message }: { message: Message }) {
     case "user":
       return <UserMessage message={message} />;
     case "assistant":
-      return (
-        <article aria-label="Reply" className="min-w-0 text-sm">
-          <Markdown>{message.text ?? ""}</Markdown>
-        </article>
-      );
+      return <AssistantMessage text={message.text ?? ""} />;
     case "tool":
       return message.tool ? <ToolCard tool={message.tool} /> : null;
     case "thinking":
@@ -47,6 +44,22 @@ export function MessageItem({ message }: { message: Message }) {
   }
 }
 
+/** A reply: Markdown, with a leading `SAY:` line shown as a small spoken caption instead. */
+function AssistantMessage({ text }: { text: string }) {
+  const { spoken, body } = splitSay(text);
+  return (
+    <article aria-label="Reply" className="min-w-0 text-sm">
+      {spoken && (
+        <p className="mb-1.5 flex items-start gap-1.5 text-xs italic text-muted" data-testid="spoken-caption">
+          <Volume2 aria-label="Spoken" className="mt-0.5 h-3.5 w-3.5 shrink-0 not-italic" />
+          <span className="min-w-0 break-words">{spoken}</span>
+        </p>
+      )}
+      {body.trim() && <Markdown>{body}</Markdown>}
+    </article>
+  );
+}
+
 function UserMessage({ message }: { message: Message }) {
   const tag = message.tag ? tagLabels[message.tag] : undefined;
   const automatic = message.tag === "poke";
@@ -60,10 +73,16 @@ function UserMessage({ message }: { message: Message }) {
           message.tag === "command" && "font-mono text-xs",
         )}
       >
-        {message.text}
+        {message.tag === "voice" ? withoutHeader(message.text ?? "") : message.text}
       </div>
     </div>
   );
+}
+
+/** A voice prompt's text without crowsnest's header line; the "voice" chip already says so. */
+function withoutHeader(text: string): string {
+  const newline = text.indexOf("\n");
+  return text.startsWith("[crowsnest voice") && newline !== -1 ? text.slice(newline + 1) : text;
 }
 
 function ThinkingBlock({ text }: { text: string }) {
