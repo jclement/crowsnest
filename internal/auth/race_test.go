@@ -35,7 +35,7 @@ func burst(t *testing.T, service *Service, ips []string) int {
 		done.Add(1)
 		go func() {
 			defer done.Done()
-			_, _, err := service.Login(context.Background(), ip, "jeff", fmt.Sprint("guess-", index), "")
+			_, _, err := service.Login(context.Background(), ip, "jeff", fmt.Sprint("guess-", index), "", testHost)
 			var limited *RateLimitedError
 			if errors.As(err, &limited) {
 				arrived.Done() // refused before the hook
@@ -84,11 +84,11 @@ func TestSuccessfulLoginTakesBackItsCount(t *testing.T) {
 	for range PerClientFailures - 1 {
 		service.Limiter().RecordFailure("10.0.0.9")
 	}
-	if _, _, err := service.Login(context.Background(), "10.0.0.9", "jeff", "right", ""); err != nil {
+	if _, _, err := service.Login(context.Background(), "10.0.0.9", "jeff", "right", "", testHost); err != nil {
 		t.Fatal(err)
 	}
 	for i := range PerClientFailures {
-		if _, _, err := service.Login(context.Background(), "10.0.0.9", "jeff", "wrong", ""); !errors.Is(err, ErrBadCredentials) {
+		if _, _, err := service.Login(context.Background(), "10.0.0.9", "jeff", "wrong", "", testHost); !errors.Is(err, ErrBadCredentials) {
 			t.Fatalf("wrong login %d after a success: %v (the success should have cleared the count)", i+1, err)
 		}
 	}

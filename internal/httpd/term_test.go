@@ -248,7 +248,7 @@ func TestTermRejectsUnauthenticated(t *testing.T) {
 
 func TestTermAcceptsAValidSession(t *testing.T) {
 	h, launcher, server := termHarness(t, harnessOptions{})
-	conn := mustDial(t, server, "/api/v1/term/tui", dialOptions{cookie: h.login()})
+	conn := mustDial(t, server, "/api/v1/term/tui", dialOptions{cookie: h.loginAt(server.URL)})
 	sendResize(t, conn, 80, 24)
 	waitClosedChan(t, launcher.next(t).started, "start")
 }
@@ -394,7 +394,7 @@ func TestTermBrowserLeavingClosesTheBridge(t *testing.T) {
 
 func TestTermLogoutClosesOpenTerminals(t *testing.T) {
 	h, launcher, server := termHarness(t, harnessOptions{heartbeat: 50 * time.Millisecond})
-	cookie := h.login()
+	cookie := h.loginAt(server.URL)
 	conn := mustDial(t, server, "/api/v1/term/tui", dialOptions{cookie: cookie})
 	bridge := launcher.next(t)
 	sendResize(t, conn, 80, 24)

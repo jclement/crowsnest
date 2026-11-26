@@ -120,7 +120,7 @@ a malicious web page driving a logged-in browser (CSRF, cross-site WebSocket hij
 rebinding against `--no-auth` on localhost); secrets leaking into logs; agent output attacking the UI (XSS).
 
 1. **Bind**: loopback by default. Never `0.0.0.0` unless the user types it (the container image does, with auth required).
-2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Admission and counting are one step: an admitted attempt is counted as a failure at once and taken back if the credentials match, so a burst of parallel guesses cannot slip past either cap before the first failure is recorded (R1-C10/M1). Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session`, `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; `X-Forwarded-For` is never trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. `X-Forwarded-Proto: https` is honoured only from loopback, and only to add `Secure` to the cookie.
+2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Admission and counting are one step: an admitted attempt is counted as a failure at once and taken back if the credentials match, so a burst of parallel guesses cannot slip past either cap before the first failure is recorded (R1-C10/M1). Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session` over plain HTTP and `__Host-crowsnest_session` over HTTPS (Secure, `Path=/`, no `Domain`, so nothing on another subdomain can set or shadow it; over HTTPS only the prefixed name is read), `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Each session is bound to the `Host:port` it was issued for (lower-cased, default port filled in) and is refused anywhere else: browsers send a host's cookies to every port on it, so this stops a cookie that reached a sibling port from working here, though not a replay that forges `Host` (R1 M2; see residual risk). Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; `X-Forwarded-For` is never trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. `X-Forwarded-Proto: https` is honoured only from loopback, and only to add `Secure` to the cookie.
 3. **Host check** on every request: `Host` must be loopback, a bound IP, the machine hostname, a detected MagicDNS name, or an `--allowed-host`. This is what stops DNS rebinding, and it applies with `--no-auth` too.
 4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host` (host and port, default ports normalised). `null` counts as missing. Non-GET calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set). A failed host check is `403` with a message naming `--allowed-host`. MagicDNS names are not auto-detected yet (M1); pass them with `--allowed-host`.
 5. **WebSockets** authenticate with the same cookie at upgrade, check Origin, and are closed when the session is revoked. No tokens in URLs.
@@ -133,6 +133,18 @@ rebinding against `--no-auth` on localhost); secrets leaking into logs; agent ou
 
 Residual risk, stated plainly: anyone with the password has a shell as the user. Basic password
 login over plain HTTP on a tailnet relies on WireGuard for confidentiality.
+
+**Cookies are shared across ports (R1 M2).** A browser sends `crowsnest_session` to every
+server on the same host name, whatever the port, and `SameSite=Strict` treats `localhost:5173`
+and `localhost:2769` as the same site. Over plain HTTP on `localhost`, the tailnet IP or the
+machine name, any other HTTP service you open in the same browser (a cloned project's dev
+server, a container's published port, a tool's local web UI) receives the session token, and
+can replay it against crowsnest with a forged `Host`. Binding sessions to `Host:port` stops a
+cookie set or received on a sibling port from being accepted as is, but not that replay. The
+remedy is a host name of crowsnest's own: give it a dedicated MagicDNS or `tailscale serve`
+name (HTTPS, so the cookie is `__Host-` prefixed and Secure) and open nothing else under that
+name. On a shared host name over plain HTTP, treat every other local web service you visit as
+able to take your session.
 
 ## 5. Driving herdr
 
@@ -566,7 +578,7 @@ The client sends a resize first; the server starts the process on that first res
 
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
-- `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent)`
+- `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host)` (`host` added by migration 0002, R1 M2: the `Host:port` the session is valid at)
 - `questions(id, title, body_md, kind, multi, options_json, recommend, context_json, urgency, files_json, status, answer_value_json, answer_note, source_pane, created_at, expires_at, settled_at)`
 - `jobs(…)`: the record in section 6.1
 - `job_events(id, job_id, at, kind, summary, detail_json)`: state change, progress, nudge, hook, restart, question, message: the job's timeline

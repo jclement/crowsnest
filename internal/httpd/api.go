@@ -7,9 +7,11 @@ package httpd
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/auth"
@@ -27,8 +29,39 @@ const (
 	codeUnavailable  = "UNAVAILABLE" // herdr is not answering
 )
 
-// SessionCookie is the session cookie's name.
-const SessionCookie = "crowsnest_session"
+// Session cookie names. Over HTTPS the cookie carries the __Host- prefix, which the browser
+// accepts only with Secure, Path=/ and no Domain, so nothing on a sibling or parent domain can
+// set or shadow it (cookie tossing). Over plain HTTP the prefix is not available (it requires
+// Secure), and only the plain name is read; over HTTPS only the prefixed one is (R1 M2).
+const (
+	SessionCookie       = "crowsnest_session"
+	SecureSessionCookie = "__Host-crowsnest_session"
+)
+
+// sessionCookieName is the cookie name for this request's scheme.
+func sessionCookieName(r *http.Request) string {
+	if isHTTPS(r) {
+		return SecureSessionCookie
+	}
+	return SessionCookie
+}
+
+// sessionHost is the Host:port a session is bound to: the request's Host, lower-cased, without
+// a trailing dot, with the scheme's default port filled in so "host" and "host:80" agree.
+func sessionHost(r *http.Request) string {
+	host, port, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		host, port = r.Host, ""
+	}
+	host = strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
+	if port == "" {
+		port = "80"
+		if isHTTPS(r) {
+			port = "443"
+		}
+	}
+	return net.JoinHostPort(host, port)
+}
 
 // maxLoginBody caps the login request; a username and password never need more.
 const maxLoginBody = 4 << 10
@@ -105,7 +138,7 @@ func isHTTPS(r *http.Request) bool {
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is set whenever the request is HTTPS
 
-		Name:     SessionCookie,
+		Name:     sessionCookieName(r),
 		Value:    token,
 		Path:     "/",
 		Expires:  expires,
@@ -119,7 +152,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expi
 func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // see setSessionCookie
 
-		Name:     SessionCookie,
+		Name:     sessionCookieName(r),
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -130,7 +163,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 }
 
 func sessionToken(r *http.Request) string {
-	cookie, err := r.Cookie(SessionCookie)
+	cookie, err := r.Cookie(sessionCookieName(r))
 	if err != nil {
 		return ""
 	}
@@ -195,7 +228,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, "Send JSON with a username and password.")
 		return
 	}
-	token, session, err := s.deps.Auth.Login(r.Context(), clientIP(r), body.Username, body.Password, r.UserAgent())
+	token, session, err := s.deps.Auth.Login(r.Context(), clientIP(r), body.Username, body.Password, r.UserAgent(), sessionHost(r))
 	var limited *auth.RateLimitedError
 	switch {
 	case errors.As(err, &limited):

@@ -154,7 +154,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		token := sessionToken(r)
-		session, err := s.deps.Auth.Authenticate(r.Context(), token)
+		session, err := s.deps.Auth.Authenticate(r.Context(), token, sessionHost(r))
 		if errors.Is(err, auth.ErrNoSession) {
 			if token != "" {
 				clearSessionCookie(w, r)

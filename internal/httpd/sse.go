@@ -97,7 +97,7 @@ func (s *Server) sessionStillValid(r *http.Request) bool {
 	if !s.deps.Auth.Enabled() {
 		return true
 	}
-	_, err := s.deps.Auth.Authenticate(r.Context(), sessionToken(r))
+	_, err := s.deps.Auth.Authenticate(r.Context(), sessionToken(r), sessionHost(r))
 	return err == nil
 }
 
