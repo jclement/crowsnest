@@ -71,6 +71,9 @@ type JobRecord struct {
 	// Origin is who created the job (migration 0007, R2-H1): "" the human, "agent" a job agent,
 	// "orchestrator" the orchestrator.
 	Origin string
+	// RootDir is the resolved directory the job's children may use without asking (migration
+	// 0008, R3-H1), recorded when crowsnest created its pane; "" grants nothing.
+	RootDir string
 }
 
 // JobEventRecord is one row of job_events.
@@ -113,7 +116,7 @@ func jobColumns(r *JobRecord) []column {
 		timeCol("last_stop_at", &r.LastStopAt),
 		textCol("lifecycle_op", &r.LifecycleOp), textCol("lifecycle_owner", &r.LifecycleOwner),
 		timeCol("lifecycle_at", &r.LifecycleAt), int64Col("lifecycle_gen", &r.LifecycleGen),
-		textCol("origin", &r.Origin),
+		textCol("origin", &r.Origin), textCol("root_dir", &r.RootDir),
 	}
 	return cols
 }
@@ -299,12 +302,36 @@ func (s *Store) CountChildJobs(ctx context.Context, parentID int64) (int, error)
 }
 
 // CountLiveAgentJobs is how many jobs an agent (or the orchestrator) created that are not yet
-// done, failed or cancelled (R2-H1's global cap).
+// done, failed or cancelled (R2-H1's global cap). Jobs still held for the human's approval are not
+// counted: they hold no agent, and an agent filing requests must not crowd out every other
+// agent's delegation (R3-L3); CountHeldApprovals caps them per creator instead.
 func (s *Store) CountLiveAgentJobs(ctx context.Context) (int, error) {
 	var count int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM jobs WHERE origin != '' AND state NOT IN ('done', 'failed', 'cancelled')`).Scan(&count); err != nil {
+		`SELECT COUNT(*) FROM jobs WHERE origin != '' AND cause != 'approval' AND state NOT IN ('done', 'failed', 'cancelled')`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting live agent-created jobs: %w", err)
+	}
+	return count, nil
+}
+
+// CountHeldApprovals is how many jobs a creator has waiting for the human's approval: a job
+// agent's (parentID > 0), or the orchestrator's made while it held no job (parentID 0).
+func (s *Store) CountHeldApprovals(ctx context.Context, origin string, parentID int64) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM jobs WHERE origin = ? AND parent_id = ? AND state = 'queued' AND cause = 'approval'`, origin, parentID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting jobs held for approval: %w", err)
+	}
+	return count, nil
+}
+
+// CountLiveOwnJobs is how many live jobs (not held for approval) a creator made with no parent
+// job: the orchestrator's fan-out while it holds no job of its own (R3-M2).
+func (s *Store) CountLiveOwnJobs(ctx context.Context, origin string) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM jobs WHERE origin = ? AND parent_id = 0 AND cause != 'approval' AND state NOT IN ('done', 'failed', 'cancelled')`, origin).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting live jobs made by the %s: %w", origin, err)
 	}
 	return count, nil
 }

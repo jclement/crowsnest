@@ -139,6 +139,8 @@ func (s *Service) startJobAgent(ctx context.Context, cl claim, job Job) error {
 	}
 	if err := s.update(ctx, cl, func(r *store.JobRecord, c *change) {
 		r.PaneID, r.WorkDir, r.WorktreeBranch, r.AgentName, r.ClaudeSessionID = pane.paneID, pane.workDir, pane.branch, AgentName(job.ID), sessionID
+		// The directory its children may use, fixed now, before its agent has run (R3-H1).
+		r.RootDir = confinementRoot(pane.workDir)
 		summary := "Opened pane " + pane.paneID + " in " + pane.workDir
 		if pane.branch != "" {
 			summary += " (worktree, branch " + pane.branch + ")"
@@ -292,6 +294,13 @@ type preparedPane struct {
 
 // preparePane finds or makes the pane a job's agent starts in.
 func (s *Service) preparePane(ctx context.Context, job Job) (preparedPane, error) {
+	if job.Origin != OriginHuman {
+		// An agent's job was checked and stored with its directory resolved (R3-H1). If the path
+		// resolves anywhere else now, a link was swapped since the check: start nothing there.
+		if now, err := filepath.EvalSymlinks(job.Dir); err != nil || now != job.Dir {
+			return preparedPane{}, fmt.Errorf("the directory %s changed since it was checked (it no longer resolves to itself); not starting there", job.Dir)
+		}
+	}
 	callCtx, cancel := context.WithTimeout(ctx, 2*herdrCallTimeout)
 	defer cancel()
 	var pane preparedPane

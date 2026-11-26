@@ -175,8 +175,15 @@ func titleOf(brief string) string {
 	return oneLine(first, maxTitleRunes)
 }
 
-// rememberDir puts dir first in the remembered list.
+// rememberDir puts dir first in the remembered list. It is stored resolved, at the moment the
+// human gave or allowed it, and the orchestrator's shortcut compares against that stored form
+// without resolving it again (R3-M2): a link swapped in later cannot widen it. A directory too
+// wide to hand out (/, ~, or one that holds ~) is still listed for the job form, but grants the
+// orchestrator nothing (safeRoot).
 func (s *Service) rememberDir(ctx context.Context, dir string) {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	dirs := s.RememberedDirs(ctx)
 	next := []string{dir}
 	for _, existing := range dirs {
