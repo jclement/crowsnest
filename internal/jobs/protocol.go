@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 // CreateInput is a new job: from the browser's text box (POST /jobs) or an agent delegating
@@ -38,21 +40,17 @@ const kvDirs = "jobs.dirs"
 // maxRememberedDirs bounds that list.
 const maxRememberedDirs = 20
 
-// Create validates and records a job, then launches it in the background. parentID is set when
-// an agent delegated it. The returned job is queued; launch progress arrives as `job` events.
+// Create validates and records a job the human gave (the browser's text box), then launches it
+// in the background. The returned job is queued; launch progress arrives as `job` events. An
+// agent's job_create goes through CreateForAgent (delegate.go), which adds R2-H1's limits;
+// parentID here is for tests and the demo.
 func (s *Service) Create(ctx context.Context, input CreateInput, parentID string) (Job, error) {
 	record, err := s.newRecord(input, parentID)
 	if err != nil {
 		return Job{}, err
 	}
 	s.mu.Lock()
-	id, err := s.opts.Store.InsertJob(ctx, record)
-	if err == nil {
-		record.ID = id
-		var c change
-		c.event(EventCreated, "Job created", map[string]any{"role": record.Role, "dir": record.Dir, "engine": record.Engine, "parent": parentID})
-		err = s.save(ctx, record, c)
-	}
+	err = s.insertLocked(ctx, &record)
 	s.mu.Unlock()
 	if err != nil {
 		return Job{}, err
@@ -68,6 +66,26 @@ func (s *Service) Create(ctx context.Context, input CreateInput, parentID string
 	s.goBackground(ctx, job.ID, func(ctx context.Context) { s.launch(ctx, job.ID) })
 	return job, nil
 }
+
+// insertLocked stores a new job and its created event (s.mu held), setting record.ID.
+func (s *Service) insertLocked(ctx context.Context, record *store.JobRecord) error {
+	id, err := s.opts.Store.InsertJob(ctx, *record)
+	if err != nil {
+		return err
+	}
+	record.ID = id
+	var c change
+	detail := map[string]any{"role": record.Role, "dir": record.Dir, "engine": record.Engine, "origin": record.Origin}
+	if record.ParentID > 0 {
+		detail["parent"] = FormatID(record.ParentID)
+	}
+	c.event(EventCreated, "Job created", detail)
+	return s.save(ctx, *record, c)
+}
+
+// modelPattern is what a model name may look like (R2-I7): it becomes one argument of the agent's
+// start command, which herdr types into a shell.
+var modelPattern = regexp.MustCompile(`^[A-Za-z0-9._:\[\]-]{1,64}$`)
 
 func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord, error) {
 	brief := strings.TrimSpace(input.Brief)
@@ -98,6 +116,10 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	if dir == "" && engine != EngineClaude {
 		return store.JobRecord{}, invalid("a job without a directory goes to the orchestrator, which is Claude; pick a directory to use %s", engine)
 	}
+	model := strings.TrimSpace(input.Model)
+	if model != "" && !modelPattern.MatchString(model) {
+		return store.JobRecord{}, invalid("model %q is not a model name (letters, digits and . _ : [ ] -, at most 64)", termtext.Cap(termtext.Clean(model), 70))
+	}
 	isolate := role == "builder"
 	if input.Isolate != nil {
 		isolate = *input.Isolate
@@ -110,7 +132,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	}
 	return store.JobRecord{
 		Title: titleOf(brief), BriefMD: brief, DoneWhen: strings.TrimSpace(input.DoneWhen), Role: role, Dir: dir,
-		Isolate: isolate && dir != "", Engine: engine, Model: strings.TrimSpace(input.Model), ParentID: parent,
+		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent,
 		State: string(StateQueued), VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: s.opts.Now(),
 	}, nil
 }
@@ -192,6 +214,10 @@ type UpdateInput struct {
 }
 
 // Update is job_update: a heartbeat with a "doing now" line, and optionally a declared state.
+// It counts as progress (resetting the nudge budget) only when it changes something: a new
+// progress line, a different state or blocked reason, or a different waiting value. Repeating
+// what already holds is not progress (R2-C01): an agent answering every nudge with the same
+// job_update must still run out of nudges.
 func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Job, error) {
 	progress := oneLine(input.Progress, maxProgressRunes)
 	if progress == "" && input.State == "" && input.Waiting == nil {
@@ -201,32 +227,31 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Job
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s; there is nothing to update", FormatID(r.ID), r.State)
 		}
-		if input.Waiting != nil && *input.Waiting {
-			open, _, err := s.questionState(ctx, r.ID)
-			if err != nil {
-				return err
-			}
-			if open == 0 {
-				// Found by the stop test: an agent told to wait answered every nudge with
-				// waiting=true, which reset the budget forever. Waiting needs a question.
-				return invalid("you have no open questions, so there is nothing to wait on. If you need the human, call ask (it does not block) and then declare waiting; if you are finished, call done; if something else blocks you, set state blocked with the reason")
-			}
+		if input.Waiting != nil && *input.Waiting && c.questions.Open == 0 {
+			// Found by the stop test: an agent told to wait answered every nudge with
+			// waiting=true, which reset the budget forever. Waiting needs a question.
+			return invalid("you have no open questions, so there is nothing to wait on. If you need the human, call ask (it does not block) and then declare waiting; if you are finished, call done; if something else blocks you, set state blocked with the reason")
 		}
-		// A repeated, unchanged line is not progress: it must not reset the nudge budget.
-		if progress != r.Progress || input.State != "" || input.Waiting != nil {
-			s.markProgressLocked(r)
-		}
+		before := *r
 		if progress != "" && progress != r.Progress {
 			r.Progress = progress
 			c.event(EventProgress, progress, nil)
 		}
-		if input.Waiting != nil {
+		if input.Waiting != nil && r.Waiting != *input.Waiting {
 			r.Waiting = *input.Waiting
 			if r.Waiting {
 				c.event(EventProgress, "Declared: nothing left that the open questions do not block", nil)
 			}
 		}
-		return applyDeclaredState(r, c, input)
+		if err := applyDeclaredState(r, c, input); err != nil {
+			return err
+		}
+		if r.Progress != before.Progress || r.Waiting != before.Waiting || r.State != before.State || r.BlockedReason != before.BlockedReason {
+			s.markProgressLocked(r)
+		} else {
+			r.LastActivityAt = s.opts.Now() // a heartbeat, not progress
+		}
+		return nil
 	})
 }
 
@@ -324,10 +349,18 @@ func (s *Service) Fail(ctx context.Context, id, reason string) (Job, error) {
 }
 
 // RecordToolUse is the PostToolUse hook: progress (the nudge budget resets) and the "doing now"
-// fallback.
-func (s *Service) RecordToolUse(ctx context.Context, id, summary string) (Job, error) {
+// fallback. crowsnest's own bookkeeping tools (job_update, ask, job_get… through MCP or the CLI)
+// are only a heartbeat: they decide for themselves whether they changed anything, and counting
+// the tool call as well would let a no-op job_update reset the budget after all (R2-C01).
+func (s *Service) RecordToolUse(ctx context.Context, id, toolName string, toolInput json.RawMessage) (Job, error) {
+	bookkeeping := isBookkeepingTool(toolName, toolInput)
+	summary := toolSummary(toolName, toolInput)
 	return s.mutate(ctx, id, func(r *store.JobRecord, _ *change) error {
 		if State(r.State).Terminal() {
+			return nil
+		}
+		if bookkeeping {
+			r.LastActivityAt = s.opts.Now()
 			return nil
 		}
 		s.markProgressLocked(r)
@@ -337,6 +370,29 @@ func (s *Service) RecordToolUse(ctx context.Context, id, summary string) (Job, e
 		}
 		return nil
 	})
+}
+
+// isBookkeepingTool reports whether a tool call is one of crowsnest's own: an MCP tool of the
+// crowsnest server, or a shell command that runs the crowsnest CLI.
+func isBookkeepingTool(name string, input json.RawMessage) bool {
+	if strings.HasPrefix(name, "mcp__crowsnest__") {
+		return true
+	}
+	if name != "Bash" {
+		return false
+	}
+	var fields struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(input, &fields) != nil {
+		return false
+	}
+	command := strings.TrimSpace(fields.Command)
+	if strings.ContainsAny(command, ";&|\n`$(") {
+		return false // more than one command: something else ran too
+	}
+	first, _, _ := strings.Cut(command, " ")
+	return filepath.Base(first) == "crowsnest"
 }
 
 // GetForAgent is job_get: the job, its questions and their answers, as text an agent reads after
@@ -353,10 +409,9 @@ func (s *Service) GetForAgent(ctx context.Context, id string) (string, error) {
 func ContextBlock(d Detail) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[crowsnest job %s] You hold this job. State: %s.\n\n", d.ID, d.State)
-	fmt.Fprintf(&b, "## Brief\n\n%s\n\n", d.BriefMD)
-	if d.DoneWhen != "" {
-		fmt.Fprintf(&b, "Done when: %s\n\n", d.DoneWhen)
-	}
+	// briefText frames a brief another agent wrote and disarms its bracketed lines (R2-M1).
+	brief := strings.TrimPrefix(briefText(d.Job), "# Job "+d.ID+": brief\n\n")
+	fmt.Fprintf(&b, "## Brief\n\n%s\n", brief)
 	if d.Progress != "" {
 		fmt.Fprintf(&b, "Your last progress line: %s\n", d.Progress)
 	}

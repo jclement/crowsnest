@@ -18,7 +18,8 @@ export type JobCause =
   | "idle"
   | "exited"
   | "launch"
-  | "config";
+  | "config"
+  | "approval";
 
 /** A job as GET /jobs and GET /jobs/{id} return it. */
 export interface Job {
@@ -60,6 +61,8 @@ export interface Job {
   retry_count: number;
   open_questions: number;
   isolate: boolean;
+  /** Who created it: "" the human, "agent" a job agent, "orchestrator" (R2-H1). Optional in fixtures. */
+  origin?: "" | "agent" | "orchestrator";
 }
 
 export interface JobEvent {
@@ -171,7 +174,8 @@ export function sectionOf(job: Job, now: Date = new Date()): BoardSection {
     const settled = new Date(job.settled_at ?? job.created_at);
     return sameDay(settled, now) ? "today" : "older";
   }
-  if (job.state === "needs_you" || job.stuck) return "attention";
+  // A job an agent asked for that waits on the human's approval needs them as much as needs_you.
+  if (job.state === "needs_you" || job.stuck || job.cause === "approval") return "attention";
   return "running";
 }
 
@@ -218,6 +222,7 @@ export function actionFor(job: Pick<Job, "state" | "stuck" | "cause">): JobActio
     case "permissions":
       return "nudge";
     case "questions":
+    case "approval":
       return "inbox";
     case "exited":
       return "resume";
@@ -270,7 +275,8 @@ export function cardLine(job: Job): string {
   if (job.state === "failed") return job.fail_reason;
   if (job.state === "done") return firstLine(job.result_md);
   if (job.state === "blocked") return `Blocked: ${job.blocked_reason}`;
-  if ((job.stuck || job.state === "needs_you") && job.cause_text) return job.cause_text + (job.cause_detail ? `: ${job.cause_detail}` : "");
+  if ((job.stuck || job.state === "needs_you" || job.cause === "approval") && job.cause_text)
+    return job.cause_text + (job.cause_detail ? `: ${job.cause_detail}` : "");
   return job.doing_now;
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -122,6 +123,35 @@ func TestNewClientRefusesMissingKeyOrOddVoice(t *testing.T) {
 	}
 	if _, err := voice.NewClient(voice.ClientOptions{APIKey: "k", VoiceID: "../x?y"}); err == nil {
 		t.Error("path-like voice accepted")
+	}
+}
+
+// R2-L4: the key never follows a redirect, and a plain-http base off loopback is refused.
+func TestKeyNeverFollowsARedirect(t *testing.T) {
+	stolen := make(chan string, 4)
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stolen <- r.Header.Get("xi-api-key")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer elsewhere.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer redirector.Close()
+	client, err := voice.NewClient(voice.ClientOptions{BaseURL: redirector.URL, APIKey: voicetest.Key, VoiceID: "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Transcribe(context.Background(), []byte("audio"), "audio/webm"); err == nil {
+		t.Fatal("a redirect was taken as success")
+	}
+	select {
+	case key := <-stolen:
+		t.Fatalf("the redirect target received a request (key %q)", key)
+	default:
+	}
+	if _, err := voice.NewClient(voice.ClientOptions{BaseURL: "http://api.elevenlabs.io", APIKey: "k", VoiceID: "v"}); err == nil {
+		t.Fatal("a plain-http base URL off loopback was accepted")
 	}
 }
 

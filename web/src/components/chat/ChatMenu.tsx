@@ -1,9 +1,13 @@
-// ChatMenu: the Chat view's menu: show or hide thinking, Restart (same conversation, --resume),
-// and New conversation (fresh session). Both relaunches ask for confirmation first, in a Sheet,
-// because they interrupt whatever the orchestrator is doing.
-import { Brain, MessageSquarePlus, MoreVertical, RotateCw } from "lucide-react";
+// ChatMenu: the Chat view's menu: Poke now (the result comes back as a toast: sent, or skipped
+// and why), the Journal, show or hide thinking, Restart (same conversation, --resume), and New
+// conversation (fresh session). Both relaunches ask for confirmation first, in a Sheet, because
+// they interrupt whatever the orchestrator is doing.
+import { BellRing, Brain, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useOrchestratorAction } from "../../lib/conversation-queries";
+import { pokeToast } from "../../lib/journal";
+import { usePokeNow } from "../../lib/queries";
+import { JournalSheet } from "../journal/JournalPanel";
 import { Button, IconButton } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
@@ -34,7 +38,9 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<Action | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [journalOpen, setJournalOpen] = useState(false);
   const action = useOrchestratorAction();
+  const poke = usePokeNow();
   const toast = useToast();
 
   useEffect(() => {
@@ -61,6 +67,13 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
     });
   };
 
+  const pokeNow = () => {
+    poke.mutate(undefined, {
+      onSuccess: (result) => toast.show(pokeToast(result)),
+      onError: (error) => toast.show({ tone: "danger", title: "Could not poke", description: error.message }),
+    });
+  };
+
   const pick = (fn: () => void) => () => {
     setOpen(false);
     fn();
@@ -71,6 +84,14 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
       <IconButton icon={MoreVertical} label="Conversation menu" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} />
       {open && (
         <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl">
+          {canRelaunch && (
+            <MenuItem icon={<BellRing className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(pokeNow)} disabled={poke.isPending}>
+              {poke.isPending ? "Poking…" : "Poke now"}
+            </MenuItem>
+          )}
+          <MenuItem icon={<NotebookText className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(() => setJournalOpen(true))}>
+            Journal
+          </MenuItem>
           <MenuItem icon={<Brain className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(onToggleThinking)}>
             {showThinking ? "Hide thinking" : "Show thinking"}
           </MenuItem>
@@ -86,6 +107,7 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
           )}
         </div>
       )}
+      <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
       <Sheet open={confirming !== null} onClose={() => setConfirming(null)} title={confirming ? confirmations[confirming].title : ""} size="md">
         {confirming && (
           <div className="flex flex-col gap-4 p-4">
@@ -105,9 +127,15 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
   );
 }
 
-function MenuItem({ icon, onClick, children }: { icon: ReactNode; onClick: () => void; children: ReactNode }) {
+function MenuItem({ icon, onClick, disabled, children }: { icon: ReactNode; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
-    <button type="button" role="menuitem" onClick={onClick} className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9">
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover disabled:opacity-60 md:min-h-9"
+    >
       {icon}
       {children}
     </button>

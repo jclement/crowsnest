@@ -6,9 +6,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agentid"
@@ -17,6 +19,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
@@ -27,11 +30,17 @@ import (
 type jobRefs struct {
 	orchestrator  *orch.Orchestrator
 	conversations *transcript.Manager
+	// questions asks the human about jobs an agent wants beyond its own directory (R2-H1). It is
+	// set once startQuestions returns, while the agent socket may already be serving, hence atomic.
+	questions atomic.Pointer[questions.Service]
+	// notify tells Jeff something (the log, and the --notify-url POST when set); the poker's
+	// draft alert goes through it too.
+	notify func(text string)
 }
 
 // newJobService builds the jobs service. refs is filled in by serve once the orchestrator and
 // the transcript manager exist.
-func newJobService(cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, socket string, identity *agentid.Registry, refs *jobRefs, logger *slog.Logger) *jobs.Service {
+func newJobService(cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, socket string, identity *agentid.Registry, refs *jobRefs, journalLog *journal.Journal, logger *slog.Logger) *jobs.Service {
 	binDir, executable := executablePaths()
 	roles, problems := jobs.LoadRoles(rolesDir(cfg))
 	for _, problem := range problems {
@@ -45,9 +54,15 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 			post(text)
 		}
 	}
+	refs.notify = notify
+	alert := func(text string) {
+		// A supervisor alert is journalled as well as sent, so the Journal shows what Jeff was told.
+		journalLog.Add(context.Background(), journal.KindAlert, text, nil)
+		notify(text)
+	}
 	claudeDir := claudeConfigDir(cfg)
 	return jobs.New(jobs.Options{
-		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: notify,
+		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert,
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,
@@ -62,6 +77,13 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 			return jobs.OrchestratorInfo{PaneID: status.PaneID, Ready: ready}
 		},
 		Activity: transcriptActivity(claudeDir, cfg.Dir, refs),
+		AskHuman: func(ctx context.Context, input questions.AskInput, caller questions.Caller) (questions.Question, error) {
+			service := refs.questions.Load()
+			if service == nil {
+				return questions.Question{}, errors.New("the inbox is not ready yet")
+			}
+			return service.Ask(ctx, input, caller)
+		},
 	})
 }
 
@@ -146,5 +168,6 @@ func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, 
 		}
 		return // the demo's jobs are scripted; the supervisor would "recover" them
 	}
+	service.ReconcileApprovals(ctx) // a decision that landed just before a restart (R2-H1)
 	go service.Run(ctx, 0)
 }

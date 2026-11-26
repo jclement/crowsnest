@@ -16,6 +16,13 @@
 // as the agents holding them do. The orchestrator and the job launcher (internal/jobs) both mint
 // them here: NewToken then Bind for a pane's environment (the pane id is known only after herdr
 // creates it), Mint for a start.
+//
+// Replacing a pane's tokens is one step (R2-C15): Bind holds the registry's lock while it lists
+// what to revoke, and deletes those and stores the new binding in one transaction, so neither two
+// concurrent binds nor a crash can leave two "exclusive" start tokens valid. A start token for a
+// pane whose pane token now belongs to another job is refused: that start is stale. Tokens end
+// with the work (R2-L1): RevokeJob when a job is finished, RevokeGonePanes for panes herdr no
+// longer has.
 package agentid
 
 import (
@@ -29,6 +36,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/store"
@@ -73,12 +81,20 @@ type KV interface {
 	SetKV(ctx context.Context, key, value string) error
 	DeleteKV(ctx context.Context, key string) error
 	ListKV(ctx context.Context, prefix string) (map[string]string, error)
+	// ReplaceKV deletes remove and sets key, in one transaction.
+	ReplaceKV(ctx context.Context, remove []string, key, value string) error
 }
+
+// ErrStaleStart refuses a start token for a pane that now belongs to another job.
+var ErrStaleStart = errors.New("the pane now belongs to another job; this agent start is stale")
 
 // Registry issues and resolves agent tokens. Build with New.
 type Registry struct {
 	kv  KV
 	now func() time.Time
+	// mu serialises every change to the bindings, so a bind's revoke-then-store cannot
+	// interleave with another's.
+	mu sync.Mutex
 }
 
 // New returns a registry over kv. now nil means time.Now.
@@ -108,19 +124,89 @@ func (r *Registry) Bind(ctx context.Context, token string, binding Binding) erro
 	if binding.PaneID == "" || token == "" {
 		return errors.New("binding an agent token needs a token and a pane id")
 	}
-	revokeKind := binding.Kind
-	if binding.Kind == KindPane {
-		revokeKind = ""
-	}
-	if err := r.RevokePane(ctx, binding.PaneID, revokeKind); err != nil {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	all, err := r.list(ctx)
+	if err != nil {
 		return err
+	}
+	var remove []string
+	for key, existing := range all {
+		if existing.PaneID != binding.PaneID {
+			continue
+		}
+		if binding.Kind == KindStart && existing.Kind == KindPane && existing.JobID != binding.JobID {
+			return fmt.Errorf("binding a start token to pane %s for job %q (the pane's token is for %q): %w", binding.PaneID, binding.JobID, existing.JobID, ErrStaleStart)
+		}
+		if binding.Kind == KindPane || existing.Kind == binding.Kind {
+			remove = append(remove, key)
+		}
 	}
 	binding.CreatedAt = r.now().UTC()
 	encoded, err := json.Marshal(binding)
 	if err != nil {
 		return fmt.Errorf("encoding an agent token binding: %w", err)
 	}
-	return r.kv.SetKV(ctx, kvPrefix+hash(token), string(encoded))
+	return r.kv.ReplaceKV(ctx, remove, kvPrefix+hash(token), string(encoded))
+}
+
+// list returns every stored binding by its kv key; damaged records are listed as empty bindings
+// (they identify nobody, and a revoke of their pane cannot see them, so they are left alone).
+func (r *Registry) list(ctx context.Context) (map[string]Binding, error) {
+	all, err := r.kv.ListKV(ctx, kvPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent tokens: %w", err)
+	}
+	out := make(map[string]Binding, len(all))
+	for key, value := range all {
+		binding, _ := decodeBinding(value)
+		out[key] = binding
+	}
+	return out, nil
+}
+
+// revokeWhere deletes, in one transaction, every binding match selects (r.mu held), and returns
+// how many.
+func (r *Registry) revokeWhere(ctx context.Context, match func(Binding) bool) (int, error) {
+	all, err := r.list(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var remove []string
+	for key, binding := range all {
+		if binding.PaneID != "" && match(binding) {
+			remove = append(remove, key)
+		}
+	}
+	if len(remove) == 0 {
+		return 0, nil
+	}
+	if err := r.kv.ReplaceKV(ctx, remove, "", ""); err != nil {
+		return 0, fmt.Errorf("revoking agent tokens: %w", err)
+	}
+	return len(remove), nil
+}
+
+// RevokeJob removes every token issued for jobID (R2-L1): a finished job's agent can no longer
+// act, ask with its identity, or create jobs. The orchestrator's tokens name no job and stay.
+func (r *Registry) RevokeJob(ctx context.Context, jobID string) error {
+	if jobID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, err := r.revokeWhere(ctx, func(b Binding) bool { return b.JobID == jobID })
+	return err
+}
+
+// RevokeGonePanes removes the tokens of panes that no longer exist (live reports false) and
+// were bound before cutoff (R2-L1): herdr reuses pane ids, and a token outliving its pane would
+// let its holder have answers typed into whatever pane gets the id next. The cutoff spares a
+// token bound a moment ago to a pane the caller's snapshot does not show yet.
+func (r *Registry) RevokeGonePanes(ctx context.Context, live func(paneID string) bool, cutoff time.Time) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.revokeWhere(ctx, func(b Binding) bool { return !live(b.PaneID) && b.CreatedAt.Before(cutoff) })
 }
 
 // Mint returns a new token bound to binding: NewToken then Bind.
@@ -164,20 +250,10 @@ func decodeBinding(value string) (Binding, bool) {
 
 // RevokePane removes every token bound to paneID, or only those of kind when it is not empty.
 func (r *Registry) RevokePane(ctx context.Context, paneID, kind string) error {
-	all, err := r.kv.ListKV(ctx, kvPrefix)
-	if err != nil {
-		return fmt.Errorf("listing agent tokens: %w", err)
-	}
-	for key, value := range all {
-		var binding Binding
-		if json.Unmarshal([]byte(value), &binding) != nil || binding.PaneID != paneID || (kind != "" && binding.Kind != kind) {
-			continue
-		}
-		if err := r.kv.DeleteKV(ctx, key); err != nil {
-			return fmt.Errorf("revoking an agent token: %w", err)
-		}
-	}
-	return nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, err := r.revokeWhere(ctx, func(b Binding) bool { return b.PaneID == paneID && (kind == "" || b.Kind == kind) })
+	return err
 }
 
 func hash(token string) string {

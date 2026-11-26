@@ -47,8 +47,11 @@ type Config struct {
 	Listeners    []Listener // the concrete addresses those binds resolved to
 	Port         int        // port used for binds that do not carry their own
 	AllowedHosts []string   // extra Host/Origin names from --allowed-host, lowercased
-	TLSCert      string     // path to a PEM certificate; empty means plain HTTP
-	TLSKey       string     // path to the matching PEM key
+	// TrustedProxies are the peers whose client-IP header is believed (--trusted-proxy, R2-L2):
+	// a tunnel or proxy on loopback makes every internet client one peer otherwise.
+	TrustedProxies []netip.Prefix
+	TLSCert        string // path to a PEM certificate; empty means plain HTTP
+	TLSKey         string // path to the matching PEM key
 
 	// HostNames is every name the Host header may carry: loopback names, bound IPs, this
 	// machine's hostname and AllowedHosts. The host check in httpd reads it (DESIGN.md 4.3).

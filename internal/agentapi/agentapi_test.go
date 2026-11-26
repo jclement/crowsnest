@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -501,10 +503,14 @@ func TestMCPWaitReturnsTheWholeAnswer(t *testing.T) {
 
 func TestMCPSay(t *testing.T) {
 	f := startSocket(t)
-	session := connectMCP(t, NewClient(f.socket, ""))
+	session := connectMCP(t, NewClient(f.socket, f.token(t, "w1:p1", "")))
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "say", Arguments: map[string]any{"text": "Done."}})
 	if err != nil || result.IsError {
 		t.Fatalf("say %+v %v", result, err)
+	}
+	// R2-I4: a caller without a token does not get the orchestrator's voice.
+	if err := NewClient(f.socket, "").Say(context.Background(), "Approve the prompt in job-4's tab."); !isStatus(err, 403) {
+		t.Fatalf("an unidentified say: %v", err)
 	}
 }
 
@@ -549,5 +555,99 @@ func TestSayGoesToTheSpeakerWhenTalkModeIsOn(t *testing.T) {
 	defer speaker.mu.Unlock()
 	if response.Code != http.StatusOK || len(speaker.said) != 1 || speaker.said[0] != "say|w2:p1|Build green." {
 		t.Fatalf("%d %v", response.Code, speaker.said)
+	}
+}
+
+// R2-L5: a job agent may hold fewer open questions than the orchestrator, and the orchestrator
+// still gets through when agents have filled the inbox.
+func TestOpenQuestionCapsSpareTheOrchestrator(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	var apiErr *APIError
+	agent := NewClient(f.socket, f.token(t, "w3:p1", "j_5"))
+	for i := range maxOpenPerJob {
+		if _, err := f.service.Ask(ctx, questions.AskInput{Title: fmt.Sprintf("Mine %d", i), Kind: questions.KindAck}, questions.Caller{PaneID: "w3:p1", JobID: "j_5"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := agent.Ask(ctx, questions.AskInput{Title: "One more", Kind: questions.KindAck}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests {
+		t.Fatalf("a job agent past its own cap: %v", err)
+	}
+	for i := range maxOpenTotal {
+		if _, err := f.service.Ask(ctx, questions.AskInput{Title: fmt.Sprintf("Filler %d", i), Kind: questions.KindAck}, questions.Caller{PaneID: fmt.Sprintf("w%d:p9", 100+i/maxOpenPerJob)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := NewClient(f.socket, f.token(t, "w4:p1", "j_6")).Ask(ctx, questions.AskInput{Title: "Full inbox", Kind: questions.KindAck}); !errors.As(err, &apiErr) || !strings.Contains(apiErr.Message, "inbox already holds") {
+		t.Fatalf("a job agent with the inbox full: %v", err)
+	}
+	if _, err := NewClient(f.socket, f.token(t, "w1:p1", "")).Ask(ctx, questions.AskInput{Title: "The lead still asks", Kind: questions.KindAck}); err != nil {
+		t.Fatalf("the orchestrator was locked out by a full inbox: %v", err)
+	}
+}
+
+// R2-H1: job_create is rate limited per caller.
+func TestJobCreateIsRateLimited(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	id, dir := startRunningJobIn(t, f)
+	agent := NewClient(f.socket, f.token(t, "w5:p1", id))
+	var apiErr *APIError
+	for i := range createBurst + 1 {
+		_, err := agent.CreateJob(ctx, jobs.CreateInput{Brief: fmt.Sprintf("child %d", i), Dir: dir, Role: "tester"})
+		if i < createBurst && err != nil {
+			t.Fatalf("child %d: %v", i, err)
+		}
+		if i == createBurst && (!errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests) {
+			t.Fatalf("past the burst: %v", err)
+		}
+	}
+}
+
+// R1b-C06: an answer written to the socket is not yet delivered; the asker's acknowledgement
+// makes it so. The client acknowledges every settled answer it decodes.
+func TestPollAnswerCountsOnlyOnceAcknowledged(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	token := f.token(t, "w1:p1", "")
+	client := NewClient(f.socket, token)
+	read := func(waitAsk bool) questions.Question {
+		t.Helper()
+		question, err := client.Ask(ctx, questions.AskInput{Title: "Ship?", Kind: questions.KindAck, Wait: waitAsk})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Answer(ctx, question.ID, questions.AnswerInput{}); err != nil {
+			t.Fatal(err)
+		}
+		return question
+	}
+	// A raw read that is never acknowledged (the tool call was cancelled as the answer arrived).
+	lost := read(true)
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://crowsnest/api/v1/questions/"+lost.ID, nil)
+	request.Header.Set(agentid.HeaderToken, token)
+	response, err := unixHTTP(f.socket).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if got, _ := f.service.Get(ctx, lost.ID); got.Delivery != questions.DeliveryPoll || got.DeliveredAt != nil {
+		t.Fatalf("an unacknowledged read counted as delivered: %+v", got)
+	}
+	// The client reads and acknowledges.
+	if _, err := client.Get(ctx, lost.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := f.service.Get(ctx, lost.ID); got.DeliveredAt == nil {
+		t.Fatalf("an acknowledged read is not delivered: %+v", got)
+	}
+}
+
+// A body cut off mid-answer is a transport failure, so WaitSettled retries it.
+func TestBrokenBodyIsRetryable(t *testing.T) {
+	response := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF))}
+	err := decodeResponse(response, &questions.Question{})
+	if !retryable(err) {
+		t.Fatalf("a broken body is not retryable: %v", err)
 	}
 }

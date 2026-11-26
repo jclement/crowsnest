@@ -24,6 +24,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/term"
@@ -81,6 +82,11 @@ type Deps struct {
 	// Voice is talk mode (M11): nil unless an ElevenLabs key is configured, and then every
 	// /voice route answers 404.
 	Voice *voice.Service
+	// Journal is read by GET /journal and written for prompts and answers sent from the web
+	// app (M8). Nil: an empty journal, nothing recorded.
+	Journal *journal.Journal
+	// Poker serves POST /orchestrator/poke (M8). Nil: it answers 503.
+	Poker *orch.Poker
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -149,6 +155,7 @@ func (s *Server) routes() http.Handler {
 	s.registerConversationRoutes(mux)
 	s.registerQuestionRoutes(mux)
 	s.registerJobRoutes(mux)
+	s.registerJournalRoutes(mux)
 	s.registerVoiceRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
@@ -162,7 +169,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 	next = s.checkOrigin(next)
 	next = s.checkHost(next)
 	next = securityHeaders(next)
-	return s.logRequests(next)
+	return s.trustProxies(s.logRequests(next))
 }
 
 // ---- Running -----------------------------------------------------------------

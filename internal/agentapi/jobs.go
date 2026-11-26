@@ -14,7 +14,9 @@
 // the caller may do comes from its token, never from that path (R1b N2): reading is open to any
 // caller, but job_update, done and fail are allowed only on the job the token was issued for, or
 // on the job held in the token's pane (the orchestrator's tokens name no job). Creating a job
-// needs an identified caller (it starts an agent), and its parent is the caller's own job. A hook
+// needs an identified caller (it starts an agent), is rate limited per caller, and goes through
+// jobs.CreateForAgent: confined to the caller's directory, limited in depth and fan-out, and
+// anything wider waits for the human's approval (R2-H1). Its parent is the caller's job. A hook
 // belongs to the token's job, else to the job held in the token's pane, else to nothing.
 
 package agentapi
@@ -78,7 +80,11 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, codeForbidden, "Only an agent crowsnest started can create jobs (no valid CROWSNEST_TOKEN came with this request).")
 		return
 	}
-	job, err := service.Create(r.Context(), input, caller.JobID)
+	if ok, retry := s.creates.Allow(quotaKey(caller)); !ok {
+		writeQuota(w, retry, "Too many jobs created in a short time. Wait, and do small pieces of work yourself rather than delegating each one.")
+		return
+	}
+	job, err := service.CreateForAgent(r.Context(), input, jobs.AgentCaller{PaneID: caller.PaneID, JobID: caller.JobID})
 	if err != nil {
 		s.writeJobError(w, r, err)
 		return

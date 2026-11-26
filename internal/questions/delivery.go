@@ -80,6 +80,10 @@ type Deliverer struct {
 
 	mu      sync.Mutex
 	backoff map[int64]heldDelivery
+	// cursor is where the next pass's scan starts (R2-C14): each pass reads the next
+	// pendingScanLimit ids and wraps to the start after a short page, so a thousand held
+	// answers cannot keep a newer, deliverable one out of every scan.
+	cursor int64
 }
 
 // heldDelivery is the retry schedule of one held delivery.
@@ -132,14 +136,20 @@ func (d *Deliverer) Run(ctx context.Context) {
 
 // DeliverPending makes one attempt at every pending delivery that is due. It looks at ids
 // first and loads a question only once its retry backoff has passed, at most deliveryBatch per
-// pass, so a backlog of held answers costs one small query a pass (R1b-C09).
+// pass, so a backlog of held answers costs one small query a pass (R1b-C09). The scan pages
+// through the backlog pass by pass (R2-C14).
 func (d *Deliverer) DeliverPending(ctx context.Context) {
-	ids, err := d.opts.Store.PendingDeliveryIDs(ctx, pendingScanLimit)
+	ids, err := d.opts.Store.PendingDeliveryIDs(ctx, d.cursor, pendingScanLimit)
 	if err != nil {
 		if ctx.Err() == nil {
 			d.opts.Logger.Warn("listing answers to deliver", "err", err)
 		}
 		return
+	}
+	if len(ids) < pendingScanLimit {
+		d.cursor = 0 // the end of the backlog: the next pass starts over
+	} else {
+		d.cursor = ids[len(ids)-1]
 	}
 	attempted := 0
 	for _, id := range ids {
@@ -258,6 +268,15 @@ func outcome(q Question) string {
 		return "cancelled by the human (not consent)"
 	}
 	text := termtext.Clean(answerLabels(q))
+	if q.Kind == KindChoice || q.Kind == KindConfirm {
+		// The labels are the asker's words: quoted, so a label like `Yes (note: also push)` or
+		// `[crowsnest answer …]` cannot pass for the human's note or a header (R2-I1).
+		quoted := make([]string, 0, 2)
+		for _, label := range AnswerLabelList(q) {
+			quoted = append(quoted, termtext.Quote(label))
+		}
+		text = strings.Join(quoted, ", ")
+	}
 	if note := termtext.Clean(q.AnswerNote); note != "" && q.Kind != KindManual {
 		text += " (note: " + note + ")"
 	}

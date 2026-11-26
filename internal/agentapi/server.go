@@ -13,6 +13,7 @@
 //	GET    /api/v1/questions/{id}?wait=N  read; with wait, long-poll up to N seconds for the answer
 //	GET    /api/v1/questions?status=      list
 //	DELETE /api/v1/questions/{id}         withdraw
+//	POST   /api/v1/questions/{id}/collected  the asker read the settled answer (R1b-C06)
 //	POST   /api/v1/say                    speak a sentence in talk mode (M11 voices it)
 //	GET    /api/v1/health                 liveness, for the CLI's "is crowsnest running" check
 //	…/api/v1/jobs…, /api/v1/hooks/{event}  the job protocol and the hooks (jobs.go, M7)
@@ -26,8 +27,10 @@
 // that holds j (the orchestrator, whose tokens name no job; DESIGN.md 6.2).
 //
 // Quotas (R1b N6), per caller (its pane, or one shared bucket for every unidentified caller):
-// asks are rate limited, open questions are capped per caller and in total, and concurrent
-// long-polls are capped. Each refusal is a 429 that says what to do.
+// asks, says and job creations are rate limited, open questions are capped per caller and in
+// total, and concurrent long-polls are capped. Each refusal is a 429 that says what to do. A job
+// agent may hold fewer open questions than the orchestrator, and the orchestrator is not counted
+// against the inbox-wide cap, so a handful of job agents cannot lock the lead out (R2-L5).
 package agentapi
 
 import (
@@ -74,9 +77,14 @@ const (
 	askRefill         = 30 * time.Second // then one more every this long
 	sayBurst          = 10
 	sayRefill         = 6 * time.Second
-	maxOpenPerCaller  = 30  // open questions one caller may have
-	maxOpenTotal      = 200 // open questions across every caller (the Inbox's list size)
+	maxOpenPerCaller  = 30  // open questions the orchestrator, or the unidentified bucket, may have
+	maxOpenPerJob     = 10  // open questions one job agent may have (R2-L5)
+	maxOpenTotal      = 200 // open questions across every caller but the orchestrator
 	maxWaitsPerCaller = 8   // concurrent long-polls one caller may hold
+	// createBurst job_create calls one caller may make at once, then one every createRefill
+	// (R2-H1; the jobs service caps depth, fan-out and the live total as well).
+	createBurst  = 5
+	createRefill = time.Minute
 	// unidentifiedKey is the one quota bucket every caller without a token shares.
 	unidentifiedKey = "unidentified"
 )
@@ -111,9 +119,10 @@ type Server struct {
 	version   string
 	handler   http.Handler
 
-	asks  *ratelimit.Limiter
-	says  *ratelimit.Limiter
-	waits *waitCounter
+	asks    *ratelimit.Limiter
+	says    *ratelimit.Limiter
+	creates *ratelimit.Limiter
+	waits   *waitCounter
 }
 
 // ServerOptions configure a Server. Questions is required.
@@ -138,9 +147,10 @@ func NewServer(opts ServerOptions) *Server {
 	server := &Server{
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version,
-		asks:  ratelimit.New(askBurst, askRefill, opts.Now),
-		says:  ratelimit.New(sayBurst, sayRefill, opts.Now),
-		waits: &waitCounter{active: map[string]int{}},
+		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
+		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
+		creates: ratelimit.New(createBurst, createRefill, opts.Now),
+		waits:   &waitCounter{active: map[string]int{}},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", server.handleHealth)
@@ -148,6 +158,7 @@ func NewServer(opts ServerOptions) *Server {
 	mux.HandleFunc("GET /api/v1/questions", server.handleList)
 	mux.HandleFunc("GET /api/v1/questions/{id}", server.handleGet)
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", server.handleCancel)
+	mux.HandleFunc("POST /api/v1/questions/{id}/collected", server.handleCollected)
 	mux.HandleFunc("POST /api/v1/say", server.handleSay)
 	server.registerJobRoutes(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -224,6 +235,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	caller := s.callerOf(r)
 	if ok, retry := s.asks.Allow(quotaKey(caller)); !ok {
+		if caller.PaneID == "" {
+			s.logger.Warn("the shared quota of callers without a token is spent: a local process without CROWSNEST_TOKEN is asking a lot")
+		}
 		writeQuota(w, retry, "Too many questions in a short time. Wait, then ask one question that covers what you need; carry on with other work meanwhile.")
 		return
 	}
@@ -235,12 +249,42 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		writeQuota(w, time.Minute, message)
 		return
 	}
+	caller, ok := s.askAboutJob(w, r, caller, input.JobID)
+	if !ok {
+		return
+	}
 	question, err := s.questions.Ask(r.Context(), input, caller)
 	if err != nil {
 		s.writeQuestionError(w, r, err)
 		return
 	}
 	writeData(w, http.StatusCreated, question)
+}
+
+// askAboutJob attaches a question to the job it names (R2-C06). A job agent's token already names
+// its job, and it may name no other. The orchestrator's token names only its pane: it may name a
+// live job it holds (the job's pane is its pane), and the question then belongs to that job, so
+// the job's needs_you, its Stop check and its answer callback all see it. ok is false when a
+// refusal was written.
+func (s *Server) askAboutJob(w http.ResponseWriter, r *http.Request, caller questions.Caller, jobID string) (questions.Caller, bool) {
+	jobID = strings.TrimSpace(jobID)
+	switch {
+	case jobID == "" || jobID == caller.JobID:
+		return caller, true
+	case caller.JobID != "":
+		writeError(w, http.StatusForbidden, codeForbidden, fmt.Sprintf("You hold job %s; a question can only be about your own job. Leave job_id empty.", caller.JobID))
+		return caller, false
+	case caller.PaneID == "" || s.jobs == nil:
+		writeError(w, http.StatusForbidden, codeForbidden, "Only the agent holding a job can ask about it (no valid CROWSNEST_TOKEN came with this request). Leave job_id empty.")
+		return caller, false
+	}
+	job, err := s.jobs.Get(r.Context(), jobID)
+	if err != nil || job.PaneID != caller.PaneID || job.State.Terminal() {
+		writeError(w, http.StatusForbidden, codeForbidden, fmt.Sprintf("You do not hold a live job %s, so the question cannot be about it. Check the id in your [crowsnest job …] header, or leave job_id empty.", jobID))
+		return caller, false
+	}
+	caller.JobID = job.ID
+	return caller, true
 }
 
 // openQuota returns a refusal when the caller, or the inbox as a whole, has too many open
@@ -251,10 +295,21 @@ func (s *Server) openQuota(r *http.Request, caller questions.Caller) string {
 		s.logger.Warn("counting open questions for the quota", "err", err)
 		return ""
 	}
+	// An identified caller whose token names no job is the orchestrator (job agents' tokens
+	// always name their job): the lead the human talks to keeps its voice when agents fill the
+	// inbox.
+	orchestrator := caller.PaneID != "" && caller.JobID == ""
+	limit := maxOpenPerCaller
+	if caller.JobID != "" {
+		limit = maxOpenPerJob
+	}
 	switch {
-	case total >= maxOpenTotal:
+	case total >= maxOpenTotal && !orchestrator:
 		return fmt.Sprintf("The human's inbox already holds %d open questions. Do not ask more now: carry on with what you can, and mention the question in your reply instead.", total)
-	case mine >= maxOpenPerCaller:
+	case mine >= limit:
+		if caller.PaneID == "" {
+			s.logger.Warn("callers without a token hold the most open questions their shared quota allows")
+		}
 		return fmt.Sprintf("You already have %d open questions. Wait for answers, or withdraw ones that no longer matter, before asking more.", mine)
 	}
 	return ""
@@ -284,10 +339,26 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		s.writeQuestionError(w, r, err)
 		return
 	}
-	// The answer counts as collected only once it is out of the door (R1b-C06).
-	if writeDataChecked(w, http.StatusOK, question) == nil && question.Status != questions.StatusOpen {
+	// Writing the answer is not delivering it (R1b-C06): the response can reach the socket and
+	// still never be read, if the asker's tool call is cancelled in that moment. The client
+	// acknowledges a settled answer it has decoded (POST …/collected); until then the sweeper
+	// may switch it to typing.
+	writeData(w, http.StatusOK, question)
+}
+
+// handleCollected is the asker's acknowledgement that it read a settled answer: only then is a
+// poll delivery confirmed. Anyone else's acknowledgement changes nothing.
+func (s *Server) handleCollected(w http.ResponseWriter, r *http.Request) {
+	caller := s.callerOf(r)
+	question, err := s.questions.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeQuestionError(w, r, err)
+		return
+	}
+	if question.Status != questions.StatusOpen {
 		s.questions.Collected(context.WithoutCancel(r.Context()), question, caller)
 	}
+	writeData(w, http.StatusOK, map[string]bool{"acknowledged": true})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -322,6 +393,12 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 	caller := s.callerOf(r)
+	if caller.PaneID == "" {
+		// R2-I4: `say` speaks in the orchestrator's voice into the human's ear; a process without
+		// a token (not an agent crowsnest started) does not get that channel.
+		writeError(w, http.StatusForbidden, codeForbidden, "Only an agent crowsnest started can speak (no valid CROWSNEST_TOKEN came with this request).")
+		return
+	}
 	if ok, retry := s.says.Allow(quotaKey(caller)); !ok {
 		writeQuota(w, retry, "Too many spoken lines in a short time; say less, less often.")
 		return
@@ -420,12 +497,6 @@ func decodeBody(w http.ResponseWriter, r *http.Request, limit int64, into any) b
 
 func writeData(w http.ResponseWriter, status int, data any) {
 	_ = writeJSON(w, status, map[string]any{"data": data})
-}
-
-// writeDataChecked writes the envelope, flushes it, and reports whether that worked: a
-// long-poll's answer counts as collected only once it reached the socket (R1b-C06).
-func writeDataChecked(w http.ResponseWriter, status int, data any) error {
-	return writeJSON(w, status, map[string]any{"data": data})
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {

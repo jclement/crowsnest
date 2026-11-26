@@ -9,6 +9,7 @@
 import type { AnswerRequest, Question } from "./questions";
 import { fixtureQuestions } from "./questionFixtures";
 import { makeBoard, makeDetail } from "./jobFixtures";
+import { fixturePokeResult, journalPage } from "./journalFixtures";
 import { ApiError } from "./api";
 import type {
   Agent,
@@ -421,6 +422,8 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
   if (questionsAnswer !== undefined) return questionsAnswer;
   const jobsAnswer = jobFixtureApi(path);
   if (jobsAnswer !== undefined) return jobsAnswer;
+  const journalAnswer = journalFixtureApi(path, method);
+  if (journalAnswer !== undefined) return journalAnswer;
   const match = /^\/agents\/([^/]+)\/(screen|keys)$/.exec(path);
   if (match?.[1] && match[2]) {
     const target = decodeURIComponent(match[1]);
@@ -479,4 +482,15 @@ function jobFixtureApi(path: string): unknown {
   const job = makeBoard().find((candidate) => candidate.id === one[1]);
   if (!job) throw new ApiError(404, "NOT_FOUND", "No such job.");
   return { ...makeDetail(), ...job };
+}
+
+// ---- Journal and pokes (M8) ----------------------------------------------------------------
+
+/** Answers GET /journal and POST /orchestrator/poke from lib/journalFixtures; undefined otherwise. */
+function journalFixtureApi(path: string, method: string): unknown {
+  if (path === "/orchestrator/poke" && method === "POST") return fixturePokeResult();
+  const journal = /^\/journal(?:\?(.*))?$/.exec(path);
+  if (!journal) return undefined;
+  const query = new URLSearchParams(journal[1] ?? "");
+  return journalPage(query.get("kind")?.split(",").filter(Boolean) ?? [], Number(query.get("before") ?? 0));
 }

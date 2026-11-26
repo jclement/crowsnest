@@ -82,12 +82,15 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke; `0` disables timer pokes |
 | `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | false | Serve the UI over the session without starting Claude |
 | `--allowed-host` | `CROWSNEST_ALLOWED_HOSTS` | derived | Extra Host/Origin names (reverse proxy, MagicDNS). Repeatable |
+| `--trusted-proxy` | `CROWSNEST_TRUSTED_PROXY` | none | `loopback`, an IP or a CIDR whose client-IP header is believed (4.2, R2-L2). Repeatable |
 | `--tls-cert`, `--tls-key` | `CROWSNEST_TLS_CERT/KEY` | none | Serve HTTPS directly |
 | `--elevenlabs-api-key` | `ELEVENLABS_API_KEY` | none | Enables talk mode |
+| `--elevenlabs-api-key-file` | `ELEVENLABS_API_KEY_FILE` | none | The key from a file (first line, mode 600): out of every environment (R1b N1) |
 | `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id | TTS voice |
 | `--notify-url` | `CROWSNEST_NOTIFY_URL` | none | POST a one-line notice here when something needs Jeff (ntfy-style) |
+| `--notify-url-file` | `CROWSNEST_NOTIFY_URL_FILE` | none | The notify URL from a file (first line, mode 600) |
 | `--demo` | `CROWSNEST_DEMO` | false | In-memory fake herdr and scripted orchestrator: UI work, hermetic E2E, screenshots. All its state (database, state dir, orchestrator dir) lives in a temporary directory removed on exit, never the real ones (R1 L2) |
-| `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs base URL (section 13; tests point it at a fake) |
+| `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs base URL (section 13; tests point it at a fake). https, or plain http only to loopback (R2-L4) |
 | `--i-know-this-is-open` | `CROWSNEST_I_KNOW_THIS_IS_OPEN` | false | Allow `--no-auth` on an open bind (startup rules) |
 | `--allow-default-session` | `CROWSNEST_ALLOW_DEFAULT_SESSION` | false | Allow `--session default` (startup rules) |
 | `--data-dir` | `CROWSNEST_DATA_DIR` | `~/.local/share/crowsnest` (XDG) | Database directory; also the parent of the default `--dir` |
@@ -121,16 +124,18 @@ a malicious web page driving a logged-in browser (CSRF, cross-site WebSocket hij
 rebinding against `--no-auth` on localhost); secrets leaking into logs; agent output attacking the UI (XSS).
 
 1. **Bind**: loopback by default. Never `0.0.0.0` unless the user types it (the container image does, with auth required).
-2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Admission and counting are one step: an admitted attempt is counted as a failure at once and taken back if the credentials match, so a burst of parallel guesses cannot slip past either cap before the first failure is recorded (R1-C10/M1). Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session` over plain HTTP and `__Host-crowsnest_session` over HTTPS (Secure, `Path=/`, no `Domain`, so nothing on another subdomain can set or shadow it; over HTTPS only the prefixed name is read), `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Each session is bound to the `Host:port` it was issued for (lower-cased, default port filled in) and is refused anywhere else: browsers send a host's cookies to every port on it, so this stops a cookie that reached a sibling port from working here, though not a replay that forges `Host` (R1 M2; see residual risk). Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; `X-Forwarded-For` is never trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. `X-Forwarded-Proto: https` is honoured only from loopback, and only to add `Secure` to the cookie.
+2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Admission and counting are one step: an admitted attempt is counted as a failure at once and taken back if the credentials match, so a burst of parallel guesses cannot slip past either cap before the first failure is recorded (R1-C10/M1). Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session` over plain HTTP and `__Host-crowsnest_session` over HTTPS (Secure, `Path=/`, no `Domain`, so nothing on another subdomain can set or shadow it; over HTTPS only the prefixed name is read), `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Each session is bound to the `Host:port` it was issued for (lower-cased, default port filled in) and is refused anywhere else: browsers send a host's cookies to every port on it, so this stops a cookie that reached a sibling port from working here, though not a replay that forges `Host` (R1 M2; see residual risk). Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; forwarding headers are not trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. The exception is opt-in (R2-L2): with `--trusted-proxy` (`loopback`, an IP or a CIDR), a request whose TCP peer is a trusted proxy is attributed to `CF-Connecting-IP`, else the last `X-Forwarded-For` hop, and that address keys the login limiter, the voice limits and the log, and caps that client at 32 requests in flight (the TCP cap of 4.11 cannot see past the proxy). The compose example's tunnel shares crowsnest's network namespace, so every internet client arrives from 127.0.0.1 and one attacker's failures would lock the owner out; it sets `CROWSNEST_TRUSTED_PROXY=loopback`. A trusted loopback proxy is trusted from every local process too, which can then pick its own bucket; those run as the user already. `X-Forwarded-Proto: https` is honoured only from loopback or a trusted proxy (the TCP peer), and only to add `Secure` to the cookie.
 3. **Host check** on every request: `Host` must be loopback, a bound IP, the machine hostname (only when a non-loopback address is bound: on loopback it adds nothing but DNS-rebinding surface, R1 I4), a detected MagicDNS name, or an `--allowed-host`. This is what stops DNS rebinding, and it applies with `--no-auth` too.
 4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host` (host and port, default ports normalised). `null` counts as missing. Non-GET calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set). A failed host check is `403` with a message naming `--allowed-host`. MagicDNS names are not auto-detected yet (M1); pass them with `--allowed-host`.
 5. **WebSockets** authenticate with the same cookie at upgrade, check Origin, and are closed when the session is revoked. No tokens in URLs.
-6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions decide who may connect (this user's processes); it serves only the agent API (ask, say, notify, job, hook), never terminals. **Who is calling** comes from a token, never from what the caller says (R1b N2, N7): crowsnest mints a random token (`cnt_…`, 32 bytes) for each agent it starts, puts it in that agent's pane environment (`CROWSNEST_TOKEN`), in its MCP server's environment (`mcp.json`) and in a 0600 `agent-token` file its hook command lines name (`--token-file`), and keeps only the token's SHA-256 in `kv`, mapped to the pane and job (`internal/agentid`). A caller with no known token is unidentified: it may ask (the answer reaches it only through `--wait`), nothing is ever typed into a pane on its behalf, and it may not withdraw questions, create jobs or act on one. Job verbs work only on the token's job or the job held in the token's pane (the orchestrator's tokens name no job). Quotas per caller cap the rate of asks and says, open questions (30 each, 200 in all) and concurrent long-polls (8), and an expiry is at least five minutes. What this does not stop: any process of the same user can read another agent's environment (`/proc/<pid>/environ`, `ps eww`) or its 0600 files and borrow its token. Processes of one uid are not isolated from each other; only a separate uid for crowsnest would make the socket a hard boundary.
+6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions decide who may connect (this user's processes); it serves only the agent API (ask, say, notify, job, hook), never terminals. **Who is calling** comes from a token, never from what the caller says (R1b N2, N7): crowsnest mints a random token (`cnt_…`, 32 bytes) for each agent it starts, puts it in that agent's pane environment (`CROWSNEST_TOKEN`), in its MCP server's environment (`mcp.json`) and in a 0600 `agent-token` file its hook command lines name (`--token-file`), and keeps only the token's SHA-256 in `kv`, mapped to the pane and job (`internal/agentid`). A caller with no known token is unidentified: it may ask (the answer reaches it only through `--wait`), nothing is ever typed into a pane on its behalf, and it may not withdraw questions, create jobs or act on one. Job verbs work only on the token's job or the job held in the token's pane (the orchestrator's tokens name no job). Quotas per caller cap the rate of asks, says and job creations, open questions (10 for a job agent, 30 for the orchestrator and for the shared bucket of callers without a token; 200 in all, the orchestrator not counted against it, R2-L5) and concurrent long-polls (8), and an expiry is at least five minutes. `say` needs a token (R2-I4). Tokens end with the work (R2-L1): a job's tokens are revoked when it reaches done, failed or cancelled, and a sweeper revokes, once a minute, the tokens of panes herdr no longer lists (bindings younger than two minutes are spared, and nothing is revoked while herdr cannot be read). Replacing a pane's tokens is one locked, transactional step, and a start token for a pane now held by another job is refused (R2-C15). Token files are 0600 in a 0700 per-job directory, and tokens are never logged.
+
+    **What the token is, plainly (R2-M2).** Agents in one session run as one uid, and processes of one uid are not isolated from each other. Any agent can read another agent's environment (`/proc/<pid>/environ`, `ps eww`) or its 0600 files under the state directory (`<state>/jobs/j_N/agent-token`, `<state>/agent-token`, `mcp.json`) with an ordinary file read, and then act as that agent on the socket: update, finish or fail its job, forge its hooks (and so silence its supervision), ask or `say` as it, the orchestrator included. The token stops accidents and forged environment variables (a process that merely sets `CROWSNEST_TOKEN` or names a pane gets nothing); it does not stop a hostile same-uid process. Only running crowsnest as its own uid would make the socket a hard boundary. That is a deployment change, not a code change, and is not done.
 7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'`. (`unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
 8. **Rendering untrusted text**: transcripts, pane text and question bodies are data. Markdown renders without raw HTML; mermaid runs with `securityLevel: 'strict'`; links open with `rel="noopener noreferrer"`; no `dangerouslySetInnerHTML` outside the sanitised mermaid SVG.
 9. **Secrets**: the password, session ids and the ElevenLabs key are never logged, never returned by any endpoint, never placed in argv or the environment of a child process. Once the config is loaded, `serve` removes `CROWSNEST_PASSWORD`, `CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY`, `CROWSNEST_NOTIFY_URL`, `CROWSNEST_NO_AUTH`, `SUPPRESS_AUTH` and `CROWSNEST_I_KNOW_THIS_IS_OPEN` from its own environment (R1 H1). That only changes the process's in-memory copy: the kernel keeps the environment a process was exec'd with, readable by the same user. So when `serve` finds any of the secret variables it re-executes itself once, with them removed from the new environment and handed over through an inherited pipe (`CROWSNEST_SECRETS_FD`); the environment the OS reports for crowsnest then holds no secret (R1b H1 residual; `cmd/crowsnest/secretenv.go`). The process that started crowsnest (a shell, tini in the devbox) keeps its own environment: pass the password as a file to keep it out of that too. Request logs record method, path, status, duration and client IP only. Error responses, the orchestrator's status detail and a terminal's start failure carry a sentence that says what to do, never herdr's or the orchestrator's own error text (which can hold paths and internals); that goes to the server log (R1 I2). A terminal's exit reason is still herdr's (`detached`, `terminal attach taken over`), because the browser acts on it. A `redact` helper scrubs token-shaped strings from anything echoed from panes into logs or notices.
 10. **Child processes** get a scrubbed environment: every `HERDR_*` variable is removed and the session is always addressed by its explicit socket path, so crowsnest started from inside a herdr pane cannot drive the pane's session. Every `CROWSNEST_*` variable except the pane variables (`CROWSNEST`, `CROWSNEST_SESSION`, `CROWSNEST_SOCKET`, `CROWSNEST_JOB`) and every `ELEVENLABS_*` one is removed too. That covers the herdr server crowsnest starts (which spawns every pane and agent, so a prompt-injected `env` in any pane finds no secret), the TUI client and each pane-control process (R1 H1). **A herdr session crowsnest did not start keeps whatever environment its server was started with**: if that shell exported the password or the ElevenLabs key, every pane in it can read them. Start the session through crowsnest, or from a shell without them.
-11. **Resource limits** (R1 L3): request headers are capped at 32 KiB and must arrive within 10 s; a login body must arrive within 5 s; at most 128 connections are open at once across all listeners. Past the cap, new connections wait in the kernel's backlog until one closes rather than being refused, so the event stream and terminal sockets (which stay open for hours and so cannot have a request timeout) keep working, and the header and body deadlines make a slow or silent client give its slot back within seconds. Each non-loopback address may hold at most 32 of them; one more from it is closed at once, so a single unauthenticated peer can no longer take every slot (R1b N4). Loopback is exempt, because a local proxy (`tailscale serve`, a tunnel sharing the network namespace) carries every real user through it. An SSE frame's write deadline is cleared once the frame is flushed: over HTTP/2 an armed deadline resets an idle stream (R1b-C03).
+11. **Resource limits** (R1 L3): request headers are capped at 32 KiB and must arrive within 10 s; a login body must arrive within 5 s; at most 128 connections are open at once across all listeners. Past the cap, new connections wait in the kernel's backlog until one closes rather than being refused, so the event stream and terminal sockets (which stay open for hours and so cannot have a request timeout) keep working, and the header and body deadlines make a slow or silent client give its slot back within seconds. Each non-loopback address may hold at most 32 of them; one more from it is closed at once, so a single unauthenticated peer can no longer take every slot (R1b N4). Loopback is exempt, because a local proxy (`tailscale serve`, a tunnel sharing the network namespace) carries every real user through it; with `--trusted-proxy` those users are capped one by one at the HTTP layer instead (4.2, R2-L2). An SSE frame's write deadline is cleared once the frame is flushed: over HTTP/2 an armed deadline resets an idle stream (R1b-C03).
 12. **Files** (R1 L5): the data and state directories are made `0700` at start even when they already existed with looser modes, and the database is created (or tightened to) `0600`; SQLite gives its `-wal` and `-shm` files the same mode. A `--password-file` that its group or others can read or write is refused (`chmod 600` it). A config file that holds `password` and is readable by others is a startup warning (move the password to `CROWSNEST_PASSWORD` or `--password-file`, or `chmod 600` the file).
 13. **TLS**: optional built-in cert/key; the documented path for a phone is `tailscale serve`, which also gives the secure context the microphone needs.
 
@@ -236,7 +241,7 @@ protocol through the CLI and their prompt; they have no hooks, so they rely on t
 | `ask(question, wait=false)` | Posts a question (section 8). **Non-blocking by default**: returns the question id at once, and the agent is told to carry on with whatever the answer does not block. The answer arrives later as a message. `wait=true` blocks, for approval of irreversible steps |
 | `done(result_md, verified, not_verified)` | Declares the job finished, with its evidence |
 | `fail(reason)` | Declares it cannot be finished |
-| `job_create(brief, role, dir, …)` | Delegates a child job (leads only) |
+| `job_create(brief, role, dir, …)` | Delegates a child job: inside the caller's own directory it starts at once; anything wider waits for the human's approval (6.10) |
 | `job_get()` | The agent's own job, its open questions and their answers: what it reads after a compaction or restart |
 
 ### 6.3 The supervisor: declared state, enforced
@@ -270,7 +275,10 @@ stop-hook continuations, reset by a tool call) is a second fence. Every nudge is
 
 **Backstop without hooks** (Codex, a hook that failed, a session crowsnest did not start): the
 poker watches herdr. An agent holding a non-terminal, non-waiting job that sits `idle` or `done`
-for 60 s with an empty input box gets the same text as a prompt, under the same budget.
+for 60 s with an empty input box gets the same text as a prompt, under the same budget. As built
+in M8 (7.7): it runs in the poker's loop and calls `jobs.Service.NudgeIfDue`; the Stop hook stamps
+the job's `last_stop_at`, and a stop whose hook ran is left to the hook, so one stop is never
+nudged twice.
 
 **Answers come back as messages.** When Jeff answers a non-blocking question, crowsnest types
 `[crowsnest answer q_7] <title> → <answer> (note: …)` into the asker (Claude queues it if a turn
@@ -350,27 +358,33 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
   after its last progress, lets the turn end (Claude queues the typed answer and it starts the next
   turn; without this the agent was nudged while its answer was on the way). A job already marked
   unresponsive with no progress since is let rest rather than nudged again.
-- **What counts as progress** (resets the budget): a tool call (PostToolUse), a `job_update` that
-  changes something, an ask, `done`, and a message or nudge from the human. Two refinements from
-  the stop test: `job_update(waiting=true)` is refused when the job has no open question (an agent
+- **What counts as progress** (resets the budget): a tool call (PostToolUse) that is not one of
+  crowsnest's own, a `job_update` that changes something, an ask, `done`, and a message or nudge
+  from the human. Two refinements from the stop test: `job_update(waiting=true)` is refused when the job has no open question (an agent
   told to "wait" answered every nudge with it, which reset the budget forever; it now has to
-  `ask`, which is the right thing), and repeating the same progress line is not progress.
+  `ask`, which is the right thing), and repeating the same progress line is not progress. Since
+  R2 (6.9) "changes something" is compared before and after: a `state` or `waiting` that already
+  held is a heartbeat, not progress, and the PostToolUse of a crowsnest tool (`mcp__crowsnest__*`,
+  or a lone `crowsnest …` shell command) is not progress either.
 - **Launch.** A builder with a git directory: `worktree.create` (branch `job/<n>-<slug>`, label
   `job-<n>`, optional `path` under `LaunchOptions.WorktreeRoot`), then `tab.create` with the
   job's env in the new workspace, because **worktree.create takes no pane env** (protocol 22). Any
   other directory: a tab in a workspace that already has a pane in it, else a new workspace. Agent
   name `job-<n>`, Claude args `--session-id --permission-mode --model --append-system-prompt-file
-  --settings --mcp-config` (files under `<state>/jobs/j_<n>/`). The brief is the first prompt,
-  `[crowsnest job j_<n>] <brief>` (multi-line briefs arrived intact through `agent.prompt`). An
+  --settings --mcp-config` (files under `<state>/jobs/j_<n>/`). The brief is written to
+  `<state>/jobs/j_<n>/brief.md` and the first prompt is one line naming it (6.10; until R2 the
+  whole brief was typed). An
   agent at a start-up prompt makes the job `needs_you`/`dialog` and nothing is typed; the
   supervisor tick sends the brief once someone has answered it. Codex: `--ask-for-approval never
   --sandbox workspace-write [--model]` (codex-cli 0.167 has no `--no-daemon`), with the protocol
-  (CLI wording) in its first prompt. The herdr start-up helpers repeat `internal/orch`'s (poll for
+  (CLI wording) at the top of its brief file. The herdr start-up helpers repeat `internal/orch`'s (poll for
   ready, retry `agent_pane_busy`, clear a stale name) rather than share them, so the orchestrator
   code under review fixes was not touched.
 - **The orchestrator** takes jobs with no directory one at a time (an agent holds at most one
   running job): the oldest queued one is sent when it is idle or working and holds no running job,
-  with a header telling it to pass `job_id` (its MCP server has no `CROWSNEST_JOB`).
+  with a header telling it to pass `job_id` (its MCP server has no `CROWSNEST_JOB`). Since R2 the
+  job is reserved for it (pane, agent name and a dispatch claim) before the brief is typed, and
+  its `ask(job_id=…)` attaches the question to that job (6.9).
 - **Recovery** (`Service.Tick`, every 10 s, clock injected): held briefs, dialogs that cleared,
   restarts (`--resume` when the transcript exists, else a fresh session and the brief again; 3 an
   hour, then `failed`), retries ("continue" when idle: a limit at 5, 15, 30 minutes then hourly; an
@@ -381,11 +395,127 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
 - **Heartbeat**: hooks, agent calls and the transcript file's modification time (with the last tool
   card from M4's tailer) advance `last_activity_at`. "Doing now" is the progress line, or the last
   tool call when the line is more than 5 minutes old.
-- **For M8**: `Service.NudgeIfDue(ctx, jobID)` applies the same rule and budget for an agent without
-  hooks that the caller found idle with an empty input box, and types the nudge.
+- **Backstop (M8)**: `Service.NudgeIfDue(ctx, jobID)` applies the same rule and budget for an agent
+  without hooks that the caller found idle with an empty input box, and types the nudge;
+  `Service.BackstopJobs` lists what the backstop watches (7.7).
 - **`--demo`** seeds ten jobs (running in a worktree, nudged, stuck on a limit with a retry
   countdown, waiting on a question, at a dialog, unresponsive, blocked, done with evidence, failed,
   queued) and keeps them moving; the supervisor does not run there.
+
+### 6.9 As fixed in R2: lifecycle steps, and what the supervisor guarantees
+
+The R2 review (`reviews/R2-codex.md`, C01 to C12 and C16) found ways for both halves of the
+promise to break: a job could silently stop (a crash between two writes left a state no tick
+picked up), or loop (no-op updates reset the nudge budget). Most were one disease: acting on a
+row read before a call to herdr that takes seconds. The fixes, in `internal/jobs`:
+
+- **Lifecycle steps** (`lifecycle.go`, migration `0006_job_lifecycle.sql`). Every step that acts
+  outside crowsnest (launch, start or restart, typing a brief, dispatching to the orchestrator, a
+  retry's "continue", a nudge) first **claims** the job under the jobs lock: it rechecks what it
+  depends on on the fresh row and records `lifecycle_op`, `lifecycle_owner` (this process),
+  `lifecycle_at` and a bumped `lifecycle_gen`. Right before each external effect it checks the
+  claim still **holds**; it **finishes** (commits the outcome and clears the claim) only if it
+  still holds. A terminal transition clears the claim and bumps the generation, so a job cancelled
+  or finished meanwhile is never restarted, briefed, retried or nudged after the check (C05, C08).
+  Cancel now records `cancelled` first and sends Esc after.
+- **Stale claims** (an owner that is another, dead, process, or older than 10 minutes) are settled
+  by the tick by what the step was: a brief or a dispatch may have been typed, so it counts as
+  sent and is **never typed twice** (at most once, like answer delivery; the SessionStart hook
+  re-injects the brief, and the Stop hook and the backstop keep the agent going); a launch or
+  start leaves the pane for the tick to look at; a retry or nudge is dropped.
+- **No absorbing states** (C02). The tick sees every live job, a page at a time, never the board's
+  newest 300 (C16): a queued job with a pane is an interrupted launch (brief sent if the agent is
+  up, agent started if not); an agent confirmed gone is restarted whether or not its brief was
+  sent, within the hourly budget, so a start that keeps failing ends in `failed` with a notice.
+- **Liveness is three-valued** (C07): gone only on positive evidence (herdr says no such agent or
+  pane, or the pane is back at a bare shell); a failed lookup is unknown and changes nothing, so an
+  outage spends no restart budget and mints no token for an agent still running.
+- **Questions are reconciled on every pass** (C03), not only when something mutates the job: a
+  question settled while crowsnest was down still brings its job back from `needs_you`. All of it
+  reads one aggregate per job (`SummarizeJobQuestions`: open, blocking, and when an answer was last
+  typed back) and never the attachments (C12); a mutation reads it once and the Stop check uses
+  that same read.
+- **"Answer incoming" means delivered or genuinely pending** (C04): a typed answer's delivery
+  time, or for one not yet delivered and not failed, when it was claimed or settled. A failed or
+  abandoned delivery counts for nothing. A stop let through only for an incoming answer does not
+  stamp `last_stop_at`, so the backstop looks again when the two-minute grace runs out. A job that
+  goes idle for 10 minutes now also tells Jeff.
+- **Progress is real work** (C01, see 6.8).
+- **The orchestrator's assignment** (C05) is chosen and reserved in one critical section (the
+  orchestrator's held jobs and the oldest unassigned job are asked of the store directly), so two
+  dispatchers cannot pick one job twice or give it two; the pane binding exists before the brief
+  is typed, so its first `job_update` and its hooks find the job. A brief provably not typed puts
+  the job back in the queue.
+- **`ask(job_id)`** (C06) is sent to the server (`AskInput.job_id`) and checked against the token:
+  a job agent may name only its own job; the orchestrator only a live job whose pane is its pane.
+  Anything else is a 403.
+- **The backstop** (C09, C10) leaves a job on its retry schedule, or being restarted, to that
+  recovery (`Decide` has a `recovering` rule, and `BackstopJobs` skips them). `NudgeIfDue` takes
+  the job as the backstop saw it and does nothing if a Stop hook has run since (`last_stop_at`
+  changed); the nudge is claimed, and counted against the budget only once typed (or uncertain); a
+  send refused by a dialog or a draft spends nothing. A Stop hook that runs while crowsnest is
+  typing into the agent (a nudge, brief or retry: `input_incoming`) lets the turn end, since that
+  text starts the next one.
+- **A stale observation never clears a newer cause** (C11): "working again" clears a limit or API
+  error only if the row still carries the very error that was observed.
+
+### 6.10 As fixed in R2 (part B): what agents may create, and how briefs travel
+
+The R2 security review (`reviews/R2-opus-security.md`) found that any job agent could start an
+unsupervised agent anywhere (R2-H1), and that briefs, agent-written ones included, were typed raw
+into terminals, the orchestrator's included (R2-M1).
+
+- **Delegation** (`internal/jobs/delegate.go`, `CreateForAgent`; the socket's `job_create` goes
+  through it, the browser's `POST /jobs` does not). A job agent's child runs inside the parent's
+  working directory or the root of the git repository (or worktree) that holds it, both compared
+  after resolving symlinks; it inherits the parent's engine, its model when it names none, and its
+  isolation unless it asks for a worktree. Anything wider (another directory, no directory, which
+  hands the work to the orchestrator, another engine, `isolate: false` while the parent is
+  isolated) is recorded `queued` with cause `approval` and becomes a **blocking question** to the
+  human, asked from the parent's pane and attached to the held job ("Job j_12 wants to start a job
+  in ~/x as codex: allow?", the reasons, and the brief as an indented code block). "Allow"
+  launches it and adds its directory to the remembered list; deny, expiry or cancellation cancels
+  it (not consent); either way the answer is typed back to the asking agent. The decision is
+  applied from the store, by the settle callback and again at start-up, so one that landed just
+  before a crash is not lost. The launcher, the tick and the orchestrator dispatch leave a held job
+  alone. The orchestrator may create jobs with no directory (it holds them itself) or in any
+  directory inside one the human has given a job before, and is asked for any other. Limits, each a
+  plain refusal: 3 levels of delegation below the human, 8 children per job ever, 16 live
+  agent-created jobs in all (`DelegationLimits`; not flags), plus 5 `job_create` calls per caller
+  at once then one a minute. Jobs carry `origin` (`''`, `agent`, `orchestrator`; migration
+  `0007_job_origin.sql`). Model names must match `^[A-Za-z0-9._:\[\]-]{1,64}$` everywhere
+  (R2-I7); roles and engines were already checked.
+- **Briefs are never typed** (`internal/jobs/briefs.go`). The brief goes to
+  `<state>/jobs/j_<n>/brief.md` (0600, in the 0700 job directory) and what is typed is one line:
+  `[crowsnest job j_<n>] Your brief for job j_<n> is in <file> (job_get returns it too). Read it
+  and begin.` (Codex: the file starts with the protocol; the orchestrator: the line also says to
+  pass `job_id`). That removes the multi-line and size problems at once. A brief another agent
+  wrote is framed in the file, in `job_get` and in the SessionStart re-injection as "written by
+  job j_P, an agent, not by the human", and every line of it that starts with a bracket has the
+  bracket turned into a parenthesis (`termtext.DisarmHeaders`), so it cannot hold a line that
+  reads like `[crowsnest answer …]`.
+- **Every text typed goes through `termtext.Block`** in `orch.Prompt`, the one door into a
+  terminal: line breaks stay; ESC sequences, other C0 and C1 controls, DEL, format and private-use
+  characters and invalid UTF-8 go. So a human's multi-line Chat prompt or job message survives,
+  and no caller can type an ESC (a bracketed-paste end) into a pane. `PromptRequest.ExpectAgent`
+  refuses to type into a pane that now holds a different agent (R2-I5); the brief, restart and
+  orchestrator-dispatch sends use it.
+
+Every place crowsnest types into a terminal, and how it is cleaned (all through `orch.Prompt`, so
+all through `termtext.Block`, unless noted):
+
+| Call site | Text | Sanitising beyond Block |
+|---|---|---|
+| `httpd/conversation.go` handlePrompt | the human's Chat prompt (with the voice header for talk) | none needed: the human's words |
+| `jobs/actions.go` Message | `[crowsnest message j_N] ` + the human's text | as above |
+| `jobs/launch.go` sendBrief | one line naming the brief file | the path through `termtext.Clean`; the brief itself is never typed |
+| `jobs/launch.go` DispatchOrchestrator | one line naming the brief file | as above; the role through `Clean` |
+| `jobs/launch.go` startInPane (restart) | fixed `[crowsnest restart]` text | fixed |
+| `jobs/actions.go` Nudge, NudgeIfDue; `recovery.go` retry | fixed nudge / "continue" text, `Decide`'s fixed reasons | fixed |
+| `questions/herdr.go` (the Deliverer) | the answer line | every field `Clean`; title and option labels `Quote` |
+| `orch/poker.go` send | the poke | every reason `Clean`ed and capped; agent titles and names `Quote` |
+| `orch/upkeep.go` | `/exit` (agent.prompt directly) and Esc / Ctrl+C keys | fixed |
+| `httpd/agents.go` keys, `jobs/actions.go` Cancel | `agent.send_keys` / `pane.send_keys` | allowlisted key names only (R1 I3) |
 
 ## 7. The orchestrator
 
@@ -518,6 +648,60 @@ Claude Code 2.1.332 by `mise run test:claude`):
   a dropped connection: `herdr.ErrNoResponse`); the note says delivery is uncertain and to check
   the terminal. Only a send that never reached herdr is an error (R1-C09).
 
+**7.7 As built in M8** (`internal/orch/poke.go`, `poker.go`, `backstop.go`, `internal/journal`,
+`cmd/crowsnest/pokes.go`, `internal/httpd/journal.go`; the Chat menu, `components/chat/PokeRow.tsx`,
+`components/journal/JournalPanel.tsx`):
+
+- **Pure precheck and gate.** `Precheck(PrecheckInput)` and `Gate(GateInput)` take everything they
+  read, the time included, so every trigger and refusal is a table row. The `Poker` observes
+  (`agent.list` every 2 s, plus at once when an event adds a reason), keeps the bookkeeping, and
+  types the poke with `Prompt` (the web app's send path: it re-checks dialog and draft and waits
+  for the turn to start).
+- **Triggers.** Another agent (not the orchestrator) settled into `done` (held 45 s) or `blocked`
+  (held 10 s), each `(pane, name, state_change_seq)` pushed once, and at most one poke carrying
+  agent reasons per 120 s. A question settled (answered, expired, cancelled) whose asker is not the
+  orchestrator's pane (notices excluded): fed from the hub's `question` event. A job reaching
+  `done`, `failed` or `cancelled`, or getting stuck (keyed by cause), unless the orchestrator holds
+  it: fed from the hub's `job` event. The timer: at each `--poke-interval` tick the standing list
+  (stuck jobs, jobs that need the human, blocked jobs, the open-question count) is read, and it is
+  a reason only when it changed since the last timer poke, so an unchanged picture costs nothing
+  (decision 34). "Poke now" (`POST /orchestrator/poke`) runs the same check, skips the 120 s limit
+  (not the holds), and journals a skip when nothing is due; an automatic check with nothing due is
+  not journalled.
+- **Gate.** Only an idle (herdr idle or done) orchestrator with an empty input box and no dialog
+  on screen is poked. Working: wait. Blocked or a start-up prompt: no poke; the Inbox already lists
+  the orchestrator's dialog as a needs-you card (that is the needs-you item 7.4 asks for). A draft:
+  wait, and after 2 hours of holding a due poke, one alert (journal and `--notify-url`). An
+  unreadable screen: wait. Due reasons that are held stay pending and go out with the next poke the
+  gate allows; a held poke is journalled once per refusal, not every check.
+- **Text.** `[crowsnest poke <RFC3339 UTC> talk=on|off]` (talk from `voice.Service.TalkOn`), then
+  one `- reason` line each. Every line goes through `internal/termtext.Clean` and is capped at 240
+  characters; titles and agent names written by agents go through `termtext.Quote`, so none can
+  forge a second line or a `[crowsnest …]` header.
+- **Delivery.** A send that provably typed nothing (`ErrNotTyped`, a dialog or draft that appeared)
+  keeps the reasons pending; a herdr refusal keeps them too; anything else (including
+  `started: false` and uncertain delivery) marks them delivered, because a duplicate poke costs a
+  turn. Bookkeeping survives restarts in one `kv` blob, `poke.state`: pushed agent marks, delivered
+  event keys (kept 7 days, at most 1000), the last agent push, the timer fingerprint.
+- **Backstop.** In the same loop: for each running, non-waiting job with a pane and its brief sent
+  (`jobs.Service.BackstopJobs`), an agent seen idle or done for 60 s whose stop no hook handled
+  (`last_stop_at`, stamped by every Stop hook, not older than the moment the agent was seen to
+  settle less 15 s of slack) and whose screen shows no draft or dialog gets `NudgeIfDue`. The same
+  agent is looked at again at most once a minute. A nudge is journalled as `backstop`.
+- **Journal.** `internal/journal` writes `journal` rows (never failing the caller) and publishes a
+  `journal` event; kinds `poke`, `skip`, `send` (Chat prompts and job messages from the web app),
+  `answer` (answers and cancels from the Inbox), `restart` (automatic and manual, with how it
+  ended; a restart budget running out is an `alert`), `alert` (every supervisor "tell Jeff" notice
+  and the draft alert), `backstop`. `GET /journal` pages by id, newest first.
+- **`--demo`** pokes only for "Poke now" (`ManualOnly`; the scripted fleet would otherwise poke the
+  scripted orchestrator every two minutes) and runs no backstop. `--no-orchestrator` keeps the
+  backstop and drops poke reasons (Poke now says the orchestrator is off).
+- **UI.** The Chat menu has "Poke now" (the result is a toast: "Poke sent (n reasons)" or "Poke
+  skipped: <reason>") and "Journal"; the Jobs view has a Journal button above the board. The
+  Journal is a Sheet with a dense table (when, kind chip, summary), a kind filter and "Load
+  older". A poke in a conversation is a one-line system row ("Poke · 2 reasons · 03:10") with the
+  reasons behind a disclosure, not a user bubble.
+
 ## 8. Needs-you: questions and dialogs
 
 Two sources feed one inbox.
@@ -586,12 +770,17 @@ comes in M12.
   re-polls within milliseconds), or asked with `wait=true` less than 10 s ago; `none` for a
   notice, a question the asker cancelled itself (the socket's DELETE), or one with no source
   pane; otherwise `type`. Only the asker's own polls count (by token), a poll its caller cut off
-  leaves no grace, and a poll answer is confirmed only when a poll hands it to the asker; one
-  nobody collects within 30 s is switched to `type` by the sweeper (R1b-C06). Waiter entries for
+  leaves no grace, and a poll answer is confirmed only when the asker's client acknowledges it
+  has read it (`POST /questions/{id}/collected`, which `Client.Get` sends after decoding a
+  settled answer; writing the response is not enough, R1b-C06); one nobody acknowledges within
+  30 s is switched to `type` by the sweeper. A lost acknowledgement can therefore mean the answer
+  is also typed: the same words twice rather than none. A response body cut off mid-read is a
+  transport failure the client retries. Waiter entries for
   missing or settled questions are dropped and idle ones pruned (R1b-C07). Waiter state is in
   memory, so after a crowsnest restart a waiting asker's uncollected answer is typed.
-- **Typing it back** (the Deliverer): one line, `[crowsnest answer q_7] <labels> (note: …); the
-  question was "<title>"`, or `expired with no answer (expiry is not consent); …`, or `cancelled by
+- **Typing it back** (the Deliverer): one line, `[crowsnest answer q_7] "<label>" (note: …); the
+  question was "<title>"` (chosen option labels quoted, full-width brackets included, since they
+  are the asker's words, R2-I1), or `expired with no answer (expiry is not consent); …`, or `cancelled by
   the human (not consent); …`. The outcome comes first and the asker's title last, quoted, with
   its double quotes made single and its square brackets made round, so a title can neither forge
   an outcome nor pass for a `[crowsnest …]` header (R1b N3). Every interpolated field goes through
@@ -696,7 +885,7 @@ browser reconnects, gets `hello`, and refetches.
 |---|---|
 | `GET /health` | Unauthenticated: `{status, version, update_available:false}` |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`) |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `say` events. On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
@@ -709,7 +898,8 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
 | `GET /inbox/summary` | `{open, blocking}`: the Inbox badge (added in M6) |
-| `GET /journal` | Pokes, sends, answers, restarts |
+| `POST /orchestrator/poke` | "Poke now" (M8) → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}` (7.7) |
+| `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated; `limit` 50 by default, at most 200 |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `POST /voice/talk` `{client_id, on}` → `{talk, heartbeat_seconds, max_recording_seconds}`; `POST /voice/read` `{question_id}` → `{text_id}` | Talk-mode heartbeat; a question made speakable (M11, 13.1). 404 when disabled |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
@@ -761,6 +951,19 @@ The client sends a resize first; the server starts the process on that first res
 - macOS detail found while building: a killed client with unread output on its PTY blocks in
   exit until that output drains (`ps` state `E`), so the TUI bridge keeps reading (and
   discarding) after Close until the PTY reports EIO.
+- Linux detail found by CI: a write to the PTY master that is blocked because the client stopped
+  reading is not woken when the client dies (macOS fails it with EIO), and `creack/pty` hands
+  back a blocking descriptor, which closing the file cannot wake either. So the TUI bridge
+  re-opens the master as a non-blocking, poller-owned file (a close-on-exec duplicate), never
+  holds a lock across a PTY write or resize, and closes the PTY once the client is reaped; the
+  close wakes the blocked write with an error. Resizes go through `SyscallConn`, since
+  `pty.Setsize` calls `Fd` and would make the descriptor blocking again.
+- herdr's first-run screen: a machine whose herdr TUI was never opened (a CI runner, a fresh
+  devbox volume) shows an onboarding screen over the whole TUI, and it takes every key, ctrl+b q
+  included, until its "continue" (Enter) and the settings page that follows (Esc) are
+  dismissed; herdr then writes `onboarding = false` to its config. In the devbox the first
+  browser TUI is where the user meets it. The pane bridge is not affected. The TUI integration
+  test dismisses it when it is up (found running the suite on Linux, 2026-11-26).
 
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
@@ -769,8 +972,10 @@ The client sends a resize first; the server starts the process on that first res
 - `jobs(…)`: the record in section 6.1. As built (migration `0004_jobs.sql`): `id` is an integer shown as `j_<id>`; besides 6.1's fields it keeps `work_dir`, `isolate`, `cause_detail`, `blocked_reason`, `waiting`, `last_tool`, `verified_json`, `not_verified_json`, `fail_reason`, `brief_sent`, `last_progress_at`, `nudge_streak`, `last_nudge_at`, `denials`, `restart_times`, `retry_at`, `retry_count`. Budgets (6.7) add their columns with M12
 - `job_events(id, job_id, at, kind, summary, detail_json)`: state change, progress, nudge, hook, restart, question, message: the job's timeline. Kinds as built: `created`, `launch`, `state`, `progress`, `nudge`, `hook`, `stuck`, `retry`, `restart`, `question`, `message`, `notify`, `done`, `fail`, `child`, `session`
 - `questions.job_id`, `questions.wait` (was the asker blocking), `questions.delivered_at` (answer typed back). As built (migration `0002_questions.sql`): `id` is an integer shown as `q_<id>`; `expires_at` is always set; delivery bookkeeping is `delivery` (`type`, `poll` or `none`, decided at settling), `delivery_claimed_at` (the write-ahead mark), `delivered_at` and `delivery_error` (8.4)
-- `journal(id, at, kind, summary, detail_json)`: poke, skip, send, answer, restart, alert
-- `kv(key, value)`: orchestrator session id, poke bookkeeping (per-agent last pushed state), settings
+- `journal(id, at, kind, summary, detail_json)`: poke, skip, send, answer, restart, alert, backstop (migration `0005_journal.sql`, which also adds `jobs.last_stop_at`, the Stop hook's stamp the backstop reads)
+- `jobs.origin` (migration `0007_job_origin.sql`, R2-H1): who created the job, `''` the human, `agent`, `orchestrator`; the migration also indexes `jobs(parent_id)` for the fan-out count
+- `jobs.lifecycle_op`, `lifecycle_owner`, `lifecycle_at`, `lifecycle_gen` (migration `0006_job_lifecycle.sql`): the lifecycle claim (6.9); the same migration indexes `jobs(agent_name, state)`, `jobs(pane_id, state)` and `questions(job_id, status)`
+- `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), settings
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
 Paths are XDG: config `~/.config/crowsnest`, data `~/.local/share/crowsnest`, state and logs `~/.local/state/crowsnest/<session>/`, agent socket in `$XDG_RUNTIME_DIR/crowsnest/` or the state dir.
@@ -875,7 +1080,9 @@ Enabled only when an ElevenLabs key is configured; the key stays on the server.
   MediaRecorder makes in Chrome (Opus in WebM) and Safari (AAC in MP4) is uploaded as is; nothing
   is transcoded. MP3 is what every browser's `<audio>` plays. The models are constants in
   `voice/client.go`.
-- **The key** lives only in `voice.Client` and goes only into that header. Every failure is
+- **The key** lives only in `voice.Client` and goes only into that header. The client never
+  follows a redirect (Go copies custom headers to the target; R2-L4), and the base URL must be
+  https or plain http to loopback. Every failure is
   reduced to `voice.APIError{Status}` before it leaves the client (the transport's error and the
   upstream body are dropped), and the HTTP layer maps the class: refused key `502`, upstream rate
   limit `503`, rejected input `422`, unreachable `502`, all with code `VOICE_UPSTREAM` and a
@@ -935,7 +1142,8 @@ internal/herdr/              Client interface, socket client, events, types; fak
 internal/fleet/              snapshot cache, dialog and draft detection, screen hash
 internal/jobs/               job service, launcher, supervisor (hooks, disposition check, recovery), roles/
 internal/agentcfg/           the --settings (hooks, allow rule) and --mcp-config files every Claude agent gets
-internal/orch/               lifecycle, send, poke precheck and gate
+internal/orch/               lifecycle, send, poke precheck and gate, poker, herdr-side backstop
+internal/journal/            journal entries (pokes, skips, sends, answers, restarts, alerts)
 internal/transcript/         locate, tail, normalise Claude JSONL
 internal/questions/          store, long-poll, expiry
 internal/term/               PTY bridge, pane-control bridge
@@ -961,7 +1169,7 @@ mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`
 | Web unit | Vitest + Testing Library for the composer, question cards (single, multi, note), dialog card, markdown/mermaid safety | `mise run test`, CI |
 | E2E hermetic | Playwright against `crowsnest --demo`: login and lockout, chat send and live update, inbox answer flows, fleet navigation, theme, 375 px and desktop projects, no horizontal scroll, basic axe checks | `mise run e2e`, CI |
 | E2E real herdr | Playwright against a real instance on a throwaway session, no Claude: terminal WebSocket types a command and sees its output, pane view, fleet reflects a created tab, cross-origin WebSocket and POST are rejected, unauthenticated WebSocket is rejected. Built in M5 (`web/e2e/real`, `playwright.real.config.ts`): each spec starts the built binary on a random port and stops it; the `--demo` Fleet with no fixtures; both terminals on `--demo`; on real herdr the Terminal view and the pane view each run a computed `echo` and find its output in the xterm buffer, a second browser takes a pane over, and screenshots go to `web/screenshots/terminal-*.png`. The real-herdr instance gets a throwaway `HOME` under `/tmp` (herdr's TUI would otherwise show the user's own machines; `/tmp` because a unix socket path is limited to 104 bytes on macOS) seeded with `onboarding = false` so herdr skips its first-run screen. The cross-origin and unauthenticated cases are covered by the httptest suite (`internal/httpd/term_test.go`) | `mise run e2e:real`, local |
-| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. M6 adds `ask_integration_test.go`: the orchestrator, started with crowsnest's `--mcp-config` and `--settings`, calls the `ask` MCP tool; the question appears through the browser API with the orchestrator's pane as its source and no permission dialog; it is answered through the API and the answer line arrives in the transcript. `CROWSNEST_E2E_PERMISSION_MODE` runs it under another mode. **The stop test** (M7, `internal/jobs/stop_integration_test.go`): a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent. Three haiku agents launched by the real launcher into worktrees of a scratch git repo under the package directory; the test plays the human for Claude's folder-trust prompt (trust is per folder, and crowsnest never answers it), which also exercises the "brief sent after the dialog" path | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
+| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. M8 adds `poke_integration_test.go`: a manual poke with one synthetic reason through `POST /orchestrator/poke` is delivered (outcome sent, turn started), appears in the transcript tagged `poke`, and is answered. M6 adds `ask_integration_test.go`: the orchestrator, started with crowsnest's `--mcp-config` and `--settings`, calls the `ask` MCP tool; the question appears through the browser API with the orchestrator's pane as its source and no permission dialog; it is answered through the API and the answer line arrives in the transcript. `CROWSNEST_E2E_PERMISSION_MODE` runs it under another mode. **The stop test** (M7, `internal/jobs/stop_integration_test.go`): a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent. Three haiku agents launched by the real launcher into worktrees of a scratch git repo under the package directory; the test plays the human for Claude's folder-trust prompt (trust is per folder, and crowsnest never answers it), which also exercises the "brief sent after the dialog" path | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
 
 Test-safety rules, enforced in the helpers rather than by convention: a test session name must
 match `^crowsnest-test-`; helpers scrub `HERDR_*` from the environment; teardown stops and deletes
@@ -987,7 +1195,7 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
   - As built (M10b):
     - `deploy/Dockerfile` has three stages. `web` (node, same version as `mise.toml`) runs `npm ci` and `vite build`; it also copies `internal/taglines/taglines.txt`, which the SPA imports raw. `build` (golang, same version) compiles with `CGO_ENABLED=0 -trimpath` and the `main.version/commit/buildDate` ldflags from build args `VERSION`, `COMMIT`, `BUILD_DATE`. Both run on `$BUILDPLATFORM` and cross-compile, so a multi-arch build runs only the runtime stage under QEMU (Go under QEMU on Apple silicon has crashed in the GC). `runtime` is `debian:trixie-slim` (pinned by codename rather than `stable-slim`, so a Debian release does not change the image under a rebuild).
     - Supply chain (R1b N8): the three base images are pinned by digest as well as tag; gh is pinned to a version, and the build fails unless its apt keyring holds exactly the two primary keys GitHub publishes; the web stage runs `npm ci --ignore-scripts`. First-start `mise install` of `node = "lts"` and `claude = "latest"` is deliberately unpinned (checked by aqua's checksums, current on every new volume); pinning is a line in the volume's `~/.config/mise/config.toml`.
-    - Secrets (R1b N1): every agent runs as `crow`, like tini and crowsnest, so any environment in the container is readable by them. The compose example therefore mounts the password as a secret file (`CROWSNEST_PASSWORD_FILE`), gives crowsnest its own `crowsnest.env` and each sidecar its own env file (a `TUNNEL_TOKEN` in crowsnest's environment would let a prompt-injected agent run its own connector for the public hostname and receive login traffic), and runs cloudflared in crowsnest's network namespace. The entrypoint drops `TUNNEL_TOKEN` and `TS_AUTHKEY` if they reach it anyway, keeps crowsnest's secrets out of `mise install`, and notes a password given as a variable; crowsnest re-executes itself without its secrets (section 4.9). Not fixable here: tini (PID 1) keeps Docker's environment, and `CROWSNEST_NOTIFY_URL` and `ELEVENLABS_API_KEY` have no file form yet, so set as variables they are readable by agents; files of crowsnest's are readable by the same uid too. The real boundary would be running crowsnest as a different uid from the agents.
+    - Secrets (R1b N1): every agent runs as `crow`, like tini and crowsnest, so any environment in the container is readable by them. The compose example therefore mounts the password as a secret file (`CROWSNEST_PASSWORD_FILE`), gives crowsnest its own `crowsnest.env` and each sidecar its own env file (a `TUNNEL_TOKEN` in crowsnest's environment would let a prompt-injected agent run its own connector for the public hostname and receive login traffic), and runs cloudflared in crowsnest's network namespace. The entrypoint drops `TUNNEL_TOKEN` and `TS_AUTHKEY` if they reach it anyway, keeps crowsnest's secrets out of `mise install`, and notes a password given as a variable; crowsnest re-executes itself without its secrets (section 4.9). Not fixable here: tini (PID 1) keeps Docker's environment, so anything set as a variable is readable by agents; that is why the notify URL and the ElevenLabs key now have file forms too (`CROWSNEST_NOTIFY_URL_FILE`, `ELEVENLABS_API_KEY_FILE`, R2 part B). Files of crowsnest's, the mounted password included, are readable by the same uid. The real boundary would be running crowsnest as a different uid from the agents.
     - herdr is the GitHub release binary for a pinned `HERDR_VERSION`, checked against per-architecture `HERDR_SHA256_*` build args (the same digests `https://herdr.dev/latest.json` and the GitHub release publish). herdr's `install.sh` was not used: it always installs whatever `latest.json` names. mise is its release binary, pinned the same way against `SHASUMS256.txt`. gh comes from GitHub's own apt repository (Debian's trails far behind).
     - Environment: `HOME=/home/crow`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR` under it, `PATH` with mise's shims and `~/.local/bin` first, `LANG`/`LC_ALL=en_US.UTF-8`, `SHELL=/bin/bash`, `DISABLE_AUTOUPDATER=1` (Claude Code upgrades through `mise upgrade`; its own updater would install a second copy the shims shadow), `CROWSNEST_PORT=2769`. `/etc/profile.d/crowsnest-devbox.sh` puts the shims back for login shells, whose `/etc/profile` resets `PATH`.
     - `deploy/entrypoint.sh` (POSIX sh, under tini, as crow): refuses with exit 64 and a message naming the variables when there are no credentials, when `CROWSNEST_PASSWORD_FILE` is unreadable, or when `CROWSNEST_NO_AUTH=true` lacks `CROWSNEST_I_KNOW_THIS_IS_OPEN=true`; refuses an unwritable `$HOME` (a bind mount not owned by uid 1000). On first start it seeds `~/.config/mise/config.toml` (`node = "lts"`, `claude = "latest"`: mise's registry maps `claude` to `aqua:anthropics/claude-code`, the native binary with checksums, preferred over `npm:@anthropic-ai/claude-code`) and `~/.config/herdr/config.toml` (`onboarding = false`, so the browser's Terminal view does not open on herdr's first-run screen); it never overwrites either. Then `mise install` runs detached (double fork, so tini reaps it) and the entrypoint waits up to `CROWSNEST_MISE_WAIT` seconds (default 300): long enough that Claude Code is usually on `PATH` before crowsnest starts, capped so a slow network never keeps the UI down. A failure prints the log's tail and carries on. Last, `exec crowsnest serve --bind 0.0.0.0 "$@"`.
@@ -1078,6 +1286,35 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 33. **Serve re-executes itself to shed its secrets** (R1b H1). `os.Unsetenv` cannot change the
     environment the kernel reports; a re-exec with the secrets on a pipe can, at the cost of one
     exec at start.
+34. **The timer pokes on a change, not on a clock** (M8). A timer that pokes whenever anything is
+    open spends a turn every interval to hear `noop`; the events already cover what happened, so
+    the timer only reports that the standing picture (stuck, needs-you, blocked jobs, open
+    questions) is different from the last time it spoke.
+35. **Held reasons wait; delivered reasons are never resent** (M8). A poke the gate refuses keeps
+    its reasons for the next allowed poke, so nothing is lost to timing; a poke that may have been
+    typed counts as delivered, the same at-most-once rule as answers (decision 25).
+36. **The backstop shares the poker's loop and the jobs service's budget** (M8). Both watch agents
+    settle and read the same screens; the nudge rule stays in one place (`Decide`), reached through
+    an interface because `internal/jobs` imports `internal/orch`.
+37. **A step that acts outside crowsnest claims the job first** (R2, 6.9). Holding the jobs lock
+    across a herdr call would stall every hook (a start takes up to a minute, and a hook gives up
+    after 5 s), so the lock is held only to claim, to check the claim, and to commit. The claim is
+    persisted, so a crash leaves a record of what was in flight, and settled by what it was.
+38. **A brief whose typing is uncertain is not typed again** (R2). Typing it twice can double the
+    work; not typing it at all is covered by the SessionStart re-injection and the nudges. Same
+    rule as answers (8.4).
+39. **Only positive evidence of absence is a death** (R2-C07). A restart revokes the old start
+    token and spends budget; doing either on a lookup timeout harms a live agent.
+40. **An agent's authority is its own directory; anything wider asks the human** (R2-H1). Agents
+    are pre-approved to call `job_create`, so the tool cannot be a permission prompt; crowsnest is
+    the gate instead. A blocking question, not a refusal, because delegating elsewhere is
+    sometimes right, and the human is the one who knows.
+41. **A brief is a file, never keystrokes** (R2-M1). Typing many lines another agent wrote into a
+    terminal makes the terminal the parser; one clean line naming a file makes the agent's Read
+    tool the parser, and the size limit goes away.
+42. **Forwarding headers are believed only from a proxy the operator names** (R2-L2). Trusting
+    them always lets anyone pick their own rate-limit bucket; never trusting them puts every
+    tunnelled client in one bucket. `--trusted-proxy` is the operator saying which is which.
 
 ## 18. Milestones
 
@@ -1125,9 +1362,16 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - The supervisor depends on Claude Code hook behaviour (Stop, SessionStart, StopFailure, Notification) as documented and probed on 2.1.332. Stop, SessionStart and PostToolUse are exercised by the stop test; StopFailure, Notification, PermissionDenied and SessionEnd follow the hooks reference and are covered by unit tests only.
 - A job agent in a folder Claude has not been told to trust stops at the trust prompt; the job shows `needs_you` and waits for someone to answer it in the terminal. A new worktree is a new folder.
 - The orchestrator holds one running job at a time; further jobs without a directory wait queued.
+- After a crash in the middle of typing a brief, the brief counts as sent and is not typed again (6.9). If it did not arrive, a Claude agent still has it from the SessionStart hook; an agent without hooks (Codex) is only nudged, and reads it with `crowsnest job get`.
+- A launch interrupted by a crash while herdr was creating the worktree can leave that worktree behind; the relaunch makes a new one (or fails on the branch name and shows `needs_you`/launch).
+- A restart mints a new start token, which revokes the agent's previous one. It now happens only once the old agent is confirmed gone (R2-C07); replacing tokens atomically per pane is R2-C15, in `internal/agentid`.
 - Codex jobs are launched but have no hooks: they are covered by the herdr-side backstop (M8 calls `NudgeIfDue`), not the Stop hook.
+- Pokes (M8): the agent-settled trigger is herdr's `done`/`blocked`; an agent that goes `idle` without passing through `done` is not reported. The timer reports a change in the standing list, not elapsed time, so a stuck job that stays stuck is pushed once (at its event) and then only when the list changes. Scheduled tasks (`tasks/*.md`) are not built; the precheck takes them as another reason source. A poke whose delivery was uncertain is not resent.
+- The backstop's "stop handled by a hook" test is time-based (a Stop hook stamp within 15 s before the agent was seen to settle). An agent whose hook works on one turn and fails on the very next within that window would miss one backstop nudge; the next idle minute catches it.
 - Answers are typed back only to the pane the question came from, as its token says. An agent restarted in another pane, or a caller without a token (a pane crowsnest did not create, a script), gets the answer only through the Inbox, `--wait`, `get_question` or `job_get`. A held delivery (dialog or draft) waits up to a week.
-- **Agent identity is per uid, not per process** (R1b N2): a process of the same user that reads another agent's environment or 0600 token file can act as that agent on the socket. The token stops the trivial forgery (setting an environment variable), not a determined same-user attacker. Questions and jobs can still be read (`GET`) by any caller.
+- **Agent identity is per uid, not per process** (R1b N2, R2-M2): every agent in a session runs as the same uid, so any agent can read another's environment or its 0600 token file under the state directory with an ordinary file read, and then act as it on the socket (finish or fail its job, forge its hooks and so silence its supervision, ask or `say` as it, the orchestrator included). The token stops accidents and forged environment variables, not a hostile same-uid process; a separate uid for crowsnest would (4.6). Questions and jobs can still be read (`GET`) by any caller (R2-I3), and role overrides in `~/.config/crowsnest/roles/` are writable by every agent and join every future job's system prompt (R2-I6).
+- **Delegation limits are constants** (6.10): depth 3, 8 children per job, 16 live agent-created jobs, not flags. A held job the human cancels from its card leaves its approval question open in the Inbox (answering it then does nothing).
+- **Some typing sites do not check the agent's name yet** (R2-I5): the brief, restart and dispatch sends do; nudges, "continue" retries and job messages still target the pane id alone.
 - The long-poll's waiter state is in memory: after a crowsnest restart, an asker blocked on `ask --wait` gets its answer from its next poll and also typed into its pane.
 - One controller per pane: two browsers on the same pane view take turns (the one that lost the pane says so and offers Reconnect).
 - The Terminal view is herdr's own TUI, which shows every machine the user's herdr config names, remote ones included; anyone who can open it reaches those machines as well (M5). The pane view is limited to the session's own panes.

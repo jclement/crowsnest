@@ -79,7 +79,7 @@ func (s *Service) HandleHook(ctx context.Context, event, jobID, callerPane strin
 	case HookSessionStart:
 		return s.hookSessionStart(ctx, id, input)
 	case HookPostToolUse:
-		_, err := s.RecordToolUse(ctx, id, toolSummary(input.ToolName, input.ToolInput))
+		_, err := s.RecordToolUse(ctx, id, input.ToolName, input.ToolInput)
 		return HookReply{}, err
 	case HookNotification, HookStopFailure, HookPermissionDenied, HookSessionEnd:
 		_, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
@@ -95,8 +95,8 @@ func (s *Service) HandleHook(ctx context.Context, event, jobID, callerPane strin
 	return HookReply{}, invalid("unknown hook event %q", event)
 }
 
-// resolveHookJob finds the job a hook belongs to: the given id, else the running job held in
-// the calling pane.
+// resolveHookJob finds the job a hook belongs to: the given id, else the live job held in the
+// calling pane.
 func (s *Service) resolveHookJob(ctx context.Context, jobID, callerPane string) string {
 	if jobID != "" {
 		if _, err := ParseID(jobID); err == nil {
@@ -110,25 +110,20 @@ func (s *Service) resolveHookJob(ctx context.Context, jobID, callerPane string) 
 	return s.jobInPane(ctx, callerPane)
 }
 
-// jobInPane returns the newest live job whose agent runs in paneID, preferring a running one.
+// jobInPane returns the live job whose agent runs in paneID, preferring a running one, else the
+// newest (a job just reserved for the orchestrator is queued with its pane set while its brief is
+// typed, R2-C05). It asks the store by pane, not a page of the board (R2-C16).
 func (s *Service) jobInPane(ctx context.Context, paneID string) string {
-	records, err := s.opts.Store.ListJobs(ctx, []string{string(StateRunning), string(StateNeedsYou), string(StateBlocked)}, listLimit)
-	if err != nil {
+	records, err := s.opts.Store.ListJobsByPane(ctx, paneID, []string{string(StateRunning), string(StateNeedsYou), string(StateBlocked), string(StateQueued)})
+	if err != nil || len(records) == 0 {
 		return ""
 	}
-	fallback := ""
 	for _, record := range records {
-		if record.PaneID != paneID {
-			continue
-		}
 		if State(record.State) == StateRunning {
 			return FormatID(record.ID)
 		}
-		if fallback == "" {
-			fallback = FormatID(record.ID)
-		}
 	}
-	return fallback
+	return FormatID(records[0].ID)
 }
 
 // touchLocked records activity and adopts a changed session id.
@@ -148,17 +143,32 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 	var reply HookReply
 	_, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		s.touchLocked(r, c, input)
-		open, answeredAt, err := s.questionState(ctx, r.ID)
-		if err != nil {
-			return err
+		job := s.toJob(*r, c.questions.Open)
+		decision := Decide(&job, c.questions.Open, StopInput{SessionID: input.SessionID, StopHookActive: input.StopHookActive}, s.historyLocked(*r, c), s.opts.Now())
+		// The stop is handled here: the herdr-side backstop leaves a stop whose hook ran alone, so
+		// it is never nudged twice (internal/orch/backstop.go). Except when the turn was let end
+		// only because an answer is on its way: that grace runs out, and the backstop must look
+		// again then (R2-C04).
+		if decision.Rule != RuleAnswerIncoming {
+			r.LastStopAt = s.opts.Now()
 		}
-		job := s.toJob(*r, open)
-		history := NudgeHistory{Streak: r.NudgeStreak, LastNudgeAt: r.LastNudgeAt, LastProgressAt: r.LastProgressAt, AnswerSettledAt: answeredAt}
-		decision := Decide(&job, open, StopInput{SessionID: input.SessionID, StopHookActive: input.StopHookActive}, history, s.opts.Now())
 		reply = s.applyDecisionLocked(r, c, decision, input)
 		return nil
 	})
 	return reply, err
+}
+
+// historyLocked is the nudge history Decide reads, from the row and its question summary.
+func (s *Service) historyLocked(r store.JobRecord, c *change) NudgeHistory {
+	typing := false
+	if s.claimLive(r) {
+		switch r.LifecycleOp {
+		case opBrief, opDispatch, opRetry, opNudge:
+			typing = true
+		}
+	}
+	return NudgeHistory{Streak: r.NudgeStreak, LastNudgeAt: r.LastNudgeAt, LastProgressAt: r.LastProgressAt,
+		AnswerIncomingAt: c.questions.AnswerIncomingAt, InputIncoming: typing}
 }
 
 // applyDecisionLocked records a Stop decision and returns the hook's output.
@@ -182,25 +192,6 @@ func (s *Service) applyDecisionLocked(r *store.JobRecord, c *change, decision De
 		map[string]any{"rule": decision.Rule, "streak": decision.Streak, "stop_hook_active": input.StopHookActive, "last_message": oneLine(input.LastAssistant, 300)})
 	body, _ := json.Marshal(map[string]string{"decision": "block", "reason": decision.Reason})
 	return HookReply{Stdout: string(body)}
-}
-
-// questionState returns the job's open question count and when one of its questions last
-// settled with the outcome typed back into the agent.
-func (s *Service) questionState(ctx context.Context, id int64) (int, time.Time, error) {
-	records, err := s.opts.Store.ListQuestionsByJob(ctx, FormatID(id))
-	if err != nil {
-		return 0, time.Time{}, err
-	}
-	open, settled := 0, time.Time{}
-	for _, q := range records {
-		switch {
-		case q.Status == "open":
-			open++
-		case q.Delivery == "type" && q.SettledAt.After(settled):
-			settled = q.SettledAt
-		}
-	}
-	return open, settled, nil
 }
 
 // ---- SessionStart --------------------------------------------------------------------------
@@ -262,7 +253,9 @@ func (s *Service) notificationLocked(r *store.JobRecord, c *change, input HookIn
 		if State(r.State) != StateNeedsYou {
 			r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseDialog), oneLine(input.Message, 300)
 			c.event(EventStuck, "Needs you: "+oneLine(input.Message, 160), map[string]any{"notification": input.NotificationType})
-			c.notify = fmt.Sprintf("crowsnest: job %s needs you: %s", FormatID(r.ID), oneLine(input.Message, 120))
+			// A fixed sentence: the hook's message is the agent's to write (any agent can post a
+			// hook), so it stays on the card and never reaches the phone (R2-L3).
+			c.notify = fmt.Sprintf("crowsnest: job %s is waiting at a dialog in its terminal", FormatID(r.ID))
 		}
 	default:
 		c.event(EventHook, "Notification: "+oneLine(firstNonEmpty(input.Message, input.NotificationType), 160), map[string]any{"type": input.NotificationType})
@@ -293,7 +286,7 @@ func (s *Service) stopFailureLocked(r *store.JobRecord, c *change, input HookInp
 			r.RetryAt = now.Add(serverRetries[r.RetryCount])
 		} else {
 			r.RetryAt = zeroTime
-			c.notify = fmt.Sprintf("crowsnest: job %s keeps hitting API errors (%s); retries stopped", FormatID(r.ID), input.Error)
+			c.notify = fmt.Sprintf("crowsnest: job %s keeps hitting API errors; retries stopped", FormatID(r.ID)) // the error text is the hook's (R2-L3)
 		}
 	}
 	detail := map[string]any{"error": input.Error}

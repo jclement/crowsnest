@@ -50,10 +50,13 @@ const (
 	optAllowedHost         = "allowed-host"
 	optTLSCert             = "tls-cert"
 	optTLSKey              = "tls-key"
-	optElevenLabsAPIKey    = "elevenlabs-api-key" //nolint:gosec // a flag name, not a credential
+	optElevenLabsAPIKey    = "elevenlabs-api-key"      //nolint:gosec // a flag name, not a credential
+	optElevenLabsKeyFile   = "elevenlabs-api-key-file" //nolint:gosec // a flag name, not a credential
 	optElevenLabsVoice     = "elevenlabs-voice"
 	optElevenLabsURL       = "elevenlabs-url"
 	optNotifyURL           = "notify-url"
+	optNotifyURLFile       = "notify-url-file"
+	optTrustedProxy        = "trusted-proxy"
 	optDemo                = "demo"
 	optIKnowThisIsOpen     = "i-know-this-is-open"
 	optAllowDefaultSession = "allow-default-session"
@@ -81,12 +84,15 @@ var options = []option{
 	{name: optPokeInterval, env: []string{"CROWSNEST_POKE_INTERVAL"}, kind: kindDuration, def: "15m", usage: "timer poke interval; 0 disables timer pokes"},
 	{name: optNoOrchestrator, env: []string{"CROWSNEST_NO_ORCHESTRATOR"}, kind: kindBool, def: "false", usage: "serve the UI over the session without starting Claude"},
 	{name: optAllowedHost, env: []string{"CROWSNEST_ALLOWED_HOSTS"}, kind: kindList, usage: "extra Host/Origin name, e.g. a reverse proxy or MagicDNS name (repeatable)"},
+	{name: optTrustedProxy, env: []string{"CROWSNEST_TRUSTED_PROXY"}, kind: kindList, usage: "loopback, or an IP or CIDR: a reverse proxy whose client-IP header (CF-Connecting-IP, X-Forwarded-For) is believed (repeatable)"},
 	{name: optTLSCert, env: []string{"CROWSNEST_TLS_CERT"}, usage: "PEM certificate: serve HTTPS directly"},
 	{name: optTLSKey, env: []string{"CROWSNEST_TLS_KEY"}, usage: "PEM key for --tls-cert"},
-	{name: optElevenLabsAPIKey, env: []string{"ELEVENLABS_API_KEY"}, usage: "ElevenLabs API key: enables talk mode (prefer the env var)"},
+	{name: optElevenLabsAPIKey, env: []string{"ELEVENLABS_API_KEY"}, usage: "ElevenLabs API key: enables talk mode (prefer the env var or --elevenlabs-api-key-file)"},
+	{name: optElevenLabsKeyFile, env: []string{"ELEVENLABS_API_KEY_FILE"}, usage: "file holding the ElevenLabs API key (first line)"},
 	{name: optElevenLabsVoice, env: []string{"CROWSNEST_ELEVENLABS_VOICE"}, def: DefaultElevenLabsVoice, usage: "ElevenLabs voice id for spoken replies"},
-	{name: optElevenLabsURL, env: []string{"CROWSNEST_ELEVENLABS_URL"}, def: DefaultElevenLabsURL, usage: "ElevenLabs API base URL"},
+	{name: optElevenLabsURL, env: []string{"CROWSNEST_ELEVENLABS_URL"}, def: DefaultElevenLabsURL, usage: "ElevenLabs API base URL (https, or http only on loopback)"},
 	{name: optNotifyURL, env: []string{"CROWSNEST_NOTIFY_URL"}, usage: "POST a one-line notice here when something needs you (ntfy-style)"},
+	{name: optNotifyURLFile, env: []string{"CROWSNEST_NOTIFY_URL_FILE"}, usage: "file holding the notify URL (first line)"},
 	{name: optDemo, env: []string{"CROWSNEST_DEMO"}, kind: kindBool, def: "false", usage: "in-memory fake herdr and scripted orchestrator"},
 	{name: optIKnowThisIsOpen, env: []string{"CROWSNEST_I_KNOW_THIS_IS_OPEN"}, kind: kindBool, def: "false", usage: "allow --no-auth on a bind that is not loopback or tailnet"},
 	{name: optAllowDefaultSession, env: []string{"CROWSNEST_ALLOW_DEFAULT_SESSION"}, kind: kindBool, def: "false", usage: "allow --session default (your main herdr session)"},

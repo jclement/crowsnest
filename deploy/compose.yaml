@@ -41,10 +41,13 @@ services:
   # ---- Optional: a Cloudflare tunnel instead of a published port -----------------------------
   # Remove `ports:` above, put TUNNEL_TOKEN=... in deploy/cloudflared.env (never in
   # crowsnest.env), point the tunnel's public hostname at http://localhost:2769, and tell
-  # crowsnest that hostname is allowed:
+  # crowsnest that hostname is allowed and that the tunnel on loopback is a trusted proxy:
   #   CROWSNEST_ALLOWED_HOSTS=crowsnest.example.com
-  # The tunnel shares crowsnest's network namespace, so it reaches crowsnest on loopback, which
-  # the per-peer connection cap leaves alone (all public traffic arrives through this one peer).
+  #   CROWSNEST_TRUSTED_PROXY=loopback
+  # The tunnel shares crowsnest's network namespace, so every internet client reaches crowsnest
+  # from 127.0.0.1. Without CROWSNEST_TRUSTED_PROXY they would share one login rate-limit bucket
+  # (five bad passwords a minute from anyone would lock you out) and escape the per-client cap;
+  # with it, crowsnest keys both on the CF-Connecting-IP cloudflared passes on (R2-L2).
   # Put Cloudflare Access in front as well; the crowsnest login should not be the only gate.
   #
   # cloudflared:
@@ -60,7 +63,8 @@ services:
   # loopback and the phone gets HTTPS (a secure context, which the microphone and the key bar's
   # paste need). Remove `ports:` above and add to the crowsnest service:
   #   network_mode: service:tailscale
-  # set CROWSNEST_ALLOWED_HOSTS=crowsnest.<your-tailnet>.ts.net in crowsnest.env, and put
+  # set CROWSNEST_ALLOWED_HOSTS=crowsnest.<your-tailnet>.ts.net and CROWSNEST_TRUSTED_PROXY=loopback
+  # in crowsnest.env (tailscale serve names the client in X-Forwarded-For), and put
   # TS_AUTHKEY=... in deploy/tailscale.env (never in crowsnest.env).
   #
   # tailscale:

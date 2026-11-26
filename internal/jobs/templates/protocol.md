@@ -19,6 +19,10 @@ the job's state declared.
 - `fail(reason)`: the job cannot be finished, and why.
 - `job_get()`: your job, its brief and your questions with their answers. Read it after a
   restart or when you lose track.
+- `job_create(brief, role, dir)`: delegate part of the work as a child job. Inside your own
+  directory, with your engine, it starts at once; anything wider (another directory, no
+  directory, another engine, `isolate: false` when you are isolated) waits for the human's
+  approval, and the answer reaches you as a message.
 {{else}}- `crowsnest job update "what you are doing now"`: call it when you start a new step, at least
   every few minutes. `--state blocked --reason "…"` when you are waiting on something other than
   the human; `--state running` when it clears. `--waiting` declares that nothing is left that

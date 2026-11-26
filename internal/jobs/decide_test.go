@@ -58,17 +58,24 @@ func TestDecide(t *testing.T) {
 
 		// An answer typed back after the agent's last progress starts the next turn.
 		{name: "answer just typed back", job: running(nil),
-			history: NudgeHistory{LastProgressAt: earlier, AnswerSettledAt: later}, allow: true, rule: RuleAnswerIncoming},
+			history: NudgeHistory{LastProgressAt: earlier, AnswerIncomingAt: later}, allow: true, rule: RuleAnswerIncoming},
+		{name: "answer in the same second as the last progress", job: running(nil),
+			history: NudgeHistory{LastProgressAt: later, AnswerIncomingAt: later}, allow: true, rule: RuleAnswerIncoming},
 		{name: "answer already acted on", job: running(nil),
-			history: NudgeHistory{LastProgressAt: later, AnswerSettledAt: earlier}, rule: RuleNudge, streak: 1},
+			history: NudgeHistory{LastProgressAt: later, AnswerIncomingAt: earlier}, rule: RuleNudge, streak: 1},
 		{name: "answer too long ago", job: running(nil),
-			history: NudgeHistory{LastProgressAt: now.Add(-time.Hour), AnswerSettledAt: now.Add(-10 * time.Minute)}, rule: RuleNudge, streak: 1},
+			history: NudgeHistory{LastProgressAt: now.Add(-time.Hour), AnswerIncomingAt: now.Add(-10 * time.Minute)}, rule: RuleNudge, streak: 1},
 
 		// The rows of DESIGN 6.4, as the supervisor leaves the job when a Stop arrives.
 		{name: "6.4 dialog: needs_you", job: running(func(j *Job) { j.State, j.Cause = StateNeedsYou, CauseDialog }), allow: true, rule: RuleDeclared},
 		{name: "6.4 permissions: still running, nudged", job: running(func(j *Job) { j.Stuck, j.Cause = true, CausePermissions }), rule: RuleNudge, streak: 1},
-		{name: "6.4 limit retried with continue, then stops: nudged", job: running(func(j *Job) { j.Stuck, j.Cause = true, CauseLimit }), rule: RuleNudge, streak: 1},
-		{name: "6.4 server error retried, then stops: nudged", job: running(func(j *Job) { j.Stuck, j.Cause = true, CauseServerError }), rule: RuleNudge, streak: 1},
+		// R2-C09: a job still on its retry schedule (or restarting) is that recovery's; a nudge
+		// would bypass the back-off. Work after a retry clears the cause, and then the usual rule
+		// applies again.
+		{name: "6.4 limit on its retry schedule: left to the retries", job: running(func(j *Job) { j.Stuck, j.Cause = true, CauseLimit }), allow: true, rule: RuleRecovering},
+		{name: "6.4 server error on its retry schedule: left to the retries", job: running(func(j *Job) { j.Stuck, j.Cause = true, CauseServerError }), allow: true, rule: RuleRecovering},
+		{name: "6.4 agent being restarted: left to the restart", job: running(func(j *Job) { j.Stuck, j.Cause = true, CauseExited }), allow: true, rule: RuleRecovering},
+		{name: "crowsnest typing into the agent: the text starts the next turn", job: running(nil), history: NudgeHistory{InputIncoming: true}, allow: true, rule: RuleInputIncoming},
 		{name: "6.4 auth or billing: needs_you", job: running(func(j *Job) { j.State, j.Cause = StateNeedsYou, CauseAuth }), allow: true, rule: RuleDeclared},
 		{name: "6.4 after compaction: same rule", job: running(nil), rule: RuleNudge, streak: 1},
 		{name: "6.4 restarted after exit: same rule", job: running(func(j *Job) { j.Cause = CauseExited }), rule: RuleNudge, streak: 1},

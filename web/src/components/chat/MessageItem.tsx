@@ -1,6 +1,7 @@
 // MessageItem: one message of a conversation. Assistant replies render as Markdown (the one safe
 // renderer, DESIGN.md 4.8); user messages are plain text in a bubble, with a small label when
-// crowsnest typed them (poke, voice, answer) or they are a slash command; tool calls are cards;
+// crowsnest typed them (voice, answer) or they are a slash command; a poke is a compact system
+// row (PokeRow), not a bubble; tool calls are cards;
 // thinking is a collapsed block (and hidden altogether unless asked for); the pane-text fallback
 // is preformatted. A reply's leading `SAY:` line (talk mode) becomes a small spoken caption.
 import { Brain, ChevronRight, Volume2 } from "lucide-react";
@@ -10,6 +11,7 @@ import type { Message, MessageTag } from "../../lib/conversation";
 import { splitSay } from "../../lib/voice/say";
 import { Markdown } from "../Markdown";
 import { Chip, type ChipTone } from "../ui/Chip";
+import { PokeRow } from "./PokeRow";
 import { ToolCard } from "./ToolCard";
 
 const tagLabels: Record<MessageTag, { label: string; tone: ChipTone }> = {
@@ -22,7 +24,7 @@ const tagLabels: Record<MessageTag, { label: string; tone: ChipTone }> = {
 export function MessageItem({ message }: { message: Message }) {
   switch (message.kind) {
     case "user":
-      return <UserMessage message={message} />;
+      return message.tag === "poke" ? <PokeRow text={message.text ?? ""} /> : <UserMessage message={message} />;
     case "assistant":
       return <AssistantMessage text={message.text ?? ""} />;
     case "tool":
@@ -62,14 +64,13 @@ function AssistantMessage({ text }: { text: string }) {
 
 function UserMessage({ message }: { message: Message }) {
   const tag = message.tag ? tagLabels[message.tag] : undefined;
-  const automatic = message.tag === "poke";
   return (
     <div className="flex min-w-0 flex-col items-end gap-1">
       {tag && <Chip tone={tag.tone}>{tag.label}</Chip>}
       <div
         className={cn(
           "max-w-[92%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words md:max-w-[80%]",
-          automatic ? "border border-border bg-surface-raised text-xs text-muted" : "bg-selected text-heading",
+          "bg-selected text-heading",
           message.tag === "command" && "font-mono text-xs",
         )}
       >

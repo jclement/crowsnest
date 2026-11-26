@@ -94,6 +94,44 @@ func waitForText(t *testing.T, bridge Bridge, seen *bytes.Buffer, want string, t
 	}
 }
 
+// dismissOnboarding clears herdr's first-run screen if it is up. A machine whose herdr TUI was
+// never opened (a CI runner, a fresh container) shows it over everything, and it swallows
+// ctrl+b q. Enter takes its "continue", which opens settings at the integrations page, and Esc
+// closes that. herdr then records `onboarding = false` in its own config, as any first use of
+// its TUI would; on a machine already past it this does nothing.
+func dismissOnboarding(t *testing.T, bridge Bridge, seen *bytes.Buffer) {
+	t.Helper()
+	readUntilQuiet(t, bridge, seen, 500*time.Millisecond, 5*time.Second)
+	if !strings.Contains(fleet.StripANSI(seen.String()), "terminal workspace manager") {
+		return
+	}
+	t.Log("herdr is showing its first-run screen; continuing past it")
+	seen.Reset()
+	_, _ = bridge.Write([]byte("\r"))
+	waitForText(t, bridge, seen, "esc close", 10*time.Second)
+	_, _ = bridge.Write([]byte{0x1b})
+	readUntilQuiet(t, bridge, seen, 500*time.Millisecond, 5*time.Second)
+}
+
+// readUntilQuiet reads output into seen until none has arrived for quiet, or for at most limit.
+func readUntilQuiet(t *testing.T, bridge Bridge, seen *bytes.Buffer, quiet, limit time.Duration) {
+	t.Helper()
+	deadline := time.After(limit)
+	for {
+		select {
+		case chunk, ok := <-bridge.Output():
+			if !ok {
+				t.Fatalf("output ended (%s) while waiting for the screen to settle", bridge.Reason())
+			}
+			seen.Write(chunk)
+		case <-time.After(quiet):
+			return
+		case <-deadline:
+			return
+		}
+	}
+}
+
 func waitForEnd(t *testing.T, bridge Bridge, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.After(timeout)
@@ -171,6 +209,7 @@ func TestIntegrationTUIBridgeLeavesTheSessionRunning(t *testing.T) {
 	t.Cleanup(func() { _ = again.Close() })
 	seen.Reset()
 	waitForText(t, again, &seen, "itest", 10*time.Second)
+	dismissOnboarding(t, again, &seen)
 	_, _ = again.Write([]byte{0x02})
 	time.Sleep(200 * time.Millisecond)
 	_, _ = again.Write([]byte("q"))

@@ -119,6 +119,29 @@ func (s *Store) DeleteKV(ctx context.Context, key string) error {
 	return nil
 }
 
+// ReplaceKV deletes the keys in remove and sets key to value, in one transaction: either all of
+// it happens or none of it does (the agent token registry replaces a pane's tokens this way, so
+// a crash cannot leave the old and the new both valid, R2-C15).
+func (s *Store) ReplaceKV(ctx context.Context, remove []string, key, value string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("replacing kv %q: %w", key, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, old := range remove {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM kv WHERE key = ?`, old); err != nil {
+			return fmt.Errorf("replacing kv %q: deleting %q: %w", key, old, err)
+		}
+	}
+	if key != "" {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value); err != nil {
+			return fmt.Errorf("replacing kv %q: %w", key, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // ListKV returns every key starting with prefix, with its value. It is for small families of
 // keys (the agent tokens, keyed agent_token:<hash>), not for scanning the table.
 func (s *Store) ListKV(ctx context.Context, prefix string) (map[string]string, error) {

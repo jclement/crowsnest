@@ -21,6 +21,7 @@ describe("the board", () => {
 
   it("files a queued or blocked job with the running ones", () => {
     expect(sectionOf(makeJob({ state: "queued" }), now)).toBe("running");
+    expect(sectionOf(makeJob({ state: "queued", cause: "approval" }), now)).toBe("attention");
     expect(sectionOf(makeJob({ state: "blocked" }), now)).toBe("running");
     expect(sectionOf(makeJob({ state: "cancelled", settled_at: "2026-11-26T08:00:00Z" }), now)).toBe("today");
   });
@@ -42,6 +43,7 @@ describe("card states", () => {
 
   it("picks the one action that fits each cause", () => {
     expect(actionFor({ state: "running", stuck: true, cause: "limit" })).toBe("retry");
+    expect(actionFor({ state: "queued", stuck: false, cause: "approval" })).toBe("inbox");
     expect(actionFor({ state: "needs_you", stuck: false, cause: "dialog" })).toBe("terminal");
     expect(actionFor({ state: "running", stuck: true, cause: "unresponsive" })).toBe("nudge");
     expect(actionFor({ state: "needs_you", stuck: false, cause: "questions" })).toBe("inbox");

@@ -26,6 +26,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/web"
@@ -127,23 +128,30 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	identity := agentid.New(db, nil)
+	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
+	journalLog := journal.New(db, events, logger, nil)
 	refs := &jobRefs{}
-	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, logger)
+	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, logger)
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), agentSocket, logger)
+	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err
 	}
-	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, logger)
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	startJobs(ctx, jobService, client, logger)
+	poker := startPoker(ctx, cfg, db, events, pokeServices{
+		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
+	}, client, logger)
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
 		Orchestrator: orchestrator, Conversations: conversations,
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
+		Journal: journalLog, Poker: poker,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

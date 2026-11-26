@@ -17,6 +17,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -29,8 +30,11 @@ const (
 	maxResultBytes = 64 << 10
 	// timelineLimit bounds one detail's timeline.
 	timelineLimit = 300
-	// listLimit bounds the board.
+	// listLimit bounds the board. It is a page for people, never the supervisor's work set: the
+	// tick and the backstop page through every live job (R2-C16).
 	listLimit = 300
+	// superviseBatch is the page size the supervisor reads live jobs in.
+	superviseBatch = 200
 	// progressStale is how old a job_update may get before "doing now" falls back to the last
 	// tool call (6.5).
 	progressStale = 5 * time.Minute
@@ -86,12 +90,19 @@ type Options struct {
 	Roles *Roles
 	// Synchronous runs launches and restarts inline instead of in goroutines (tests).
 	Synchronous bool
+	// AskHuman asks the human a question (questions.Service.Ask): a job an agent asked for beyond
+	// its own directory, engine or isolation waits on one (R2-H1). Nil: such jobs are refused.
+	AskHuman func(ctx context.Context, input questions.AskInput, caller questions.Caller) (questions.Question, error)
+	// Delegation bounds what agents may create; zero fields take the defaults (delegate.go).
+	Delegation DelegationLimits
 }
 
 // Service holds the jobs.
 type Service struct {
 	opts Options
 	mu   sync.Mutex
+	// instance names this process in the lifecycle claims it writes (lifecycle.go).
+	instance string
 
 	busyMu sync.Mutex
 	busy   map[string]bool // jobs with a launch or restart running in the background
@@ -111,7 +122,7 @@ func New(opts Options) *Service {
 	if opts.Notify == nil {
 		opts.Notify = func(string) {}
 	}
-	return &Service{opts: opts}
+	return &Service{opts: opts, instance: newInstance()}
 }
 
 // Roles returns the role set.
@@ -164,16 +175,45 @@ func (s *Service) List(ctx context.Context, states []State) ([]Job, error) {
 	for _, record := range records {
 		open := 0
 		if !State(record.State).Terminal() {
-			list, err := s.questionsOf(ctx, record.ID)
+			summary, err := s.opts.Store.SummarizeJobQuestions(ctx, FormatID(record.ID))
 			if err != nil {
 				return nil, err
 			}
-			open = countOpen(list)
+			open = summary.Open
 		}
 		out = append(out, s.toJob(record, open))
 	}
 	return out, nil
 }
+
+// eachLive calls fn for every live job, oldest first, a page at a time (R2-C16: the supervisor
+// must see every live job, not the board's newest page).
+func (s *Service) eachLive(ctx context.Context, states []State, fn func(store.JobRecord)) error {
+	names := make([]string, len(states))
+	for i, state := range states {
+		names[i] = string(state)
+	}
+	after := int64(0)
+	for {
+		page, err := s.opts.Store.ListJobsPage(ctx, names, after, superviseBatch)
+		if err != nil {
+			return err
+		}
+		for _, record := range page {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			fn(record)
+		}
+		if len(page) < superviseBatch {
+			return nil
+		}
+		after = page[len(page)-1].ID
+	}
+}
+
+// liveStates are the states the supervisor looks after.
+var liveStates = []State{StateQueued, StateRunning, StateNeedsYou, StateBlocked}
 
 func (s *Service) questionsOf(ctx context.Context, id int64) ([]Question, error) {
 	records, err := s.opts.Store.ListQuestionsByJob(ctx, FormatID(id))
@@ -208,10 +248,12 @@ func countOpen(list []Question) int {
 
 // ---- Mutating ------------------------------------------------------------------------------
 
-// change is what one mutation produced: events to journal, and whether to tell Jeff.
+// change is what one mutation produced: events to journal, and whether to tell Jeff. questions
+// is the job's question summary, read once per mutation (R2-C12) for the change to use.
 type change struct {
-	events []store.JobEventRecord
-	notify string
+	events    []store.JobEventRecord
+	notify    string
+	questions store.JobQuestionSummary
 }
 
 // event appends a timeline entry.
@@ -228,12 +270,17 @@ func (c *change) event(kind, summary string, detail map[string]any) {
 // mutate applies fn to job id under the lock and saves it. fn may return an error to abandon
 // the change. The returned job is the saved state.
 func (s *Service) mutate(ctx context.Context, id string, fn func(record *store.JobRecord, c *change) error) (Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutateLocked(ctx, id, fn)
+}
+
+// mutateLocked is mutate for a caller that already holds s.mu.
+func (s *Service) mutateLocked(ctx context.Context, id string, fn func(record *store.JobRecord, c *change) error) (Job, error) {
 	numeric, err := ParseID(id)
 	if err != nil {
 		return Job{}, ErrNotFound
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	record, err := s.opts.Store.GetJob(ctx, numeric)
 	if errors.Is(err, store.ErrNotFound) {
 		return Job{}, ErrNotFound
@@ -243,24 +290,35 @@ func (s *Service) mutate(ctx context.Context, id string, fn func(record *store.J
 	}
 	before := record
 	var c change
+	if !State(record.State).Terminal() {
+		if c.questions, err = s.opts.Store.SummarizeJobQuestions(ctx, id); err != nil {
+			return Job{}, err
+		}
+	}
 	if err := fn(&record, &c); err != nil {
 		return Job{}, err
 	}
-	open, err := s.reconcileQuestionsLocked(ctx, &record, &c)
-	if err != nil {
-		return Job{}, err
-	}
+	open := s.reconcileQuestionsLocked(&record, &c)
 	if err := CheckTransition(State(before.State), State(record.State)); err != nil && before.State != record.State {
 		return Job{}, err
 	}
 	if before.State != record.State {
 		c.event(EventState, fmt.Sprintf("%s → %s", before.State, record.State), map[string]any{"from": before.State, "to": record.State})
-		if State(record.State).Terminal() && record.SettledAt.IsZero() {
-			record.SettledAt = s.opts.Now()
+		if State(record.State).Terminal() {
+			if record.SettledAt.IsZero() {
+				record.SettledAt = s.opts.Now()
+			}
+			// Whatever step was acting on the job loses its claim: it must not start, type or
+			// record anything for a finished job (R2-C08).
+			clearClaim(&record)
+			record.LifecycleGen++
 		}
 	}
 	if err := s.save(ctx, record, c); err != nil {
 		return Job{}, err
+	}
+	if State(record.State).Terminal() && !State(before.State).Terminal() {
+		s.revokeTokensLocked(ctx, record) // R2-L1 (tokens.go)
 	}
 	job := s.toJob(record, open)
 	changeName := "updated"
@@ -288,38 +346,34 @@ func (s *Service) save(ctx context.Context, record store.JobRecord, c change) er
 	return nil
 }
 
-// reconcileQuestionsLocked derives needs_you from the job's questions: a live job goes to
-// needs_you when a blocking ask (wait=true) is open, or when the agent declared waiting and
-// questions are open; it comes back to running when that stops being true. It returns the open
-// question count.
-func (s *Service) reconcileQuestionsLocked(ctx context.Context, record *store.JobRecord, c *change) (int, error) {
+// reconcileQuestionsLocked derives needs_you from the job's questions (c.questions): a live job
+// goes to needs_you when a blocking ask (wait=true) is open, or when the agent declared waiting
+// and questions are open; it comes back to running when that stops being true. It returns the
+// open question count.
+func (s *Service) reconcileQuestionsLocked(record *store.JobRecord, c *change) int {
 	if State(record.State).Terminal() {
-		return 0, nil
+		return 0
 	}
-	records, err := s.opts.Store.ListQuestionsByJob(ctx, FormatID(record.ID))
-	if err != nil {
-		return 0, err
-	}
-	open, blocking := 0, 0
-	for _, question := range records {
-		if question.Status == "open" {
-			open++
-			if question.Wait {
-				blocking++
-			}
-		}
-	}
-	if open == 0 {
+	deriveFromQuestions(record, c.questions)
+	return c.questions.Open
+}
+
+// deriveFromQuestions applies the question-derived part of a job's state to record and reports
+// whether anything changed. The tick uses it to find jobs whose questions settled while nothing
+// else touched them (R2-C03).
+func deriveFromQuestions(record *store.JobRecord, q store.JobQuestionSummary) bool {
+	before := *record
+	if q.Open == 0 {
 		record.Waiting = false
 	}
-	wantNeedsYou := blocking > 0 || (record.Waiting && open > 0)
+	wantNeedsYou := q.Blocking > 0 || (record.Waiting && q.Open > 0)
 	switch {
 	case State(record.State) == StateRunning && wantNeedsYou:
-		record.State, record.Cause, record.CauseDetail = string(StateNeedsYou), string(CauseQuestions), fmt.Sprintf("%d open question(s)", open)
+		record.State, record.Cause, record.CauseDetail = string(StateNeedsYou), string(CauseQuestions), fmt.Sprintf("%d open question(s)", q.Open)
 	case State(record.State) == StateNeedsYou && Cause(record.Cause) == CauseQuestions && !wantNeedsYou:
 		record.State, record.Cause, record.CauseDetail = string(StateRunning), "", ""
 	}
-	return open, nil
+	return before.Waiting != record.Waiting || before.State != record.State || before.Cause != record.Cause
 }
 
 func (s *Service) publish(job Job, changeName string) {
@@ -351,7 +405,7 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 		LastActivityAt: timePtr(r.LastActivityAt), Nudges: r.Nudges, Restarts: r.Restarts,
 		RetryAt: timePtr(r.RetryAt), RetryCount: r.RetryCount, OpenQuestions: open,
 		Verified: decodeList(r.VerifiedJSON), NotVerified: decodeList(r.NotVerifiedJSON),
-		Isolate: r.Isolate, isolate: r.Isolate,
+		Isolate: r.Isolate, isolate: r.Isolate, briefSent: r.BriefSent, Origin: r.Origin,
 	}
 	if r.ParentID > 0 {
 		job.ParentID = FormatID(r.ParentID)

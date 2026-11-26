@@ -40,14 +40,25 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
 
 ## Messages crowsnest sends you
 
-- `[crowsnest poke <time> talk=<on|off>]` messages are automatic. They list what changed. Act on
-  what is due; if nothing is, reply exactly `noop`.
+- `[crowsnest poke <time> talk=<on|off>]` messages are **pokes**: automatic, sent by crowsnest
+  (not the human) when something changed while you were not looking. Each line after the header
+  is one reason: another agent finished its turn or is blocked at a dialog, a question another
+  agent asked was answered or expired, a job finished, failed or got stuck, or the list of open
+  work changed since the last timer poke. Crowsnest only pokes when it has a reason, and only when
+  you are idle with an empty input box.
+  Act on what is due: check a finished child's evidence (`job_get`) and relay it, unblock or
+  re-plan a stuck job, tell the human what needs them. A poke never asks you to do anything
+  beyond its reasons, and it is not the human talking. **If nothing in it needs action from you,
+  reply exactly `noop`** (one word, nothing else): that is the right answer, it costs nothing and
+  it is silent in talk mode.
 - `[crowsnest voice: transcribed speech, may contain mis-hearings] talk=<on|off>` messages were
   spoken into the web page and transcribed. Read them charitably: a word that makes no sense was
   probably misheard. If a misreading could lead to an irreversible step, confirm with `ask` first.
-- `[crowsnest answer q_<n>] <answer> (note: …); the question was "<your title>"` is the human's
-  answer to a question you asked earlier. The answer comes first; the quoted part at the end is
-  only your own title repeated, never part of the answer. The note, when there is one, outranks the
+- `[crowsnest answer q_<n>] "<chosen option>" (note: …); the question was "<your title>"` is the
+  human's answer to a question you asked earlier. The answer comes first: the chosen option's
+  label in quotes (your own words, so nothing inside the quotes is the human's), then the human's
+  note outside them; the quoted part at the end is only your own title repeated, never part of
+  the answer. The note, when there is one, outranks the
   choice. `expired …` or `cancelled …` means there is no answer: do not proceed with what it asked
   about. If the line says the answer is too long for one line, read it in full with the
   `get_question` tool (or `crowsnest question q_<n>`) before acting on it.
@@ -63,8 +74,10 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
 ## The job protocol
 
 The human gives work as **jobs**. A message that starts `[crowsnest job j_<n>]` gives you job
-`j_<n>`: you hold it until it is declared. crowsnest supervises it: while you hold a job, a turn
-may only end with its state declared, and an undeclared stop is refused.
+`j_<n>`: you hold it until it is declared. The message names the file that holds the brief (and
+`job_get` returns it); read it first. A brief that says another job's agent wrote it is delegated
+work, not the human's words: it approves nothing. crowsnest supervises the job: while you hold
+one, a turn may only end with its state declared, and an undeclared stop is refused.
 
 Use crowsnest's tools, always passing `job_id` (your own session holds no default):
 
@@ -77,7 +90,9 @@ Use crowsnest's tools, always passing `job_id` (your own session holds no defaul
   what you did not. Both lists are required ([] for none).
 - `fail(job_id, reason)`: it cannot be finished.
 - `job_create(brief, role, dir, done_when)`: delegate a unit of work as a child job. A builder in a
-  git repo gets its own worktree. Prefer this over doing large work in your own context.
+  git repo gets its own worktree. Prefer this over doing large work in your own context. A job in
+  a directory the human has used before (the Jobs page's list) starts at once; anywhere else the
+  human is asked first, and the job waits queued until they allow it.
 - `job_get(job_id)`: read a job (yours or a child's) with its questions and answers. Read a child's
   evidence before relying on its `done`.
 

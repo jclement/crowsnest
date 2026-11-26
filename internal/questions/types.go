@@ -88,6 +88,10 @@ type AskInput struct {
 	// Wait says the asker will block on the long-poll for the answer (`ask --wait`, the MCP
 	// tool's wait=true). It is recorded so the answer is not also typed into its pane.
 	Wait bool `json:"wait,omitempty"`
+	// JobID names the job the question is about (the MCP tool's job_id). The agent socket
+	// checks it against the caller's token: a job agent may name only its own job, and the
+	// orchestrator (whose token names no job) only a job it holds (R2-C06).
+	JobID string `json:"job_id,omitempty"`
 }
 
 // Caller identifies who asked: the herdr pane the answer is typed back into, and the job the
