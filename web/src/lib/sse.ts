@@ -1,69 +1,104 @@
-// useEventStream: one EventSource on /api/v1/events per app, with reconnect and a status the UI
-// can show as a banner. The server sends `hello` on every connect; since it never replays, the
-// app treats hello as "refetch everything you show" (DESIGN.md section 9). Later milestones add
-// handlers for fleet, message, question, orchestrator, poke and say events.
-import { useEffect, useRef, useState } from "react";
-import { endpoints } from "./api";
+// useEventStream: one EventSource on /api/v1/events per app, reconnecting with exponential
+// backoff, and a state the UI shows as the reconnect banner. The server sends `hello` on every
+// connect and never replays, so the app treats hello as "refetch everything you show"
+// (DESIGN.md section 10); lib/live.ts maps the other events to query invalidations.
+//
+// Reconnection is ours, not the browser's: on any error the source is closed and a new one is
+// opened after 1 s, 2 s, 4 s … up to 30 s. Before each attempt the session is checked with
+// /auth/me, so an expired session lands on the login page (through the API client's 401
+// handler) instead of retrying forever. "Retry now" skips the wait.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { endpoints, fixturesEnabled } from "./api";
+import { eventNames } from "./types";
 
 export type StreamStatus = "connecting" | "open" | "reconnecting";
 
-export type EventHandlers = Record<string, (data: unknown) => void>;
+export interface StreamState {
+  status: StreamStatus;
+  /** Consecutive failed attempts since the stream was last open. */
+  attempt: number;
+  /** When the next attempt starts (epoch ms), while one is scheduled. */
+  retryAt: number | null;
+  /** Reconnect immediately instead of waiting out the backoff. */
+  retryNow: () => void;
+}
+
+export type EventHandlers = Partial<Record<string, (data: unknown) => void>>;
 
 const EVENTS_URL = "/api/v1/events";
-const MAX_BACKOFF_MS = 30_000;
+export const INITIAL_BACKOFF_MS = 1_000;
+export const MAX_BACKOFF_MS = 30_000;
+
+/** The wait before reconnect attempt number `attempt` (0-based). */
+export function backoffDelay(attempt: number): number {
+  return Math.min(INITIAL_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
+}
 
 /**
  * Subscribes to the server's event stream while mounted. handlers maps event names to callbacks;
- * it may change between renders without reconnecting. Returns the connection status.
+ * it may change between renders without reconnecting. In fixtures mode there is no server, so
+ * the stream reports itself open and never connects.
  */
-export function useEventStream(handlers: EventHandlers): StreamStatus {
-  const [status, setStatus] = useState<StreamStatus>("connecting");
+export function useEventStream(handlers: EventHandlers): StreamState {
+  const fixtures = fixturesEnabled();
+  const [state, setState] = useState<Omit<StreamState, "retryNow">>({
+    status: fixtures ? "open" : "connecting",
+    attempt: 0,
+    retryAt: null,
+  });
   const handlersRef = useRef(handlers);
+  const retryNowRef = useRef<() => void>(() => {});
   useEffect(() => {
     handlersRef.current = handlers;
   });
 
   useEffect(() => {
+    if (fixtures) return;
     let source: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let stopped = false;
-    const subscribed = new Set<string>();
 
     const dispatch = (name: string) => (event: MessageEvent) => {
       if (name === "hello") {
         attempt = 0;
-        setStatus("open");
+        setState({ status: "open", attempt: 0, retryAt: null });
       }
       handlersRef.current[name]?.(parse(event.data));
     };
 
     const connect = () => {
+      if (stopped) return;
       source = new EventSource(EVENTS_URL);
-      subscribed.clear();
-      for (const name of new Set(["hello", "heartbeat", ...Object.keys(handlersRef.current)])) {
+      for (const name of new Set<string>([...eventNames, ...Object.keys(handlersRef.current)])) {
         source.addEventListener(name, dispatch(name) as EventListener);
-        subscribed.add(name);
       }
       source.onerror = () => {
-        if (stopped || !source) return;
-        setStatus("reconnecting");
-        // CONNECTING: the browser is retrying by itself. CLOSED: it gave up (often a 401), so
-        // check the session (a 401 routes to login via the API client) and retry with backoff.
-        if (source.readyState === EventSource.CLOSED) scheduleReconnect();
+        if (stopped) return;
+        source?.close();
+        source = null;
+        scheduleReconnect();
       };
     };
 
     const scheduleReconnect = () => {
-      source?.close();
-      const delay = Math.min(1000 * 2 ** attempt, MAX_BACKOFF_MS);
+      clearTimeout(retryTimer);
+      const delay = backoffDelay(attempt);
       attempt += 1;
-      retryTimer = setTimeout(() => {
-        endpoints.me().then(
-          () => !stopped && connect(),
-          () => !stopped && scheduleReconnect(),
-        );
-      }, delay);
+      setState({ status: "reconnecting", attempt, retryAt: Date.now() + delay });
+      retryTimer = setTimeout(attemptReconnect, delay);
+    };
+
+    const attemptReconnect = () => {
+      if (stopped) return;
+      setState((previous) => ({ ...previous, retryAt: null }));
+      endpoints.me().then(connect, () => !stopped && scheduleReconnect());
+    };
+
+    retryNowRef.current = () => {
+      if (stopped || source) return;
+      clearTimeout(retryTimer);
+      attemptReconnect();
     };
 
     connect();
@@ -72,9 +107,10 @@ export function useEventStream(handlers: EventHandlers): StreamStatus {
       clearTimeout(retryTimer);
       source?.close();
     };
-  }, []);
+  }, [fixtures]);
 
-  return status;
+  const retryNow = useCallback(() => retryNowRef.current(), []);
+  return { ...state, retryNow };
 }
 
 function parse(data: string): unknown {

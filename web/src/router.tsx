@@ -7,7 +7,8 @@ import { AppFrame } from "./components/AppFrame";
 import { ApiError, endpoints, queryKeys } from "./lib/api";
 import { LoginPage } from "./routes/LoginPage";
 import { NotFound } from "./routes/NotFound";
-import { ChatView, FleetView, InboxView, TerminalView } from "./routes/views";
+import { FleetView } from "./routes/FleetView";
+import { ChatView, InboxView, JobsView, TerminalView } from "./routes/views";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -51,12 +52,21 @@ const appRoute = createRoute({
   component: AppFrame,
 });
 
-const chatRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: ChatView });
+const jobsRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: JobsView });
+const chatRoute = createRoute({ getParentRoute: () => appRoute, path: "/chat", component: ChatView });
 const inboxRoute = createRoute({ getParentRoute: () => appRoute, path: "/inbox", component: InboxView });
-const fleetRoute = createRoute({ getParentRoute: () => appRoute, path: "/fleet", component: FleetView });
+const fleetRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/fleet",
+  // ?agent=<pane id> selects an agent, so a link or a reload opens the same one.
+  validateSearch: (search: Record<string, unknown>): { agent?: string } => ({
+    agent: typeof search.agent === "string" && search.agent ? search.agent : undefined,
+  }),
+  component: FleetView,
+});
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 
-const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([chatRoute, inboxRoute, fleetRoute, terminalRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([jobsRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

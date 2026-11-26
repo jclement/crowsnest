@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Bird } from "lucide-react";
-import { EmptyState } from "../components/EmptyState";
+import { EmptyState } from "../components/ui/EmptyState";
 
 export function NotFound() {
   return (
@@ -9,7 +9,7 @@ export function NotFound() {
       title="Nothing on the horizon"
       action={
         <Link to="/" className="mt-2 text-xs text-accent hover:underline">
-          Back to chat
+          Back to jobs
         </Link>
       }
     >
