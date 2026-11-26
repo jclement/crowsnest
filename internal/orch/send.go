@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -112,6 +113,14 @@ func Prompt(ctx context.Context, client herdr.Client, target string, request Pro
 	if request.ExpectAgent != "" && agent.Name != request.ExpectAgent {
 		return PromptResult{}, notTyped(fmt.Errorf("%w: pane %s holds %q, not %q", ErrWrongAgent, agent.PaneID, agent.Name, request.ExpectAgent))
 	}
+	// One typist per pane: the draft check and the typing happen under the pane's lock, so a
+	// send never reads text crowsnest itself is still typing (a poke, an answer, a brief) as
+	// somebody's draft, and two texts are never typed into one box at once.
+	unlock, err := lockPane(ctx, client, agent.PaneID)
+	if err != nil {
+		return PromptResult{}, notTyped(err)
+	}
+	defer unlock()
 	if err := checkInput(ctx, client, agent, request.ForceOverDraft); err != nil {
 		return PromptResult{}, err
 	}
@@ -120,6 +129,38 @@ func Prompt(ctx context.Context, client herdr.Client, target string, request Pro
 	wait := &herdr.PromptWait{Until: []herdr.AgentStatus{herdr.StatusWorking, herdr.StatusBlocked}, TimeoutMS: promptWaitMS}
 	after, err := client.AgentPrompt(sendCtx, agent.PaneID, request.Text, wait)
 	return promptOutcome(ctx, client, agent, after, err)
+}
+
+// paneTypists holds one lock per pane (and per herdr client, so tests with their own fakes do
+// not share locks): a buffered channel of one, which a waiter can give up on when its context
+// ends. Found by `mise run e2e:claude` (M9): a poke being typed made a human's send fail with a
+// false "someone typed a draft". Entries are never removed; a session has a few dozen panes.
+var (
+	paneTypistsMu sync.Mutex
+	paneTypists   = map[paneTypistKey]chan struct{}{}
+)
+
+type paneTypistKey struct {
+	client herdr.Client
+	pane   string
+}
+
+// lockPane waits for the pane's typing lock and returns its release, or an error if ctx ends.
+func lockPane(ctx context.Context, client herdr.Client, paneID string) (func(), error) {
+	paneTypistsMu.Lock()
+	key := paneTypistKey{client: client, pane: paneID}
+	slot, ok := paneTypists[key]
+	if !ok {
+		slot = make(chan struct{}, 1)
+		paneTypists[key] = slot
+	}
+	paneTypistsMu.Unlock()
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for another send to pane %s to finish: %w", paneID, ctx.Err())
+	}
 }
 
 func validatePrompt(text string) error {

@@ -72,6 +72,23 @@ function herdrIn(args: string[]) {
   if (result.status !== 0) throw new Error(`herdr ${args.join(" ")}: ${result.stderr}`);
 }
 
+/** On a failure, what the orchestrator was doing: its newest messages, its screen, the journal. */
+async function explainOrchestrator(page: Page) {
+  const get = async (path: string) => (await page.request.get(`${instance.baseURL}/api/v1${path}`)).text();
+  const messages = await get("/agents/orchestrator/messages?limit=12");
+  const status = await get("/orchestrator");
+  const orchestrator = (JSON.parse(status) as { data: { pane_id: string } }).data;
+  const view = orchestrator.pane_id ? await screenOf(page, orchestrator.pane_id) : null;
+  const screen = view ? `${view.text}\n--- draft verdict\n${JSON.stringify(view.draft)}` : "(no pane)";
+  if (orchestrator.pane_id) await capture(page, orchestrator.pane_id, "orchestrator-at-failure");
+  const composer = await page.getByRole("alert").allInnerTexts().catch(() => []);
+  test.info().annotations.push({ type: "alerts on the page", description: composer.join(" | ") });
+  const journal = await get("/journal");
+  const body = `--- orchestrator\n${status}\n--- messages\n${messages}\n--- screen\n${screen}\n--- journal\n${journal}`;
+  await test.info().attach("orchestrator.txt", { body, contentType: "text/plain" });
+  console.log(body.slice(-6000));
+}
+
 /** Makes every POST /jobs from the page ask for the cheap model. */
 async function cheapJobs(page: Page) {
   await page.route("**/api/v1/jobs", async (route) => {
@@ -263,12 +280,16 @@ test.describe.serial("real Claude through the browser", () => {
     let questionId = "";
     await expect
       .poll(async () => {
-        await clearDialogs(page, "ask-wait");
+        if (!questionId) await clearDialogs(page, "ask-wait");
         const open = ((await (await page.request.get(`${instance.baseURL}/api/v1/questions?status=open`)).json()) as { data: Array<{ id: string; title: string }> }).data;
         questionId = open.find((entry) => entry.title === "Go ahead with the e2e check?")?.id ?? "";
         return questionId;
       }, { timeout: 4 * 60_000, intervals: [3_000] })
-      .not.toBe("");
+      .not.toBe("")
+      .catch(async (error: unknown) => {
+        await explainOrchestrator(page);
+        throw error;
+      });
     // The orchestrator is blocked in the command meanwhile.
     await expect(page.getByTestId("chat-state")).toHaveText("Working");
     await page.goto(`${instance.baseURL}/inbox?q=${questionId}`);
