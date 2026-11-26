@@ -19,6 +19,8 @@ import (
 
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/fleet"
+	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 )
 
@@ -44,6 +46,12 @@ type Deps struct {
 	Web fs.FS
 	// Heartbeat overrides DefaultHeartbeat; tests shorten it.
 	Heartbeat time.Duration
+
+	// Herdr is the session's client and Fleet its cached view. Either may be nil (tests of
+	// other routes); the routes that need them then answer 503.
+	Herdr        herdr.Client
+	Fleet        *fleet.Cache
+	HerdrVersion string // reported by /auth/me
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -90,6 +98,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
 	mux.Handle("GET /api/v1/events", s.requireAuth(http.HandlerFunc(s.handleEvents)))
+	mux.Handle("GET /api/v1/fleet", s.requireAuth(http.HandlerFunc(s.handleFleet)))
+	mux.Handle("GET /api/v1/agents/{target}/screen", s.requireAuth(http.HandlerFunc(s.handleScreen)))
+	mux.Handle("POST /api/v1/agents/{target}/keys", s.requireAuth(http.HandlerFunc(s.handleKeys)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 	mux.Handle("/", s.spaHandler())
 	return mux

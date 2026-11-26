@@ -21,8 +21,10 @@ const (
 	codeUnauthorized = "UNAUTHORIZED"
 	codeForbidden    = "FORBIDDEN"
 	codeNotFound     = "NOT_FOUND"
+	codeConflict     = "CONFLICT"
 	codeRateLimited  = "RATE_LIMITED"
 	codeInternal     = "INTERNAL_ERROR"
+	codeUnavailable  = "UNAVAILABLE" // herdr is not answering
 )
 
 // SessionCookie is the session cookie's name.
@@ -156,17 +158,21 @@ type MeResponse struct {
 
 // Features tells the UI what this server offers.
 type Features struct {
-	Auth    bool   `json:"auth"`    // false with --no-auth: hide sign-out
-	Voice   bool   `json:"voice"`   // talk mode available
-	Demo    bool   `json:"demo"`    // running against the fake herdr
-	Session string `json:"session"` // herdr session name
+	Auth         bool   `json:"auth"`          // false with --no-auth: hide sign-out
+	Voice        bool   `json:"voice"`         // talk mode available
+	Demo         bool   `json:"demo"`          // running against the fake herdr
+	Session      string `json:"session"`       // herdr session name
+	HerdrVersion string `json:"herdr_version"` // version the herdr server reported at start
 }
 
 func (s *Server) me() MeResponse {
 	cfg := s.deps.Config
 	return MeResponse{
 		Username: s.deps.Auth.Username(),
-		Features: Features{Auth: s.deps.Auth.Enabled(), Voice: cfg.VoiceEnabled(), Demo: cfg.Demo, Session: cfg.Session},
+		Features: Features{
+			Auth: s.deps.Auth.Enabled(), Voice: cfg.VoiceEnabled(), Demo: cfg.Demo, Session: cfg.Session,
+			HerdrVersion: s.deps.HerdrVersion,
+		},
 	}
 }
 
