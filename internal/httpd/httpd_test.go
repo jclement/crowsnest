@@ -19,6 +19,8 @@ import (
 
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/fleet"
+	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -78,6 +80,8 @@ type harness struct {
 type harnessOptions struct {
 	noAuth    bool
 	heartbeat time.Duration
+	herdr     herdr.Client // nil: the herdr routes answer 503
+	fleet     *fleet.Cache
 }
 
 var testWeb = fstest.MapFS{
@@ -120,13 +124,16 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	logs := &syncBuffer{}
 	events := hub.New()
 	server, err := New(Deps{
-		Config:    cfg,
-		Auth:      service,
-		Hub:       events,
-		Logger:    slog.New(slog.NewTextHandler(logs, nil)),
-		Version:   "v9.9.9-test",
-		Web:       testWeb,
-		Heartbeat: opts.heartbeat,
+		Config:       cfg,
+		Auth:         service,
+		Hub:          events,
+		Logger:       slog.New(slog.NewTextHandler(logs, nil)),
+		Version:      "v9.9.9-test",
+		Web:          testWeb,
+		Heartbeat:    opts.heartbeat,
+		Herdr:        opts.herdr,
+		Fleet:        opts.fleet,
+		HerdrVersion: "0.9.5-test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -469,7 +476,7 @@ func TestMe(t *testing.T) {
 	}
 	var envelope struct{ Data MeResponse }
 	_ = json.Unmarshal(response.Body.Bytes(), &envelope)
-	want := MeResponse{Username: testUser, Features: Features{Auth: true, Session: "crowsnest-test"}}
+	want := MeResponse{Username: testUser, Features: Features{Auth: true, Session: "crowsnest-test", HerdrVersion: "0.9.5-test"}}
 	if envelope.Data != want {
 		t.Fatalf("me %+v, want %+v", envelope.Data, want)
 	}

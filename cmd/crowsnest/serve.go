@@ -1,6 +1,7 @@
-// `crowsnest serve`: load and check the config, open the database, and run the HTTP server
-// until SIGINT or SIGTERM. herdr, the orchestrator, questions and talk mode join here in later
-// milestones; M1 serves auth, health, the event stream and the web app.
+// `crowsnest serve`: load and check the config, open the database, connect to (or start) the herdr
+// session, keep the fleet cache running, and run the HTTP server until SIGINT or SIGTERM. With
+// --demo the herdr session is the in-memory fake with its scripted demo fleet. The orchestrator,
+// questions and talk mode join here in later milestones.
 
 package main
 
@@ -18,6 +19,9 @@ import (
 
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/fleet"
+	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/store"
@@ -72,7 +76,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	events := hub.New()
 	defer events.Close()
-	deps := httpd.Deps{Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version}
+	client, herdrVersion, err := connectHerdr(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	fleetCache := fleet.New(fleet.Options{Client: client, Hub: events, Session: cfg.Session, Logger: logger})
+	go fleetCache.Run(ctx)
+
+	deps := httpd.Deps{
+		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
+		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
+	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
 	}
@@ -81,6 +95,31 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	return server.Run(ctx)
+}
+
+// connectHerdr returns the session's client and the herdr version. --demo gets the fake with the
+// demo fleet, animated until ctx ends; otherwise the named session is connected to, and its server
+// started (detached, never stopped by crowsnest) if nothing answers.
+func connectHerdr(ctx context.Context, cfg config.Config, logger *slog.Logger) (herdr.Client, string, error) {
+	if cfg.Demo {
+		demo := fake.NewDemo()
+		go demo.Run(ctx, fake.DefaultDemoStep)
+		logger.Info("demo mode: using the in-memory herdr with a scripted fleet", "herdr_version", fake.Version)
+		return demo, fake.Version, nil
+	}
+	session, err := herdr.EnsureSession(ctx, herdr.SessionOptions{
+		Name: cfg.Session, AllowDefault: cfg.AllowDefaultSession, LogDir: cfg.StateDir, Logger: logger,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("connecting to herdr session %q: %w", cfg.Session, err)
+	}
+	logger.Info("connected to herdr", "session", session.Name, "socket", session.SocketPath,
+		"herdr_version", session.Pong.Version, "protocol", session.Pong.Protocol, "started", session.Started)
+	if session.Pong.Protocol != herdr.ProtocolVersion {
+		logger.Warn("herdr speaks a different protocol than crowsnest was built for; some features may misbehave",
+			"herdr_protocol", session.Pong.Protocol, "expected", herdr.ProtocolVersion)
+	}
+	return session.Client, session.Pong.Version, nil
 }
 
 // cleanSessions deletes expired sessions every hour until ctx ends.

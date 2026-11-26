@@ -378,6 +378,8 @@ func (l *loader) loadOrchestrator(cfg *Config) error {
 	if cfg.DataDir == "" {
 		cfg.DataDir = filepath.Join(l.xdgDir("XDG_DATA_HOME", ".local/share"), "crowsnest")
 	}
+	// State (logs, sockets) is per session, so two crowsnests on two sessions never share it.
+	cfg.StateDir = filepath.Join(l.xdgDir("XDG_STATE_HOME", ".local/state"), "crowsnest", cfg.Session)
 	cfg.Dir = l.path(optDir)
 	if cfg.Dir == "" {
 		cfg.Dir = filepath.Join(cfg.DataDir, "orchestrator")

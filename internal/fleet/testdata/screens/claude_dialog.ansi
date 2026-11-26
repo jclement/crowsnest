@@ -1,0 +1,10 @@
+[38;5;244m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+ [1mBash command[22m
+
+   git push --force origin main
+
+ Do you want to proceed?
+ [36m❯ 1. Yes[39m
+   2. No, and tell Claude what to do differently [2m(esc)[22m
+
+ [2mEsc to cancel · Tab to amend[22m

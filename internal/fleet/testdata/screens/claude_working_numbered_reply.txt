@@ -1,0 +1,15 @@
+
+⏺ Here is the plan:
+
+  1. Write the socket client
+  2. Write the fake
+  3. Wire the fleet cache
+
+  Press Enter to confirm each step in the dialog when it appears.
+
+✻ Compiling… (38s · ↓ 1.2k tokens · esc to interrupt)
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)

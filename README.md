@@ -4,10 +4,11 @@ One Go binary that starts a [herdr](https://herdr.dev) session and a Claude Code
 it, and serves a mobile-friendly web app for running that session from a browser: chat with the
 orchestrator, answer questions from agents, drive a terminal, and see every agent in the fleet.
 
-> **Status: M1 (skeleton).** Today crowsnest serves the login, the API health and auth
-> endpoints, the event stream and the web app shell with four empty views. herdr, the
-> orchestrator, questions, terminals and talk mode arrive in later milestones; see
-> [DESIGN.md](DESIGN.md) section 17 and [STATUS.md](STATUS.md).
+> **Status: M2 (herdr and the fleet).** crowsnest serves the login, the API health and auth
+> endpoints, the event stream and the web app shell; it connects to (or starts) its herdr
+> session and serves the fleet, agent screens and dialog key presses. The orchestrator,
+> questions, terminals and talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md)
+> section 18 and [STATUS.md](STATUS.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
 default, refuses to start without a login (or an explicit `--no-auth`), and checks Host and
@@ -24,8 +25,15 @@ CROWSNEST_PASSWORD='something long' ./bin/crowsnest --username jeff
 # open http://localhost:2769
 ```
 
-For development, `mise run dev` runs the Go server with `--no-auth` on :2769 and Vite on :5173
-(open http://localhost:5173; Vite proxies `/api` to Go).
+crowsnest needs [herdr](https://herdr.dev) on `PATH`. On start it connects to the herdr session
+named by `--session` (default `crowsnest`) and, if nothing answers, starts
+`herdr --session <name> server` detached, logging to
+`~/.local/state/crowsnest/<session>/herdr-server.log`. It never stops that server: herdr and its
+agents outlive crowsnest. `--demo` needs no herdr at all; it serves an in-memory fake fleet that
+changes every few seconds.
+
+For development, `mise run dev` runs the Go server with `--no-auth --demo` on :2769 and Vite on
+:5173 (open http://localhost:5173; Vite proxies `/api` to Go).
 
 To work on the UI with no server at all, open http://localhost:5173/fleet?fixtures=1 on the Vite
 dev server: every API call is answered in memory from `web/src/lib/fixtures.ts` (a fleet with
@@ -88,8 +96,9 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 `--web-dev` (`CROWSNEST_WEB_DEV`) is a hidden development flag used by `mise run dev`: the UI is
 served by Vite, so the binary does not require embedded web assets.
 
-The settings for herdr, the orchestrator, talk mode and notices are parsed and validated now and
-take effect in their milestones.
+`--session`, `--allow-default-session` and `--demo` take effect now. The settings for the
+orchestrator, talk mode and notices are parsed and validated now and take effect in their
+milestones.
 
 ### Startup refusals
 
@@ -113,17 +122,21 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /health` | none | `{status, version, update_available}` |
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
-| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session}}` |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, later `fleet`, `message`, `question`, … |
+| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version}}` |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes; later `message`, `question`, … |
+| `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
+| `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
+| `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
 
 ## Tasks
 
 | Task | Does |
 |---|---|
 | `mise run setup` | Install tools, Go modules and web dependencies. Idempotent |
-| `mise run dev` | Go server (`--no-auth`, `--web-dev`) on :2769 and Vite on :5173. Long-running |
+| `mise run dev` | Go server (`--no-auth`, `--web-dev`, `--demo`) on :2769 and Vite on :5173. Long-running |
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
+| `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests) |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
@@ -139,6 +152,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 |---|---|
 | `~/.config/crowsnest/config.yaml` | Optional config file |
 | `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed) and settings |
+| `~/.local/state/crowsnest/<session>/herdr-server.log` | Output of a herdr server crowsnest started |
 
 ## License
 

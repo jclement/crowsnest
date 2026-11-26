@@ -1,0 +1,18 @@
+
+⏺ Update(internal/fleet/cache.go)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Edit file                                                                    │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ internal/fleet/cache.go                                                  │ │
+│ │                                                                          │ │
+│ │  41    const debounce = 150 * time.Millisecond                           │ │
+│ │  42 -  const poll = 5 * time.Second                                      │ │
+│ │  42 +  const poll = 3 * time.Second                                      │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+│ Do you want to make this edit to cache.go?                                   │
+│ ❯ 1. Yes                                                                     │
+│   2. Yes, allow all edits during this session (shift+tab)                    │
+│   3. No, and tell Claude what to do differently (esc)                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  Enter to confirm · Esc to cancel

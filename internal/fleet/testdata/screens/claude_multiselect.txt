@@ -1,0 +1,9 @@
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Which suites should run before the merge?
+
+❯ 1. [✔] Go unit tests
+  2. [ ] Web unit tests
+  3. [ ] Integration (real herdr)
+
+Enter to select · Space to toggle · Esc to cancel
