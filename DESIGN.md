@@ -83,6 +83,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | false | Serve the UI over the session without starting Claude |
 | `--allowed-host` | `CROWSNEST_ALLOWED_HOSTS` | derived | Extra Host/Origin names (reverse proxy, MagicDNS). Repeatable |
 | `--trusted-proxy` | `CROWSNEST_TRUSTED_PROXY` | none | `loopback`, an IP or a CIDR whose client-IP header is believed (4.2, R2-L2). Repeatable |
+| `--trusted-proxy-header` | `CROWSNEST_TRUSTED_PROXY_HEADER` | `x-forwarded-for` | The one header a trusted proxy's client is read from: `x-forwarded-for` (its last hop) or `cf-connecting-ip` (cloudflared only; 4.2, R3-L1) |
 | `--tls-cert`, `--tls-key` | `CROWSNEST_TLS_CERT/KEY` | none | Serve HTTPS directly |
 | `--elevenlabs-api-key` | `ELEVENLABS_API_KEY` | none | Enables talk mode |
 | `--elevenlabs-api-key-file` | `ELEVENLABS_API_KEY_FILE` | none | The key from a file (first line, mode 600): out of every environment (R1b N1) |
@@ -124,11 +125,11 @@ a malicious web page driving a logged-in browser (CSRF, cross-site WebSocket hij
 rebinding against `--no-auth` on localhost); secrets leaking into logs; agent output attacking the UI (XSS).
 
 1. **Bind**: loopback by default. Never `0.0.0.0` unless the user types it (the container image does, with auth required).
-2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Admission and counting are one step: an admitted attempt is counted as a failure at once and taken back if the credentials match, so a burst of parallel guesses cannot slip past either cap before the first failure is recorded (R1-C10/M1). Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session` over plain HTTP and `__Host-crowsnest_session` over HTTPS (Secure, `Path=/`, no `Domain`, so nothing on another subdomain can set or shadow it; over HTTPS only the prefixed name is read), `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Each session is bound to the `Host:port` it was issued for (lower-cased, default port filled in) and is refused anywhere else: browsers send a host's cookies to every port on it, so this stops a cookie that reached a sibling port from working here, though not a replay that forges `Host` (R1 M2; see residual risk). Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; forwarding headers are not trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. The exception is opt-in (R2-L2): with `--trusted-proxy` (`loopback`, an IP or a CIDR), a request whose TCP peer is a trusted proxy is attributed to `CF-Connecting-IP`, else the last `X-Forwarded-For` hop, and that address keys the login limiter, the voice limits and the log, and caps that client at 32 requests in flight (the TCP cap of 4.11 cannot see past the proxy). The compose example's tunnel shares crowsnest's network namespace, so every internet client arrives from 127.0.0.1 and one attacker's failures would lock the owner out; it sets `CROWSNEST_TRUSTED_PROXY=loopback`. A trusted loopback proxy is trusted from every local process too, which can then pick its own bucket; those run as the user already. `X-Forwarded-Proto: https` is honoured only from loopback or a trusted proxy (the TCP peer), and only to add `Secure` to the cookie.
+2. **Login**: one user. Password compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Admission and counting are one step: an admitted attempt is counted as a failure at once and taken back if the credentials match, so a burst of parallel guesses cannot slip past either cap before the first failure is recorded (R1-C10/M1). Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session` over plain HTTP and `__Host-crowsnest_session` over HTTPS (Secure, `Path=/`, no `Domain`, so nothing on another subdomain can set or shadow it; over HTTPS only the prefixed name is read), `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Each session is bound to the `Host:port` it was issued for (lower-cased, default port filled in) and is refused anywhere else: browsers send a host's cookies to every port on it, so this stops a cookie that reached a sibling port from working here, though not a replay that forges `Host` (R1 M2; see residual risk). Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; forwarding headers are not trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. The exception is opt-in (R2-L2): with `--trusted-proxy` (`loopback`, an IP or a CIDR), a request whose TCP peer is a trusted proxy is attributed to the client it names in the one header `--trusted-proxy-header` chooses: the last `X-Forwarded-For` hop (the default) or `CF-Connecting-IP` (only for cloudflared, which overwrites it at Cloudflare's edge; `tailscale serve` and most proxies pass a client's own copy through, so believing it there let a client pick a fresh bucket on every attempt, R3-L1), and that address keys the login limiter, the voice limits and the log, and caps that client at 32 requests in flight (the TCP cap of 4.11 cannot see past the proxy). The compose example's tunnel shares crowsnest's network namespace, so every internet client arrives from 127.0.0.1 and one attacker's failures would lock the owner out; it sets `CROWSNEST_TRUSTED_PROXY=loopback` and, for the cloudflared layout only, `CROWSNEST_TRUSTED_PROXY_HEADER=cf-connecting-ip`. A trusted loopback proxy is trusted from every local process too, which can then pick its own bucket; those run as the user already. `X-Forwarded-Proto: https` is honoured only from loopback or a trusted proxy (the TCP peer), and only to add `Secure` to the cookie.
 3. **Host check** on every request: `Host` must be loopback, a bound IP, the machine hostname (only when a non-loopback address is bound: on loopback it adds nothing but DNS-rebinding surface, R1 I4), a detected MagicDNS name, or an `--allowed-host`. This is what stops DNS rebinding, and it applies with `--no-auth` too.
 4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host` (host and port, default ports normalised). `null` counts as missing. Non-GET calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set). A failed host check is `403` with a message naming `--allowed-host`. MagicDNS names are not auto-detected yet (M1); pass them with `--allowed-host`.
 5. **WebSockets** authenticate with the same cookie at upgrade, check Origin, and are closed when the session is revoked. No tokens in URLs.
-6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions decide who may connect (this user's processes); it serves only the agent API (ask, say, notify, job, hook), never terminals. **Who is calling** comes from a token, never from what the caller says (R1b N2, N7): crowsnest mints a random token (`cnt_…`, 32 bytes) for each agent it starts, puts it in that agent's pane environment (`CROWSNEST_TOKEN`), in its MCP server's environment (`mcp.json`) and in a 0600 `agent-token` file its hook command lines name (`--token-file`), and keeps only the token's SHA-256 in `kv`, mapped to the pane and job (`internal/agentid`). A caller with no known token is unidentified: it may ask (the answer reaches it only through `--wait`), nothing is ever typed into a pane on its behalf, and it may not withdraw questions, create jobs or act on one. Job verbs work only on the token's job or the job held in the token's pane (the orchestrator's tokens name no job). Quotas per caller cap the rate of asks, says and job creations, open questions (10 for a job agent, 30 for the orchestrator and for the shared bucket of callers without a token; 200 in all, the orchestrator not counted against it, R2-L5) and concurrent long-polls (8), and an expiry is at least five minutes. `say` needs a token (R2-I4). Tokens end with the work (R2-L1): a job's tokens are revoked when it reaches done, failed or cancelled, and a sweeper revokes, once a minute, the tokens of panes herdr no longer lists (bindings younger than two minutes are spared, and nothing is revoked while herdr cannot be read). Replacing a pane's tokens is one locked, transactional step, and a start token for a pane now held by another job is refused (R2-C15). Token files are 0600 in a 0700 per-job directory, and tokens are never logged.
+6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions decide who may connect (this user's processes); it serves only the agent API (ask, say, notify, job, hook), never terminals. **Who is calling** comes from a token, never from what the caller says (R1b N2, N7): crowsnest mints a random token (`cnt_…`, 32 bytes) for each agent it starts, puts it in that agent's pane environment (`CROWSNEST_TOKEN`), in its MCP server's environment (`mcp.json`) and in a 0600 `agent-token` file its hook command lines name (`--token-file`), and keeps only the token's SHA-256 in `kv`, mapped to the pane and job (`internal/agentid`). A caller with no known token is unidentified: it may ask (the answer reaches it only through `--wait`), nothing is ever typed into a pane on its behalf, and it may not withdraw questions, create jobs or act on one. Job verbs work only on the token's job or the job held in the token's pane (the orchestrator's tokens name no job). Quotas per caller cap the rate of asks, says and job creations, open questions (10 for a job agent, 30 for the orchestrator and for the shared bucket of callers without a token; 200 in all, the orchestrator not counted against it, R2-L5) and concurrent long-polls (8), and an expiry is at least five minutes. `say` needs a token (R2-I4). Tokens end with the work (R2-L1): a job's tokens are revoked when it reaches done, failed or cancelled, and a sweeper revokes, once a minute, the tokens of panes herdr no longer lists (bindings younger than two minutes are spared, and nothing is revoked while herdr cannot be read). Replacing a pane's tokens is one locked, transactional step, and a start token for a pane now held by another job is refused (R2-C15). Token files are 0600 in a 0700 per-job directory, and tokens are never logged. Since R3-L4 every file crowsnest writes there (`brief.md`, `prompt.md`, `settings.json`, `mcp.json`, `agent-token`) is removed and created afresh, exclusively and without following a link, read-only (0400), and a job directory that is a link is refused; that stops a planted link from redirecting crowsnest's write and an accidental overwrite, not a same-uid agent, which can chmod or recreate the file.
 
     **What the token is, plainly (R2-M2).** Agents in one session run as one uid, and processes of one uid are not isolated from each other. Any agent can read another agent's environment (`/proc/<pid>/environ`, `ps eww`) or its 0600 files under the state directory (`<state>/jobs/j_N/agent-token`, `<state>/agent-token`, `mcp.json`) with an ordinary file read, and then act as that agent on the socket: update, finish or fail its job, forge its hooks (and so silence its supervision), ask or `say` as it, the orchestrator included. The token stops accidents and forged environment variables (a process that merely sets `CROWSNEST_TOKEN` or names a pane gets nothing); it does not stop a hostile same-uid process. Only running crowsnest as its own uid would make the socket a hard boundary. That is a deployment change, not a code change, and is not done.
 7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'`. (`unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
@@ -459,6 +460,42 @@ row read before a call to herdr that takes seconds. The fixes, in `internal/jobs
 - **A stale observation never clears a newer cause** (C11): "working again" clears a limit or API
   error only if the row still carries the very error that was observed.
 
+### 6.9.1 As fixed in R3: no cause without an owner, no step past its claim
+
+The R3 review (`reviews/R3-codex.md`) found the claim mechanism sound against terminal
+transitions but not against crashes and newer dispositions. The fixes:
+
+- **Every stuck cause is re-validated by the tick** (R3-C01). `exited` was the one with no owner
+  once a restart's claim went stale: the replacement could be up and idle, its brief sent, and the
+  Stop hook, the backstop and the idle check all deferred to a restart nobody was running. An
+  agent seen alive 30 s after its last sign of life (`exitedGrace`, so a process that announced
+  SessionEnd has time to leave) has not exited: the cause is cleared and it is supervised again
+  (nudged within the budget if idle, then the idle notice). The other causes already had a
+  re-check: limit and API error (working again clears; the retry schedule), silent and idle
+  (activity clears), dialog (the screen), questions (the summary), unresponsive and permissions
+  (progress clears; escalation notifies), auth, config and launch (needs you, notified when set).
+- **A step replaces only the disposition its claim owned** (R3-C04). The claim records the job's
+  state, stuck flag and cause when it is taken (after its own bookkeeping, so a restart owns its
+  own "exited"). On completion a brief, a dispatch or a restart replaces that and nothing newer: a
+  `job_update(blocked)`, an auth failure or a limit that arrived while the brief was typed stays.
+  A queued job still becomes running (queued with a brief delivered is a state nobody watches).
+- **Budgets are spent when claimed** (R3-C06). A nudge counts against the streak, and a retry's
+  attempt and next time are recorded, under the claim, before anything is typed; a send that
+  provably typed nothing is refunded (unless something else changed the budget meanwhile). A stale
+  nudge or retry claim found after a crash stays counted, so crash after crash can neither nudge
+  without end nor bypass the API-error cap and back-off.
+- **A stop let through for crowsnest's own typing is not stamped** (R3-C05), like one let through
+  for an answer: a live typing claim proves a send is in flight, not that a turn follows, so the
+  backstop looks again once the agent has sat idle a minute.
+- **Cancel fences the effect in flight** (R2-C08 residual). Each herdr effect of a claim (typing,
+  starting an agent) registers itself, then checks the claim, then runs under a context. Cancel
+  commits first, then cancels a registered effect and leaves the Esc to it: the effect sends Esc
+  when it returns, so the interrupt follows anything it typed. `orch.Prompt` types nothing once its
+  context has ended (it checks right before `agent.prompt`). An `agent.prompt` herdr has already
+  accepted cannot be recalled; the Esc after it ends that turn.
+- **Every typing site names the agent it expects** (R2-I5, R3-I2): nudges, retries and job
+  messages pass `ExpectAgent` too.
+
 ### 6.10 As fixed in R2 (part B): what agents may create, and how briefs travel
 
 The R2 security review (`reviews/R2-opus-security.md`) found that any job agent could start an
@@ -500,6 +537,45 @@ into terminals, the orchestrator's included (R2-M1).
   and no caller can type an ESC (a bracketed-paste end) into a pane. `PromptRequest.ExpectAgent`
   refuses to type into a pane that now holds a different agent (R2-I5); the brief, restart and
   orchestrator-dispatch sends use it.
+
+**As fixed in R3** (`reviews/R3-opus-security.md` H1, M1, M2, L3; `reviews/R3-codex.md` C02, C03):
+
+- **The boundary is recorded, never recomputed** (R3-H1). When crowsnest opens a job's pane it
+  records `jobs.root_dir` (migration `0008_job_root.sql`): the working directory with its links
+  resolved. Children are compared with that stored value only; git is no longer asked (an agent
+  can set `core.worktree` to make `--show-toplevel` print `$HOME`, verified), and the parent's path
+  is not resolved again (it can swap its own directory for a link). A root that is `/`, `$HOME`
+  (as written or resolved) or a directory holding `$HOME` grants nothing, so a human job given in
+  `~` lets its children nothing without asking. A job agent's child in a subdirectory of a
+  non-isolated parent that sits in a repository's subdirectory is now confined to that
+  subdirectory, not the repository: narrower, and safe.
+- **The child's directory is resolved once.** That resolved path is checked, stored as `dir`,
+  shown to the human and launched; the launcher refuses an agent's job whose `dir` no longer
+  resolves to itself (a link swapped since the check). The window between that last check and
+  herdr's own call remains (herdr follows links).
+- **The approval card is crowsnest's** (R3-M1): requester, job, role, engine and model, the
+  resolved directory (and the path the agent asked for when it differs), and the reasons, every
+  path in a code span longer than any backtick run in it. The brief is normalised (CR, VT, FF,
+  NEL, U+2028 and U+2029 become LF; `termtext.Block`), cut at 3000 bytes, and quoted in a fenced
+  block longer than any backtick run inside, under a line saying nothing in it comes from crowsnest.
+- **A qualified allow starts nothing** (R3-C03). The note outranks the choice everywhere in this
+  product, and crowsnest cannot follow a condition ("not until tomorrow", "only with Claude"), so
+  Allow with a note cancels the held job; the note reaches the agent with the answer, and the
+  agent may ask again. The option reads "Allow: start it as asked", the card says so, and the
+  `job_create` result tells the agent.
+- **Approvals are reconciled on every tick** (R3-C02), not only at start: a decision whose callback
+  was lost is applied; a held job whose question id was never stored (a crash between the three
+  writes) finds its question by `job_id` and the `approval_for` context and links it; one with no
+  question after a minute is cancelled (nothing was asked, so nothing can approve it). Creating the
+  approval re-checks the decision once its link is stored, for an answer faster than that write,
+  and a failed creation cleans up with a context of its own. Held jobs are re-notified like any
+  question left too long.
+- **The orchestrator is held to the same rules** (R3-M2): another engine needs the human;
+  remembered directories are stored resolved when the human gives or allows them and compared
+  without resolving again, and `/`, `~` and its ancestors grant nothing (they stay in the job
+  form's list); holding no job, it may have at most `MaxChildren` (8) live jobs of its own.
+- **Held requests are capped per creator** (R3-L3): at most 2 waiting for the human at once, and a
+  held job does not count against the live cap of 16 (it holds no agent).
 
 Every place crowsnest types into a terminal, and how it is cleaned (all through `orch.Prompt`, so
 all through `termtext.Block`, unless noted):
@@ -974,6 +1050,7 @@ The client sends a resize first; the server starts the process on that first res
 - `questions.job_id`, `questions.wait` (was the asker blocking), `questions.delivered_at` (answer typed back). As built (migration `0002_questions.sql`): `id` is an integer shown as `q_<id>`; `expires_at` is always set; delivery bookkeeping is `delivery` (`type`, `poll` or `none`, decided at settling), `delivery_claimed_at` (the write-ahead mark), `delivered_at` and `delivery_error` (8.4)
 - `journal(id, at, kind, summary, detail_json)`: poke, skip, send, answer, restart, alert, backstop (migration `0005_journal.sql`, which also adds `jobs.last_stop_at`, the Stop hook's stamp the backstop reads)
 - `jobs.origin` (migration `0007_job_origin.sql`, R2-H1): who created the job, `''` the human, `agent`, `orchestrator`; the migration also indexes `jobs(parent_id)` for the fan-out count
+- `jobs.root_dir` (migration `0008_job_root.sql`, R3-H1): the resolved directory a job's children may use without asking, recorded when crowsnest opens its pane; `''` grants nothing
 - `jobs.lifecycle_op`, `lifecycle_owner`, `lifecycle_at`, `lifecycle_gen` (migration `0006_job_lifecycle.sql`): the lifecycle claim (6.9); the same migration indexes `jobs(agent_name, state)`, `jobs(pane_id, state)` and `questions(job_id, status)`
 - `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), settings
 
@@ -1314,7 +1391,21 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
     tool the parser, and the size limit goes away.
 42. **Forwarding headers are believed only from a proxy the operator names** (R2-L2). Trusting
     them always lets anyone pick their own rate-limit bucket; never trusting them puts every
-    tunnelled client in one bucket. `--trusted-proxy` is the operator saying which is which.
+    tunnelled client in one bucket. `--trusted-proxy` is the operator saying which is which, and
+    `--trusted-proxy-header` which header that proxy itself writes (R3-L1).
+43. **A cause must have an owner, and the tick checks it against herdr** (R3-C01). A flag that
+    exempts a job from the nudges and the idle notice is safe only while something is acting on
+    it; a stale one is a silent stop.
+44. **A step commits only what it claimed** (R3-C04). Claim ownership fences terminal transitions;
+    the disposition snapshot fences the agent's own newer word.
+45. **Budgets are spent before the effect** (R3-C06). Counting after the effect lets a crash refund
+    it; counting before and refunding only a provable no-op errs toward escalating, which tells
+    Jeff, rather than toward looping.
+46. **A qualified allow is not an allow** (R3-C03). Free text cannot be executed, and the note
+    outranks the choice; cancelling and letting the agent ask again is the honest reading.
+47. **Authority comes from what crowsnest recorded, never from what an agent can edit** (R3-H1,
+    M2). The parent's root is fixed when its pane is made; git configuration and links in the
+    agent's own tree are inputs it controls.
 
 ## 18. Milestones
 
@@ -1370,8 +1461,11 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - The backstop's "stop handled by a hook" test is time-based (a Stop hook stamp within 15 s before the agent was seen to settle). An agent whose hook works on one turn and fails on the very next within that window would miss one backstop nudge; the next idle minute catches it.
 - Answers are typed back only to the pane the question came from, as its token says. An agent restarted in another pane, or a caller without a token (a pane crowsnest did not create, a script), gets the answer only through the Inbox, `--wait`, `get_question` or `job_get`. A held delivery (dialog or draft) waits up to a week.
 - **Agent identity is per uid, not per process** (R1b N2, R2-M2): every agent in a session runs as the same uid, so any agent can read another's environment or its 0600 token file under the state directory with an ordinary file read, and then act as it on the socket (finish or fail its job, forge its hooks and so silence its supervision, ask or `say` as it, the orchestrator included). The token stops accidents and forged environment variables, not a hostile same-uid process; a separate uid for crowsnest would (4.6). Questions and jobs can still be read (`GET`) by any caller (R2-I3), and role overrides in `~/.config/crowsnest/roles/` are writable by every agent and join every future job's system prompt (R2-I6).
-- **Delegation limits are constants** (6.10): depth 3, 8 children per job, 16 live agent-created jobs, not flags. A held job the human cancels from its card leaves its approval question open in the Inbox (answering it then does nothing).
-- **Some typing sites do not check the agent's name yet** (R2-I5): the brief, restart and dispatch sends do; nudges, "continue" retries and job messages still target the pane id alone.
+- **Delegation limits are constants** (6.10): depth 3, 8 children per job (and 8 live jobs of the orchestrator's own while it holds none), 16 live agent-created jobs, 2 held requests per creator, not flags. A held job the human cancels from its card leaves its approval question open in the Inbox (answering it then does nothing).
+- **A held job orphaned by a crash before its question was asked is cancelled after a minute** (R3-C02), and the asking agent is not told (its `job_create` call died with crowsnest); the parent's timeline shows it.
+- **The directory check has a window** (R3-H1): an agent's child directory is resolved once and re-checked right before the launch, but herdr resolves it again itself, so a link flipped in that last instant still moves the pane. Closing it needs herdr to take a directory handle.
+- **The poke replay after a dropped subscription is incomplete** (R3-C08, not fixed): it reads the board's newest 300 jobs and 200 questions, and an event between the replay and the next subscription can be missed. The timer poke's standing list still shows stuck jobs and open questions.
+- **Tokens of a reused pane id** (R3-L2, not fixed): the sweeper revokes on absence only; a pane id herdr reuses within the sweep interval keeps the old pane's token. Job tokens end with the job regardless.
 - The long-poll's waiter state is in memory: after a crowsnest restart, an asker blocked on `ask --wait` gets its answer from its next poll and also typed into its pane.
 - One controller per pane: two browsers on the same pane view take turns (the one that lost the pane says so and offers Reconnect).
 - The Terminal view is herdr's own TUI, which shows every machine the user's herdr config names, remote ones included; anyone who can open it reaches those machines as well (M5). The pane view is limited to the session's own panes.
