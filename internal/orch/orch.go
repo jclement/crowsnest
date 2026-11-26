@@ -203,6 +203,19 @@ type Orchestrator struct {
 	knownSession string
 	// rcCheckUntil is how long after a start the watch looks for Remote Control's banner.
 	rcCheckUntil time.Time
+	// launching is the pane a start is launching Claude in, before the status names it: hooks
+	// that fire during the launch (SessionStart, InstructionsLoaded) are matched to it.
+	launching string
+}
+
+// Pane is the pane the agent runs in, or the one it is being launched in right now.
+func (o *Orchestrator) Pane() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.status.PaneID != "" {
+		return o.status.PaneID
+	}
+	return o.launching
 }
 
 // launchBaseline is the session id Claude was started with and the ids herdr may go on

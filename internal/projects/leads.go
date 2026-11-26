@@ -213,7 +213,7 @@ func (l *Leads) ByPane(paneID string) *Lead {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, lead := range l.running {
-		if lead.Agent.Status().PaneID == paneID {
+		if lead.Agent.Pane() == paneID {
 			return lead
 		}
 	}

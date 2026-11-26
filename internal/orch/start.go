@@ -200,6 +200,9 @@ func (o *Orchestrator) waitForShell(ctx context.Context, paneID string) error {
 
 // start writes the start-up files and starts Claude in paneID.
 func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (Status, error) {
+	o.mu.Lock()
+	o.launching = paneID
+	o.mu.Unlock()
 	files, err := o.writeFiles(ctx, paneID)
 	if err != nil {
 		return o.fail(err)
