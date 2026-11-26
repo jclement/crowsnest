@@ -44,14 +44,14 @@ type Rule string
 
 // Rules.
 const (
-	RuleNoJob           Rule = "no_job"           // the session holds no job
-	RuleTerminal        Rule = "terminal"         // done, failed or cancelled
-	RuleDeclared        Rule = "declared"         // blocked, needs_you, in_review or queued
-	RuleWaiting         Rule = "waiting"          // open questions, and nothing else workable
-	RuleAlreadyStuck    Rule = "already_stuck"    // already marked unresponsive; no new progress
-	RuleBudgetSpent     Rule = "budget_spent"     // MaxNudges with no progress: allow, escalate
-	RuleNudge           Rule = "nudge"            // refused: nothing declared
-	RuleNudgeQuestions  Rule = "nudge_questions"  // refused: questions open, but not declared waiting
+	RuleNoJob          Rule = "no_job"          // the session holds no job
+	RuleTerminal       Rule = "terminal"        // done, failed or cancelled
+	RuleDeclared       Rule = "declared"        // blocked, needs_you, in_review or queued
+	RuleWaiting        Rule = "waiting"         // open questions, and nothing else workable
+	RuleAlreadyStuck   Rule = "already_stuck"   // already marked unresponsive; no new progress
+	RuleBudgetSpent    Rule = "budget_spent"    // MaxNudges with no progress: allow, escalate
+	RuleNudge          Rule = "nudge"           // refused: nothing declared
+	RuleNudgeQuestions Rule = "nudge_questions" // refused: questions open, but not declared waiting
 )
 
 // Decision is the check's answer.

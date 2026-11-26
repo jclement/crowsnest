@@ -108,7 +108,9 @@ func textCol(name string, p *string) column {
 func boolCol(name string, p *bool) column {
 	return column{name: name, scan: p, value: func() any { return *p }}
 }
-func intCol(name string, p *int) column { return column{name: name, scan: p, value: func() any { return *p }} }
+func intCol(name string, p *int) column {
+	return column{name: name, scan: p, value: func() any { return *p }}
+}
 func int64Col(name string, p *int64) column {
 	return column{name: name, scan: p, value: func() any { return *p }}
 }
