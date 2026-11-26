@@ -1,0 +1,18 @@
+[
+  {
+    "id": "abbe8ef5-9e36-4a37-9657-a32cd744e258",
+    "index": 0,
+    "seq": 1,
+    "kind": "user",
+    "text": "Reply with a short markdown list of three colours and one fenced code block of Go hello world. No tools.",
+    "at": "2026-11-26T06:01:27.861Z"
+  },
+  {
+    "id": "c9f9c352-2e1d-4408-836b-24d6461f3a6a",
+    "index": 1,
+    "seq": 2,
+    "kind": "assistant",
+    "text": "- Red\n- Green\n- Blue\n\n```go\npackage main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, world!\")\n}\n```",
+    "at": "2026-11-26T06:01:29.182Z"
+  }
+]

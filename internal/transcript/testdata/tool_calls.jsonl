@@ -1,0 +1,67 @@
+{"type":"session-owner"}
+{"type":"derived-from"}
+{"type":"queue-operation","timestamp":"2026-11-26T06:01:30.210Z"}
+{"type":"queue-operation","timestamp":"2026-11-26T06:01:30.211Z"}
+{"type":"attachment","uuid":"947b16cc-2bfd-4fde-b077-5fea1405740f","timestamp":"2026-11-26T06:01:30.105Z"}
+{"type":"attachment","uuid":"29a3df8f-df40-480b-b12b-7c504543962a","timestamp":"2026-11-26T06:01:30.106Z"}
+{"type":"attachment","uuid":"cbcb2440-e380-4c99-80df-3702e20796a4","timestamp":"2026-11-26T06:01:30.106Z"}
+{"type":"attachment","uuid":"79d8ae36-988c-4e8e-8b87-46b917d02e0c","timestamp":"2026-11-26T06:01:30.106Z"}
+{"type":"attachment","uuid":"dde6cc7e-f348-4684-9654-c978399e7d34","timestamp":"2026-11-26T06:01:30.106Z"}
+{"type":"attachment","uuid":"91214a77-e636-4a1d-982e-96cf10cae7c9","timestamp":"2026-11-26T06:01:30.107Z"}
+{"type":"attachment","uuid":"62f03f5f-3dcc-4902-9757-8633b0da16b3","timestamp":"2026-11-26T06:01:30.156Z"}
+{"type":"attachment","uuid":"7cd739d8-203d-4b66-a076-ba45236e56f0","timestamp":"2026-11-26T06:01:30.202Z"}
+{"type":"user","uuid":"0bd5213a-86ed-42d5-b499-e4e285b0ec8b","parentUuid":"7cd739d8-203d-4b66-a076-ba45236e56f0","isSidechain":false,"timestamp":"2026-11-26T06:01:30.227Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"user","content":"Use the Bash tool to run 'ls' and then the Read tool to read notes.txt, then tell me how many lines it has."}}
+{"type":"attachment","uuid":"1f347fc3-a210-4d7c-87ce-ee3fbde3ef6f","timestamp":"2026-11-26T06:01:30.227Z"}
+{"type":"attachment","uuid":"1bd0a68f-d74e-4f3b-a632-9e55e097a10e","timestamp":"2026-11-26T06:01:30.227Z"}
+{"type":"attachment","uuid":"e2f9de09-5a8d-44b4-beeb-f0c288db28ad","timestamp":"2026-11-26T06:01:30.227Z"}
+{"type":"attachment","uuid":"66bdc356-55fb-4013-af7a-3903c9c71112","timestamp":"2026-11-26T06:01:30.227Z"}
+{"type":"attachment","uuid":"5103c08e-b719-46ac-b608-1e41cb010ca6","timestamp":"2026-11-26T06:01:30.227Z"}
+{"type":"attachment","uuid":"e46cc494-2849-4c40-ab11-b908499d7f75","timestamp":"2026-11-26T06:01:30.227Z"}
+{"type":"data-flow-records"}
+{"type":"atis-latch"}
+{"type":"attachment","uuid":"b4a34770-eb7c-42f4-9390-c45fbfcb230a","timestamp":"2026-11-26T06:01:30.303Z"}
+{"type":"attachment","uuid":"88a5aee7-097c-45ae-b2bb-391e2e2c6725","timestamp":"2026-11-26T06:01:30.303Z"}
+{"type":"attachment","uuid":"542acdaf-8264-4246-80a3-54e027ab9f7e","timestamp":"2026-11-26T06:01:30.304Z"}
+{"type":"attachment","uuid":"0180b082-c370-4498-a084-0756212bd368","timestamp":"2026-11-26T06:01:30.304Z"}
+{"type":"attachment","uuid":"bb520c6f-4e71-4909-a13c-2d15406fc694","timestamp":"2026-11-26T06:01:30.305Z"}
+{"type":"api-request-shape","timestamp":"2026-11-26T06:01:30.318Z"}
+{"type":"api-request-blob"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-11-26T06:01:30.318Z"}
+{"type":"last-prompt"}
+{"type":"session-owner"}
+{"type":"atis-latch"}
+{"type":"tools-used"}
+{"type":"data-flow-records"}
+{"type":"assistant","uuid":"f1287755-2706-4945-a385-41bc9fe5d0d4","parentUuid":"bb520c6f-4e71-4909-a13c-2d15406fc694","isSidechain":false,"timestamp":"2026-11-26T06:01:32.115Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2kJCKnhaabW8fD9SZA","model":"claude-haiku-5-5","content":[{"type":"thinking","thinking":""}]}}
+{"type":"assistant","uuid":"43fcbb36-a176-41af-a5d5-b94ea6738b92","parentUuid":"f1287755-2706-4945-a385-41bc9fe5d0d4","isSidechain":false,"timestamp":"2026-11-26T06:01:32.290Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2kJCKnhaabW8fD9SZA","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"toolu_012RKEMWGo5CCxJZkwVtVmzh","name":"Bash","input":{"command":"ls","description":"List files in current directory"}}]}}
+{"type":"user","uuid":"eb93b47a-592f-4975-845a-db7af62ff946","parentUuid":"43fcbb36-a176-41af-a5d5-b94ea6738b92","isSidechain":false,"timestamp":"2026-11-26T06:01:33.013Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"user","content":[{"tool_use_id":"toolu_012RKEMWGo5CCxJZkwVtVmzh","type":"tool_result","content":"(Bash completed with no output)","is_error":false}]}}
+{"type":"attachment","uuid":"f9dc24bd-91ac-49ab-87f9-4c534f090f0d","timestamp":"2026-11-26T06:01:33.017Z"}
+{"type":"attachment","uuid":"eb74dbb5-7e14-48c7-8d9a-2bd59d693db5","timestamp":"2026-11-26T06:01:33.025Z"}
+{"type":"attachment","uuid":"61c916a5-8a04-4072-a651-b7c7338f9f23","timestamp":"2026-11-26T06:01:33.025Z"}
+{"type":"attachment","uuid":"429118b4-bb3f-43ff-b02d-793e19fe9e26","timestamp":"2026-11-26T06:01:33.025Z"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-11-26T06:01:33.040Z"}
+{"type":"last-prompt"}
+{"type":"session-owner"}
+{"type":"atis-latch"}
+{"type":"tools-used"}
+{"type":"data-flow-records"}
+{"type":"assistant","uuid":"5179549d-edd9-4445-8cd6-50509b498c93","parentUuid":"429118b4-bb3f-43ff-b02d-793e19fe9e26","isSidechain":false,"timestamp":"2026-11-26T06:01:35.891Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2kVmLzytGvQUbhnSFx","model":"claude-haiku-5-5","content":[{"type":"thinking","thinking":""}]}}
+{"type":"assistant","uuid":"7d42befc-a22b-41ad-a883-624ec3a552c1","parentUuid":"5179549d-edd9-4445-8cd6-50509b498c93","isSidechain":false,"timestamp":"2026-11-26T06:01:36.104Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2kVmLzytGvQUbhnSFx","model":"claude-haiku-5-5","content":[{"type":"text","text":"The `ls` returned no output, so the directory looks empty. I'll still try the read as you asked."}]}}
+{"type":"assistant","uuid":"bfc39d18-ab2c-4b30-8fbc-82cf9d28d452","parentUuid":"7d42befc-a22b-41ad-a883-624ec3a552c1","isSidechain":false,"timestamp":"2026-11-26T06:01:36.620Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2kVmLzytGvQUbhnSFx","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"toolu_01NAwHYFujBMfHxco9QUoiNm","name":"Read","input":{"file_path":"/home/crow/work/demo/notes.txt"}}]}}
+{"type":"user","uuid":"71de1597-58d1-42b3-ab75-b6b2387ba2da","parentUuid":"bfc39d18-ab2c-4b30-8fbc-82cf9d28d452","isSidechain":false,"timestamp":"2026-11-26T06:01:36.643Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"user","content":[{"tool_use_id":"toolu_01NAwHYFujBMfHxco9QUoiNm","type":"tool_result","content":"1\talpha\n2\tbeta\n3\tgamma\n4\t"}]}}
+{"type":"attachment","uuid":"db6a4d8c-478e-4963-b7ed-223ef317490b","timestamp":"2026-11-26T06:01:36.650Z"}
+{"type":"attachment","uuid":"5802a574-1b96-49c9-a11a-32ce08271fe8","timestamp":"2026-11-26T06:01:36.650Z"}
+{"type":"attachment","uuid":"53929bf9-5d16-40e5-82b1-d2f0a7c20ebe","timestamp":"2026-11-26T06:01:36.650Z"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-11-26T06:01:36.660Z"}
+{"type":"last-prompt"}
+{"type":"session-owner"}
+{"type":"atis-latch"}
+{"type":"data-flow-records"}
+{"type":"assistant","uuid":"5e5d8c76-ffc4-47ce-88d1-1d1fbd42a3a8","parentUuid":"53929bf9-5d16-40e5-82b1-d2f0a7c20ebe","isSidechain":false,"timestamp":"2026-11-26T06:01:39.733Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2kmGG3mo74prs18NR2","model":"claude-haiku-5-5","content":[{"type":"thinking","thinking":""}]}}
+{"type":"assistant","uuid":"c34ff13e-1727-47c4-8358-692bd620f5a1","parentUuid":"5e5d8c76-ffc4-47ce-88d1-1d1fbd42a3a8","isSidechain":false,"timestamp":"2026-11-26T06:01:40.315Z","sessionId":"session-tool_calls","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2kmGG3mo74prs18NR2","model":"claude-haiku-5-5","content":[{"type":"text","text":"The file has **3 lines** of content: `alpha`, `beta`, `gamma`.\n\nThe Read output also shows an empty line 4. That usually means a trailing newline, so I count 3 lines. I did not run `wc -l` to confirm.\n\nThe `ls` printed nothing, even though `notes.txt` exists in that directory. That doesn't match, so I can't explain it from here."}]}}
+{"type":"system","subtype":"stop_hook_summary","uuid":"d950f454-19ac-4af1-b602-2c8ec26701d6","parentUuid":"c34ff13e-1727-47c4-8358-692bd620f5a1","isSidechain":false,"timestamp":"2026-11-26T06:01:40.341Z"}
+{"type":"last-prompt"}
+{"type":"cost-state"}

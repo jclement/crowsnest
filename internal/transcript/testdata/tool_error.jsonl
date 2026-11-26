@@ -1,0 +1,52 @@
+{"type":"session-owner"}
+{"type":"derived-from"}
+{"type":"queue-operation","timestamp":"2026-11-26T06:01:41.058Z"}
+{"type":"queue-operation","timestamp":"2026-11-26T06:01:41.059Z"}
+{"type":"attachment","uuid":"96ed57f6-ed9e-48ea-9fdb-0fab0884fed8","timestamp":"2026-11-26T06:01:40.954Z"}
+{"type":"attachment","uuid":"e1af25aa-04bb-4aaa-8d6b-a5c5770c2195","timestamp":"2026-11-26T06:01:40.956Z"}
+{"type":"attachment","uuid":"2214e5d6-0551-46ae-9270-9123f19e8dff","timestamp":"2026-11-26T06:01:40.956Z"}
+{"type":"attachment","uuid":"acdde413-02f5-4a2f-a30f-daacd89ec789","timestamp":"2026-11-26T06:01:40.957Z"}
+{"type":"attachment","uuid":"3635033c-60da-42cc-b3e2-c85a07cd3e34","timestamp":"2026-11-26T06:01:40.957Z"}
+{"type":"attachment","uuid":"e0085222-6b27-41f1-b82f-22d28b056c8c","timestamp":"2026-11-26T06:01:40.958Z"}
+{"type":"attachment","uuid":"395e8ea0-a0d5-44b5-b759-10fada20643c","timestamp":"2026-11-26T06:01:41.005Z"}
+{"type":"attachment","uuid":"ea66bfd1-7e0e-4875-85dd-b6a1fd66df02","timestamp":"2026-11-26T06:01:41.050Z"}
+{"type":"user","uuid":"96994d71-d5ce-4471-9c88-c5a4f764b0eb","parentUuid":"ea66bfd1-7e0e-4875-85dd-b6a1fd66df02","isSidechain":false,"timestamp":"2026-11-26T06:01:41.076Z","sessionId":"session-tool_error","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"user","content":"Use the Bash tool to run 'cat does-not-exist.txt' and tell me what happened."}}
+{"type":"attachment","uuid":"93c1381e-a64a-469b-b968-5adbd1c445b5","timestamp":"2026-11-26T06:01:41.075Z"}
+{"type":"attachment","uuid":"bc309ff2-e668-4350-9c90-3f3481a52189","timestamp":"2026-11-26T06:01:41.075Z"}
+{"type":"attachment","uuid":"0448e120-2bd0-4e6c-b9bd-069fdaa89eb8","timestamp":"2026-11-26T06:01:41.075Z"}
+{"type":"attachment","uuid":"5474b520-69dd-4a02-890a-8f4e38b4f355","timestamp":"2026-11-26T06:01:41.075Z"}
+{"type":"attachment","uuid":"32dccf89-7b56-4173-8a62-0b92d2aa52cb","timestamp":"2026-11-26T06:01:41.075Z"}
+{"type":"attachment","uuid":"11d60d85-8558-4055-82dc-c3e1dff57b2e","timestamp":"2026-11-26T06:01:41.075Z"}
+{"type":"data-flow-records"}
+{"type":"atis-latch"}
+{"type":"attachment","uuid":"82aaeb6a-7ead-4cef-8473-36f3f8993343","timestamp":"2026-11-26T06:01:41.153Z"}
+{"type":"attachment","uuid":"20ba5c60-1f33-420f-afee-e584d7f3d38d","timestamp":"2026-11-26T06:01:41.153Z"}
+{"type":"attachment","uuid":"353f517b-0378-45ee-9b00-e76688e22a88","timestamp":"2026-11-26T06:01:41.153Z"}
+{"type":"attachment","uuid":"b3ae8381-f87a-42cf-90d6-7b3ba9e3530d","timestamp":"2026-11-26T06:01:41.154Z"}
+{"type":"attachment","uuid":"f728b411-3938-4638-88e3-86b7aba0f05f","timestamp":"2026-11-26T06:01:41.154Z"}
+{"type":"api-request-shape","timestamp":"2026-11-26T06:01:41.168Z"}
+{"type":"api-request-blob"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-11-26T06:01:41.168Z"}
+{"type":"last-prompt"}
+{"type":"session-owner"}
+{"type":"atis-latch"}
+{"type":"tools-used"}
+{"type":"data-flow-records"}
+{"type":"assistant","uuid":"3f82756a-51e2-4ec9-a015-e960386b8a5d","parentUuid":"f728b411-3938-4638-88e3-86b7aba0f05f","isSidechain":false,"timestamp":"2026-11-26T06:01:42.365Z","sessionId":"session-tool_error","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2m6Z7dkaSsPiCWNtoZ","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"toolu_01375N3iSnJLLuFNh3W6mLpd","name":"Bash","input":{"command":"cat does-not-exist.txt","description":"Attempt to print a file that does not exist"}}]}}
+{"type":"user","uuid":"42d7f632-961e-47fa-a0b7-b7d7cc5d863b","parentUuid":"3f82756a-51e2-4ec9-a015-e960386b8a5d","isSidechain":false,"timestamp":"2026-11-26T06:01:43.068Z","sessionId":"session-tool_error","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"user","content":[{"type":"tool_result","content":"Exit code 1\n\u001b[31m[bat error]\u001b[0m: 'does-not-exist.txt': No such file or directory (os error 2)","is_error":true,"tool_use_id":"toolu_01375N3iSnJLLuFNh3W6mLpd"}]}}
+{"type":"attachment","uuid":"da4a9eb1-3d8b-400b-89b0-4fe9f7bb14f5","timestamp":"2026-11-26T06:01:43.071Z"}
+{"type":"attachment","uuid":"f2f69183-c2d7-4b54-a5ab-86a20cf10d4f","timestamp":"2026-11-26T06:01:43.077Z"}
+{"type":"attachment","uuid":"6f054dc6-3037-4ba1-9933-beb8d20c9da8","timestamp":"2026-11-26T06:01:43.077Z"}
+{"type":"attachment","uuid":"b5aa1a1c-dc9d-49ee-a424-b7cb02343e1d","timestamp":"2026-11-26T06:01:43.077Z"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-11-26T06:01:43.095Z"}
+{"type":"last-prompt"}
+{"type":"session-owner"}
+{"type":"atis-latch"}
+{"type":"data-flow-records"}
+{"type":"assistant","uuid":"bf6d5efb-562b-4f9d-bc35-17100b070f84","parentUuid":"b5aa1a1c-dc9d-49ee-a424-b7cb02343e1d","isSidechain":false,"timestamp":"2026-11-26T06:01:44.282Z","sessionId":"session-tool_error","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2mEkzM1FgRC9atDEK4","model":"claude-haiku-5-5","content":[{"type":"thinking","thinking":""}]}}
+{"type":"assistant","uuid":"34892bcd-08a8-4fd5-b1cc-10723fbcaed0","parentUuid":"bf6d5efb-562b-4f9d-bc35-17100b070f84","isSidechain":false,"timestamp":"2026-11-26T06:01:45.272Z","sessionId":"session-tool_error","cwd":"/home/crow/work/demo","version":"2.1.332","message":{"role":"assistant","id":"msg_011ChR2mEkzM1FgRC9atDEK4","model":"claude-haiku-5-5","content":[{"type":"text","text":"The command failed because the file doesn't exist. `cat` exited with code 1 and printed:\n\n```\n[bat error]: 'does-not-exist.txt': No such file or directory (os error 2)\n```\n\nThe error came from `bat`, not the system `cat`, so `cat` on this machine is probably aliased to `bat`. The file was looked up in the working directory, `/home/crow/work/demo`, and there is no file by that name there."}]}}
+{"type":"system","subtype":"stop_hook_summary","uuid":"0e9ea5b9-3ec0-4833-ac9f-561618c7b2aa","parentUuid":"34892bcd-08a8-4fd5-b1cc-10723fbcaed0","isSidechain":false,"timestamp":"2026-11-26T06:01:45.288Z"}
+{"type":"last-prompt"}
+{"type":"cost-state"}
