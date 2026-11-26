@@ -46,6 +46,15 @@ describe("hotkeyFor", () => {
     expect(hotkeyFor(key("?", { shiftKey: true }), { ...page, terminal: true, typing: true }, initialSequence, 0).action).toBeNull();
   });
 
+  it("focuses the needs-you tray with g then n, and never answers on a bare y or n", () => {
+    const first = hotkeyFor(key("g"), page, initialSequence, 1000);
+    expect(hotkeyFor(key("n"), page, first.state, 1200).action).toEqual({ kind: "tray" });
+    expect(hotkeyFor(key("n"), { ...page, typing: true }, first.state, 1200).action).toBeNull();
+    expect(hotkeyFor(key("n"), page, initialSequence, 0).action).toBeNull();
+    expect(hotkeyFor(key("y"), page, initialSequence, 0).action).toBeNull();
+    expect(hotkeyFor(key("y"), page, first.state, 1200).action).toBeNull();
+  });
+
   it("navigates with g then a view key, within the time limit", () => {
     const first = hotkeyFor(key("g"), page, initialSequence, 1000);
     expect(first.action).toBeNull();

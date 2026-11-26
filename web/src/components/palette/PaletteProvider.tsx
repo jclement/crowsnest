@@ -6,6 +6,7 @@
 //
 // The key listener sits on the window in the capture phase, so a terminal (xterm stops the
 // events it handles) or a view's own handler never sees the chord first.
+import { FOCUS_TRAY_EVENT } from "../../lib/needsYou";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
@@ -81,6 +82,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
       if (openRef.current) return;
       event.preventDefault();
       if (action.kind === "help") setSheet("shortcuts");
+      else if (action.kind === "tray") window.dispatchEvent(new Event(FOCUS_TRAY_EVENT));
       else void navigate({ to: action.to, search: {} } as unknown as Parameters<typeof navigate>[0]);
     };
     window.addEventListener("keydown", onKey, { capture: true });

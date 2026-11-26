@@ -11,6 +11,7 @@ import type { SpendGroup, SpendPeriod, SpendReport } from "./spend";
 import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types";
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
+import type { Approval, DecideRequest } from "./approvals";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
 import type { ContextInfo, ScheduleView } from "./schedule";
@@ -207,6 +208,10 @@ export const endpoints = {
   answerQuestion: (id: string, answer: AnswerRequest) =>
     api<Question>(`/questions/${encodeURIComponent(id)}/answer`, { method: "POST", body: answer }),
   cancelQuestion: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  approvals: (status: "pending" | "all") => api<Approval[]>(`/approvals?status=${status}`),
+  approval: (id: string) => api<Approval>(`/approvals/${encodeURIComponent(id)}`),
+  decideApproval: (id: string, request: DecideRequest) =>
+    api<Approval>(`/approvals/${encodeURIComponent(id)}/decide`, { method: "POST", body: request }),
   inboxSummary: () => api<InboxSummary>("/inbox/summary"),
   // ---- M7: jobs ----
   jobs: () => api<Job[]>("/jobs"),
@@ -369,6 +374,10 @@ export const queryKeys = {
   questionList: (status: string) => ["questions", "list", status] as const,
   question: (id: string) => ["questions", "one", id] as const,
   inboxSummary: ["questions", "summary"] as const,
+  /** Everything about approvals sits under ["approvals"]; an `approval` event refreshes it. */
+  approvals: ["approvals"] as const,
+  approvalList: (status: string) => ["approvals", "list", status] as const,
+  approval: (id: string) => ["approvals", "one", id] as const,
   /** Everything about the journal sits under ["journal"]; a `journal` or `poke` event refreshes it. */
   journal: ["journal"] as const,
   journalPage: (kinds: string) => ["journal", kinds] as const,

@@ -9,6 +9,12 @@
 // scope is the whole app and a new version is picked up on the next visit.
 //
 // The payload (internal/push/send.go) is JSON {title, body, tag, url, kind}: no secrets, one line.
+// A low-risk approval or a confirm/choice question also carries {actions: [{action, title}],
+// action_token} (DESIGN.md 8.7): where the platform shows notification buttons (Chrome on desktop
+// and Android; not Safari, iOS or Firefox), a press posts {token, action} to /push/action WITHOUT
+// the session cookie. The token is single-use, scoped to that one item and expires in minutes;
+// the result is shown as a new notification. Elsewhere the buttons are left off and a tap opens
+// the item, as for every other notice.
 "use strict";
 
 const API = "/api/v1";
@@ -34,10 +40,26 @@ function readPayload(data) {
       tag: typeof parsed.tag === "string" && parsed.tag ? parsed.tag : fallback.tag,
       url: safePath(parsed.url),
       kind: typeof parsed.kind === "string" ? parsed.kind : "",
+      actions: readActions(parsed.actions),
+      token: typeof parsed.action_token === "string" ? parsed.action_token : "",
     };
   } catch {
     return fallback;
   }
+}
+
+/** At most two {action, title} buttons with plain names; anything else is dropped. */
+function readActions(actions) {
+  if (!Array.isArray(actions)) return [];
+  return actions
+    .filter((entry) => entry && typeof entry.action === "string" && /^[A-Za-z0-9_.-]{1,32}$/.test(entry.action) && typeof entry.title === "string")
+    .slice(0, 2)
+    .map((entry) => ({ action: entry.action, title: entry.title.slice(0, 24) }));
+}
+
+/** Whether this browser shows buttons on a notification. */
+function actionsSupported() {
+  return typeof Notification !== "undefined" && typeof Notification.maxActions === "number" && Notification.maxActions > 0;
 }
 
 /** Only a path on this origin may be opened: a pushed URL can never send the app elsewhere. */
@@ -48,6 +70,7 @@ function safePath(url) {
 
 /** Shows the notification for a payload. Exposed on self for the hermetic browser suite. */
 function showNotice(notice) {
+  const buttons = notice.token && notice.actions && notice.actions.length > 0 && actionsSupported() ? notice.actions : [];
   return self.registration.showNotification(notice.title, {
     body: notice.body,
     tag: notice.tag,
@@ -55,7 +78,8 @@ function showNotice(notice) {
     renotify: true,
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
-    data: { url: notice.url, kind: notice.kind },
+    actions: buttons,
+    data: { url: notice.url, kind: notice.kind, token: buttons.length > 0 ? notice.token : "" },
   });
 }
 self.crowsnestShowNotice = showNotice;
@@ -81,10 +105,46 @@ async function openInApp(url) {
 }
 self.crowsnestOpenInApp = openInApp;
 
+/**
+ * Answers an item from a notification button: the token alone authorises it (credentials are
+ * omitted, so the session cookie is never sent), then the outcome replaces the notification. A
+ * refused or failed answer says so and links to the item.
+ */
+async function answerFromNotification(data, action, tag) {
+  let message = "";
+  let ok = false;
+  try {
+    const response = await fetch(API + "/push/action", {
+      method: "POST",
+      credentials: "omit",
+      headers: { "Content-Type": "application/json", "X-Crowsnest": "1", Accept: "application/json" },
+      body: JSON.stringify({ token: data.token, action }),
+    });
+    const body = await response.json().catch(() => ({}));
+    ok = response.ok;
+    message = ok ? (body.data && body.data.message) || "Done." : (body.error && body.error.message) || "crowsnest refused the answer.";
+  } catch {
+    message = "crowsnest could not be reached.";
+  }
+  return self.registration.showNotification(ok ? "crowsnest: answered" : "crowsnest: not answered", {
+    body: ok ? message : message + " Tap to open it.",
+    tag,
+    renotify: false,
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    data: { url: safePath(data.url), kind: "result", token: "" },
+  });
+}
+self.crowsnestAnswer = answerFromNotification;
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data && event.notification.data.url;
-  event.waitUntil(openInApp(url));
+  const data = event.notification.data || {};
+  if (event.action && data.token) {
+    event.waitUntil(answerFromNotification(data, event.action, event.notification.tag));
+    return;
+  }
+  event.waitUntil(openInApp(data.url));
 });
 
 /** Converts the server's base64url VAPID key for pushManager.subscribe. */

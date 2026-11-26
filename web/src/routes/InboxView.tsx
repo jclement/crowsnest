@@ -1,14 +1,16 @@
-// The Inbox (DESIGN.md sections 8 and 12): everything that needs the human, in one list. Two
-// sources feed it: questions agents asked through crowsnest, and terminal dialogs (agents blocked
-// on a permission or question prompt, from the fleet). Blocking questions and dialogs come first,
-// then other open questions, notices last; the History tab holds settled questions.
+// The Inbox (DESIGN.md sections 8 and 12): everything that needs the human, in one list. Three
+// sources feed it: tool calls waiting for approval (8.7), questions agents asked through crowsnest,
+// and terminal dialogs (agents blocked on a permission or question prompt, from the fleet; one
+// whose pane has a pending approval is that approval and is not listed twice). Approvals, blocking
+// questions and dialogs come first, then other open questions, notices last; the History tab holds
+// settled questions and approvals.
 //
-// The selection lives in the URL (?q=q_7, or ?q=dialog:<pane id>) so a link or a reload lands on
-// it. From md the list and the selected item sit side by side; on a phone the item opens in a
+// The selection lives in the URL (?q=q_7, ?q=approval:ap_3 or ?q=dialog:<pane id>) so a link, a
+// notification or a reload lands on it. From md the list and the selected item sit side by side; on a phone the item opens in a
 // full-screen sheet.
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Bell, BellOff, BellRing, FileDiff, Inbox, ListTodo, MessageSquareWarning, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { Bell, BellOff, BellRing, FileDiff, Inbox, ListTodo, MessageSquareWarning, RefreshCw, ShieldAlert } from "lucide-react";
+import { useState, type ReactElement } from "react";
 import { DialogCard } from "../components/fleet/DialogCard";
 import { QuestionDetail } from "../components/inbox/QuestionDetail";
 import { Banner } from "../components/ui/Banner";
@@ -23,13 +25,16 @@ import { relativeTime } from "../lib/format";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { notificationState, requestNotifications, type NotificationState } from "../lib/notifications";
 import { isFinished, type Job } from "../lib/jobs";
-import { useAgentScreen, useFleet, useJobs, useQuestions } from "../lib/queries";
+import { useAgentScreen, useApproval, useApprovals, useFleet, useJobs, useQuestions } from "../lib/queries";
+import { compareApprovals, outcome, requester, riskLabels, type Approval } from "../lib/approvals";
+import { ApprovalCard } from "../components/approvals/ApprovalCard";
 import { answerSummary, compareQuestions, kindLabels, type Question } from "../lib/questions";
 import type { Agent } from "../lib/types";
 
 type InboxTab = "open" | "history";
 
 const DIALOG_PREFIX = "dialog:";
+const APPROVAL_PREFIX = "approval:";
 
 export function InboxView() {
   const { q: selected } = useSearch({ strict: false }) as { q?: string };
@@ -81,9 +86,12 @@ export function InboxView() {
 
 function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: string) => void }) {
   const questions = useQuestions("open");
+  const approvals = useApprovals("pending");
   const fleet = useFleet();
   const jobs = useJobs();
-  const dialogs = (fleet.data?.agents ?? []).filter((agent) => agent.needs_you);
+  const pendingApprovals = [...(approvals.data ?? [])].sort(compareApprovals);
+  const approvalPanes = new Set(pendingApprovals.map((approval) => approval.pane_id));
+  const dialogs = (fleet.data?.agents ?? []).filter((agent) => agent.needs_you && !approvalPanes.has(agent.pane_id));
   // Stuck jobs appear here too (DESIGN.md 12); a job waiting on questions is already represented
   // by its questions, and one at a dialog by the dialog row.
   const stuck = (jobs.data ?? []).filter((job) => job.stuck && !isFinished(job.state));
@@ -94,7 +102,7 @@ function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: st
   const sorted = [...questions.data].sort(compareQuestions);
   const blocking = sorted.filter((question) => question.urgency === "blocking" && question.kind !== "notice");
   const rest = sorted.filter((question) => !blocking.includes(question));
-  if (sorted.length === 0 && dialogs.length === 0 && stuck.length === 0) {
+  if (sorted.length === 0 && dialogs.length === 0 && stuck.length === 0 && pendingApprovals.length === 0) {
     return (
       <EmptyState icon={Inbox} title="Nothing needs you">
         When an agent asks a question or stops at a terminal dialog, it lands here.
@@ -103,6 +111,9 @@ function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: st
   }
   return (
     <ul aria-label="Needs you" className="divide-y divide-border">
+      {pendingApprovals.map((approval) => (
+        <ApprovalRow key={approval.id} approval={approval} selected={selected === APPROVAL_PREFIX + approval.id} onSelect={onSelect} />
+      ))}
       {blocking.map((question) => (
         <QuestionRow key={question.id} question={question} selected={selected === question.id} onSelect={onSelect} />
       ))}
@@ -121,20 +132,31 @@ function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: st
 
 function HistoryList({ selected, onSelect }: { selected?: string; onSelect: (id: string) => void }) {
   const questions = useQuestions("answered,expired,cancelled");
+  const approvals = useApprovals("all");
   if (questions.isPending) return <SkeletonRows rows={5} label="Loading history" />;
   if (questions.isError) return <LoadError message={questions.error.message} retry={() => void questions.refetch()} />;
-  if (questions.data.length === 0) {
+  const settledApprovals = (approvals.data ?? []).filter((approval) => approval.status !== "pending");
+  if (questions.data.length === 0 && settledApprovals.length === 0) {
     return (
       <EmptyState icon={Inbox} title="No history yet">
-        Answered, expired and cancelled questions are kept here.
+        Answered, expired and cancelled questions, and settled approvals, are kept here.
       </EmptyState>
     );
   }
+  type Entry = { at: string; node: ReactElement };
+  const entries: Entry[] = [
+    ...questions.data.map((question) => ({
+      at: question.settled_at ?? question.created_at,
+      node: <QuestionRow key={question.id} question={question} selected={selected === question.id} onSelect={onSelect} />,
+    })),
+    ...settledApprovals.map((approval) => ({
+      at: approval.settled_at ?? approval.created_at,
+      node: <ApprovalRow key={approval.id} approval={approval} selected={selected === APPROVAL_PREFIX + approval.id} onSelect={onSelect} />,
+    })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
   return (
     <ul aria-label="History" className="divide-y divide-border">
-      {[...questions.data].sort(compareQuestions).map((question) => (
-        <QuestionRow key={question.id} question={question} selected={selected === question.id} onSelect={onSelect} />
-      ))}
+      {entries.map((entry) => entry.node)}
     </ul>
   );
 }
@@ -169,6 +191,31 @@ function QuestionRow({ question, selected, onSelect }: { question: Question; sel
             </Chip>
           )}
           {settled && <span className="min-w-0 truncate text-xs text-muted">→ {answerSummary(question)}</span>}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function ApprovalRow({ approval, selected, onSelect }: { approval: Approval; selected: boolean; onSelect: (id: string) => void }) {
+  const settled = approval.status !== "pending";
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onSelect(APPROVAL_PREFIX + approval.id)}
+        aria-current={selected || undefined}
+        className={cn(rowClass, selected && "bg-selected")}
+      >
+        <span className="flex w-full items-start gap-2">
+          <ShieldAlert className={cn("mt-0.5 h-4 w-4 shrink-0", approval.risk === "dangerous" ? "text-danger" : approval.risk === "elevated" ? "text-warning" : "text-success")} aria-hidden />
+          <span className={cn("min-w-0 flex-1 break-words font-mono text-xs font-medium", settled ? "text-body" : "text-heading")}>{approval.summary}</span>
+          <span className="shrink-0 text-2xs text-muted">{relativeTime(approval.settled_at ?? approval.created_at)}</span>
+        </span>
+        <span className="flex flex-wrap items-center gap-1">
+          <Chip tone={approval.risk === "dangerous" ? "danger" : approval.risk === "elevated" ? "warning" : "success"}>{riskLabels[approval.risk]}</Chip>
+          <Chip>Approval</Chip>
+          <span className="min-w-0 truncate text-xs text-muted">{settled ? `→ ${outcome(approval)}` : requester(approval)}</span>
         </span>
       </button>
     </li>
@@ -220,8 +267,32 @@ function StuckJobRow({ job }: { job: Job }) {
 // ---- Selected item -------------------------------------------------------------------------
 
 function SelectedItem({ id, onDone }: { id: string; onDone?: () => void }) {
+  if (id.startsWith(APPROVAL_PREFIX)) return <ApprovalDetail id={id.slice(APPROVAL_PREFIX.length)} />;
   if (id.startsWith(DIALOG_PREFIX)) return <DialogDetail paneId={id.slice(DIALOG_PREFIX.length)} />;
   return <QuestionDetail key={id} id={id} onDone={onDone} />;
+}
+
+function ApprovalDetail({ id }: { id: string }) {
+  const approval = useApproval(id);
+  const navigate = useNavigate();
+  if (approval.isError) {
+    return (
+      <EmptyState icon={Inbox} title="No such approval">
+        It may have been cleared; settled approvals are in the History tab.
+      </EmptyState>
+    );
+  }
+  if (!approval.data) return <SkeletonRows rows={6} label="Loading the approval" />;
+  const pane = approval.data.pane_id;
+  return (
+    <div className="p-3 md:p-4">
+      <ApprovalCard
+        key={approval.data.id + approval.data.status}
+        approval={approval.data}
+        onOpenTerminal={pane ? () => void navigate({ to: "/fleet", search: { agent: pane } }) : undefined}
+      />
+    </div>
+  );
 }
 
 function DialogDetail({ paneId }: { paneId: string }) {
@@ -251,7 +322,8 @@ function DialogDetail({ paneId }: { paneId: string }) {
 
 function SheetTitle({ id }: { id?: string }) {
   if (!id) return null;
-  return <span className="truncate">{id.startsWith(DIALOG_PREFIX) ? "Terminal dialog" : `Question ${id}`}</span>;
+  const label = id.startsWith(APPROVAL_PREFIX) ? `Approval ${id.slice(APPROVAL_PREFIX.length)}` : id.startsWith(DIALOG_PREFIX) ? "Terminal dialog" : `Question ${id}`;
+  return <span className="truncate">{label}</span>;
 }
 
 // ---- Notifications -------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import type { CreateJobRequest } from "./jobs";
 import type { JournalKind } from "./journal";
 import type { ScheduleView } from "./schedule";
 import type { AnswerRequest } from "./questions";
+import type { DecideRequest } from "./approvals";
 import type { SendKeysRequest } from "./types";
 
 /** How often the fleet is refetched even without events: a safety net, not the update path. */
@@ -208,5 +209,27 @@ export function useCompactNow() {
     mutationFn: endpoints.orchestratorCompact,
     onSettled: () =>
       Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.orchestratorContext }), queryClient.invalidateQueries({ queryKey: queryKeys.journal })]),
+  });
+}
+
+// ---- Approvals (DESIGN.md 8.7) ----------------------------------------------------------------
+
+/** Pending approvals, or every recent one ("all"); an `approval` event refreshes them. */
+export function useApprovals(status: "pending" | "all" = "pending") {
+  return useQuery({ queryKey: queryKeys.approvalList(status), queryFn: () => endpoints.approvals(status), refetchInterval: QUESTIONS_SAFETY_POLL_MS });
+}
+
+export function useApproval(id: string | undefined) {
+  return useQuery({ queryKey: queryKeys.approval(id ?? ""), queryFn: () => endpoints.approval(id ?? ""), enabled: !!id });
+}
+
+export function useDecideApproval(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: DecideRequest) => endpoints.decideApproval(id, request),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.approvals });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+    },
   });
 }

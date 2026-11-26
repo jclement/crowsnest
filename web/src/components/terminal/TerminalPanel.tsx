@@ -2,6 +2,7 @@
 // reconnecting with a countdown, or ended and why, with Reconnect), the xterm itself, and on
 // phones and touch screens the key bar under it. The Terminal view uses it on the herdr TUI
 // and fills the visible viewport; the Fleet detail uses it on one pane at a fixed height.
+import { useTrayKeepOut } from "../../lib/trayKeepOut";
 import { Minus, Plus, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
@@ -26,6 +27,7 @@ interface TerminalPanelProps {
 
 export function TerminalPanel({ path, label, fill, className }: TerminalPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  useTrayKeepOut(rootRef, "terminal");
   const handle = useRef<XTermHandle | null>(null);
   const toast = useToast();
   const [state, setState] = useState<TerminalState>({ status: "connecting", attempt: 0 });

@@ -6,6 +6,8 @@
 // whose dialog is a multi-question form, agents in every state, plain shell panes, a long cwd
 // and a long terminal title. fixtureApi() answers API calls from it in memory, so pressing a
 // dialog option in fixtures mode behaves like the real thing (the dialog goes away).
+import { approvalFixtureApi, fixtureApprovals } from "./approvalFixtures";
+import type { Approval } from "./approvals";
 import { spendFixtureApi } from "./spendFixtures";
 import { scheduleFixtureApi } from "./scheduleFixtures";
 import type { AnswerRequest, Question } from "./questions";
@@ -420,6 +422,8 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
   if (path === "/auth/me") return fixtureMe;
   if (path === "/auth/logout") return { signed_out: true };
   if (path === "/fleet") return structuredClone(fleetState);
+  const approvalsAnswer = approvalFixtureApi(approvalState, path, method, body);
+  if (approvalsAnswer !== undefined) return approvalsAnswer;
   const questionsAnswer = questionFixtureApi(path, method, body);
   if (questionsAnswer !== undefined) return questionsAnswer;
   const jobsAnswer = jobFixtureApi(path);
@@ -442,6 +446,8 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
 }
 
 // ---- Questions (M6) ----------------------------------------------------------------
+
+const approvalState: Approval[] = structuredClone(fixtureApprovals);
 
 const questionState: Question[] = structuredClone(fixtureQuestions);
 

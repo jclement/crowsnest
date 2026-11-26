@@ -2,6 +2,7 @@ package actions
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -31,10 +32,10 @@ func TestSingleUse(t *testing.T) {
 	if err != nil || item != "approval:ap_1" {
 		t.Fatalf("first redeem = %q, %v", item, err)
 	}
-	if _, err := tokens.Redeem(ctx, token, "allow"); err != ErrInvalid {
+	if _, err := tokens.Redeem(ctx, token, "allow"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("second redeem must fail, got %v", err)
 	}
-	if _, err := tokens.Redeem(ctx, token, "deny"); err != ErrInvalid {
+	if _, err := tokens.Redeem(ctx, token, "deny"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("a used token is used for every action, got %v", err)
 	}
 }
@@ -68,7 +69,7 @@ func TestExpiry(t *testing.T) {
 	ctx := context.Background()
 	token, _ := tokens.Mint(ctx, "question:q_2", []string{"yes"})
 	*now = now.Add(TTL + time.Second)
-	if _, err := tokens.Redeem(ctx, token, "yes"); err != ErrInvalid {
+	if _, err := tokens.Redeem(ctx, token, "yes"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("an expired token must fail, got %v", err)
 	}
 }
@@ -77,16 +78,16 @@ func TestScope(t *testing.T) {
 	tokens, _ := newTokens(t)
 	ctx := context.Background()
 	token, _ := tokens.Mint(ctx, "question:q_2", []string{"yes", "no"})
-	if _, err := tokens.Redeem(ctx, token, "maybe"); err != ErrInvalid {
+	if _, err := tokens.Redeem(ctx, token, "maybe"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("an action outside the token's scope must fail, got %v", err)
 	}
-	if _, err := tokens.Redeem(ctx, token, "yes"); err != ErrInvalid {
+	if _, err := tokens.Redeem(ctx, token, "yes"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("a probed token is spent, got %v", err)
 	}
-	if _, err := tokens.Redeem(ctx, "cna_forged", "yes"); err != ErrInvalid {
+	if _, err := tokens.Redeem(ctx, "cna_forged", "yes"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("an unknown token must fail, got %v", err)
 	}
-	if _, err := tokens.Redeem(ctx, "crowsnest_session_value", "yes"); err != ErrInvalid {
+	if _, err := tokens.Redeem(ctx, "crowsnest_session_value", "yes"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("a non-token must fail, got %v", err)
 	}
 }

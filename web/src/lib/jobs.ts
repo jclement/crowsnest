@@ -20,7 +20,8 @@ export type JobCause =
   | "exited"
   | "launch"
   | "config"
-  | "approval";
+  | "approval"
+  | "approval-tool";
 
 /** A job as GET /jobs and GET /jobs/{id} return it. */
 export interface Job {
@@ -230,6 +231,7 @@ export function actionFor(job: Pick<Job, "state" | "stuck" | "cause">): JobActio
       return "nudge";
     case "questions":
     case "approval":
+    case "approval-tool":
       return "inbox";
     case "exited":
       return "resume";

@@ -62,7 +62,7 @@ func (s *Store) ListApprovals(ctx context.Context, statuses []string, limit int)
 	query := `SELECT ` + approvalColumns + ` FROM approvals`
 	var args []any
 	if len(statuses) > 0 {
-		query += ` WHERE status IN (` + strings.TrimSuffix(strings.Repeat("?,", len(statuses)), ",") + `)`
+		query += ` WHERE status IN (` + strings.TrimSuffix(strings.Repeat("?,", len(statuses)), ",") + `)` //nolint:gosec // placeholders only; the values are bound
 		for _, status := range statuses {
 			args = append(args, status)
 		}
