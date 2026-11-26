@@ -149,7 +149,7 @@ func fakeLauncher(t *testing.T, mode string) HerdrLauncher {
 	t.Helper()
 	t.Setenv(fakeEnv, mode)
 	t.Setenv("HERDR_SOCKET_PATH", "/must/not/leak") // the bridge must scrub this
-	t.Setenv("CROWSNEST_PASSWORD", "s3cret")       // and these (R1 H1)
+	t.Setenv("CROWSNEST_PASSWORD", "s3cret")        // and these (R1 H1)
 	t.Setenv("ELEVENLABS_API_KEY", "sk-test")
 	return HerdrLauncher{Binary: os.Args[0], Session: "crowsnest-test-unit"}
 }

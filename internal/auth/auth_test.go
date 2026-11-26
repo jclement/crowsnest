@@ -240,4 +240,3 @@ func TestSessionIsBoundToItsHost(t *testing.T) {
 		t.Fatalf("the session was lost after being presented elsewhere: %v", err)
 	}
 }
-

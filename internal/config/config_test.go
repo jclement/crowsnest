@@ -532,4 +532,3 @@ func TestUnsetSecretEnv(t *testing.T) {
 		t.Error("an ordinary setting was removed too")
 	}
 }
-
