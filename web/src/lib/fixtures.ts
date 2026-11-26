@@ -6,6 +6,8 @@
 // whose dialog is a multi-question form, agents in every state, plain shell panes, a long cwd
 // and a long terminal title. fixtureApi() answers API calls from it in memory, so pressing a
 // dialog option in fixtures mode behaves like the real thing (the dialog goes away).
+import type { AnswerRequest, Question } from "./questions";
+import { fixtureQuestions } from "./questionFixtures";
 import { ApiError } from "./api";
 import type {
   Agent,
@@ -414,6 +416,8 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
   if (path === "/auth/me") return fixtureMe;
   if (path === "/auth/logout") return { signed_out: true };
   if (path === "/fleet") return structuredClone(fleetState);
+  const questionsAnswer = questionFixtureApi(path, method, body);
+  if (questionsAnswer !== undefined) return questionsAnswer;
   const match = /^\/agents\/([^/]+)\/(screen|keys)$/.exec(path);
   if (match?.[1] && match[2]) {
     const target = decodeURIComponent(match[1]);
@@ -423,4 +427,39 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
     return structuredClone(state.screen);
   }
   throw new ApiError(404, "NOT_FOUND", `No fixture for ${method} ${path}.`);
+}
+
+// ---- Questions (M6) ----------------------------------------------------------------
+
+const questionState: Question[] = structuredClone(fixtureQuestions);
+
+/** Answers the question routes from fixtureQuestions; undefined for any other path. */
+function questionFixtureApi(path: string, method: string, body: unknown): unknown {
+  if (path === "/inbox/summary") {
+    const open = questionState.filter((question) => question.status === "open");
+    return { open: open.length, blocking: open.filter((question) => question.urgency === "blocking").length };
+  }
+  const list = /^\/questions\?status=(.*)$/.exec(path);
+  if (list) {
+    const statuses = decodeURIComponent(list[1] ?? "").split(",");
+    return questionState
+      .filter((question) => statuses.includes("all") || statuses.includes(question.status))
+      .map((question) => ({ ...question, files: undefined }));
+  }
+  const one = /^\/questions\/([^/]+)(\/answer)?$/.exec(path);
+  if (!one?.[1]) return undefined;
+  const question = questionState.find((candidate) => candidate.id === decodeURIComponent(one[1] ?? ""));
+  if (!question) throw new ApiError(404, "NOT_FOUND", "No such question.");
+  if (method === "POST" || method === "DELETE") {
+    if (question.status !== "open") throw new ApiError(409, "CONFLICT", "This question was already answered, expired or cancelled.");
+    const answer = (body ?? {}) as AnswerRequest;
+    Object.assign(question, {
+      status: method === "POST" ? "answered" : "cancelled",
+      answer_value: answer.answer_value ?? null,
+      answer_note: answer.answer_note ?? "",
+      settled_at: new Date().toISOString(),
+      delivery: "type",
+    });
+  }
+  return structuredClone(question);
 }

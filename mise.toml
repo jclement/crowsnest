@@ -69,7 +69,7 @@ run = [
 ]
 
 [tasks."test:claude"]
-description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API"
+description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API, and calls the ask MCP tool whose answer is typed back"
 run = "CROWSNEST_E2E_CLAUDE=1 CGO_ENABLED=1 go test -count=1 -tags integration -run IntegrationClaude -v -timeout 6m ./internal/orch/..."
 
 [tasks.lint]
@@ -108,6 +108,11 @@ run = [
 description = "Fleet view with fixtures at 375 and 1440 px, light and dark, into web/screenshots; plus the 375 px layout checks"
 run = "npm --prefix web run screenshots"
 
+[tasks."screenshots:inbox"]
+description = "Inbox against the built binary in --demo mode (seeded questions, a mermaid body, a diff, a dialog) at 375 and 1440 px, light and dark, into web/screenshots; plus an answer round trip"
+depends = ["build"]
+run = "npm --prefix web run screenshots:inbox"
+
 [tasks."screenshots:chat"]
 description = "Chat view against the built binary in --demo mode (a real prompt round trip) at 375 and 1440 px, light and dark, into web/screenshots"
 depends = ["build"]
@@ -119,6 +124,26 @@ run = "npm --prefix web run screenshots:chat"
 description = "Prove the release packaging locally: GoReleaser snapshot into dist/ (four archives, checksums), nothing published"
 # .goreleaser.yml's before-hook builds the web app, so this is the whole job.
 run = "goreleaser release --snapshot --clean"
+
+[tasks.image]
+description = "Build the devbox image (deploy/Dockerfile) for this machine's arch as crowsnest:dev. Needs Docker"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+docker build -f deploy/Dockerfile \
+  --build-arg VERSION="$VERSION" \
+  --build-arg COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+  --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t crowsnest:dev .
+# raw: the run script is a Tera template, and Docker's Go template braces would collide with it.
+echo "built crowsnest:dev $VERSION ($(docker image inspect crowsnest:dev --format '{% raw %}{{.Size}}{% endraw %}' | awk '{printf "%.0f MB", $1/1000000}'))"
+"""
+
+# No `usage` spec, so `mise run publish -- v1.2.3` reaches the script as $1.
+[tasks.publish]
+description = "Build the devbox image for amd64 and arm64 and push ghcr.io/jclement/crowsnest:<version> and :latest. Token from GHCR_TOKEN or gh. Jeff's step"
+run = "bash deploy/publish.sh"
 
 [tasks.release]
 description = "Interactive release: bump version, tag, and push. Jeff's step"

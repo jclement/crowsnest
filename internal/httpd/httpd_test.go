@@ -23,6 +23,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
@@ -91,6 +92,8 @@ type harnessOptions struct {
 	terminals     term.Launcher // nil: the terminal routes answer 503
 	termQueue     int
 	maxTerminals  int
+	// M6: the question inbox (questions_test.go); nil: the routes answer 503
+	questions *questions.Service
 }
 
 var testWeb = fstest.MapFS{
@@ -149,6 +152,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 
 		Conversations: opts.conversations,
 		Orchestrator:  opts.orchestrator,
+		Questions:     opts.questions,
 	})
 	if err != nil {
 		t.Fatal(err)

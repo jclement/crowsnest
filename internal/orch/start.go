@@ -6,6 +6,7 @@ package orch
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -27,7 +28,13 @@ var templates embed.FS
 const (
 	InstructionsFile = "CROWSNEST.md"
 	SettingsFile     = "claude-settings.json"
+	MCPConfigFile    = "mcp.json"
 )
+
+// MCPAllowRule pre-approves every tool of crowsnest's MCP server in the orchestrator's settings,
+// so `ask` never stops at a permission prompt (DESIGN.md 6.2; verified in M6 under
+// --permission-mode auto, see section 7.6).
+const MCPAllowRule = "mcp__crowsnest__*"
 
 // shellNames are the processes that count as "a bare shell" in a pane.
 var shellNames = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": true, "dash": true, "ksh": true, "tcsh": true, "csh": true, "nu": true}
@@ -110,10 +117,13 @@ func (o *Orchestrator) createPane(ctx context.Context, workspaceID string) (stri
 	return created.RootPane.ID, nil
 }
 
-// paneEnv is the environment of the orchestrator's pane (DESIGN.md 7, step 2). CROWSNEST_SOCKET
-// joins it with the agent socket (M6).
+// paneEnv is the environment of the orchestrator's pane (DESIGN.md 7, step 2): the agent socket
+// so `crowsnest ask` can reach the server, and the binary's directory first on PATH so it resolves.
 func (o *Orchestrator) paneEnv() map[string]string {
 	env := map[string]string{"CROWSNEST": "1", "CROWSNEST_SESSION": o.opts.Session}
+	if o.opts.AgentSocket != "" {
+		env["CROWSNEST_SOCKET"] = o.opts.AgentSocket
+	}
 	if o.opts.BinDir != "" {
 		env["PATH"] = o.opts.BinDir + string(os.PathListSeparator) + o.opts.BasePath
 	}
@@ -159,12 +169,12 @@ func (o *Orchestrator) waitForShell(ctx context.Context, paneID string) error {
 
 // start writes the start-up files and starts Claude in paneID.
 func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (Status, error) {
-	instructions, settings, err := o.writeFiles()
+	files, err := o.writeFiles()
 	if err != nil {
 		return o.fail(err)
 	}
 	sessionID, resuming := o.chooseSession(ctx, resume)
-	args := o.startArgs(sessionID, resuming, instructions, settings)
+	args := o.startArgs(sessionID, resuming, files)
 	o.mu.Lock()
 	prior := o.knownSession
 	o.mu.Unlock()
@@ -289,9 +299,16 @@ func (o *Orchestrator) chooseSession(ctx context.Context, resume bool) (string, 
 	return uuid.NewString(), false
 }
 
+// startFiles are the paths of the files Claude is started with.
+type startFiles struct {
+	instructions string // CROWSNEST.md, appended to the system prompt
+	settings     string // claude-settings.json: the MCP allow rule (and M7's hooks)
+	mcpConfig    string // mcp.json naming `crowsnest mcp`; empty when there is no socket
+}
+
 // startArgs is Claude's command line. It stays short on purpose: macOS refuses a start command
 // longer than the terminal's line-input limit, so content goes in files (DESIGN.md 7, step 4).
-func (o *Orchestrator) startArgs(sessionID string, resume bool, instructions, settings string) []string {
+func (o *Orchestrator) startArgs(sessionID string, resume bool, files startFiles) []string {
 	flag := "--session-id"
 	if resume {
 		flag = "--resume"
@@ -303,29 +320,83 @@ func (o *Orchestrator) startArgs(sessionID string, resume bool, instructions, se
 	if o.opts.Model != "" {
 		args = append(args, "--model", o.opts.Model)
 	}
-	return append(args, "--append-system-prompt-file", instructions, "--settings", settings)
+	args = append(args, "--append-system-prompt-file", files.instructions, "--settings", files.settings)
+	if files.mcpConfig != "" {
+		args = append(args, "--mcp-config", files.mcpConfig)
+	}
+	return args
 }
 
-// writeFiles renders CROWSNEST.md and writes the (for now empty) Claude settings file; M7 puts
-// the supervisor's hooks in it. Both are rewritten on every start so an upgraded crowsnest
-// brings its new instructions.
-func (o *Orchestrator) writeFiles() (instructions, settings string, err error) {
+// writeFiles renders CROWSNEST.md and writes the Claude settings file and, when there is an agent
+// socket, the MCP config. All are rewritten on every start so an upgraded crowsnest brings its
+// new instructions. M7 adds the supervisor's hooks to the settings.
+func (o *Orchestrator) writeFiles() (startFiles, error) {
 	if err := os.MkdirAll(o.opts.StateDir, 0o700); err != nil {
-		return "", "", fmt.Errorf("creating the state directory %s: %w", o.opts.StateDir, err)
+		return startFiles{}, fmt.Errorf("creating the state directory %s: %w", o.opts.StateDir, err)
 	}
-	instructions = filepath.Join(o.opts.StateDir, InstructionsFile)
+	files := startFiles{
+		instructions: filepath.Join(o.opts.StateDir, InstructionsFile),
+		settings:     filepath.Join(o.opts.StateDir, SettingsFile),
+	}
 	body, err := o.Instructions()
 	if err != nil {
-		return "", "", err
+		return startFiles{}, err
 	}
-	if err := os.WriteFile(instructions, []byte(body), 0o600); err != nil {
-		return "", "", fmt.Errorf("writing %s: %w", instructions, err)
+	if err := writePrivate(files.instructions, []byte(body)); err != nil {
+		return startFiles{}, err
 	}
-	settings = filepath.Join(o.opts.StateDir, SettingsFile)
-	if err := os.WriteFile(settings, []byte("{}\n"), 0o600); err != nil {
-		return "", "", fmt.Errorf("writing %s: %w", settings, err)
+	if err := writeJSONFile(files.settings, ClaudeSettings(o.mcpEnabled())); err != nil {
+		return startFiles{}, err
 	}
-	return instructions, settings, nil
+	if o.mcpEnabled() {
+		files.mcpConfig = filepath.Join(o.opts.StateDir, MCPConfigFile)
+		if err := writeJSONFile(files.mcpConfig, MCPConfig(o.opts.Executable, o.opts.AgentSocket)); err != nil {
+			return startFiles{}, err
+		}
+	}
+	return files, nil
+}
+
+func (o *Orchestrator) mcpEnabled() bool {
+	return o.opts.Executable != "" && o.opts.AgentSocket != ""
+}
+
+// ClaudeSettings is the --settings file: the allow rule for crowsnest's MCP tools when they are
+// offered. (M7 adds the hooks.)
+func ClaudeSettings(withMCP bool) map[string]any {
+	if !withMCP {
+		return map[string]any{}
+	}
+	return map[string]any{"permissions": map[string]any{"allow": []string{MCPAllowRule}}}
+}
+
+// MCPConfig is the --mcp-config file: one stdio server, `<executable> mcp`, told where the agent
+// socket is. The pane's own environment (HERDR_PANE_ID) reaches it too, which is how the server
+// knows which pane is asking.
+func MCPConfig(executable, socket string) map[string]any {
+	return map[string]any{"mcpServers": map[string]any{
+		"crowsnest": map[string]any{
+			"type":    "stdio",
+			"command": executable,
+			"args":    []string{"mcp"},
+			"env":     map[string]string{"CROWSNEST_SOCKET": socket},
+		},
+	}}
+}
+
+func writeJSONFile(path string, value any) error {
+	body, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding %s: %w", path, err)
+	}
+	return writePrivate(path, append(body, '\n'))
+}
+
+func writePrivate(path string, body []byte) error {
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
 }
 
 // Instructions renders the embedded CROWSNEST.md template for this session.

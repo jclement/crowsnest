@@ -65,6 +65,15 @@ type BlockedError struct {
 
 func (e *BlockedError) Error() string { return "the agent is waiting at a dialog" }
 
+// ErrNotTyped marks a send that failed before anything was typed (the agent could not be found,
+// its screen could not be read, or a dialog came up). A caller may safely try again later; the
+// answer deliverer (internal/questions) relies on it for at-most-once delivery. BlockedError and
+// DraftError also mean nothing was typed.
+var ErrNotTyped = errors.New("nothing was typed")
+
+// notTyped wraps err so errors.Is(err, ErrNotTyped) holds.
+func notTyped(err error) error { return fmt.Errorf("%w: %w", ErrNotTyped, err) }
+
 // ErrEmptyPrompt and ErrPromptTooLong are validation failures.
 var (
 	ErrEmptyPrompt   = errors.New("the prompt is empty")
@@ -79,7 +88,7 @@ func Prompt(ctx context.Context, client herdr.Client, target string, request Pro
 	}
 	agent, err := callAgentGet(ctx, client, target)
 	if err != nil {
-		return PromptResult{}, fmt.Errorf("finding agent %s: %w", target, err)
+		return PromptResult{}, notTyped(fmt.Errorf("finding agent %s: %w", target, err))
 	}
 	if err := checkInput(ctx, client, agent, request.ForceOverDraft); err != nil {
 		return PromptResult{}, err
@@ -105,7 +114,7 @@ func validatePrompt(text string) error {
 func checkInput(ctx context.Context, client herdr.Client, agent herdr.Agent, force bool) error {
 	screen, err := readScreen(ctx, client, agent.PaneID)
 	if err != nil {
-		return fmt.Errorf("reading the agent's screen: %w", err)
+		return notTyped(fmt.Errorf("reading the agent's screen: %w", err))
 	}
 	if agent.AgentStatus == herdr.StatusBlocked || screen.dialog.Present {
 		return &BlockedError{PaneID: agent.PaneID, ScreenHash: screen.hash, Dialog: screen.dialog}

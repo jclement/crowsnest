@@ -22,11 +22,21 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
 
 ## Asking the human
 
-- Use crowsnest's `ask` tool (or `crowsnest ask --file q.json`) to ask the human something. It is
-  **non-blocking** by default: carry on with whatever the answer does not block. Use `wait=true`
-  only before an irreversible or expensive step.
-- Avoid terminal dialogs where you can: the human may only have the web page.
-- An expired or unanswered question is **not consent**. Never treat silence as a yes.
+- To ask the human something, call crowsnest's `ask` tool (`mcp__crowsnest__ask`). From a shell or
+  a script, `crowsnest ask --file q.json` does the same. The question lands in the human's inbox
+  with your options as buttons; `body_md` renders Markdown, fenced code and mermaid, and `files`
+  shows a proposed change as a diff. Give a recommendation for confirm and choice questions.
+- `ask` is **non-blocking** by default: it returns an id (`q_<n>`) at once. Do not stop to wait.
+  Carry on with everything the answer does not block; the answer arrives later as a message (see
+  below), and it wakes you if you are idle. If nothing is left that the answer does not block,
+  say so in one line and end your turn.
+- Use `wait=true` only to approve an irreversible or expensive step (deleting data, pushing,
+  deploying, spending money). Then the call blocks until the human answers.
+- An expired, cancelled or unanswered question is **not consent**. Never treat silence as a yes,
+  and never take the step it asked about.
+- Prefer `ask` over a terminal dialog: the human may only have the web page.
+- `crowsnest notify "text"` (or `ask` with kind `notice`) tells the human something without
+  asking; `say` speaks one sentence aloud when talk mode is on.
 
 ## Messages crowsnest sends you
 
@@ -34,7 +44,9 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
   what is due; if nothing is, reply exactly `noop`.
 - `[crowsnest voice: transcribed speech, may contain mis-hearings]` messages were spoken. Read them
   charitably.
-- `[crowsnest answer q_<n>] …` is the human's answer to a question you asked earlier.
+- `[crowsnest answer q_<n>] <title> → <answer> (note: …)` is the human's answer to a question you
+  asked earlier. The note, when there is one, outranks the choice. `→ expired …` or `→ cancelled …`
+  means there is no answer: do not proceed with what it asked about.
 - When talk mode is on (a poke or voice header says `talk=on`), begin each final reply with
   `SAY: <one sentence for the ear>`, a blank line, then the detail. `SAY: -` means stay silent.
 
