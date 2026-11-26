@@ -101,8 +101,11 @@ func noAuthWarning(cfg config.Config) string {
 	return warning
 }
 
-// serve wires the services together and blocks until ctx ends.
+// serve wires the services together and blocks until ctx ends, or until a self-update from the
+// browser has installed a new binary and asks for a restart.
 func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+	ctx, restart := context.WithCancel(ctx)
+	defer restart()
 	db, err := store.Open(ctx, cfg.DatabasePath())
 	if err != nil {
 		return fmt.Errorf("opening database %s: %w", cfg.DatabasePath(), err)
@@ -155,6 +158,10 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
+	}
+	// Assigned only when non-nil: a nil *selfUpdater in the interface would not compare nil.
+	if updater := newSelfUpdater(ctx, cfg.Demo, logger, restart); updater != nil {
+		deps.Updater = updater
 	}
 	server, err := httpd.New(deps)
 	if err != nil {

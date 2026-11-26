@@ -172,15 +172,24 @@ func sessionToken(r *http.Request) string {
 
 // ---- Handlers ----------------------------------------------------------------
 
-// HealthResponse is GET /api/v1/health.
+// HealthResponse is GET /api/v1/health. LatestVersion and ReleaseURL are set only when a newer
+// release has been found.
 type HealthResponse struct {
 	Status          string `json:"status"`
 	Version         string `json:"version"`
 	UpdateAvailable bool   `json:"update_available"`
+	LatestVersion   string `json:"latest_version,omitempty"`
+	ReleaseURL      string `json:"release_url,omitempty"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeData(w, http.StatusOK, HealthResponse{Status: "ok", Version: s.deps.Version})
+	health := HealthResponse{Status: "ok", Version: s.deps.Version}
+	if s.deps.Updater != nil {
+		if latest, ok := s.deps.Updater.Available(); ok {
+			health.UpdateAvailable, health.LatestVersion, health.ReleaseURL = true, latest.TagName, latest.URL
+		}
+	}
+	writeData(w, http.StatusOK, health)
 }
 
 // MeResponse is GET /api/v1/auth/me and the body of a successful login.

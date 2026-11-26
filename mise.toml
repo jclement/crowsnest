@@ -50,7 +50,10 @@ description = "Remove the crowsnest-dev container (if running) and its volumes (
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-docker rm -f crowsnest-dev >/dev/null 2>&1 && echo "removed container crowsnest-dev" || true
+# docker rm -f succeeds even when there is no such container, so look first.
+if [ -n "$(docker ps -aq --filter name=^crowsnest-dev$)" ]; then
+  docker rm -f crowsnest-dev >/dev/null && echo "removed container crowsnest-dev"
+fi
 docker volume rm crowsnest-dev-home >/dev/null 2>&1 && echo "removed volume crowsnest-dev-home" || true
 docker volume rm crowsnest-dev-secret >/dev/null 2>&1 && echo "removed volume crowsnest-dev-secret" || true
 """
@@ -80,10 +83,10 @@ run = [
 ]
 
 [tasks."test:integration"]
-description = "Go integration tests against real herdr, in throwaway crowsnest-test-* sessions (the client, worktree.create, the terminal bridges, the fleet cache following events). Needs herdr installed"
+description = "Go integration tests against real herdr, in throwaway crowsnest-test-* sessions (the client, worktree.create, the terminal bridges, the fleet cache following events), plus self-update's real Sigstore verification of a published release (network). Needs herdr installed"
 run = [
-  "go vet -tags integration ./internal/herdr/... ./internal/term/... ./internal/orch/... ./internal/jobs/... ./internal/fleet/...",
-  "CGO_ENABLED=1 go test -race -count=1 -tags integration -run Integration -v ./internal/herdr/... ./internal/term/... ./internal/fleet/...",
+  "go vet -tags integration ./internal/herdr/... ./internal/term/... ./internal/orch/... ./internal/jobs/... ./internal/fleet/... ./internal/update/...",
+  "CGO_ENABLED=1 go test -race -count=1 -tags integration -run Integration -v ./internal/herdr/... ./internal/term/... ./internal/fleet/... ./internal/update/...",
 ]
 
 [tasks."test:claude"]
