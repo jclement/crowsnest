@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { flushSync } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { chordLabel, focusContext, hotkeyFor, initialSequence, isMacPlatform, type SequenceState } from "../../lib/hotkeys";
+import { SettingsSheet } from "../system/SettingsSheet";
 import { loadRecents, pushRecent, saveRecents, type PaletteSheet } from "../../lib/palette";
 import { JournalSheet } from "../journal/JournalPanel";
 import { ScheduleSheet } from "../schedule/SchedulePanel";
@@ -120,6 +121,11 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
       <JournalSheet open={sheet === "journal"} onClose={() => setSheet(null)} />
       <ScheduleSheet open={sheet === "schedule"} onClose={() => setSheet(null)} />
       <SpendSheet open={sheet === "spend"} onClose={() => setSheet(null)} />
+      <SettingsSheet
+        open={sheet === "settings"}
+        onClose={() => setSheet(null)}
+        onOpen={(next) => setSheet(next === "account" ? null : next === "voice" && !voice ? null : next)}
+      />
       <NotificationSettings open={sheet === "notifications"} onClose={() => setSheet(null)} />
       {voice && <VoiceSettingsSheet open={sheet === "voice"} onClose={() => setSheet(null)} />}
     </PaletteContext.Provider>

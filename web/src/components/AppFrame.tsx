@@ -19,6 +19,7 @@ import { ConnectionBanner } from "./ConnectionBanner";
 import { Footer } from "./Footer";
 import { navItems } from "./nav";
 import { PaletteButton } from "./palette/PaletteButton";
+import { MachineStrip } from "./system/MachineStats";
 import { PaletteProvider } from "./palette/PaletteProvider";
 import { ThemeToggle } from "./ThemeToggle";
 import { TrayBar, TrayPanel } from "./tray/NeedsYouTray";
@@ -87,7 +88,8 @@ export function AppFrame() {
             fixtures
           </span>
         )}
-        <PaletteButton className="ml-auto sm:mr-1" />
+        <MachineStrip className="ml-auto" />
+        <PaletteButton className="sm:mr-1" />
         <div className="flex items-center">
           <ConnectionState status={stream.status} />
           {voice && <SpeakToggle />}

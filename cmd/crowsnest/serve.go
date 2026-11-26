@@ -33,6 +33,7 @@ import (
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/sysstat"
 	"github.com/jclement/crowsnest/internal/system"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/web"
@@ -196,7 +197,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, files, meter, logger)
 	jobServiceRef.Store(jobService)
 	live.jobs.Store(jobService)
-	go live.applyJobDefaults(cfg)
+	go live.applyJobDefaults(ctx, cfg)
 	approvalLinks.jobs.Store(jobService)
 	files.jobs = jobService
 	go files.run(ctx, events, refs.questions.Load)
@@ -239,7 +240,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
 		Names: db, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
+		Processes: sysstat.NewProcesses(),
 	}
+	var serverRef atomic.Pointer[httpd.Server]
+	deps.Stats = startStats(ctx, cfg, events, fleetCache, func() bool {
+		server := serverRef.Load()
+		return server != nil && server.OpenStreams() > 0
+	}, logger)
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
 	}
@@ -251,6 +258,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	if err != nil {
 		return err
 	}
+	serverRef.Store(server)
 	var readyOnce sync.Once
 	server.OnListening = func(url string) {
 		readyOnce.Do(func() { logReady(ctx, sys, []string{browsableBase(url)}, logger) })

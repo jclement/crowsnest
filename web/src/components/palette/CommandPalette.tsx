@@ -44,8 +44,7 @@ import {
   Bot,
   BellRing,
   Volume2,
-  type LucideIcon,
-} from "lucide-react";
+  type LucideIcon, Activity, SlidersHorizontal } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
@@ -100,6 +99,8 @@ const icons: Record<PaletteIcon, LucideIcon> = {
   signout: LogOut,
   speak: Volume2,
   voice: Mic,
+  system: Activity,
+  settings: SlidersHorizontal,
 };
 
 const ROOT = { kind: "root" } as const;

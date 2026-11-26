@@ -36,6 +36,7 @@ type System interface {
 	Onboarding(ctx context.Context, recheck bool) system.OnboardingView
 	StartOnboarding(ctx context.Context, engine string) error
 	SetEnv(env doctor.Env)
+	OnboardingPending(ctx context.Context) bool
 }
 
 // ShellOpener opens a plain shell pane and types command into it, returning the pane.
@@ -76,7 +77,7 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	text := doctor.Diagnostics(service.Report(r.Context(), r.URL.Query().Get("recheck") == "1"), home)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(text))
+	_, _ = w.Write([]byte(text)) //nolint:gosec // text/plain with nosniff (securityHeaders): never rendered as HTML
 }
 
 type demoStateRequest struct {
@@ -229,3 +230,65 @@ func offered(report doctor.Report, command string) bool {
 	}
 	return false
 }
+
+// ---- Machine stats -----------------------------------------------------------
+
+// AgentUsage is one agent's process tree in GET /system/agents.
+type AgentUsage struct {
+	PaneID    string  `json:"pane_id"`
+	Name      string  `json:"name"`
+	Kind      string  `json:"kind"`
+	Status    string  `json:"status"`
+	Workspace string  `json:"workspace"`
+	CPU       float64 `json:"cpu"`
+	RSS       uint64  `json:"rss"`
+	Processes int     `json:"processes"`
+}
+
+func (s *Server) registerStatsRoutes(mux *http.ServeMux) {
+	mux.Handle("GET /api/v1/system/stats", s.requireAuth(http.HandlerFunc(s.handleStats)))
+	mux.Handle("GET /api/v1/system/agents", s.requireAuth(http.HandlerFunc(s.handleAgentUsage)))
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Stats == nil {
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "System stats are off on this server.")
+		return
+	}
+	writeData(w, http.StatusOK, s.deps.Stats.Stats(r.Context()))
+}
+
+// handleAgentUsage attributes CPU and memory to each agent: herdr names the foreground processes
+// of its pane, and the agent's cost is that process tree's. A pane herdr cannot describe is
+// skipped rather than failing the list.
+func (s *Server) handleAgentUsage(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Fleet == nil || s.deps.Herdr == nil || s.deps.Processes == nil {
+		writeData(w, http.StatusOK, []AgentUsage{})
+		return
+	}
+	fleetView, err := s.deps.Fleet.Fleet(r.Context())
+	if err != nil {
+		writeData(w, http.StatusOK, []AgentUsage{})
+		return
+	}
+	out := []AgentUsage{}
+	for _, agent := range fleetView.Agents {
+		info, err := s.deps.Herdr.PaneProcessInfo(r.Context(), agent.PaneID)
+		if err != nil {
+			continue
+		}
+		var pids []int
+		for _, proc := range info.ForegroundProcesses {
+			pids = append(pids, proc.PID)
+		}
+		usage := s.deps.Processes.Tree(r.Context(), pids)
+		out = append(out, AgentUsage{PaneID: agent.PaneID, Name: agent.Name, Kind: agent.Kind, Status: string(agent.Status), Workspace: agent.Workspace,
+			CPU: usage.CPU, RSS: usage.RSS, Processes: usage.Processes})
+	}
+	s.deps.Processes.Prune(r.Context())
+	writeData(w, http.StatusOK, out)
+}
+
+// OpenStreams is how many browsers have the event stream open: the stats sampler runs only
+// while it is above zero.
+func (s *Server) OpenStreams() int { return int(s.openStreams.Load()) }

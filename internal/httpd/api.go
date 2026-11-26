@@ -211,6 +211,8 @@ type Features struct {
 	Name         string `json:"name"`          // this instance's name (--name, else the short hostname)
 	// Attachments are the upload limits; nil when attachments are off (8.6).
 	Attachments *AttachmentLimits `json:"attachments,omitempty"`
+	// Onboarding is true while the first-run checklist is unfinished: the app opens /welcome.
+	Onboarding bool `json:"onboarding,omitempty"`
 }
 
 func (s *Server) me(ctx context.Context) MeResponse {
@@ -220,6 +222,7 @@ func (s *Server) me(ctx context.Context) MeResponse {
 		Features: Features{
 			Auth: s.deps.Auth.Enabled(), Voice: cfg.VoiceEnabled(), Demo: cfg.Demo, Session: cfg.Session,
 			HerdrVersion: s.herdrVersion(), Name: s.instanceName(), Attachments: s.attachmentLimits(),
+			Onboarding: s.deps.System != nil && s.deps.System.OnboardingPending(ctx),
 		},
 	}
 }

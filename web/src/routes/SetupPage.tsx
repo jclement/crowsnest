@@ -56,7 +56,7 @@ function Starting({ username }: { username: string }) {
         try {
           const health = await endpoints.health();
           if (!health.setup_required) {
-            window.location.replace("/");
+            window.location.replace("/welcome");
             return;
           }
         } catch {
@@ -75,8 +75,8 @@ function Starting({ username }: { username: string }) {
     <div role="status" className="flex flex-col gap-2">
       <h1 className="text-base font-semibold text-heading">Starting crowsnest…</h1>
       <p className="text-xs text-muted">
-        Signed in as <span className="font-medium text-heading">{username}</span>. Crowsnest is starting its herdr session and orchestrator; this page
-        opens the app when it is ready.
+        Signed in as <span className="font-medium text-heading">{username}</span>. Crowsnest is starting up; this page opens a short checklist when it
+        is ready.
       </p>
       {slow && <p className="text-xs text-warning">This is taking a while. Check crowsnest&apos;s log if it does not come up.</p>}
     </div>

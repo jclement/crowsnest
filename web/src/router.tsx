@@ -5,7 +5,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { Outlet, createRootRouteWithContext, createRoute, createRouter, redirect } from "@tanstack/react-router";
 import { AppFrame } from "./components/AppFrame";
-import { ApiError, endpoints, isSetupRequired, queryKeys } from "./lib/api";
+import { ApiError, endpoints, isSetupRequired, queryKeys, type Me } from "./lib/api";
 import { LoginPage } from "./routes/LoginPage";
 import { SetupPage } from "./routes/SetupPage";
 import { NotFound } from "./routes/NotFound";
@@ -14,6 +14,8 @@ import { ChatView } from "./routes/ChatView";
 import { InboxView } from "./routes/InboxView";
 import { JobsView } from "./routes/JobsView";
 import { TerminalView } from "./routes/views";
+import { SystemView } from "./routes/SystemView";
+import { WelcomePage } from "./routes/WelcomePage";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -75,8 +77,27 @@ const appRoute = createRoute({
       if (isSetupRequired(error)) throw redirect({ to: "/setup" });
       throw error;
     }
+    // The first-run checklist is unfinished: finish it before the app (DESIGN.md 4.14.1).
+    const me = context.queryClient.getQueryData<Me>(queryKeys.me);
+    if (me?.features.onboarding) throw redirect({ to: "/welcome" });
   },
   component: AppFrame,
+});
+
+// The guided first run: after setup's password step, before the app. Signed in, outside the frame.
+const welcomeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/welcome",
+  beforeLoad: async ({ context, location }) => {
+    try {
+      await context.queryClient.fetchQuery({ queryKey: queryKeys.me, queryFn: endpoints.me });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) throw redirect({ to: "/login", search: { redirect: location.href } });
+      if (isSetupRequired(error)) throw redirect({ to: "/setup" });
+      throw error;
+    }
+  },
+  component: WelcomePage,
 });
 
 const jobsRoute = createRoute({
@@ -110,8 +131,9 @@ const fleetRoute = createRoute({
   component: FleetView,
 });
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
+const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, appRoute.addChildren([jobsRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([jobsRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute, systemRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

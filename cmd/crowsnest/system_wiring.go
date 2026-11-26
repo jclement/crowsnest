@@ -19,12 +19,14 @@ import (
 
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/doctor"
+	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/sysstat"
 	"github.com/jclement/crowsnest/internal/system"
 )
 
@@ -50,17 +52,17 @@ func (l *liveServices) apply(_ config.Config, next config.Config) {
 	if tender := l.tender.Load(); tender != nil {
 		tender.SetThresholds(next.CompactAt, next.FreshAt)
 	}
-	l.applyJobDefaults(next)
+	l.applyJobDefaults(context.Background(), next)
 }
 
 // applyJobDefaults sets the jobs' default engine (auto resolved against what is installed) and
 // model.
-func (l *liveServices) applyJobDefaults(cfg config.Config) {
+func (l *liveServices) applyJobDefaults(ctx context.Context, cfg config.Config) {
 	service, sys := l.jobs.Load(), l.system.Load()
 	if service == nil || sys == nil {
 		return
 	}
-	engine := sys.Selection(context.Background()).Jobs
+	engine := sys.Selection(ctx).Jobs
 	service.SetDefaults(engine, cfg.JobModel)
 }
 
@@ -157,4 +159,29 @@ func logReady(ctx context.Context, service *system.Service, urls []string, logge
 			fmt.Fprintf(os.Stderr, "\n  crowsnest is running: %s\n  %s\n  %s   (details: crowsnest doctor)\n\n", strings.Join(urls, "  "), marker, report.Summary)
 		}
 	}()
+}
+
+// startStats starts the machine-stats sampler: every two seconds while a browser has the event
+// stream open, the host's (or the container's cgroup's) CPU, memory, load and data-volume disk,
+// with the number of working agents from the fleet. --demo samples the real machine too: the
+// numbers are harmless and make the strip look alive.
+func startStats(ctx context.Context, cfg config.Config, events *hub.Hub, fleetCache *fleet.Cache, active func() bool, logger *slog.Logger) *sysstat.Sampler {
+	sampler := sysstat.New(sysstat.Options{
+		Source: &sysstat.HostSource{DataDir: cfg.DataDir}, Hub: events, Active: active, Logger: logger,
+		Working: func() int {
+			view, err := fleetCache.Fleet(ctx)
+			if err != nil {
+				return -1
+			}
+			working := 0
+			for _, agent := range view.Agents {
+				if agent.Status == herdr.StatusWorking {
+					working++
+				}
+			}
+			return working
+		},
+	})
+	go sampler.Run(ctx)
+	return sampler
 }

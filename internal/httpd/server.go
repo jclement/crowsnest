@@ -35,6 +35,7 @@ import (
 	"github.com/jclement/crowsnest/internal/schedule"
 	"github.com/jclement/crowsnest/internal/setup"
 	"github.com/jclement/crowsnest/internal/spend"
+	"github.com/jclement/crowsnest/internal/sysstat"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
 	"github.com/jclement/crowsnest/internal/voice"
@@ -129,6 +130,10 @@ type Deps struct {
 	// HerdrVersionNow, when set, reports herdr's version now (it may connect after start);
 	// HerdrVersion is used otherwise.
 	HerdrVersionNow func() string
+	// Stats serves /system/stats (the header's machine strip); Processes measures agents'
+	// process trees for /system/agents. Nil: those answer 503 and an empty list.
+	Stats     *sysstat.Sampler
+	Processes *sysstat.Processes
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).
@@ -226,6 +231,7 @@ func (s *Server) routes() http.Handler {
 	s.registerAttachmentRoutes(mux)
 	s.registerApprovalRoutes(mux)
 	s.registerSystemRoutes(mux)
+	s.registerStatsRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)
