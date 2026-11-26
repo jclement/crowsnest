@@ -36,8 +36,8 @@ func (o *Orchestrator) Watch(ctx context.Context) {
 		o.checkRemoteControl(ctx, agent.PaneID)
 		return
 	}
-	if o.Status().State == StateFailed {
-		return // waiting for a manual restart
+	if state := o.Status().State; state == StateFailed || state == StateStopped {
+		return // waiting for a manual restart, or stopped on purpose
 	}
 	o.recover(ctx)
 }
@@ -195,4 +195,29 @@ func (o *Orchestrator) checkRemoteControl(ctx context.Context, paneID string) {
 	o.mu.Unlock()
 	o.update(func(s *Status) { s.RemoteControlNote = note })
 	o.opts.Logger.Info("orchestrator remote control", "name", o.opts.RemoteControlName, "note", note)
+}
+
+// ---- Stopping a standing agent -------------------------------------------------------------
+
+// StateStopped is a standing agent stopped on purpose (a project lead's Stop); its watch does
+// not restart it until Start (Ensure) or Restart is called.
+const StateStopped State = "stopped"
+
+// Stop ends the agent's Claude (Esc, /exit, then Ctrl+C) and marks it stopped, so the watch
+// leaves it alone. Its conversation is kept: the next start resumes it. Project leads use it;
+// the orchestrator has no Stop button (--no-orchestrator is how it is kept off).
+func (o *Orchestrator) Stop(ctx context.Context) (Status, error) {
+	o.lifecycle.Lock()
+	defer o.lifecycle.Unlock()
+	agent, alive, err := o.liveAgent(ctx)
+	if err != nil {
+		return o.fail(fmt.Errorf("looking for %s to stop it: %w", o.agentName(), err))
+	}
+	if alive {
+		if err := o.stop(ctx, agent); err != nil {
+			return o.fail(err)
+		}
+	}
+	o.opts.Journal.Add(ctx, journal.KindRestart, "Stopped "+o.agentName(), map[string]any{"agent": o.agentName()})
+	return o.update(func(s *Status) { s.State, s.Detail = StateStopped, "" }), nil
 }
