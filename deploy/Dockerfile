@@ -16,17 +16,25 @@
 
 # ---- Versions ------------------------------------------------------------------------------
 # Keep NODE_VERSION and GO_VERSION in step with mise.toml so the image builds what CI tests.
+# Each base image is pinned by digest as well as tag (R1b N8): a tag can be moved under a rebuild,
+# a digest cannot. To bump one, change the tag and take the new index digest from
+#   docker buildx imagetools inspect <image>:<tag> --format '{{json .Manifest.Digest}}'
 ARG NODE_VERSION=26.13.0
 ARG GO_VERSION=1.27.3
 ARG DEBIAN_RELEASE=trixie
+ARG NODE_DIGEST=sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
+ARG GO_DIGEST=sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80
+ARG DEBIAN_DIGEST=sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
 
 # ---- web: the SPA ---------------------------------------------------------------------------
 # $BUILDPLATFORM: the output is platform-independent JS, so build it natively once instead of
 # under QEMU for every target architecture.
-FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS web
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim@${NODE_DIGEST} AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# --ignore-scripts: no dependency's install script runs in the build of an image that is a remote
+# shell by design (R1b N8). The web build needs none (the local setup blocks them too).
+RUN npm ci --no-audit --no-fund --ignore-scripts
 COPY web/ ./
 # The login page and footer import the Go binary's taglines file raw (DESIGN.md decision 16).
 COPY internal/taglines/taglines.txt /src/internal/taglines/taglines.txt
@@ -35,7 +43,7 @@ RUN npm run build
 # ---- build: the binary ----------------------------------------------------------------------
 # Also $BUILDPLATFORM, and not only for speed: Go under QEMU on Apple silicon has been seen to
 # die in the GC mid-download. CGO is off, so cross-compiling with GOOS/GOARCH needs nothing else.
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-${DEBIAN_RELEASE} AS build
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-${DEBIAN_RELEASE}@${GO_DIGEST} AS build
 ARG TARGETOS
 ARG TARGETARCH
 # The same three values `mise run build` and GoReleaser stamp; the publish task and the release
@@ -56,7 +64,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
       -o /out/crowsnest ./cmd/crowsnest
 
 # ---- runtime --------------------------------------------------------------------------------
-FROM debian:${DEBIAN_RELEASE}-slim AS runtime
+FROM debian:${DEBIAN_RELEASE}-slim@${DEBIAN_DIGEST} AS runtime
 ARG TARGETARCH
 
 # herdr and mise are pinned with their SHA-256 per architecture. To bump one, take the new
@@ -68,6 +76,11 @@ ARG HERDR_SHA256_ARM64=17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44
 ARG MISE_VERSION=2026.11.14
 ARG MISE_SHA256_AMD64=6fa596291e9758106f761fea4f8e7fac6c3e7ff4714d5c0b9a76e16068db14f6
 ARG MISE_SHA256_ARM64=7bd3b2d5ffff077a7662ba186c09600e5b40c1eee9df0c264ed67642ce0a8698
+# gh is pinned to a version, and its apt keyring must hold exactly the primary keys GitHub
+# publishes (https://github.com/cli/cli/blob/trunk/docs/install_linux.md, checked 2026-11-26),
+# so a keyring swapped on the way in fails the build instead of signing what apt installs.
+ARG GH_VERSION=2.106.0
+ARG GH_KEY_FINGERPRINTS="2C6106201985B60E6C7AC87323F3D4EA75716059 7F38BBB59D064DBCB3D84D725612B36462313325"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -83,15 +96,20 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # gh from GitHub's own apt repository (Debian's package trails by many releases), installed as
-# GitHub documents it: their keyring, a signed-by source.
+# GitHub documents it (their keyring, a signed-by source), with the keyring's fingerprints checked
+# and the version pinned.
 RUN install -d -m 0755 /etc/apt/keyrings \
  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && got="$(gpg --show-keys --with-colons /etc/apt/keyrings/githubcli-archive-keyring.gpg 2>/dev/null \
+      | awk -F: '$1 == "pub" { want = 1; next } $1 == "fpr" && want { print $10; want = 0 }' | sort | xargs)" \
+ && expected="$(echo "$GH_KEY_FINGERPRINTS" | tr ' ' '\n' | sort | xargs)" \
+ && { [ "$got" = "$expected" ] || { echo "gh keyring fingerprints are [$got], expected [$expected]" >&2; exit 1; }; } \
  && chmod 0644 /etc/apt/keyrings/githubcli-archive-keyring.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends gh \
+ && apt-get install -y --no-install-recommends "gh=${GH_VERSION}" \
  && rm -rf /var/lib/apt/lists/*
 
 # herdr: the release binary its installer would fetch, but for a pinned version rather than

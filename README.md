@@ -99,7 +99,8 @@ which also gives the HTTPS secure context the microphone needs later:
 start. A browser gets the herdr session, a terminal and (once the orchestrator lands) Claude.
 
 ```sh
-cp deploy/.env.sample deploy/.env          # set CROWSNEST_USERNAME and CROWSNEST_PASSWORD
+cp deploy/crowsnest.env.sample deploy/crowsnest.env      # set CROWSNEST_USERNAME
+(umask 077; printf '%s\n' 'your password' > deploy/crowsnest_password)   # mounted as a secret
 docker compose -f deploy/compose.yaml up -d
 docker compose -f deploy/compose.yaml logs -f crowsnest   # first start: watch mise install
 open http://127.0.0.1:2769
@@ -135,12 +136,14 @@ The entrypoint (`deploy/entrypoint.sh`) on every start:
 
 1. **Refuses to start without credentials**: `CROWSNEST_USERNAME` plus `CROWSNEST_PASSWORD` or
    `CROWSNEST_PASSWORD_FILE`, or else both `CROWSNEST_NO_AUTH=true` and
-   `CROWSNEST_I_KNOW_THIS_IS_OPEN=true`. It exits 64 with a message saying which to set.
+   `CROWSNEST_I_KNOW_THIS_IS_OPEN=true`. It exits 64 with a message saying which to set. It then
+   drops `TUNNEL_TOKEN` and `TS_AUTHKEY` if they reached it (they belong in the sidecars' own env
+   files), and notes when the password came as a variable rather than a file.
 2. **On first start only** writes `~/.config/mise/config.toml` (node LTS, and Claude Code from
    mise's `claude` registry entry, the native binary) and a herdr config that skips herdr's
    first-run screen. Existing files are never overwritten; edit them to change the tool set.
-3. **Runs `mise install`** and waits up to `CROWSNEST_MISE_WAIT` seconds (default 300) for it. A
-   failure is logged with the last lines of `~/.local/state/crowsnest/mise-install.log` and a slow
+3. **Runs `mise install`** (with crowsnest's secrets removed from its environment) and waits up to
+   `CROWSNEST_MISE_WAIT` seconds (default 300) for it. A failure is logged with the last lines of `~/.local/state/crowsnest/mise-install.log` and a slow
    install carries on in the background; neither stops crowsnest from starting.
 4. **Execs `crowsnest serve --bind 0.0.0.0`**, passing through any arguments given to the
    container. Every other setting is a `CROWSNEST_*` variable (see Configuration). Change the
@@ -149,6 +152,25 @@ The entrypoint (`deploy/entrypoint.sh`) on every start:
 Upgrading tools needs no rebuild: `mise upgrade` in the web terminal (Claude Code's own
 auto-updater is off in the image for that reason). Upgrading crowsnest, herdr or mise is a new
 image; the volume carries over.
+
+**First-start installs are `latest`, on purpose.** The seeded mise config asks for `node = "lts"`
+and `claude = "latest"`, so a new volume gets whatever is current that day, checked by mise
+against the release checksums (aqua) but not pinned. That is a trade: Claude Code moves fast and
+an image-pinned copy would be stale within a week. To pin, edit `~/.config/mise/config.toml` in
+the volume (for example `claude = "2.1.332"`, `node = "26.13.0"`) and run `mise install`; the
+entrypoint never overwrites that file. Everything the image itself installs is pinned: the base
+images by digest, herdr and mise by version and SHA-256, gh by version with its apt key's
+fingerprints checked, and the web build runs `npm ci --ignore-scripts`.
+
+**Secrets in the container.** Agents run as `crow`, the same user as crowsnest, so they can read
+any environment in the container through `/proc/<pid>/environ`. crowsnest re-executes itself
+without its secrets and gives its children none, but tini (PID 1) keeps the environment Docker
+started it with. Hence `deploy/compose.yaml` mounts the password as a file
+(`CROWSNEST_PASSWORD_FILE`; `deploy/crowsnest_password`, mode 0600, owned by uid 1000), and each
+sidecar's token lives in that sidecar's own env file (`cloudflared.env`, `tailscale.env`), never
+in `crowsnest.env`. `CROWSNEST_NOTIFY_URL` and `ELEVENLABS_API_KEY` have no file form yet: set in
+`crowsnest.env`, an agent can read them. A file of crowsnest's is readable by the same user too;
+the only hard boundary would be a separate uid for crowsnest, which the image does not have.
 
 **Blast radius.** Whoever logs in has a shell as `crow`, and so does every agent in the
 container. They reach what is mounted and what the network reaches, nothing else on the host.
@@ -176,16 +198,20 @@ Exit codes: `0` success, `1` runtime error, `2` usage error.
 
 These run inside agent panes and talk to the server over the unix socket named by
 `CROWSNEST_SOCKET` (crowsnest sets it, and puts its own directory first on `PATH`, in the
-orchestrator's pane). The asking pane is taken from `HERDR_PANE_ID` (where answers are typed back)
-and the job from `CROWSNEST_JOB` (M7). Without `CROWSNEST_SOCKET`, or with no server answering,
-they fail with exit 1 and say so.
+orchestrator's pane). Who is asking comes from `CROWSNEST_TOKEN`, a random token crowsnest mints
+for each agent it starts (in the pane's environment, and in its MCP server's) and maps to that
+pane and job; a pane or job a caller names itself is never believed. Without a token a caller is
+unidentified: it may ask, but its answer only comes back through `--wait`, and it may not
+withdraw questions. Without `CROWSNEST_SOCKET`, or with no server answering, they fail with exit
+1 and say so.
 
 | Command | Does |
 |---|---|
-| `crowsnest ask --file q.json\|- [--wait] [--timeout 12h]` | Post a question (DESIGN.md 8.1 shape: `title`, `body_md`, `kind` confirm/choice/ack/manual/notice, `multi`, `options`, `recommend`, `context`, `urgency`, `expires_in_hours`, `files`). Without `--wait` it prints the id (`q_7`) and returns; the answer is typed into the pane later as `[crowsnest answer q_7] <title> → <answer> (note: …)`. With `--wait` it blocks and prints `{id, status, answer_value, answer_note}`: exit `0` answered, `3` expired or cancelled, `1` error |
+| `crowsnest ask --file q.json\|- [--wait] [--timeout 12h]` | Post a question (DESIGN.md 8.1 shape: `title`, `body_md`, `kind` confirm/choice/ack/manual/notice, `multi`, `options`, `recommend`, `context`, `urgency`, `expires_in_hours`, `files`). Without `--wait` it prints the id (`q_7`) and returns; the answer is typed into the pane later as `[crowsnest answer q_7] <answer> (note: …); the question was "<title>"` (or, when that would not fit on one line, a line saying to read it with `crowsnest question`). With `--wait` it blocks and prints `{id, status, answer_value, answer_note}`: exit `0` answered, `3` expired or cancelled, `1` error. `expires_in_hours` is between 5 minutes (0.084) and 168 |
+| `crowsnest question <id>` | Print a question with its whole answer, `{id, status, title, answer_value, answer_labels, answer_note}`; never shortened |
 | `crowsnest notify "text" [--urgency low\|normal\|blocking]` | A notice (no answer needed); the first line is its title. Prints the id |
 | `crowsnest say "sentence"` | Ask for one sentence to be spoken in talk mode (M11 speaks it; now it is published as a `say` event) |
-| `crowsnest mcp` | A stdio MCP server exposing `ask` and `say` (M7 adds the job tools), proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes |
+| `crowsnest mcp` | A stdio MCP server exposing `ask`, `get_question` and `say` (M7 adds the job tools), proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes. `ask` with `wait=true` returns the whole answer and note |
 
 The socket is `$XDG_RUNTIME_DIR/crowsnest/<session>.sock` when `XDG_RUNTIME_DIR` is set, else
 `~/.local/state/crowsnest/<session>/agent.sock` (or, when that path is too long for a unix socket,
@@ -193,7 +219,10 @@ The socket is `$XDG_RUNTIME_DIR/crowsnest/<session>.sock` when `XDG_RUNTIME_DIR`
 directory is `0700` and must belong to you; the socket is `0600`.
 Its routes are Meat Prompt's (`POST /api/v1/questions`, `GET /api/v1/questions/{id}?wait=90`,
 `GET /api/v1/questions?status=`, `DELETE /api/v1/questions/{id}`) plus `POST /api/v1/say` and
-`GET /api/v1/health`.
+`GET /api/v1/health`. The caller's token travels as `X-Crowsnest-Token`. Quotas, per caller
+(all unidentified callers share one): 10 asks at once then one per 30 s, 30 open questions (200
+in all), 8 concurrent long-polls, and a say rate limit; past one the answer is `429` with
+`Retry-After` and a sentence saying what to do.
 
 ## Configuration
 
@@ -234,7 +263,11 @@ served by Vite, so the binary does not require embedded web assets.
 
 `--session`, `--allow-default-session`, `--demo`, `--dir`, `--model`, `--permission-mode`,
 `--no-orchestrator` and `--notify-url` (one plain-text line, the question's id and scrubbed title,
-POSTed for each `blocking` question) take effect now. `--poke-interval` (M8) and talk mode are
+POSTed for each `blocking` question, at most 3 at once and then one a minute per asking pane; the
+URL is never logged) take effect now. When `serve` finds `CROWSNEST_PASSWORD`,
+`CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY` or `CROWSNEST_NOTIFY_URL` in its environment it
+re-executes itself once with them moved to an inherited pipe, so the environment the OS reports
+for the process (`/proc/<pid>/environ`, `ps eww`) holds none of them. `--poke-interval` (M8) and talk mode are
 parsed and validated now and take effect in their milestones.
 
 ### Startup refusals
@@ -327,7 +360,7 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | `~/.local/state/crowsnest/<session>/herdr-server.log` | Output of a herdr server crowsnest started |
 | `~/.local/state/crowsnest/<session>/CROWSNEST.md` | The orchestrator's instructions (`--append-system-prompt-file`), rewritten from the embedded template on every start |
 | `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` (M7 adds hooks) |
-| `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server and its `CROWSNEST_SOCKET` |
+| `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server, its `CROWSNEST_SOCKET` and its agent token (`0600`) |
 | `~/.local/state/crowsnest/<session>/agent.sock` | The agent API socket (when `XDG_RUNTIME_DIR` is unset) |
 | `$TMPDIR/crowsnest-demo-*/` | `--demo` only: the demo's database, state (the demo agents' transcripts, its agent socket) and orchestrator directory, removed on exit |
 | `~/.local/state/crowsnest/mise-install.log` | Devbox image only: the entrypoint's last `mise install` |
