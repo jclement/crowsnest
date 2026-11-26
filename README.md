@@ -322,7 +322,8 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--port` | `CROWSNEST_PORT` | `2769` | Port for binds that do not name one (C-R-O-W on a keypad) |
 | `--session` | `CROWSNEST_SESSION` | `crowsnest` | herdr session to create or connect to |
 | `--dir` | `CROWSNEST_DIR` | `<data-dir>/orchestrator` | Orchestrator's working directory |
-| `--model` | `CROWSNEST_MODEL` | Claude's default | Orchestrator model |
+| `--model` | `CROWSNEST_MODEL` | `sonnet` | Orchestrator model. An explicit empty value (`--model=` or `CROWSNEST_MODEL=`) means Claude's own default |
+| `--job-model` | `CROWSNEST_JOB_MODEL` | unset (Claude's default) | Model for job agents whose job names none (a delegated job still inherits its parent's) |
 | `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Orchestrator permission mode (`acceptEdits`, `auto`, `bypassPermissions`, `dontAsk`, `manual`, `plan`) |
 | `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke interval; `0` disables timer pokes |
 | `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | `false` | Serve the UI over the session without starting Claude |

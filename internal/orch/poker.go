@@ -89,8 +89,6 @@ type PokerOptions struct {
 	Logger  *slog.Logger
 	// Status is the orchestrator's current status (Orchestrator.Status).
 	Status func() Status
-	// Talk reports whether talk mode is on, for the header's talk= flag. Nil: off.
-	Talk func() bool
 	// Interval is the timer (--poke-interval); 0 disables timer pokes.
 	Interval time.Duration
 	// Standing lists what is open right now (stuck jobs, jobs that need the human, open
@@ -425,10 +423,9 @@ func (p *Poker) skipped(ctx context.Context, result PokeResult, decision GateDec
 // agent vanished) keeps the reasons pending; anything else marks them delivered, because a
 // second copy of a poke costs a turn and says the same thing twice.
 func (p *Poker) send(ctx context.Context, result PokeResult, status Status, due PrecheckResult) PokeResult {
-	talk := p.opts.Talk != nil && p.opts.Talk()
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pokeSendTimeout)
 	defer cancel()
-	sent, err := Prompt(sendCtx, p.opts.Client, status.PaneID, PromptRequest{Text: PokeText(result.At, talk, due.Reasons)})
+	sent, err := Prompt(sendCtx, p.opts.Client, status.PaneID, PromptRequest{Text: PokeText(result.At, due.Reasons)})
 	var blocked *BlockedError
 	var draft *DraftError
 	if errors.Is(err, ErrNotTyped) || errors.As(err, &blocked) || errors.As(err, &draft) {

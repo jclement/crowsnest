@@ -26,6 +26,12 @@ const DefaultPermissionMode = "auto"
 // DefaultPokeInterval is how often the timer considers poking the orchestrator.
 const DefaultPokeInterval = 15 * time.Minute
 
+// DefaultModel is the orchestrator's model. The orchestrator is a lead: it delegates, answers
+// pokes and relays, and most of its turns are short, so a cheaper, faster model serves it better
+// than the most capable one (DESIGN.md 17, "The orchestrator runs on sonnet"). Job agents keep
+// Claude's own default unless --job-model or the job names one.
+const DefaultModel = "sonnet"
+
 // DefaultElevenLabsVoice is a stock ElevenLabs voice ("Rachel"), used until one is chosen.
 const DefaultElevenLabsVoice = "21m00Tcm4TlvDq8ikWAM"
 
@@ -72,7 +78,8 @@ type Config struct {
 
 	Session        string        // herdr session name
 	Dir            string        // orchestrator working directory
-	Model          string        // orchestrator model; empty means Claude's default
+	Model          string        // orchestrator model (sonnet by default); empty means Claude's default
+	JobModel       string        // job agents' model when a job names none; empty means Claude's default
 	PermissionMode string        // orchestrator permission mode
 	PokeInterval   time.Duration // timer poke interval; 0 disables timer pokes
 	NoOrchestrator bool          // serve the UI over the session without starting Claude
@@ -80,9 +87,12 @@ type Config struct {
 	// ---- Talk mode and notices ----
 
 	ElevenLabsAPIKey string // enables talk mode when set
-	ElevenLabsVoice  string // TTS voice id
-	ElevenLabsURL    string // ElevenLabs API base URL
-	NotifyURL        string // ntfy-style URL for one-line notices
+	ElevenLabsVoice  string // TTS voice id: the default until one is chosen in the web app
+	// ElevenLabsVoiceSource says where ElevenLabsVoice came from ("--elevenlabs-voice",
+	// "CROWSNEST_ELEVENLABS_VOICE", the config file's name, or "default"), for the settings sheet.
+	ElevenLabsVoiceSource string
+	ElevenLabsURL         string // ElevenLabs API base URL
+	NotifyURL             string // ntfy-style URL for one-line notices
 
 	// ---- Modes and overrides ----
 

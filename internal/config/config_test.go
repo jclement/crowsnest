@@ -129,6 +129,12 @@ func TestDefaults(t *testing.T) {
 	if !cfg.Listeners[1].Optional || cfg.Listeners[0].Optional {
 		t.Errorf("only ::1 from localhost should be optional: %+v", cfg.Listeners)
 	}
+	if cfg.Model != DefaultModel || cfg.JobModel != "" {
+		t.Errorf("models: orchestrator %q, jobs %q; want sonnet and Claude's default", cfg.Model, cfg.JobModel)
+	}
+	if cfg.ElevenLabsVoiceSource != "default" {
+		t.Errorf("voice source %q", cfg.ElevenLabsVoiceSource)
+	}
 	if cfg.ElevenLabsVoice != DefaultElevenLabsVoice || cfg.ElevenLabsURL != DefaultElevenLabsURL {
 		t.Errorf("elevenlabs defaults: %q %q", cfg.ElevenLabsVoice, cfg.ElevenLabsURL)
 	}
@@ -147,12 +153,17 @@ func TestPrecedence(t *testing.T) {
 		wantPort  int
 		wantModel string
 	}{
-		{name: "default", wantPort: DefaultPort},
+		{name: "default", wantPort: DefaultPort, wantModel: DefaultModel},
 		{name: "file beats default", file: file, wantPort: 1111, wantModel: "file-model"},
 		{name: "env beats file", file: file, env: []string{"CROWSNEST_PORT", "2222"}, wantPort: 2222, wantModel: "file-model"},
 		{name: "flag beats env", file: file, env: []string{"CROWSNEST_PORT", "2222"}, args: []string{"--port", "3333"}, wantPort: 3333, wantModel: "file-model"},
 		{name: "empty env falls through", file: file, env: []string{"CROWSNEST_PORT", ""}, wantPort: 1111, wantModel: "file-model"},
-		{name: "flag at its default value still wins", env: []string{"CROWSNEST_PORT", "2222"}, args: []string{"--port", "2769"}, wantPort: 2769},
+		{name: "flag at its default value still wins", env: []string{"CROWSNEST_PORT", "2222"}, args: []string{"--port", "2769"}, wantPort: 2769, wantModel: DefaultModel},
+		// The orchestrator's model is the one option whose empty value means something: Claude's
+		// own default rather than sonnet. An empty CROWSNEST_MODEL is that, not "unset".
+		{name: "empty model env means Claude's default", file: file, env: []string{"CROWSNEST_MODEL", ""}, wantPort: 1111, wantModel: ""},
+		{name: "empty model flag means Claude's default", args: []string{"--model="}, wantPort: DefaultPort, wantModel: ""},
+		{name: "model env overrides the default", env: []string{"CROWSNEST_MODEL", "opus"}, wantPort: DefaultPort, wantModel: "opus"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -172,7 +183,7 @@ func TestEveryOptionReadsItsEnvVar(t *testing.T) {
 	h := newHarness(t).withEnv(
 		"CROWSNEST_USERNAME", "jeff", "CROWSNEST_PASSWORD", " s3cret with spaces ",
 		"CROWSNEST_BIND", "127.0.0.1:9000, tailnet", "CROWSNEST_PORT", "4000",
-		"CROWSNEST_SESSION", "lab", "CROWSNEST_DIR", "~/work", "CROWSNEST_MODEL", "haiku",
+		"CROWSNEST_SESSION", "lab", "CROWSNEST_DIR", "~/work", "CROWSNEST_MODEL", "haiku", "CROWSNEST_JOB_MODEL", "opus",
 		"CROWSNEST_PERMISSION_MODE", "plan", "CROWSNEST_POKE_INTERVAL", "0",
 		"CROWSNEST_NO_ORCHESTRATOR", "true", "CROWSNEST_ALLOWED_HOSTS", "Crow.Example.ts.net,proxy.lan",
 		"ELEVENLABS_API_KEY", "el-key", "CROWSNEST_ELEVENLABS_VOICE", "voice1",
@@ -192,12 +203,13 @@ func TestEveryOptionReadsItsEnvVar(t *testing.T) {
 		{"session", cfg.Session == "lab"},
 		{"dir expands ~", cfg.Dir == filepath.Join(h.home, "work")},
 		{"model", cfg.Model == "haiku"},
+		{"job model", cfg.JobModel == "opus"},
 		{"permission mode", cfg.PermissionMode == "plan"},
 		{"poke 0 disables", cfg.PokeInterval == 0},
 		{"no orchestrator", cfg.NoOrchestrator},
 		{"allowed hosts lowercased", slices.Equal(cfg.AllowedHosts, []string{"crow.example.ts.net", "proxy.lan"})},
 		{"elevenlabs key", cfg.ElevenLabsAPIKey == "el-key" && cfg.VoiceEnabled()},
-		{"voice", cfg.ElevenLabsVoice == "voice1"},
+		{"voice", cfg.ElevenLabsVoice == "voice1" && cfg.ElevenLabsVoiceSource == "CROWSNEST_ELEVENLABS_VOICE"},
 		{"elevenlabs url trimmed", cfg.ElevenLabsURL == "http://127.0.0.1:9999"},
 		{"notify url", cfg.NotifyURL == "https://ntfy.sh/x"},
 		{"demo", cfg.Demo},
@@ -328,6 +340,8 @@ func TestInvalidValues(t *testing.T) {
 		{name: "duration bare number", args: []string{"--poke-interval", "15"}, wantErr: "not a duration"},
 		{name: "duration negative", args: []string{"--poke-interval", "-1m"}, wantErr: "negative"},
 		{name: "permission mode", args: []string{"--permission-mode", "yolo"}, wantErr: "not one of"},
+		{name: "model with a space", args: []string{"--model", "son net"}, wantErr: "is not a model name"},
+		{name: "job model with a flag in it", args: []string{"--job-model=--dangerously-skip-permissions"}, wantErr: "is not a model name"},
 		{name: "session name with slash", args: []string{"--session", "../etc"}, wantErr: "not a valid herdr session name"},
 		{name: "username without password", args: []string{"--username", "jeff"}, wantErr: "together"},
 		{name: "password without username", env: []string{"CROWSNEST_PASSWORD", "x"}, wantErr: "together"},

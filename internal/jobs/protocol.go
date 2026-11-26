@@ -117,6 +117,10 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 		return store.JobRecord{}, invalid("a job without a directory goes to the orchestrator, which is Claude; pick a directory to use %s", engine)
 	}
 	model := strings.TrimSpace(input.Model)
+	if model == "" && engine == EngineClaude && dir != "" {
+		// A job with no directory goes to the orchestrator, which keeps its own model.
+		model = s.opts.DefaultModel
+	}
 	if model != "" && !modelPattern.MatchString(model) {
 		return store.JobRecord{}, invalid("model %q is not a model name (letters, digits and . _ : [ ] -, at most 64)", termtext.Cap(termtext.Clean(model), 70))
 	}

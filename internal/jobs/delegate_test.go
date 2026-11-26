@@ -283,6 +283,32 @@ func TestModelNamesAreStrict(t *testing.T) {
 	}
 }
 
+// --job-model fills a Claude job's model when the job names none; a named model, a codex job and
+// a job for the orchestrator (no directory) are left alone.
+func TestDefaultJobModel(t *testing.T) {
+	r := newRig(t, func(o *Options) { o.DefaultModel = "opus" })
+	ctx := context.Background()
+	cases := []struct {
+		input CreateInput
+		want  string
+	}{
+		{CreateInput{Brief: "x", Dir: t.TempDir()}, "opus"},
+		{CreateInput{Brief: "x", Dir: t.TempDir(), Model: "haiku"}, "haiku"},
+		{CreateInput{Brief: "x", Dir: t.TempDir(), Engine: EngineCodex}, ""},
+		{CreateInput{Brief: "x"}, ""},
+	}
+	for _, c := range cases {
+		job, err := r.svc.Create(ctx, c.input, "")
+		if err != nil || job.Model != c.want {
+			t.Errorf("%+v: model %q (%v), want %q", c.input, job.Model, err, c.want)
+		}
+	}
+	plain := newRig(t, nil)
+	if job, _ := plain.svc.Create(ctx, CreateInput{Brief: "x", Dir: t.TempDir()}, ""); job.Model != "" {
+		t.Errorf("no --job-model: model %q, want Claude's default", job.Model)
+	}
+}
+
 // The store keeps the origin (migration 0007).
 func TestOriginIsStored(t *testing.T) {
 	d := newDelegateRig(t, DelegationLimits{})

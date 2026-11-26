@@ -25,7 +25,6 @@ import (
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/transcript"
-	"github.com/jclement/crowsnest/internal/voice"
 )
 
 const (
@@ -109,14 +108,14 @@ type promptRequest struct {
 	Voice bool `json:"voice"`
 }
 
-// voicePrompt puts the voice header and the talk flag on a transcribed prompt (DESIGN.md 7.1). An
-// empty transcript stays empty, so the send path refuses it as it would any empty prompt.
-func voicePrompt(text string, talkOn bool) string {
+// voicePrompt puts the voice header on a transcribed prompt (DESIGN.md 7.1). An empty transcript
+// stays empty, so the send path refuses it as it would any empty prompt.
+func voicePrompt(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
 	}
-	return VoiceHeader + " " + voice.TalkFlag(talkOn) + "\n" + text
+	return VoiceHeader + "\n" + text
 }
 
 // BlockedDetail is the detail of a BLOCKED refusal: the dialog to answer instead.
@@ -147,7 +146,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, codeNotFound, "Talk mode is off: start crowsnest with an ElevenLabs API key to use it.")
 			return
 		}
-		body.Text = voicePrompt(body.Text, s.deps.Voice.TalkOn())
+		body.Text = voicePrompt(body.Text)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), promptTimeout)
 	defer cancel()

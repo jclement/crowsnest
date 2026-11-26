@@ -50,21 +50,15 @@ func TestDemoTranscripts(t *testing.T) {
 	}
 }
 
-func TestDemoSayFollowsTheTalkFlag(t *testing.T) {
-	reply := cannedReplies[0]
-	voiceOn := "[crowsnest voice: transcribed speech, may contain mis-hearings] talk=on\nwhat is the status"
-	if got := demoSay(voiceOn, reply); got != "SAY: "+reply.say+"\n\n" {
-		t.Fatalf("talk=on: %q", got)
-	}
-	for _, prompt := range []string{
-		"[crowsnest voice: transcribed speech, may contain mis-hearings] talk=off\nhi",
-		"plain prompt mentioning talk=on",
-	} {
-		if got := demoSay(prompt, reply); got != "" {
-			t.Errorf("%q: %q", prompt, got)
+// The demo orchestrator writes a SAY line on every reply, as the real one is told to.
+func TestDemoSayOnEveryReply(t *testing.T) {
+	for _, reply := range cannedReplies {
+		if got := demoSay(reply); got != "SAY: "+reply.say+"\n\n" || reply.say == "" {
+			t.Fatalf("%q", got)
 		}
 	}
-	if got := promptBody(voiceOn); got != "what is the status" {
+	voice := "[crowsnest voice: transcribed speech, may contain mis-hearings]\nwhat is the status"
+	if got := promptBody(voice); got != "what is the status" {
 		t.Errorf("promptBody: %q", got)
 	}
 }

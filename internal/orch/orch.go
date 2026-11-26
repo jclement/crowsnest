@@ -70,11 +70,13 @@ const (
 
 // Status is what GET /orchestrator returns and an `orchestrator` event carries.
 type Status struct {
-	State     State     `json:"state"`
-	Name      string    `json:"name"`
-	PaneID    string    `json:"pane_id"`    // empty until it has a pane
-	SessionID string    `json:"session_id"` // Claude's session id, when known
-	Dir       string    `json:"dir"`
+	State     State  `json:"state"`
+	Name      string `json:"name"`
+	PaneID    string `json:"pane_id"`    // empty until it has a pane
+	SessionID string `json:"session_id"` // Claude's session id, when known
+	Dir       string `json:"dir"`
+	// Model is the model Claude was started with (--model); empty means Claude's own default.
+	Model     string    `json:"model"`
 	Detail    string    `json:"detail,omitempty"` // a sentence for the human when something is wrong
 	Restarts  int       `json:"restarts"`         // automatic restarts in the last hour
 	UpdatedAt time.Time `json:"updated_at"`
@@ -190,7 +192,7 @@ func New(opts Options) *Orchestrator {
 	if opts.Disabled {
 		state = StateDisabled
 	}
-	return &Orchestrator{opts: opts, status: Status{State: state, Name: Name, Dir: opts.Dir, UpdatedAt: opts.Now()}}
+	return &Orchestrator{opts: opts, status: Status{State: state, Name: Name, Dir: opts.Dir, Model: opts.Model, UpdatedAt: opts.Now()}}
 }
 
 // Status returns the current status.

@@ -229,18 +229,16 @@ func Gate(input GateInput) GateDecision {
 
 // ---- Text ------------------------------------------------------------------------------
 
-// PokeHeader is the first line of a poke: `[crowsnest poke <RFC3339> talk=on|off]`.
-func PokeHeader(at time.Time, talk bool) string {
-	flag := "off"
-	if talk {
-		flag = "on"
-	}
-	return fmt.Sprintf("[crowsnest poke %s talk=%s]", at.UTC().Format(time.RFC3339), flag)
+// PokeHeader is the first line of a poke: `[crowsnest poke <RFC3339>]`. It carried a `talk=on|off`
+// flag until the orchestrator was told to write a SAY line on every reply (DESIGN.md 13.2), which
+// left nothing for the flag to switch.
+func PokeHeader(at time.Time) string {
+	return fmt.Sprintf("[crowsnest poke %s]", at.UTC().Format(time.RFC3339))
 }
 
 // PokeText is the whole poke: the header, then one line per reason.
-func PokeText(at time.Time, talk bool, reasons []Reason) string {
-	lines := []string{PokeHeader(at, talk)}
+func PokeText(at time.Time, reasons []Reason) string {
+	lines := []string{PokeHeader(at)}
 	for _, reason := range reasons {
 		lines = append(lines, "- "+oneLine(reason.Text))
 	}

@@ -10,8 +10,11 @@
 //
 // The endpoints and shapes here were taken from the ElevenLabs API reference on 2026-11-26
 // (https://elevenlabs.io/docs/api-reference): POST /v1/speech-to-text (multipart, `model_id` and
-// `file`, transcript in `text`) and POST /v1/text-to-speech/{voice_id}/stream (JSON `text` and
-// `model_id`, `output_format` as a query parameter, the audio streamed back).
+// `file`, transcript in `text`; files up to 5 GB and 15 hours, so crowsnest's own caps are the
+// ones that bind), POST /v1/text-to-speech/{voice_id}/stream (JSON `text`, `model_id` and
+// `voice_settings.speed`, `output_format` as a query parameter, the audio streamed back) and
+// GET /v2/voices (the account's voices, paged). They were then checked once with a real key
+// (REPORT.md of the voice-fix branch).
 package voice
 
 import (
@@ -37,20 +40,26 @@ const (
 	// and deprecates scribe_v1. A human with a key should confirm scribe_v3 and switch if it
 	// transcribes better (REPORT.md, "check with a real key").
 	STTModel = "scribe_v2"
-	// TTSModel is the low-latency text-to-speech model: a spoken reply should start quickly, and
-	// the sentences are short. eleven_flash_v2_5 is current (the turbo models are deprecated).
+	// TTSModel is the default text-to-speech model, the low-latency one: a spoken reply should
+	// start quickly, and the sentences are short. Settings can pick the higher-quality model
+	// instead (settings.go, TTSModels).
 	TTSModel = "eleven_flash_v2_5"
-	// TTSOutputFormat is MP3, which every browser's <audio> plays (Safari has no Opus-in-Ogg).
-	// mp3_44100_128 is the API's default and needs no paid tier.
-	TTSOutputFormat = "mp3_44100_128"
+	// TTSOutputFormat is MP3, which every browser's <audio> plays (Safari has no Opus-in-Ogg) and
+	// starts playing from the first frames, so playback begins while ElevenLabs is still
+	// generating. 64 kbit/s is plenty for one voice and halves the bytes the browser must buffer
+	// before it starts, against the API's default of 128.
+	TTSOutputFormat = "mp3_44100_64"
 	// TTSContentType is what an mp3 stream is served as when ElevenLabs does not say.
 	TTSContentType = "audio/mpeg"
 )
 
-// Timeouts. Transcribing a minute of audio takes a few seconds; the TTS timeout covers only the
-// response headers, because the body is streamed to the browser for as long as it takes.
+// Timeouts. Transcribing the longest recording (MaxRecordingSeconds, five minutes) takes
+// ElevenLabs some seconds to tens of seconds; three minutes leaves room for a slow day without
+// letting a hung upstream hold the request forever. The TTS timeout covers only the response
+// headers, because the body is streamed to the browser for as long as it takes.
 const (
-	sttTimeout       = 45 * time.Second
+	sttTimeout       = 3 * time.Minute
+	voicesTimeout    = 15 * time.Second
 	ttsHeaderTimeout = 20 * time.Second
 	// maxSTTResponse caps the transcript JSON we read back (words and timings included).
 	maxSTTResponse = 4 << 20
@@ -101,7 +110,7 @@ func (e *APIError) Is(target error) bool {
 type Client struct {
 	baseURL string
 	apiKey  string
-	voiceID string
+	voiceID string // the configured default voice
 	http    *http.Client
 }
 
@@ -232,9 +241,23 @@ func recordingName(contentType string) string {
 // ttsRequest is the JSON body of a text-to-speech call. Text normalisation is forced on because
 // the flash model does not spell out numbers by default, and agents say "3 tests" a lot.
 type ttsRequest struct {
-	Text                   string `json:"text"`
-	ModelID                string `json:"model_id"`
-	ApplyTextNormalization string `json:"apply_text_normalization"`
+	Text                   string            `json:"text"`
+	ModelID                string            `json:"model_id"`
+	ApplyTextNormalization string            `json:"apply_text_normalization"`
+	VoiceSettings          *ttsVoiceSettings `json:"voice_settings,omitempty"`
+}
+
+// ttsVoiceSettings overrides the voice's stored settings for one call. Only speed is set; the
+// rest stay the voice's own (a partial object is accepted, as the real API answered).
+type ttsVoiceSettings struct {
+	Speed float64 `json:"speed"`
+}
+
+// SpeakOptions choose how one text is spoken. Zero fields take the client's defaults.
+type SpeakOptions struct {
+	VoiceID string  // empty: the configured voice
+	ModelID string  // empty: TTSModel
+	Speed   float64 // 0 or 1: the voice's own pace; otherwise within APISpeedMin..APISpeedMax
 }
 
 // Speech is a streaming audio response. The caller must Close it.
@@ -254,12 +277,23 @@ func (s *Speech) Close() error {
 // Speak starts streaming text as audio in the configured voice. It returns once ElevenLabs has
 // answered with headers; the audio then arrives through Body as it is generated. ctx bounds the
 // whole stream (the browser hanging up cancels it).
-func (c *Client) Speak(ctx context.Context, text string) (*Speech, error) {
-	payload, err := json.Marshal(ttsRequest{Text: text, ModelID: TTSModel, ApplyTextNormalization: "on"})
+func (c *Client) Speak(ctx context.Context, text string, opts SpeakOptions) (*Speech, error) {
+	voiceID, model := opts.VoiceID, opts.ModelID
+	if voiceID == "" {
+		voiceID = c.voiceID
+	}
+	if model == "" {
+		model = TTSModel
+	}
+	request := ttsRequest{Text: text, ModelID: model, ApplyTextNormalization: "on"}
+	if opts.Speed != 0 && opts.Speed != 1 {
+		request.VoiceSettings = &ttsVoiceSettings{Speed: clampAPISpeed(opts.Speed)}
+	}
+	payload, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("encoding the speech request: %w", err)
 	}
-	endpoint := c.baseURL + "/v1/text-to-speech/" + url.PathEscape(c.voiceID) + "/stream?output_format=" + TTSOutputFormat
+	endpoint := c.baseURL + "/v1/text-to-speech/" + url.PathEscape(voiceID) + "/stream?output_format=" + TTSOutputFormat
 	ctx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
@@ -281,6 +315,77 @@ func (c *Client) Speak(ctx context.Context, text string) (*Speech, error) {
 		contentType = TTSContentType
 	}
 	return &Speech{Body: res.Body, ContentType: contentType, cancel: cancel}, nil
+}
+
+// DefaultVoice is the voice id the client was configured with (--elevenlabs-voice).
+func (c *Client) DefaultVoice() string { return c.voiceID }
+
+// ---- Voices ----------------------------------------------------------------------------
+
+// VoiceInfo is one voice the account can use, as the settings sheet lists it.
+type VoiceInfo struct {
+	VoiceID     string            `json:"voice_id"`
+	Name        string            `json:"name"`
+	Category    string            `json:"category,omitempty"` // premade, cloned, generated, professional
+	Description string            `json:"description,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"` // accent, gender, age, use_case, …
+}
+
+// voicesPage is GET /v2/voices's answer, the fields crowsnest reads.
+type voicesPage struct {
+	Voices        []VoiceInfo `json:"voices"`
+	HasMore       bool        `json:"has_more"`
+	NextPageToken *string     `json:"next_page_token"`
+}
+
+const (
+	// voicesPageSize is the API's maximum page.
+	voicesPageSize = 100
+	// maxVoicePages bounds the walk: 500 voices is more than any account's picker needs.
+	maxVoicePages = 5
+	// maxVoicesResponse caps one page's JSON.
+	maxVoicesResponse = 4 << 20
+)
+
+// Voices lists the voices the account can use (its own and the premade ones), sorted by name.
+func (c *Client) Voices(ctx context.Context) ([]VoiceInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, voicesTimeout)
+	defer cancel()
+	var all []VoiceInfo
+	token := ""
+	for range maxVoicePages {
+		query := url.Values{"page_size": {fmt.Sprint(voicesPageSize)}, "sort": {"name"}, "sort_direction": {"asc"}, "include_total_count": {"false"}}
+		if token != "" {
+			query.Set("next_page_token", token)
+		}
+		page, err := c.voicesPage(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page.Voices...)
+		if !page.HasMore || page.NextPageToken == nil || *page.NextPageToken == "" {
+			break
+		}
+		token = *page.NextPageToken
+	}
+	return all, nil
+}
+
+func (c *Client) voicesPage(ctx context.Context, query url.Values) (voicesPage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v2/voices?"+query.Encode(), nil)
+	if err != nil {
+		return voicesPage{}, fmt.Errorf("building the voices request: %w", err)
+	}
+	res, err := c.do(req, "listing voices")
+	if err != nil {
+		return voicesPage{}, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	var page voicesPage
+	if err := json.NewDecoder(io.LimitReader(res.Body, maxVoicesResponse)).Decode(&page); err != nil {
+		return voicesPage{}, &APIError{Status: http.StatusBadGateway, Doing: "listing voices"}
+	}
+	return page, nil
 }
 
 // ---- Shared ----------------------------------------------------------------------------

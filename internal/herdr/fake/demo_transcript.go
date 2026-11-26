@@ -110,7 +110,7 @@ func (d *Demo) finishTurn(paneID, prompt string, reply cannedReply) {
 	if err == nil {
 		w.at = time.Now()
 		w.tool(reply.tool, reply.input, reply.result, false)
-		w.text(demoSay(prompt, reply) + strings.ReplaceAll(reply.markdown, "{{prompt}}", firstLine(promptBody(prompt))))
+		w.text(demoSay(reply) + strings.ReplaceAll(reply.markdown, "{{prompt}}", firstLine(promptBody(prompt))))
 	}
 	d.scribe.mu.Unlock()
 	d.idle(paneID, "Answered: "+firstLine(promptBody(prompt)))
@@ -181,10 +181,10 @@ func seedOrchestrator(w *transcriptWriter) {
 	w.thinking("Let me look at the fleet before answering, rather than guessing from memory.")
 	w.tool("Bash", map[string]any{"command": "herdr agent list --json | jq -r '.[] | \"\\(.name) \\(.agent_status)\"'", "description": "List agents and their states"},
 		"orchestrator working\nbuilder working\nreviewer done\ndocs-writer blocked\nlinter idle", false)
-	w.text("Four agents besides me:\n\n| Agent | State | Doing |\n|---|---|---|\n| builder | working | wiring `/api/v1/fleet` |\n| reviewer | done | review written to `REVIEW.md` |\n| docs-writer | **blocked** | wants to run a command |\n| linter | idle | no lint errors |\n\nThe docs writer needs you; everything else is moving.")
-	w.user("[crowsnest poke 2026-11-26T03:10Z talk=off]\n- docs-writer is blocked on a dialog (10 min)\n- reviewer settled: done")
+	w.text("SAY: Four agents are running; the docs writer needs you.\n\nFour agents besides me:\n\n| Agent | State | Doing |\n|---|---|---|\n| builder | working | wiring `/api/v1/fleet` |\n| reviewer | done | review written to `REVIEW.md` |\n| docs-writer | **blocked** | wants to run a command |\n| linter | idle | no lint errors |\n\nThe docs writer needs you; everything else is moving.")
+	w.user("[crowsnest poke 2026-11-26T03:10Z]\n- docs-writer is blocked on a dialog (10 min)\n- reviewer settled: done")
 	w.tool("Read", map[string]any{"file_path": "~/src/crowsnest/REVIEW.md"}, "# Review: fleet cache\n\n1. minor: debounce constant could be named\n2. minor: missing test for events_lost", false)
-	w.text("The reviewer found **two minor issues** in the fleet cache; I've passed them to the builder.\n\nThe docs writer is still waiting on you: it wants to run\n\n```sh\nrm -rf dist && npm run build\n```\n\nAnswer it from **Fleet** (or the Inbox, once that exists).")
+	w.text("SAY: The review found two minor issues, and the docs writer still needs you.\n\nThe reviewer found **two minor issues** in the fleet cache; I've passed them to the builder.\n\nThe docs writer is still waiting on you: it wants to run\n\n```sh\nrm -rf dist && npm run build\n```\n\nAnswer it from **Fleet** (or the Inbox, once that exists).")
 }
 
 func seedBuilder(w *transcriptWriter) {
@@ -207,16 +207,12 @@ type cannedReply struct {
 	input    map[string]any
 	result   string
 	markdown string
-	say      string // the SAY line used when talk mode is on (DESIGN.md 7.1)
+	say      string // the reply's SAY line (DESIGN.md 7.1)
 }
 
-// demoSay follows the SAY contract the way a real orchestrator is told to: a prompt whose header
-// says talk=on gets a spoken first line, so talk mode can be exercised without Claude.
-func demoSay(prompt string, reply cannedReply) string {
-	header, _, _ := strings.Cut(prompt, "\n") // not firstLine: it shortens the line, and the flag is at its end
-	if !strings.HasPrefix(header, "[crowsnest ") || !strings.Contains(header, "talk=on") {
-		return ""
-	}
+// demoSay follows the SAY contract the way a real orchestrator is told to: every reply opens with
+// a spoken first line, so speak mode can be exercised without Claude.
+func demoSay(reply cannedReply) string {
 	return "SAY: " + reply.say + "\n\n"
 }
 

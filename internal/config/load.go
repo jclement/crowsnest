@@ -99,7 +99,7 @@ func (l *loader) lookup(name string) source {
 		return l.flagValue(flag, opt)
 	}
 	for _, env := range opt.env {
-		if value, ok := l.opts.Getenv(env); ok && value != "" {
+		if value, ok := l.opts.Getenv(env); ok && (value != "" || opt.emptyIsValue) {
 			return source{raw: value, where: env}
 		}
 	}
@@ -446,6 +446,11 @@ func (l *loader) loadTLS(cfg *Config) error {
 // sessions directory or confuse the CLI.
 var sessionNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
+// modelNamePattern is what a model name may look like: it becomes one argument of Claude's
+// command line. The characters are a job's model's (jobs.modelPattern); the first must be a
+// letter or digit, so a value can never read as another flag ("--model --something").
+var modelNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,63}$`)
+
 // permissionModes are Claude Code's --permission-mode choices (claude --help, 2.1.x).
 var permissionModes = []string{"acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"}
 
@@ -466,6 +471,12 @@ func (l *loader) loadOrchestrator(cfg *Config) error {
 		cfg.Dir = filepath.Join(cfg.DataDir, "orchestrator")
 	}
 	cfg.Model = l.str(optModel)
+	cfg.JobModel = l.str(optJobModel)
+	for name, model := range map[string]string{optModel: cfg.Model, optJobModel: cfg.JobModel} {
+		if model != "" && !modelNamePattern.MatchString(model) {
+			return fmt.Errorf("--%s %q is not a model name (letters, digits and . _ : [ ] -, at most 64)", name, model)
+		}
+	}
 	cfg.PermissionMode = l.str(optPermissionMode)
 	if !slices.Contains(permissionModes, cfg.PermissionMode) {
 		return fmt.Errorf("--permission-mode %q is not one of %s", cfg.PermissionMode, strings.Join(permissionModes, ", "))
@@ -483,6 +494,7 @@ func (l *loader) loadExtras(cfg *Config) error {
 		return err
 	}
 	cfg.ElevenLabsVoice = l.str(optElevenLabsVoice)
+	cfg.ElevenLabsVoiceSource = l.lookup(optElevenLabsVoice).where
 	cfg.ElevenLabsURL = strings.TrimRight(l.str(optElevenLabsURL), "/")
 	if cfg.NotifyURL, err = l.secretOrFile(optNotifyURL, optNotifyURLFile, "the URL"); err != nil {
 		return err

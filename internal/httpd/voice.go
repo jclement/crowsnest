@@ -2,10 +2,14 @@
 // key is configured, so a browser cannot tell a disabled feature from a missing one and no
 // handler below ever runs without the voice service.
 //
-//	POST /voice/stt              audio body (a MediaRecorder blob) → {text}
-//	GET  /voice/tts?text_id=     the audio of a server-held text, streamed
-//	POST /voice/talk             {client_id, on} heartbeat → {talk, heartbeat_seconds, max_recording_seconds}
+//	POST /voice/stt              audio body (a MediaRecorder blob, up to five minutes) → {text}
+//	GET  /voice/tts?text_id=     the audio of a server-held text, streamed as it is generated
 //	POST /voice/read             {question_id} → {text_id}: a question's title and options, to hear
+//	POST /voice/reply            {target, message_id} → {text_id, text}: a reply's SAY line, to hear
+//	GET  /voice/settings         the voice, speed and model in force, and where each came from
+//	PUT  /voice/settings         {voice_id, speed, model} → the same as GET
+//	GET  /voice/voices           the ElevenLabs account's voices (cached for five minutes)
+//	POST /voice/preview          {voice_id, speed, model} → {text_id, playback_rate}: a sample
 //
 // The voice prompt itself goes through POST /agents/{target}/prompt with "voice": true, which adds
 // the voice header (conversation.go).
@@ -22,6 +26,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/voice"
@@ -31,14 +36,24 @@ import (
 // rather than "the server".
 const codeVoiceUpstream = "VOICE_UPSTREAM"
 
-// VoiceHeader opens every prompt that came from speech (DESIGN.md 7.1); the talk flag follows it.
+// VoiceHeader opens every prompt that came from speech (DESIGN.md 7.1), on a line of its own.
 const VoiceHeader = "[crowsnest voice: transcribed speech, may contain mis-hearings]"
+
+// sttUploadTimeout bounds reading one recording. The server has no overall read timeout (event
+// streams and terminals stay open for hours), so without this a client that stops sending would
+// hold its connection forever; with it, five minutes of audio (at most MaxRecordingBytes) has two
+// minutes to arrive, which is under 0.6 Mbit/s for the biggest upload.
+const sttUploadTimeout = 2 * time.Minute
 
 func (s *Server) registerVoiceRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/voice/stt", s.requireAuth(s.requireVoice(s.handleSTT)))
 	mux.Handle("GET /api/v1/voice/tts", s.requireAuth(s.requireVoice(s.handleTTS)))
-	mux.Handle("POST /api/v1/voice/talk", s.requireAuth(s.requireVoice(s.handleTalk)))
 	mux.Handle("POST /api/v1/voice/read", s.requireAuth(s.requireVoice(s.handleReadAloud)))
+	mux.Handle("POST /api/v1/voice/reply", s.requireAuth(s.requireVoice(s.handleReplySay)))
+	mux.Handle("GET /api/v1/voice/settings", s.requireAuth(s.requireVoice(s.handleVoiceSettings)))
+	mux.Handle("PUT /api/v1/voice/settings", s.requireAuth(s.requireVoice(s.handleSaveVoiceSettings)))
+	mux.Handle("GET /api/v1/voice/voices", s.requireAuth(s.requireVoice(s.handleVoices)))
+	mux.Handle("POST /api/v1/voice/preview", s.requireAuth(s.requireVoice(s.handleVoicePreview)))
 }
 
 // requireVoice answers 404 when talk mode is off.
@@ -76,11 +91,15 @@ func (s *Server) handleSTT(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnsupportedMediaType, codeValidation, "Send the recording as audio/webm, audio/ogg or audio/mp4, as the browser's recorder makes it.")
 		return
 	}
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(sttUploadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		s.internalError(w, r, "setting the upload deadline", err)
+		return
+	}
 	audio, err := io.ReadAll(http.MaxBytesReader(w, r.Body, voice.MaxRecordingBytes))
 	var tooBig *http.MaxBytesError
 	switch {
 	case errors.As(err, &tooBig):
-		writeError(w, http.StatusRequestEntityTooLarge, codeValidation, "That recording is too long; keep it under a minute.")
+		writeError(w, http.StatusRequestEntityTooLarge, codeValidation, "That recording is too long; keep it under five minutes.")
 		return
 	case err != nil:
 		writeError(w, http.StatusBadRequest, codeValidation, "The recording did not arrive; try again.")
@@ -139,34 +158,6 @@ func (s *Server) streamAudio(w http.ResponseWriter, audio io.Reader) {
 			return
 		}
 	}
-}
-
-// ---- Talk presence -------------------------------------------------------------------
-
-// TalkRequest is the body of POST /voice/talk.
-type TalkRequest struct {
-	ClientID string `json:"client_id"`
-	On       bool   `json:"on"`
-}
-
-// TalkResponse tells the browser whether talk mode is on anywhere and how often to beat.
-type TalkResponse struct {
-	Talk                bool `json:"talk"`
-	HeartbeatSeconds    int  `json:"heartbeat_seconds"`
-	MaxRecordingSeconds int  `json:"max_recording_seconds"`
-}
-
-func (s *Server) handleTalk(w http.ResponseWriter, r *http.Request) {
-	var body TalkRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil || !voice.ValidClientID(body.ClientID) {
-		writeError(w, http.StatusBadRequest, codeValidation, `Send JSON like {"client_id":"<8-64 letters, digits, - or _>","on":true}.`)
-		return
-	}
-	writeData(w, http.StatusOK, TalkResponse{
-		Talk:                s.deps.Voice.Beat(body.ClientID, body.On),
-		HeartbeatSeconds:    int(voice.TalkHeartbeat.Seconds()),
-		MaxRecordingSeconds: voice.MaxRecordingSeconds,
-	})
 }
 
 // ---- Read aloud ----------------------------------------------------------------------
@@ -229,6 +220,9 @@ func (s *Server) voiceError(w http.ResponseWriter, r *http.Request, doing string
 	switch {
 	case errors.Is(err, voice.ErrUnknownText):
 		writeError(w, http.StatusNotFound, codeNotFound, "That reply is no longer available to play.")
+		return
+	case errors.Is(err, voice.ErrBadSettings):
+		writeError(w, http.StatusBadRequest, codeValidation, strings.TrimPrefix(err.Error(), voice.ErrBadSettings.Error()+": "))
 		return
 	case errors.Is(err, voice.ErrLimited):
 		w.Header().Set("Retry-After", strconv.Itoa(int(voice.RetryAfter().Seconds())))

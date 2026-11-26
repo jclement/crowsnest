@@ -126,7 +126,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	fleetCache := fleet.New(fleet.Options{Client: client, Hub: events, Session: cfg.Session, Logger: logger})
 	go fleetCache.Run(ctx)
-	talk, err := startVoice(cfg, events, logger)
+	talk, err := startVoice(cfg, db, events, logger)
 	if err != nil {
 		return err
 	}

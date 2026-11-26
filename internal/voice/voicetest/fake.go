@@ -1,6 +1,6 @@
-// Package voicetest is a fake ElevenLabs API for tests: an httptest server that answers the two
-// endpoints crowsnest calls, checks the API key header, records what it was sent, and can be told
-// to fail with a status. The voice package's tests and the HTTP handler tests both use it.
+// Package voicetest is a fake ElevenLabs API for tests: an httptest server that answers the
+// endpoints crowsnest calls (speech-to-text, text-to-speech streaming and the voice list),
+// checks the API key header, records what it was sent, and can be told to fail with a status. The voice package's tests and the HTTP handler tests both use it.
 package voicetest
 
 import (
@@ -90,6 +90,9 @@ func (f *Server) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/v1/text-to-speech/") && strings.HasSuffix(r.URL.Path, "/stream"):
 		w.Header().Set("Content-Type", "audio/mpeg")
 		_, _ = w.Write(Audio)
+	case r.URL.Path == "/v2/voices":
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, voicesPage(r.URL.Query().Get("next_page_token")))
 	default:
 		http.NotFound(w, r)
 	}
@@ -122,4 +125,17 @@ func writeError(w http.ResponseWriter, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, `{"detail":{"status":"error","message":"bad key `+Key+`"}}`)
+}
+
+// Voices are the fake account's voices, over two pages so paging is exercised.
+const (
+	VoiceRachel = "21m00Tcm4TlvDq8ikWAM"
+	VoiceBrian  = "nPczCjzI2devNBz1zQrb"
+)
+
+func voicesPage(token string) string {
+	if token == "page2" {
+		return `{"voices":[{"voice_id":"` + VoiceBrian + `","name":"Brian","category":"premade","labels":{"accent":"american","gender":"male"},"preview_url":"https://example.invalid/b.mp3"}],"has_more":false,"next_page_token":null}`
+	}
+	return `{"voices":[{"voice_id":"` + VoiceRachel + `","name":"Rachel","category":"premade","description":"Calm","labels":{"accent":"american","gender":"female","use_case":"narration"}}],"has_more":true,"next_page_token":"page2","total_count":2}`
 }

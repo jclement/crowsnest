@@ -143,12 +143,12 @@ func TestPokeReasonsCannotForgeLines(t *testing.T) {
 }
 
 func TestPokeText(t *testing.T) {
-	text := PokeText(pokeEpoch, true, []Reason{{Text: "builder finished\nits turn"}, {Text: "q_7 was answered"}})
-	want := "[crowsnest poke 2026-11-26T03:10:00Z talk=on]\n- builder finished its turn\n- q_7 was answered"
+	text := PokeText(pokeEpoch, []Reason{{Text: "builder finished\nits turn"}, {Text: "q_7 was answered"}})
+	want := "[crowsnest poke 2026-11-26T03:10:00Z]\n- builder finished its turn\n- q_7 was answered"
 	if text != want {
 		t.Fatalf("text %q, want %q", text, want)
 	}
-	if header := PokeHeader(pokeEpoch.In(time.FixedZone("MST", -7*3600)), false); header != "[crowsnest poke 2026-11-26T03:10:00Z talk=off]" {
+	if header := PokeHeader(pokeEpoch.In(time.FixedZone("MST", -7*3600))); header != "[crowsnest poke 2026-11-26T03:10:00Z]" {
 		t.Fatalf("header %q", header)
 	}
 }
@@ -181,7 +181,6 @@ type pokeRig struct {
 	orch    string // the orchestrator's pane
 	builder string // another agent's pane
 	alerts  []string
-	talk    bool
 	opts    PokerOptions
 	poker   *Poker
 }
@@ -203,7 +202,7 @@ func newPokeRig(t *testing.T, adjust ...func(*PokerOptions)) *pokeRig {
 	r.screen(r.builder, emptyInput)
 	r.opts = PokerOptions{
 		Client: r.fake, KV: db, Journal: r.journal, Logger: slog.New(slog.DiscardHandler), Now: r.clock.Now,
-		Status: r.status, Talk: func() bool { return r.talk }, Alert: func(text string) { r.alerts = append(r.alerts, text) },
+		Status: r.status, Alert: func(text string) { r.alerts = append(r.alerts, text) },
 	}
 	for _, change := range adjust {
 		change(&r.opts)
@@ -280,7 +279,7 @@ func TestPokerAgentSettledIsHeldThenPushedOnce(t *testing.T) {
 		t.Fatalf("46 s: %+v pokes %v", got, r.pokes())
 	}
 	text := r.pokes()[0]
-	if !strings.HasPrefix(text, "[crowsnest poke 2026-11-26T03:10:46Z talk=off]\n- \"builder\" (pane "+r.builder+") finished its turn (done), for 46s") {
+	if !strings.HasPrefix(text, "[crowsnest poke 2026-11-26T03:10:46Z]\n- \"builder\" (pane "+r.builder+") finished its turn (done), for 46s") {
 		t.Fatalf("poke text %q", text)
 	}
 	r.settleOrchestrator()
@@ -472,13 +471,12 @@ func TestPokeNowWithNothingDue(t *testing.T) {
 
 func TestPokeNowWithASyntheticReason(t *testing.T) {
 	r := newPokeRig(t)
-	r.talk = true
 	r.poker.Add(context.Background(), Reason{Key: "manual:1", Source: SourceManual, Text: "this is a test poke"})
 	got := r.poker.PokeNow(context.Background())
 	if got.Outcome != OutcomeSent || !slices.Equal(got.Reasons, []string{"this is a test poke"}) {
 		t.Fatalf("result %+v", got)
 	}
-	if text := r.pokes()[0]; text != "[crowsnest poke 2026-11-26T03:10:00Z talk=on]\n- this is a test poke" {
+	if text := r.pokes()[0]; text != "[crowsnest poke 2026-11-26T03:10:00Z]\n- this is a test poke" {
 		t.Fatalf("text %q", text)
 	}
 }
@@ -600,7 +598,7 @@ func TestInstructionsExplainPokes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[crowsnest poke <time> talk=<on|off>]", "reply exactly `noop`", "not the human talking", "empty input box"} {
+	for _, want := range []string{"[crowsnest poke <time>]", "Begin the final reply of every turn with", "reply exactly `noop`", "not the human talking", "empty input box"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("CROWSNEST.md does not say %q", want)
 		}

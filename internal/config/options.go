@@ -30,6 +30,10 @@ type option struct {
 	def    string // default, in the same text form a flag would take
 	usage  string
 	hidden bool // dev-only; not shown in --help
+	// emptyIsValue makes an environment variable that is set but empty count as given (the empty
+	// value), rather than as unset. For options whose empty value means something different from
+	// their default: CROWSNEST_MODEL= means "Claude's own default", not "sonnet".
+	emptyIsValue bool
 }
 
 // Option names, used by the loader to pick values out by name.
@@ -44,6 +48,7 @@ const (
 	optSession             = "session"
 	optDir                 = "dir"
 	optModel               = "model"
+	optJobModel            = "job-model"
 	optPermissionMode      = "permission-mode"
 	optPokeInterval        = "poke-interval"
 	optNoOrchestrator      = "no-orchestrator"
@@ -80,7 +85,8 @@ var options = []option{
 	{name: optPort, env: []string{"CROWSNEST_PORT"}, kind: kindInt, def: strconv.Itoa(DefaultPort), usage: "port for binds that do not name one"},
 	{name: optSession, env: []string{"CROWSNEST_SESSION"}, def: DefaultSession, usage: "herdr session to create or connect to"},
 	{name: optDir, env: []string{"CROWSNEST_DIR"}, usage: "orchestrator working directory (default <data-dir>/orchestrator)"},
-	{name: optModel, env: []string{"CROWSNEST_MODEL"}, usage: "orchestrator model (default: Claude's own)"},
+	{name: optModel, env: []string{"CROWSNEST_MODEL"}, def: DefaultModel, emptyIsValue: true, usage: "orchestrator model; an empty value means Claude's own default"},
+	{name: optJobModel, env: []string{"CROWSNEST_JOB_MODEL"}, usage: "job agents' model when a job names none (default: Claude's own)"},
 	{name: optPermissionMode, env: []string{"CROWSNEST_PERMISSION_MODE"}, def: DefaultPermissionMode, usage: "orchestrator permission mode"},
 	{name: optPokeInterval, env: []string{"CROWSNEST_POKE_INTERVAL"}, kind: kindDuration, def: "15m", usage: "timer poke interval; 0 disables timer pokes"},
 	{name: optNoOrchestrator, env: []string{"CROWSNEST_NO_ORCHESTRATOR"}, kind: kindBool, def: "false", usage: "serve the UI over the session without starting Claude"},

@@ -95,6 +95,9 @@ type Options struct {
 	AskHuman func(ctx context.Context, input questions.AskInput, caller questions.Caller) (questions.Question, error)
 	// Delegation bounds what agents may create; zero fields take the defaults (delegate.go).
 	Delegation DelegationLimits
+	// DefaultModel is the model a Claude job agent gets when its job names none and does not
+	// inherit one from its parent (--job-model). Empty: Claude's own default.
+	DefaultModel string
 }
 
 // Service holds the jobs.

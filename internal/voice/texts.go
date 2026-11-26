@@ -28,9 +28,15 @@ type Text struct {
 	ID        string
 	Text      string
 	CreatedAt time.Time
-	// audio is the finished mp3 of a previous fetch, when it fit under maxCachedAudio.
+	// Override, when set, is how this one text must be spoken whatever the settings say: a
+	// preview of a voice or speed in the settings sheet before it is saved.
+	Override *Effective
+	// audio is the finished mp3 of a previous fetch, when it fit under maxCachedAudio, and
+	// variant names the voice, model and speed it was made with: a settings change makes it
+	// stale rather than wrong.
 	audio       []byte
 	contentType string
+	variant     string
 }
 
 // Texts is the id → text map. The zero value is not usable; call NewTexts.
@@ -49,14 +55,34 @@ func NewTexts(now func() time.Time) *Texts {
 	return &Texts{byID: map[string]*Text{}, now: now}
 }
 
-// Add stores text and returns its new id ("t_" and 24 hex characters of crypto randomness).
+// Add stores text and returns its id ("t_" and 24 hex characters of crypto randomness). The same
+// sentence added again within its lifetime gets the same id back, so a reply heard when it
+// arrived and played again from Chat costs one synthesis, not two.
 func (t *Texts) Add(text string) string {
+	return t.add(text, nil)
+}
+
+// AddWithOverride stores text that must be spoken as override says (a preview). It is never
+// shared with an ordinary entry of the same text.
+func (t *Texts) AddWithOverride(text string, override Effective) string {
+	return t.add(text, &override)
+}
+
+func (t *Texts) add(text string, override *Effective) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if override == nil {
+		for _, id := range t.order {
+			entry := t.byID[id]
+			if entry.Override == nil && entry.Text == text && t.now().Sub(entry.CreatedAt) <= textTTL {
+				return id
+			}
+		}
+	}
 	raw := make([]byte, 12)
 	_, _ = rand.Read(raw) // crypto/rand.Read never fails on supported platforms
 	id := "t_" + hex.EncodeToString(raw)
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.byID[id] = &Text{ID: id, Text: text, CreatedAt: t.now()}
+	t.byID[id] = &Text{ID: id, Text: text, CreatedAt: t.now(), Override: override}
 	t.order = append(t.order, id)
 	for len(t.order) > maxTexts {
 		delete(t.byID, t.order[0])
@@ -76,25 +102,25 @@ func (t *Texts) Get(id string) (Text, bool) {
 	return *entry, true
 }
 
-// cachedAudio returns the stored audio for id, if a previous fetch completed.
-func (t *Texts) cachedAudio(id string) ([]byte, string, bool) {
+// cachedAudio returns the stored audio for id, if a previous fetch of the same variant completed.
+func (t *Texts) cachedAudio(id, variant string) ([]byte, string, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	entry, ok := t.byID[id]
-	if !ok || entry.audio == nil {
+	if !ok || entry.audio == nil || entry.variant != variant {
 		return nil, "", false
 	}
 	return entry.audio, entry.contentType, true
 }
 
 // storeAudio keeps a completed fetch's audio for replays.
-func (t *Texts) storeAudio(id string, audio []byte, contentType string) {
+func (t *Texts) storeAudio(id, variant string, audio []byte, contentType string) {
 	if len(audio) == 0 || len(audio) > maxCachedAudio {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if entry, ok := t.byID[id]; ok {
-		entry.audio, entry.contentType = audio, contentType
+		entry.audio, entry.contentType, entry.variant = audio, contentType, variant
 	}
 }

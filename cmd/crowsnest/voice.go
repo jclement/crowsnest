@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -15,7 +16,7 @@ import (
 )
 
 // startVoice builds the voice service, or returns nil when talk mode is off.
-func startVoice(cfg config.Config, events *hub.Hub, logger *slog.Logger) (*voice.Service, error) {
+func startVoice(cfg config.Config, settings voice.SettingsStore, events *hub.Hub, logger *slog.Logger) (*voice.Service, error) {
 	if !cfg.VoiceEnabled() {
 		return nil, nil
 	}
@@ -23,8 +24,11 @@ func startVoice(cfg config.Config, events *hub.Hub, logger *slog.Logger) (*voice
 	if err != nil {
 		return nil, fmt.Errorf("setting up talk mode: %w", err)
 	}
-	logger.Info("talk mode on", "elevenlabs_url", cfg.ElevenLabsURL, "voice", cfg.ElevenLabsVoice, "stt_model", voice.STTModel, "tts_model", voice.TTSModel)
-	return voice.NewService(voice.Options{Client: client, Hub: events, Logger: logger}), nil
+	service := voice.NewService(voice.Options{Client: client, Settings: settings, DefaultVoiceSource: cfg.ElevenLabsVoiceSource, Hub: events, Logger: logger})
+	chosen := service.Settings(context.Background())
+	logger.Info("talk mode on", "elevenlabs_url", cfg.ElevenLabsURL, "voice", chosen.VoiceID, "voice_chosen_in_app", chosen.VoiceStored,
+		"speed", chosen.Speed, "tts_model", voice.TTSModels[chosen.Model], "stt_model", voice.STTModel)
+	return service, nil
 }
 
 // speakerOf hands the agent socket the service as its Speaker, or a nil interface when talk mode

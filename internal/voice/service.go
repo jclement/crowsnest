@@ -1,6 +1,10 @@
 // The talk-mode service: what the HTTP handlers, the agent socket's `say` and the reply watcher
-// call. It owns the ElevenLabs client, the speakable texts, the talk presence and the per-session
-// rate limits, and publishes `say` events for the browsers to play.
+// call. It owns the ElevenLabs client, the speakable texts, the voice settings and the
+// per-session rate limits, and publishes `say` events for the browsers to play.
+//
+// Nothing here knows which browsers are listening. A `say` event costs nothing: speech is
+// synthesised only when a browser with speak mode on (or a Play button) fetches the text's
+// audio, and a finished synthesis is cached, so nobody listening means no ElevenLabs spend.
 
 package voice
 
@@ -8,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -17,15 +22,20 @@ import (
 	"github.com/jclement/crowsnest/internal/hub"
 )
 
-// Caps on what one browser session can spend. A minute of speech is a few requests at most, so
+// Caps on what one browser session can spend. A recording is one request however long it is, so
 // these only bite on a stuck client or someone scripting the API with a stolen cookie.
 const (
-	// MaxRecordingBytes caps an upload. 60 s of speech is well under 1 MB in either browser's
-	// default encoding (Opus in WebM, AAC in MP4, both at most 256 kbit/s); 2 MB leaves room
-	// without letting an upload run to many minutes of billed transcription.
-	MaxRecordingBytes = 2 << 20
-	// MaxRecordingSeconds is the length the web app stops recording at.
-	MaxRecordingSeconds = 60
+	// MaxRecordingSeconds is the length the web app stops recording at (Jeff: "max time = 5
+	// minutes for voice input"). The web app's MAX_RECORDING_MS must match.
+	MaxRecordingSeconds = 300
+	// RecordingBitsPerSecond is the bit rate the web app asks MediaRecorder for.
+	RecordingBitsPerSecond = 64_000
+	// MaxRecordingBytes caps an upload: five minutes at up to 192 kbit/s, three times the rate
+	// asked for, plus 1 MiB for the container. Chrome's Opus in WebM keeps to the asked rate;
+	// Safari's AAC in MP4 may not (it has been seen to record at 128 kbit/s or more whatever it
+	// is asked), so the cap is sized for that rather than for Chrome. Five minutes at 64 kbit/s is
+	// 2.4 MB; at 192 it is 7.2 MB.
+	MaxRecordingBytes = MaxRecordingSeconds*192_000/8 + 1<<20
 	// sttPerMinute and ttsPerMinute are per browser session.
 	sttPerMinute = 12
 	ttsPerMinute = 30
@@ -66,23 +76,34 @@ type SayEvent struct {
 
 // Service is talk mode. Build it with NewService.
 type Service struct {
-	client *Client
-	texts  *Texts
-	talk   *Talk
-	hub    *hub.Hub
-	logger *slog.Logger
-	now    func() time.Time
+	client   *Client
+	texts    *Texts
+	settings SettingsStore
+	// voiceSource names where the default voice came from (config's source), for the sheet.
+	voiceSource string
+	hub         *hub.Hub
+	logger      *slog.Logger
+	now         func() time.Time
 
 	mu    sync.Mutex
 	usage map[string][]time.Time // "<kind>:<session key>" → request times in the window
+
+	voicesMu  sync.Mutex
+	voices    []VoiceInfo
+	voicesAt  time.Time
+	voicesErr error
 }
 
 // Options configure a Service. Client is required.
 type Options struct {
-	Client *Client
-	Hub    *hub.Hub // nil: say events are dropped
-	Logger *slog.Logger
-	Now    func() time.Time
+	Client   *Client
+	Settings SettingsStore // nil: settings cannot be changed; the defaults are used
+	// DefaultVoiceSource names where --elevenlabs-voice's value came from ("default", the flag,
+	// the environment variable or the config file), shown by the settings sheet.
+	DefaultVoiceSource string
+	Hub                *hub.Hub // nil: say events are dropped
+	Logger             *slog.Logger
+	Now                func() time.Time
 }
 
 // NewService returns a Service.
@@ -94,7 +115,7 @@ func NewService(opts Options) *Service {
 		opts.Now = time.Now
 	}
 	return &Service{
-		client: opts.Client, texts: NewTexts(opts.Now), talk: NewTalk(opts.Now), hub: opts.Hub,
+		client: opts.Client, texts: NewTexts(opts.Now), settings: opts.Settings, voiceSource: opts.DefaultVoiceSource, hub: opts.Hub,
 		logger: opts.Logger, now: opts.Now, usage: map[string][]time.Time{},
 	}
 }
@@ -134,36 +155,102 @@ func (s *Service) publish(event SayEvent) {
 type Audio struct {
 	io.Reader
 	ContentType string
-	close       func() error
+	// PlaybackRate is the speed the browser should play it at, beyond what ElevenLabs was asked.
+	PlaybackRate float64
+	close        func() error
 }
 
 // Close releases the upstream stream, if any.
 func (a *Audio) Close() error { return a.close() }
 
-// Speech returns the audio for textID, charged to session. A text fetched before comes from
-// the cache; otherwise ElevenLabs streams it, and a stream read to the end is kept for replays.
+// Speech returns the audio for textID, charged to session, in the voice, model and speed in
+// force (or the text's own override, for a preview). A text fetched before in the same variant
+// comes from the cache; otherwise ElevenLabs streams it, and a stream read to the end is kept for
+// replays. PlaybackRate is what the browser should play it at (settings.go).
 func (s *Service) Speech(ctx context.Context, session, textID string) (*Audio, error) {
 	text, ok := s.texts.Get(textID)
 	if !ok {
 		return nil, ErrUnknownText
 	}
-	if audio, contentType, ok := s.texts.cachedAudio(textID); ok {
-		return &Audio{Reader: bytes.NewReader(audio), ContentType: contentType, close: func() error { return nil }}, nil
+	how := s.Settings(ctx)
+	if text.Override != nil {
+		how = *text.Override
+	}
+	options := how.SpeakOptions()
+	variant := fmt.Sprintf("%s|%s|%.2f", options.VoiceID, options.ModelID, options.Speed)
+	if audio, contentType, ok := s.texts.cachedAudio(textID, variant); ok {
+		return &Audio{Reader: bytes.NewReader(audio), ContentType: contentType, PlaybackRate: how.PlaybackRate(), close: func() error { return nil }}, nil
 	}
 	if !s.allow("tts", session, ttsPerMinute) {
 		return nil, ErrLimited
 	}
-	speech, err := s.client.Speak(ctx, text.Text)
+	speech, err := s.client.Speak(ctx, text.Text, options)
 	if err != nil {
 		return nil, err
 	}
 	recorder := &cappedRecorder{limit: maxCachedAudio}
 	reader := &teeUntilEOF{source: speech.Body, copy: recorder, done: func() {
 		if !recorder.overflow {
-			s.texts.storeAudio(textID, recorder.buf.Bytes(), speech.ContentType)
+			s.texts.storeAudio(textID, variant, recorder.buf.Bytes(), speech.ContentType)
 		}
 	}}
-	return &Audio{Reader: reader, ContentType: speech.ContentType, close: speech.Close}, nil
+	return &Audio{Reader: reader, ContentType: speech.ContentType, PlaybackRate: how.PlaybackRate(), close: speech.Close}, nil
+}
+
+// DefaultVoice is the configured voice id, used when no voice is stored.
+func (s *Service) DefaultVoice() string { return s.client.DefaultVoice() }
+
+// DefaultVoiceSource names where the default voice was configured.
+func (s *Service) DefaultVoiceSource() string {
+	if s.voiceSource == "" {
+		return "default"
+	}
+	return s.voiceSource
+}
+
+// PreviewSentence is what a voice preview says.
+const PreviewSentence = "This is how crowsnest will sound. Tests pass, and I opened the pull request."
+
+// Preview makes a speakable text that plays the sample sentence the way how says, for the
+// settings sheet's Preview button, and returns its id.
+func (s *Service) Preview(how Effective) string {
+	return s.texts.AddWithOverride(PreviewSentence, how)
+}
+
+// ReplySay makes an assistant reply's SAY line speakable on demand (Chat's play button) and
+// returns its id and sentence, or ok false when the reply has nothing to say aloud.
+func (s *Service) ReplySay(reply string) (id, sentence string, ok bool) {
+	result := ParseSay(reply)
+	if result.Kind != SaySpeak {
+		return "", "", false
+	}
+	return s.texts.Add(result.Sentence), result.Sentence, true
+}
+
+// ---- Voices --------------------------------------------------------------------------
+
+// voicesTTL is how long the account's voice list is reused: it changes when someone adds a voice
+// on ElevenLabs' site, which is rare, and the sheet is opened often.
+const voicesTTL = 5 * time.Minute
+
+// Voices lists the account's voices, from a cache of at most voicesTTL. A failure is cached for
+// a few seconds only, so a retry soon after works.
+func (s *Service) Voices(ctx context.Context) ([]VoiceInfo, error) {
+	s.voicesMu.Lock()
+	defer s.voicesMu.Unlock()
+	age := s.now().Sub(s.voicesAt)
+	if s.voicesErr == nil && s.voices != nil && age < voicesTTL {
+		return s.voices, nil
+	}
+	if s.voicesErr != nil && age < 5*time.Second {
+		return nil, s.voicesErr
+	}
+	voices, err := s.client.Voices(ctx)
+	s.voices, s.voicesErr, s.voicesAt = voices, err, s.now()
+	if voices == nil && err == nil {
+		s.voices = []VoiceInfo{}
+	}
+	return s.voices, err
 }
 
 // ---- Listening -----------------------------------------------------------------------
@@ -175,15 +262,6 @@ func (s *Service) Transcribe(ctx context.Context, session string, audio []byte, 
 	}
 	return s.client.Transcribe(ctx, audio, contentType)
 }
-
-// ---- Talk presence -------------------------------------------------------------------
-
-// Beat records a browser's talk-mode heartbeat and returns whether talk mode is on anywhere.
-func (s *Service) Beat(clientID string, on bool) bool { return s.talk.Beat(clientID, on) }
-
-// TalkOn reports whether any browser has talk mode on. The poke header (M8) and the voice
-// prompt header carry it as `talk=on|off`.
-func (s *Service) TalkOn() bool { return s.talk.On() }
 
 // ---- Rate limit ----------------------------------------------------------------------
 

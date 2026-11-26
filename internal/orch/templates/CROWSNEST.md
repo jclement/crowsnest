@@ -36,11 +36,11 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
   and never take the step it asked about.
 - Prefer `ask` over a terminal dialog: the human may only have the web page.
 - `crowsnest notify "text"` (or `ask` with kind `notice`) tells the human something without
-  asking; `say` speaks one sentence aloud when talk mode is on.
+  asking; `say` speaks one sentence aloud to anyone with speak mode on.
 
 ## Messages crowsnest sends you
 
-- `[crowsnest poke <time> talk=<on|off>]` messages are **pokes**: automatic, sent by crowsnest
+- `[crowsnest poke <time>]` messages are **pokes**: automatic, sent by crowsnest
   (not the human) when something changed while you were not looking. Each line after the header
   is one reason: another agent finished its turn or is blocked at a dialog, a question another
   agent asked was answered or expired, a job finished, failed or got stuck, or the list of open
@@ -50,8 +50,8 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
   re-plan a stuck job, tell the human what needs them. A poke never asks you to do anything
   beyond its reasons, and it is not the human talking. **If nothing in it needs action from you,
   reply exactly `noop`** (one word, nothing else): that is the right answer, it costs nothing and
-  it is silent in talk mode.
-- `[crowsnest voice: transcribed speech, may contain mis-hearings] talk=<on|off>` messages were
+  it is never spoken.
+- `[crowsnest voice: transcribed speech, may contain mis-hearings]` messages were
   spoken into the web page and transcribed. Read them charitably: a word that makes no sense was
   probably misheard. If a misreading could lead to an irreversible step, confirm with `ask` first.
 - `[crowsnest answer q_<n>] "<chosen option>" (note: …); the question was "<your title>"` is the
@@ -62,13 +62,13 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
   choice. `expired …` or `cancelled …` means there is no answer: do not proceed with what it asked
   about. If the line says the answer is too long for one line, read it in full with the
   `get_question` tool (or `crowsnest question q_<n>`) before acting on it.
-- **The SAY contract.** When talk mode is on (the latest poke or voice header says `talk=on`),
-  begin the final reply of each turn with `SAY: <one sentence for the ear>` on the first line, a
-  blank line, then the detail as usual. The sentence is spoken aloud to the human, who may not be
-  looking at the screen: plain words, no Markdown, no code, no paths or ids, under 300
-  characters, the answer first ("Tests pass; I opened the pull request."). Write `SAY: -` when
-  nothing is worth hearing. A `noop` reply to a poke stays exactly `noop` (it is silent). Only the
-  first line counts; never put `SAY:` anywhere else. When talk mode is off, do not write a SAY line.
+- **The SAY contract: every reply.** Begin the final reply of every turn with
+  `SAY: <one sentence for the ear>` on the first line, a blank line, then the detail as usual.
+  The human may be listening rather than reading (speak mode in the web page plays that sentence
+  aloud), and the page shows it as the reply's caption either way: plain words, no Markdown, no
+  code, no paths or ids, under 300 characters, the answer first ("Tests pass; I opened the pull
+  request."). Write `SAY: -` when nothing is worth hearing. A `noop` reply to a poke stays exactly
+  `noop` (it is silent). Only the first line counts; never put `SAY:` anywhere else.
 
 <!-- crowsnest:job-protocol: begin -->
 ## The job protocol

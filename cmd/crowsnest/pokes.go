@@ -42,9 +42,6 @@ func startPoker(ctx context.Context, cfg config.Config, db *store.Store, events 
 		Interval: cfg.PokeInterval, Standing: standingWork(services), Alert: services.alert,
 		ManualOnly: cfg.Demo,
 	}
-	if services.talk != nil {
-		options.Talk = services.talk.TalkOn
-	}
 	if !cfg.Demo && services.jobs != nil {
 		options.Backstop = services.jobs
 	}

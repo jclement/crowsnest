@@ -62,7 +62,7 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	}
 	claudeDir := claudeConfigDir(cfg)
 	return jobs.New(jobs.Options{
-		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert,
+		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,
