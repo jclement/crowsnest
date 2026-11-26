@@ -38,7 +38,7 @@ import (
 // request header the agent-side client sends it in.
 const (
 	EnvToken    = "CROWSNEST_TOKEN"
-	HeaderToken = "X-Crowsnest-Token"
+	HeaderToken = "X-Crowsnest-Token" //nolint:gosec // a header name, not a credential
 )
 
 // Kinds of binding: where the token was handed out. A pane token sits in the pane's environment
@@ -143,17 +143,23 @@ func (r *Registry) Resolve(ctx context.Context, token string) (Binding, bool, er
 		return Binding{}, false, nil
 	}
 	value, err := r.kv.GetKV(ctx, kvPrefix+hash(token))
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return Binding{}, false, nil
-		}
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return Binding{}, false, nil
+	case err != nil:
 		return Binding{}, false, fmt.Errorf("looking up an agent token: %w", err)
 	}
+	binding, ok := decodeBinding(value)
+	return binding, ok, nil
+}
+
+// decodeBinding reads a stored binding; a damaged record identifies nobody.
+func decodeBinding(value string) (Binding, bool) {
 	var binding Binding
-	if err := json.Unmarshal([]byte(value), &binding); err != nil || binding.PaneID == "" {
-		return Binding{}, false, nil
+	if json.Unmarshal([]byte(value), &binding) != nil || binding.PaneID == "" {
+		return Binding{}, false
 	}
-	return binding, true, nil
+	return binding, true
 }
 
 // RevokePane removes every token bound to paneID, or only those of kind when it is not empty.

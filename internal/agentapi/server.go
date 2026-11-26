@@ -285,7 +285,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The answer counts as collected only once it is out of the door (R1b-C06).
-	if writeData(w, http.StatusOK, question) == nil && question.Status != questions.StatusOpen {
+	if writeDataChecked(w, http.StatusOK, question) == nil && question.Status != questions.StatusOpen {
 		s.questions.Collected(context.WithoutCancel(r.Context()), question, caller)
 	}
 }
@@ -418,9 +418,13 @@ func decodeBody(w http.ResponseWriter, r *http.Request, limit int64, into any) b
 	return true
 }
 
-// writeData writes the envelope and flushes it, and reports whether that worked: a long-poll's
-// answer counts as delivered only when it reached the socket.
-func writeData(w http.ResponseWriter, status int, data any) error {
+func writeData(w http.ResponseWriter, status int, data any) {
+	_ = writeJSON(w, status, map[string]any{"data": data})
+}
+
+// writeDataChecked writes the envelope, flushes it, and reports whether that worked: a
+// long-poll's answer counts as collected only once it reached the socket (R1b-C06).
+func writeDataChecked(w http.ResponseWriter, status int, data any) error {
 	return writeJSON(w, status, map[string]any{"data": data})
 }
 

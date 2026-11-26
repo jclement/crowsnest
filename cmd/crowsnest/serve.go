@@ -53,7 +53,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// re-exec existed, and children still never inherit them (UnsetSecretEnv).
 	if !restored {
 		if err := reexecWithoutSecrets(); err != nil {
-			fmt.Fprintln(cmd.ErrOrStderr(), "crowsnest: could not drop secrets from its own environment:", err)
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "crowsnest: could not drop secrets from its own environment:", err)
 		}
 	}
 	cfg, err := config.LoadForServe(cmd.Flags(), config.Options{})

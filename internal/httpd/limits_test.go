@@ -5,6 +5,7 @@ package httpd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -99,7 +100,7 @@ func TestOnePeerCannotTakeEverySlot(t *testing.T) {
 	_ = clients[2].SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := clients[2].Read(make([]byte, 1)); err == nil {
 		t.Fatal("a third connection from one peer was served past its cap of two")
-	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+	} else if ne := net.Error(nil); errors.As(err, &ne) && ne.Timeout() {
 		t.Fatal("a third connection from one peer was held open past its cap instead of being refused")
 	}
 	// Two live connections, plus the one Accept holds while it waits for the next connection;
