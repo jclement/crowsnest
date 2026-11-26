@@ -15,7 +15,6 @@ import (
 
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/questions"
-	"github.com/jclement/crowsnest/internal/store"
 )
 
 // delegateRig is a rig whose AskHuman is a real questions service on the same database.
@@ -297,5 +296,4 @@ func TestOriginIsStored(t *testing.T) {
 	if err != nil || record.Origin != OriginAgent {
 		t.Fatalf("record %+v %v", record, err)
 	}
-	var _ store.JobRecord = record
 }

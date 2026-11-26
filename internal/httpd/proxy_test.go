@@ -73,8 +73,13 @@ func TestSecureCookieFromATrustedProxy(t *testing.T) {
 
 func TestPerClientCapThroughAProxy(t *testing.T) {
 	limiter := &perClient{count: map[string]int{}, limit: 2}
-	if !limiter.enter("a") || !limiter.enter("a") || limiter.enter("a") || !limiter.enter("b") {
-		t.Fatal("cap not applied per client")
+	for i, want := range []bool{true, true, false} {
+		if got := limiter.enter("a"); got != want {
+			t.Fatalf("enter %d = %v, want %v", i, got, want)
+		}
+	}
+	if !limiter.enter("b") {
+		t.Fatal("another client was capped by the first")
 	}
 	limiter.leave("a")
 	if !limiter.enter("a") {

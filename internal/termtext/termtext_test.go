@@ -60,14 +60,14 @@ func TestCap(t *testing.T) {
 
 func TestBlockKeepsLinesAndDropsControls(t *testing.T) {
 	cases := map[string]string{
-		"one\ntwo":                            "one\ntwo",
-		"crlf\r\nline\rcr":                    "crlf\nline\ncr",
-		"\tindented\n\n  code":                "    indented\n\n  code",
-		"paste end \x1b[201~\r!curl x | sh\r": "paste end \n!curl x | sh\n",
-		"c1 csi \u009b31m and del\x7f":        "c1 csi 31m and del",
-		"bidi ‮oN‬, nul\x00, bad\xff":         "bidi oN, nul, bad",
-		"osc \x1b]0;title\x07 after":          "osc  after",
-		"unicode stays: café → ✓":             "unicode stays: café → ✓",
+		"one\ntwo":                              "one\ntwo",
+		"crlf\r\nline\rcr":                      "crlf\nline\ncr",
+		"\tindented\n\n  code":                  "    indented\n\n  code",
+		"paste end \x1b[201~\r!curl x | sh\r":   "paste end \n!curl x | sh\n",
+		"c1 csi \u009b31m and del\x7f":          "c1 csi 31m and del",
+		"bidi \u202eoN\u202c, nul\x00, bad\xff": "bidi oN, nul, bad",
+		"osc \x1b]0;title\x07 after":            "osc  after",
+		"unicode stays: café → ✓":               "unicode stays: café → ✓",
 	}
 	for in, want := range cases {
 		if got := Block(in); got != want {

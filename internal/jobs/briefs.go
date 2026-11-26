@@ -31,7 +31,7 @@ func (s *Service) jobDir(jobID string) (string, error) {
 		return "", fmt.Errorf("creating %s: %w", dir, err)
 	}
 	for _, path := range []string{filepath.Dir(dir), dir} {
-		if err := os.Chmod(path, 0o700); err != nil {
+		if err := os.Chmod(path, 0o700); err != nil { //nolint:gosec // a directory: 0700 is owner-only
 			return "", fmt.Errorf("restricting %s: %w", path, err)
 		}
 	}
