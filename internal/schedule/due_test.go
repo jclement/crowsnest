@@ -35,7 +35,7 @@ func TestCheckCadences(t *testing.T) {
 		return parsed
 	}
 	// The fall-back hour happens twice: 01:10 MDT and then 01:15 MST, 65 minutes later.
-	firstOneTen := time.Date(2026, 11, 1, 7, 10, 0, 0, time.UTC)   // 01:10 MDT
+	firstOneTen := time.Date(2026, 11, 1, 7, 10, 0, 0, time.UTC)      // 01:10 MDT
 	secondOneFifteen := time.Date(2026, 11, 1, 8, 15, 0, 0, time.UTC) // 01:15 MST
 
 	cases := []struct {

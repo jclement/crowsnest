@@ -66,16 +66,16 @@ const (
 
 // Task is one parsed task file.
 type Task struct {
-	Name    string     `json:"name"`   // the file name without .md
-	Path    string     `json:"path"`   // absolute path of the file
-	Origin  string     `json:"origin"` // "dir" (the orchestrator's) or "user" (~/.config/crowsnest)
-	Every   Cadence    `json:"-"`
-	After   *TimeOfDay `json:"-"`
-	As      RunAs      `json:"as"`
-	Dir     string     `json:"dir,omitempty"`
-	Role    string     `json:"role,omitempty"`
-	Title   string     `json:"title"` // the body's first heading or line, for the UI
-	Body    string     `json:"-"`
+	Name   string     `json:"name"`   // the file name without .md
+	Path   string     `json:"path"`   // absolute path of the file
+	Origin string     `json:"origin"` // "dir" (the orchestrator's) or "user" (~/.config/crowsnest)
+	Every  Cadence    `json:"-"`
+	After  *TimeOfDay `json:"-"`
+	As     RunAs      `json:"as"`
+	Dir    string     `json:"dir,omitempty"`
+	Role   string     `json:"role,omitempty"`
+	Title  string     `json:"title"` // the body's first heading or line, for the UI
+	Body   string     `json:"-"`
 }
 
 // namePattern is the front door's task-name rule: a name is also a key and a reason line.
@@ -122,7 +122,7 @@ func splitFrontmatter(content string) (map[string]string, string, error) {
 	content = strings.TrimPrefix(content, "\ufeff")
 	lines := strings.SplitAfter(content, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return nil, "", errors.New("the file must start with a --- frontmatter block holding every:")
+		return nil, "", errors.New("the file must start with a --- frontmatter block that names every")
 	}
 	front := map[string]string{}
 	for i, line := range lines[1:] {

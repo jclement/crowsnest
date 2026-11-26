@@ -88,7 +88,9 @@ func TestOrchestratorContextAndCompact(t *testing.T) {
 	}
 	tender := orch.NewTender(orch.TenderOptions{
 		Client: f, KV: db, CompactAt: 150_000, FreshAt: -1,
-		Usage: func(context.Context) (transcript.Usage, error) { return transcript.Usage{Tokens: 120_000, Known: true}, nil },
+		Usage: func(context.Context) (transcript.Usage, error) {
+			return transcript.Usage{Tokens: 120_000, Known: true}, nil
+		},
 	})
 	h := newHarness(t, harnessOptions{orchestrator: o, tender: tender, herdr: f})
 	cookie := h.login()

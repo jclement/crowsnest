@@ -224,7 +224,7 @@ func provablyNotTyped(err error) bool {
 // upkeep around it.
 type ContextInfo struct {
 	transcript.Usage
-	Threshold     int       `json:"threshold"`          // --compact-at; 0: off
+	Threshold     int       `json:"threshold"` // --compact-at; 0: off
 	LastCompactAt time.Time `json:"last_compact_at,omitzero"`
 	FreshAt       string    `json:"fresh_at,omitempty"` // HH:MM, empty when off
 	FreshDay      string    `json:"fresh_day,omitempty"`

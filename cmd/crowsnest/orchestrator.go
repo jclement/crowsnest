@@ -59,7 +59,7 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 		Client: client, KV: db, Hub: events, Journal: journalLog, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
 		StateDir: cfg.StateDir, Model: cfg.Model, PermissionMode: cfg.PermissionMode, Version: version,
 		RemoteControlName: orchestratorRemoteControl(cfg),
-		BinDir: binDir, Executable: executable, AgentSocket: agentSocket, BasePath: os.Getenv("PATH"), ClaudeConfigDir: claudeDir, Disabled: cfg.NoOrchestrator, Identity: identity,
+		BinDir:            binDir, Executable: executable, AgentSocket: agentSocket, BasePath: os.Getenv("PATH"), ClaudeConfigDir: claudeDir, Disabled: cfg.NoOrchestrator, Identity: identity,
 		OnStatus: func(status orch.Status) {
 			// Follow the orchestrator's conversation from the moment it has a pane, so its
 			// `message` events flow before any browser asks.

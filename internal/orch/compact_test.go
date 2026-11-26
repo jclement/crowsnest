@@ -5,6 +5,7 @@ package orch
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -117,7 +118,9 @@ func newTenderRig(t *testing.T, freshAt int) *tenderRig {
 	return r
 }
 
-func (r *tenderRig) tend() bool { return r.tender.Tend(context.Background(), r.clock.Now(), r.status()) }
+func (r *tenderRig) tend() bool {
+	return r.tender.Tend(context.Background(), r.clock.Now(), r.status())
+}
 
 func TestTenderCompactsOnceUntilGrowth(t *testing.T) {
 	r := newTenderRig(t, -1)
@@ -169,7 +172,7 @@ func TestTenderCompactNow(t *testing.T) {
 	r := newTenderRig(t, -1)
 	r.usage = transcript.Usage{Tokens: 5_000, Known: true}
 	r.set(r.orch, herdr.StatusWorking)
-	if err := r.tender.CompactNow(context.Background(), r.status()); err != ErrNotReady {
+	if err := r.tender.CompactNow(context.Background(), r.status()); !errors.Is(err, ErrNotReady) {
 		t.Fatalf("working: %v", err)
 	}
 	r.settleOrchestrator()

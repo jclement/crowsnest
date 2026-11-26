@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,7 +138,7 @@ func TestDisabledAndRunNow(t *testing.T) {
 	if due := h.service().DueTasks(ctx, h.now); len(due) != 0 {
 		t.Fatalf("a disabled task stays off after a restart, got %+v", due)
 	}
-	if err := service.RunNow(ctx, "nope"); err != ErrNoTask {
+	if err := service.RunNow(ctx, "nope"); !errors.Is(err, ErrNoTask) {
 		t.Fatalf("unknown task: %v", err)
 	}
 }
