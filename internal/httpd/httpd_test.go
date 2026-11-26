@@ -28,6 +28,7 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/schedule"
@@ -126,6 +127,9 @@ type harnessOptions struct {
 	trustedProxyHeader string // default x-forwarded-for
 	// Instruction layers (instructions_test.go); nil: the routes answer 503
 	instructions *instructions.Service
+	// Projects and their leads (projects_test.go); nil: the routes answer 503
+	projects *projects.Service
+	leads    *projects.Leads
 }
 
 var testWeb = fstest.MapFS{
@@ -192,6 +196,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Orchestrator:  opts.orchestrator,
 		Questions:     opts.questions,
 		Jobs:          opts.jobs,
+		Projects:      opts.projects,
+		Leads:         opts.leads,
 		Spend:         opts.spend,
 		Voice:         opts.voice,
 		Journal:       opts.journal,
