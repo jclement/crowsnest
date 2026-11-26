@@ -2,13 +2,16 @@
 // choice are large option buttons (one press answers, with the note typed above it); multi-select
 // is checkboxes plus Submit; ack is one button; manual is free text; a notice is dismissed. The
 // agent's recommended option is marked, never preselected: the human decides.
-// With voice on, the note can be dictated.
+// With voice on, the note can be dictated. Files (a screenshot, a sketch: DESIGN.md 8.6) go with
+// the answer by paste, drop or the paperclip; the asker gets them as files it can read.
 import { Check, CheckCheck, Send, Star, X } from "lucide-react";
-import { useId, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { buildAnswer, canSubmit, type Question, type QuestionOption } from "../../lib/questions";
 import { useAnswerQuestion, useMe } from "../../lib/queries";
+import { AttachButtons, AttachmentTray, DropOverlay } from "../attach/AttachmentTray";
+import { uploadHold, useAttachments, useFileDrop, usePasteToAttach } from "../attach/useAttachments";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/toast-context";
@@ -28,14 +31,32 @@ export function AnswerForm({ question, onAnswered }: AnswerFormProps) {
   const voice = useMe().data?.features.voice ?? false;
   const [error, setError] = useState<string | null>(null);
   const manual = question.kind === "manual";
+  const formRef = useRef<HTMLFormElement>(null);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const attachments = useAttachments();
+  const insertText = useCallback((pasted: string) => {
+    const box = noteRef.current;
+    const start = box?.selectionStart ?? Number.MAX_SAFE_INTEGER;
+    const end = box?.selectionEnd ?? start;
+    setNote((current) => current.slice(0, start) + pasted + current.slice(end));
+  }, []);
+  const onPaste = usePasteToAttach(attachments, insertText);
+  const dropping = useFileDrop(formRef, attachments.add, attachments.enabled);
+  const hold = uploadHold(attachments);
 
   const submit = (keys: string[]) => {
     if (!canSubmit(question, keys, note)) return;
+    if (hold) {
+      setError(hold);
+      return;
+    }
     setError(null);
+    const request = { ...buildAnswer(question, keys, note), ...(attachments.ids.length > 0 ? { attachments: attachments.ids } : {}) };
     // mutateAsync rather than mutate's own callbacks: the hook awaits a refetch that replaces this
     // component (see DialogCard), and React Query drops an unmounted caller's callbacks (M9).
-    answer.mutateAsync(buildAnswer(question, keys, note)).then(
+    answer.mutateAsync(request).then(
       () => {
+        attachments.clear();
         toast.show({ tone: "success", title: `Answered ${question.id}`, description: question.title });
         onAnswered?.();
       },
@@ -48,13 +69,15 @@ export function AnswerForm({ question, onAnswered }: AnswerFormProps) {
 
   return (
     <form
+      ref={formRef}
       aria-label="Answer"
-      className="flex flex-col gap-3"
+      className="relative flex flex-col gap-3"
       onSubmit={(event) => {
         event.preventDefault();
         submit(picked);
       }}
     >
+      <DropOverlay active={dropping} label="Drop files to send with the answer" />
       {error && (
         <Banner tone="danger" role="alert" className="rounded">
           {error}
@@ -65,24 +88,31 @@ export function AnswerForm({ question, onAnswered }: AnswerFormProps) {
           <label htmlFor={noteId} className="text-xs font-medium text-heading">
             {manual ? "Your answer" : "Note (optional; it outranks the choice)"}
           </label>
-          {voice && <DictateButton onText={(spoken) => setNote((current) => (current.trim() ? `${current.trimEnd()} ${spoken}` : spoken))} />}
+          <span className="flex items-center gap-1.5">
+            {voice && <DictateButton onText={(spoken) => setNote((current) => (current.trim() ? `${current.trimEnd()} ${spoken}` : spoken))} />}
+            <AttachButtons attachments={attachments} />
+          </span>
         </div>
         <textarea
+          ref={noteRef}
           id={noteId}
           value={note}
           onChange={(event) => setNote(event.target.value)}
+          onPaste={onPaste}
           rows={manual ? 4 : 2}
           maxLength={8000}
           placeholder={manual ? "Write the answer the agent asked for" : "Add context, a condition, or a different idea"}
           className="w-full resize-y rounded border border-border-strong bg-surface px-2.5 py-2 text-sm text-heading placeholder:text-muted focus:border-accent focus:outline-none md:text-xs"
         />
+        <AttachmentTray attachments={attachments} className="mt-1" />
+        {hold && <p className="text-2xs font-medium text-warning">{hold}</p>}
       </div>
 
       {(question.kind === "confirm" || (question.kind === "choice" && !question.multi)) && (
         <ul aria-label="Options" className="flex flex-col gap-1.5">
           {question.options.map((option) => (
             <li key={option.key}>
-              <OptionButton option={option} recommended={option.key === question.recommend} disabled={answer.isPending} onPress={() => submit([option.key])} />
+              <OptionButton option={option} recommended={option.key === question.recommend} disabled={answer.isPending || !!hold} onPress={() => submit([option.key])} />
             </li>
           ))}
         </ul>

@@ -72,7 +72,7 @@ function pastedName(file: File, now = new Date()): string {
 
 export function useAttachments(): AttachmentsApi {
   const me = useMe();
-  const limits = me.data?.features.attachments;
+  const limits = me.data?.features?.attachments;
   const [chips, setChips] = useState<AttachmentChip[]>([]);
   const controllers = useRef(new Map<string, AbortController>());
   const chipsRef = useRef(chips);

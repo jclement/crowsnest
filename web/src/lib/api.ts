@@ -167,8 +167,11 @@ export const endpoints = {
   job: (id: string) => api<JobDetail>(`/jobs/${encodeURIComponent(id)}`),
   createJob: (request: CreateJobRequest) => api<Job>("/jobs", { method: "POST", body: request }),
   /** Types the human's message into the job's agent; errors like a Chat send (409 BLOCKED, DRAFT). */
-  jobMessage: (id: string, text: string, forceOverDraft = false) =>
-    api<PromptResult>(`/jobs/${encodeURIComponent(id)}/message`, { method: "POST", body: { text, force_over_draft: forceOverDraft } }),
+  jobMessage: (id: string, text: string, forceOverDraft = false, attachments?: string[]) =>
+    api<PromptResult>(`/jobs/${encodeURIComponent(id)}/message`, {
+      method: "POST",
+      body: { text, force_over_draft: forceOverDraft, ...(attachments && attachments.length > 0 ? { attachments } : {}) },
+    }),
   jobAction: (id: string, action: "cancel" | "nudge" | "resume") => api<Job>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
   roles: () => api<RoleInfo[]>("/roles"),
   dirs: () => api<DirEntry[]>("/dirs"),

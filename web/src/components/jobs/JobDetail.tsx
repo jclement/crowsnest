@@ -3,15 +3,15 @@
 // (answerable right here with the Inbox's components), a message box to its agent, the
 // timeline, and the agent's Conversation and Terminal (the Fleet view's slots).
 import { useNavigate } from "@tanstack/react-router";
-import { Ban, CheckCircle2, CircleSlash, MessageSquare, RefreshCw, Send, SquareTerminal, Zap } from "lucide-react";
-import { useState, type FormEvent } from "react";
-import { ApiError } from "../../lib/api";
+import { Ban, CheckCircle2, CircleSlash, MessageSquare, RefreshCw, SquareTerminal, Zap } from "lucide-react";
+import { useState } from "react";
 import { relativeTime } from "../../lib/format";
 import { actionFor, actionLabels, isFinished, jobAnswerText, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
-import { useFleet, useJob, useJobAction, useJobMessage } from "../../lib/queries";
+import { useFleet, useJob, useJobAction } from "../../lib/queries";
 import { AgentConversation } from "../agent/AgentConversation";
 import { AgentTerminal } from "../agent/AgentTerminal";
 import { QuestionDetail } from "../inbox/QuestionDetail";
+import { JobFiles, JobMessageBox } from "./JobMessageBox";
 import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
@@ -110,11 +110,12 @@ function Overview({ job, openTerminal }: { job: Detail; openTerminal: () => void
           <QuestionDetail id={question.id} />
         </Card>
       ))}
-      {!isFinished(job.state) && job.pane_id && <MessageBox job={job} />}
+      {!isFinished(job.state) && job.pane_id && <JobMessageBox job={job} />}
       <Card title="Brief">
         <Markdown className="text-sm">{job.brief_md}</Markdown>
         {job.done_when && <p className="mt-2 text-xs text-muted">Done when: {job.done_when}</p>}
       </Card>
+      <JobFiles jobId={job.id} />
       {settled.length > 0 && (
         <Card title="Answered questions">
           <ul className="flex flex-col gap-1 text-xs">
@@ -193,46 +194,6 @@ function Evidence({ title, items, empty, tone }: { title: string; items: string[
         </ul>
       )}
     </section>
-  );
-}
-
-function MessageBox({ job }: { job: Detail }) {
-  const [text, setText] = useState("");
-  const send = useJobMessage(job.id);
-  const toast = useToast();
-  const submit = (event: FormEvent, force = false) => {
-    event.preventDefault();
-    if (!text.trim()) return;
-    send.mutate(
-      { text, force },
-      {
-        onSuccess: (result) => {
-          setText("");
-          toast.show({ tone: "success", title: result.queued ? "Queued for the agent" : "Sent to the agent" });
-        },
-        onError: (error) => {
-          const draft = error instanceof ApiError && error.code === "DRAFT";
-          toast.show({ tone: "danger", title: draft ? "Someone is typing in that terminal" : "Not sent", description: error.message });
-        },
-      },
-    );
-  };
-  return (
-    <form onSubmit={submit} aria-label="Message the agent" className="flex items-end gap-2">
-      <label className="min-w-0 flex-1">
-        <span className="sr-only">Message to {job.agent_name || "the agent"}</span>
-        <textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          rows={1}
-          placeholder={`Message ${job.agent_name || "the agent"}…`}
-          className="min-h-11 w-full resize-y rounded border border-border-strong bg-surface px-2 py-2 text-sm text-heading placeholder:text-muted md:min-h-8"
-        />
-      </label>
-      <Button type="submit" icon={Send} disabled={!text.trim() || send.isPending}>
-        Send
-      </Button>
-    </form>
   );
 }
 

@@ -1,6 +1,7 @@
 // Questions from agents (DESIGN.md section 8.1): the TypeScript mirror of internal/questions
 // (types.go) in its JSON spelling, plus the small pure helpers the Inbox needs (ordering, labels,
 // what an answer looks like). Keep the types a plain mirror of the wire format.
+import type { Attachment } from "./attachments";
 
 export type QuestionKind = "confirm" | "choice" | "ack" | "manual" | "notice";
 export type QuestionStatus = "open" | "answered" | "expired" | "cancelled";
@@ -45,12 +46,18 @@ export interface Question {
   delivery: Delivery;
   delivered_at: string | null;
   delivery_error?: string;
+  /** The asker's files (GET /questions/{id} only). */
+  attachments?: Attachment[];
+  /** The human's files sent with the answer, with the asker's copies. */
+  answer_attachments?: Attachment[];
 }
 
 /** The body of POST /questions/{id}/answer. */
 export interface AnswerRequest {
   answer_value?: string | string[];
   answer_note?: string;
+  /** Uploads (a_…) sent with the answer: copied into the asker's inbox, named in the line typed back. */
+  attachments?: string[];
 }
 
 /** GET /inbox/summary. */
