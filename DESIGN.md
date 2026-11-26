@@ -270,7 +270,10 @@ stop-hook continuations, reset by a tool call) is a second fence. Every nudge is
 
 **Backstop without hooks** (Codex, a hook that failed, a session crowsnest did not start): the
 poker watches herdr. An agent holding a non-terminal, non-waiting job that sits `idle` or `done`
-for 60 s with an empty input box gets the same text as a prompt, under the same budget.
+for 60 s with an empty input box gets the same text as a prompt, under the same budget. As built
+in M8 (7.7): it runs in the poker's loop and calls `jobs.Service.NudgeIfDue`; the Stop hook stamps
+the job's `last_stop_at`, and a stop whose hook ran is left to the hook, so one stop is never
+nudged twice.
 
 **Answers come back as messages.** When Jeff answers a non-blocking question, crowsnest types
 `[crowsnest answer q_7] <title> → <answer> (note: …)` into the asker (Claude queues it if a turn
@@ -381,8 +384,9 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
 - **Heartbeat**: hooks, agent calls and the transcript file's modification time (with the last tool
   card from M4's tailer) advance `last_activity_at`. "Doing now" is the progress line, or the last
   tool call when the line is more than 5 minutes old.
-- **For M8**: `Service.NudgeIfDue(ctx, jobID)` applies the same rule and budget for an agent without
-  hooks that the caller found idle with an empty input box, and types the nudge.
+- **Backstop (M8)**: `Service.NudgeIfDue(ctx, jobID)` applies the same rule and budget for an agent
+  without hooks that the caller found idle with an empty input box, and types the nudge;
+  `Service.BackstopJobs` lists what the backstop watches (7.7).
 - **`--demo`** seeds ten jobs (running in a worktree, nudged, stuck on a limit with a retry
   countdown, waiting on a question, at a dialog, unresponsive, blocked, done with evidence, failed,
   queued) and keeps them moving; the supervisor does not run there.
@@ -517,6 +521,60 @@ Claude Code 2.1.332 by `mise run test:claude`):
   is a send whose request reached herdr but whose answer was lost (crowsnest's own 35 s deadline,
   a dropped connection: `herdr.ErrNoResponse`); the note says delivery is uncertain and to check
   the terminal. Only a send that never reached herdr is an error (R1-C09).
+
+**7.7 As built in M8** (`internal/orch/poke.go`, `poker.go`, `backstop.go`, `internal/journal`,
+`cmd/crowsnest/pokes.go`, `internal/httpd/journal.go`; the Chat menu, `components/chat/PokeRow.tsx`,
+`components/journal/JournalPanel.tsx`):
+
+- **Pure precheck and gate.** `Precheck(PrecheckInput)` and `Gate(GateInput)` take everything they
+  read, the time included, so every trigger and refusal is a table row. The `Poker` observes
+  (`agent.list` every 2 s, plus at once when an event adds a reason), keeps the bookkeeping, and
+  types the poke with `Prompt` (the web app's send path: it re-checks dialog and draft and waits
+  for the turn to start).
+- **Triggers.** Another agent (not the orchestrator) settled into `done` (held 45 s) or `blocked`
+  (held 10 s), each `(pane, name, state_change_seq)` pushed once, and at most one poke carrying
+  agent reasons per 120 s. A question settled (answered, expired, cancelled) whose asker is not the
+  orchestrator's pane (notices excluded): fed from the hub's `question` event. A job reaching
+  `done`, `failed` or `cancelled`, or getting stuck (keyed by cause), unless the orchestrator holds
+  it: fed from the hub's `job` event. The timer: at each `--poke-interval` tick the standing list
+  (stuck jobs, jobs that need the human, blocked jobs, the open-question count) is read, and it is
+  a reason only when it changed since the last timer poke, so an unchanged picture costs nothing
+  (decision 34). "Poke now" (`POST /orchestrator/poke`) runs the same check, skips the 120 s limit
+  (not the holds), and journals a skip when nothing is due; an automatic check with nothing due is
+  not journalled.
+- **Gate.** Only an idle (herdr idle or done) orchestrator with an empty input box and no dialog
+  on screen is poked. Working: wait. Blocked or a start-up prompt: no poke; the Inbox already lists
+  the orchestrator's dialog as a needs-you card (that is the needs-you item 7.4 asks for). A draft:
+  wait, and after 2 hours of holding a due poke, one alert (journal and `--notify-url`). An
+  unreadable screen: wait. Due reasons that are held stay pending and go out with the next poke the
+  gate allows; a held poke is journalled once per refusal, not every check.
+- **Text.** `[crowsnest poke <RFC3339 UTC> talk=on|off]` (talk from `voice.Service.TalkOn`), then
+  one `- reason` line each. Every line goes through `internal/termtext.Clean` and is capped at 240
+  characters; titles and agent names written by agents go through `termtext.Quote`, so none can
+  forge a second line or a `[crowsnest …]` header.
+- **Delivery.** A send that provably typed nothing (`ErrNotTyped`, a dialog or draft that appeared)
+  keeps the reasons pending; a herdr refusal keeps them too; anything else (including
+  `started: false` and uncertain delivery) marks them delivered, because a duplicate poke costs a
+  turn. Bookkeeping survives restarts in one `kv` blob, `poke.state`: pushed agent marks, delivered
+  event keys (kept 7 days, at most 1000), the last agent push, the timer fingerprint.
+- **Backstop.** In the same loop: for each running, non-waiting job with a pane and its brief sent
+  (`jobs.Service.BackstopJobs`), an agent seen idle or done for 60 s whose stop no hook handled
+  (`last_stop_at`, stamped by every Stop hook, not older than the moment the agent was seen to
+  settle less 15 s of slack) and whose screen shows no draft or dialog gets `NudgeIfDue`. The same
+  agent is looked at again at most once a minute. A nudge is journalled as `backstop`.
+- **Journal.** `internal/journal` writes `journal` rows (never failing the caller) and publishes a
+  `journal` event; kinds `poke`, `skip`, `send` (Chat prompts and job messages from the web app),
+  `answer` (answers and cancels from the Inbox), `restart` (automatic and manual, with how it
+  ended; a restart budget running out is an `alert`), `alert` (every supervisor "tell Jeff" notice
+  and the draft alert), `backstop`. `GET /journal` pages by id, newest first.
+- **`--demo`** pokes only for "Poke now" (`ManualOnly`; the scripted fleet would otherwise poke the
+  scripted orchestrator every two minutes) and runs no backstop. `--no-orchestrator` keeps the
+  backstop and drops poke reasons (Poke now says the orchestrator is off).
+- **UI.** The Chat menu has "Poke now" (the result is a toast: "Poke sent (n reasons)" or "Poke
+  skipped: <reason>") and "Journal"; the Jobs view has a Journal button above the board. The
+  Journal is a Sheet with a dense table (when, kind chip, summary), a kind filter and "Load
+  older". A poke in a conversation is a one-line system row ("Poke · 2 reasons · 03:10") with the
+  reasons behind a disclosure, not a user bubble.
 
 ## 8. Needs-you: questions and dialogs
 
@@ -696,7 +754,7 @@ browser reconnects, gets `hello`, and refetches.
 |---|---|
 | `GET /health` | Unauthenticated: `{status, version, update_available:false}` |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`) |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `say` events. On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
@@ -709,7 +767,8 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
 | `GET /inbox/summary` | `{open, blocking}`: the Inbox badge (added in M6) |
-| `GET /journal` | Pokes, sends, answers, restarts |
+| `POST /orchestrator/poke` | "Poke now" (M8) → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}` (7.7) |
+| `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated; `limit` 50 by default, at most 200 |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `POST /voice/talk` `{client_id, on}` → `{talk, heartbeat_seconds, max_recording_seconds}`; `POST /voice/read` `{question_id}` → `{text_id}` | Talk-mode heartbeat; a question made speakable (M11, 13.1). 404 when disabled |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
@@ -769,8 +828,8 @@ The client sends a resize first; the server starts the process on that first res
 - `jobs(…)`: the record in section 6.1. As built (migration `0004_jobs.sql`): `id` is an integer shown as `j_<id>`; besides 6.1's fields it keeps `work_dir`, `isolate`, `cause_detail`, `blocked_reason`, `waiting`, `last_tool`, `verified_json`, `not_verified_json`, `fail_reason`, `brief_sent`, `last_progress_at`, `nudge_streak`, `last_nudge_at`, `denials`, `restart_times`, `retry_at`, `retry_count`. Budgets (6.7) add their columns with M12
 - `job_events(id, job_id, at, kind, summary, detail_json)`: state change, progress, nudge, hook, restart, question, message: the job's timeline. Kinds as built: `created`, `launch`, `state`, `progress`, `nudge`, `hook`, `stuck`, `retry`, `restart`, `question`, `message`, `notify`, `done`, `fail`, `child`, `session`
 - `questions.job_id`, `questions.wait` (was the asker blocking), `questions.delivered_at` (answer typed back). As built (migration `0002_questions.sql`): `id` is an integer shown as `q_<id>`; `expires_at` is always set; delivery bookkeeping is `delivery` (`type`, `poll` or `none`, decided at settling), `delivery_claimed_at` (the write-ahead mark), `delivered_at` and `delivery_error` (8.4)
-- `journal(id, at, kind, summary, detail_json)`: poke, skip, send, answer, restart, alert
-- `kv(key, value)`: orchestrator session id, poke bookkeeping (per-agent last pushed state), settings
+- `journal(id, at, kind, summary, detail_json)`: poke, skip, send, answer, restart, alert, backstop (migration `0005_journal.sql`, which also adds `jobs.last_stop_at`, the Stop hook's stamp the backstop reads)
+- `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), settings
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
 Paths are XDG: config `~/.config/crowsnest`, data `~/.local/share/crowsnest`, state and logs `~/.local/state/crowsnest/<session>/`, agent socket in `$XDG_RUNTIME_DIR/crowsnest/` or the state dir.
@@ -935,7 +994,8 @@ internal/herdr/              Client interface, socket client, events, types; fak
 internal/fleet/              snapshot cache, dialog and draft detection, screen hash
 internal/jobs/               job service, launcher, supervisor (hooks, disposition check, recovery), roles/
 internal/agentcfg/           the --settings (hooks, allow rule) and --mcp-config files every Claude agent gets
-internal/orch/               lifecycle, send, poke precheck and gate
+internal/orch/               lifecycle, send, poke precheck and gate, poker, herdr-side backstop
+internal/journal/            journal entries (pokes, skips, sends, answers, restarts, alerts)
 internal/transcript/         locate, tail, normalise Claude JSONL
 internal/questions/          store, long-poll, expiry
 internal/term/               PTY bridge, pane-control bridge
@@ -961,7 +1021,7 @@ mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`
 | Web unit | Vitest + Testing Library for the composer, question cards (single, multi, note), dialog card, markdown/mermaid safety | `mise run test`, CI |
 | E2E hermetic | Playwright against `crowsnest --demo`: login and lockout, chat send and live update, inbox answer flows, fleet navigation, theme, 375 px and desktop projects, no horizontal scroll, basic axe checks | `mise run e2e`, CI |
 | E2E real herdr | Playwright against a real instance on a throwaway session, no Claude: terminal WebSocket types a command and sees its output, pane view, fleet reflects a created tab, cross-origin WebSocket and POST are rejected, unauthenticated WebSocket is rejected. Built in M5 (`web/e2e/real`, `playwright.real.config.ts`): each spec starts the built binary on a random port and stops it; the `--demo` Fleet with no fixtures; both terminals on `--demo`; on real herdr the Terminal view and the pane view each run a computed `echo` and find its output in the xterm buffer, a second browser takes a pane over, and screenshots go to `web/screenshots/terminal-*.png`. The real-herdr instance gets a throwaway `HOME` under `/tmp` (herdr's TUI would otherwise show the user's own machines; `/tmp` because a unix socket path is limited to 104 bytes on macOS) seeded with `onboarding = false` so herdr skips its first-run screen. The cross-origin and unauthenticated cases are covered by the httptest suite (`internal/httpd/term_test.go`) | `mise run e2e:real`, local |
-| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. M6 adds `ask_integration_test.go`: the orchestrator, started with crowsnest's `--mcp-config` and `--settings`, calls the `ask` MCP tool; the question appears through the browser API with the orchestrator's pane as its source and no permission dialog; it is answered through the API and the answer line arrives in the transcript. `CROWSNEST_E2E_PERMISSION_MODE` runs it under another mode. **The stop test** (M7, `internal/jobs/stop_integration_test.go`): a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent. Three haiku agents launched by the real launcher into worktrees of a scratch git repo under the package directory; the test plays the human for Claude's folder-trust prompt (trust is per folder, and crowsnest never answers it), which also exercises the "brief sent after the dialog" path | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
+| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. M8 adds `poke_integration_test.go`: a manual poke with one synthetic reason through `POST /orchestrator/poke` is delivered (outcome sent, turn started), appears in the transcript tagged `poke`, and is answered. M6 adds `ask_integration_test.go`: the orchestrator, started with crowsnest's `--mcp-config` and `--settings`, calls the `ask` MCP tool; the question appears through the browser API with the orchestrator's pane as its source and no permission dialog; it is answered through the API and the answer line arrives in the transcript. `CROWSNEST_E2E_PERMISSION_MODE` runs it under another mode. **The stop test** (M7, `internal/jobs/stop_integration_test.go`): a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent. Three haiku agents launched by the real launcher into worktrees of a scratch git repo under the package directory; the test plays the human for Claude's folder-trust prompt (trust is per folder, and crowsnest never answers it), which also exercises the "brief sent after the dialog" path | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
 
 Test-safety rules, enforced in the helpers rather than by convention: a test session name must
 match `^crowsnest-test-`; helpers scrub `HERDR_*` from the environment; teardown stops and deletes
@@ -1078,6 +1138,16 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 33. **Serve re-executes itself to shed its secrets** (R1b H1). `os.Unsetenv` cannot change the
     environment the kernel reports; a re-exec with the secrets on a pipe can, at the cost of one
     exec at start.
+34. **The timer pokes on a change, not on a clock** (M8). A timer that pokes whenever anything is
+    open spends a turn every interval to hear `noop`; the events already cover what happened, so
+    the timer only reports that the standing picture (stuck, needs-you, blocked jobs, open
+    questions) is different from the last time it spoke.
+35. **Held reasons wait; delivered reasons are never resent** (M8). A poke the gate refuses keeps
+    its reasons for the next allowed poke, so nothing is lost to timing; a poke that may have been
+    typed counts as delivered, the same at-most-once rule as answers (decision 25).
+36. **The backstop shares the poker's loop and the jobs service's budget** (M8). Both watch agents
+    settle and read the same screens; the nudge rule stays in one place (`Decide`), reached through
+    an interface because `internal/jobs` imports `internal/orch`.
 
 ## 18. Milestones
 
@@ -1126,6 +1196,8 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - A job agent in a folder Claude has not been told to trust stops at the trust prompt; the job shows `needs_you` and waits for someone to answer it in the terminal. A new worktree is a new folder.
 - The orchestrator holds one running job at a time; further jobs without a directory wait queued.
 - Codex jobs are launched but have no hooks: they are covered by the herdr-side backstop (M8 calls `NudgeIfDue`), not the Stop hook.
+- Pokes (M8): the agent-settled trigger is herdr's `done`/`blocked`; an agent that goes `idle` without passing through `done` is not reported. The timer reports a change in the standing list, not elapsed time, so a stuck job that stays stuck is pushed once (at its event) and then only when the list changes. Scheduled tasks (`tasks/*.md`) are not built; the precheck takes them as another reason source. A poke whose delivery was uncertain is not resent.
+- The backstop's "stop handled by a hook" test is time-based (a Stop hook stamp within 15 s before the agent was seen to settle). An agent whose hook works on one turn and fails on the very next within that window would miss one backstop nudge; the next idle minute catches it.
 - Answers are typed back only to the pane the question came from, as its token says. An agent restarted in another pane, or a caller without a token (a pane crowsnest did not create, a script), gets the answer only through the Inbox, `--wait`, `get_question` or `job_get`. A held delivery (dialog or draft) waits up to a week.
 - **Agent identity is per uid, not per process** (R1b N2): a process of the same user that reads another agent's environment or 0600 token file can act as that agent on the socket. The token stops the trivial forgery (setting an environment variable), not a determined same-user attacker. Questions and jobs can still be read (`GET`) by any caller.
 - The long-poll's waiter state is in memory: after a crowsnest restart, an asker blocked on `ask --wait` gets its answer from its next poll and also typed into its pane.
