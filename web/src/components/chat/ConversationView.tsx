@@ -12,7 +12,7 @@ import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
 import { SkeletonRows } from "../ui/Skeleton";
-import { Composer } from "./Composer";
+import { Composer, type ComposerProps } from "./Composer";
 import { MessageItem } from "./MessageItem";
 import { useStickToBottom } from "./useStickToBottom";
 
@@ -31,9 +31,12 @@ export interface ConversationViewProps {
    * it on the first prompt, so a fresh conversation has none): it gets the empty state instead.
    */
   paneFallback?: boolean;
-  /** Extra controls at the top of the composer area (talk mode's push-to-talk panel); given the
-   * function that scrolls the conversation to its newest message. */
-  composerExtra?: (scrollToBottom: () => void) => ReactNode;
+  /** Replaces the plain Composer (Chat's voice composer wraps it); given its props, including the
+   * onSent that scrolls the conversation to its newest message. */
+  renderComposer?: (props: ComposerProps) => ReactNode;
+  /** When set (voice is on), replies with a SAY line get a play button that speaks it through
+   * this API target. */
+  playTarget?: string;
 }
 
 export function ConversationView({
@@ -44,7 +47,8 @@ export function ConversationView({
   showThinking = false,
   onOpenTerminal,
   paneFallback = true,
-  composerExtra,
+  renderComposer,
+  playTarget,
 }: ConversationViewProps) {
   const query = useAgentMessages(target);
   const desktop = useMediaQuery(DESKTOP_QUERY);
@@ -67,7 +71,7 @@ export function ConversationView({
         )}
       >
         <div className={cn("mx-auto flex min-w-0 flex-col gap-3", page && "max-w-3xl")}>
-          <ConversationBody query={query} messages={messages} agentName={agentName} />
+          <ConversationBody query={query} messages={messages} agentName={agentName} playTarget={playTarget} />
           <div ref={anchorRef} aria-hidden className="h-px" />
         </div>
       </div>
@@ -89,8 +93,7 @@ export function ConversationView({
           </div>
         )}
         <div className={cn("mx-auto flex min-w-0 flex-col gap-2", page && "max-w-3xl")}>
-          {composerExtra?.(scrollToBottom)}
-          <Composer target={target} agentName={agentName} state={state} onSent={scrollToBottom} onOpenTerminal={onOpenTerminal} />
+          {(renderComposer ?? ((props: ComposerProps) => <Composer {...props} />))({ target, agentName, state, onSent: scrollToBottom, onOpenTerminal })}
         </div>
       </div>
     </div>
@@ -101,10 +104,12 @@ function ConversationBody({
   query,
   messages,
   agentName,
+  playTarget,
 }: {
   query: ReturnType<typeof useAgentMessages>;
   messages: ReturnType<typeof visibleMessages>;
   agentName: string;
+  playTarget?: string;
 }) {
   if (query.isPending) return <SkeletonRows rows={5} label="Loading the conversation" />;
   if (query.isError) {
@@ -135,7 +140,7 @@ function ConversationBody({
       <ol aria-label="Conversation" className="flex min-w-0 flex-col gap-3">
         {messages.map((message) => (
           <li key={message.id} className="min-w-0">
-            <MessageItem message={message} />
+            <MessageItem message={message} playTarget={playTarget} />
           </li>
         ))}
       </ol>

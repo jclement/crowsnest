@@ -180,10 +180,16 @@ export const endpoints = {
   // ---- M11: talk mode (every route is 404 when voice is off) ----
   /** Uploads one recording as it came from MediaRecorder; returns what was said. */
   transcribe: (audio: Blob) => uploadAudio(audio),
-  /** Talk-mode heartbeat: this tab has talk mode on (or just turned it off). */
-  talk: (clientId: string, on: boolean) => api<TalkStatus>("/voice/talk", { method: "POST", body: { client_id: clientId, on } }),
   /** A question's title and options, made speakable; play it through speechUrl. */
   readAloud: (questionId: string) => api<{ text_id: string }>("/voice/read", { method: "POST", body: { question_id: questionId } }),
+  /** A reply's SAY line, made playable (Chat's play button). 404 when it has none. */
+  replySay: (target: string, messageId: string) =>
+    api<{ text_id: string; text: string }>("/voice/reply", { method: "POST", body: { target, message_id: messageId } }),
+  voiceSettings: () => api<VoiceSettings>("/voice/settings"),
+  saveVoiceSettings: (settings: VoiceSettingsChange) => api<VoiceSettings>("/voice/settings", { method: "PUT", body: settings }),
+  voices: () => api<VoiceInfo[]>("/voice/voices"),
+  /** A sample sentence in a voice, speed and model not yet saved. */
+  previewVoice: (settings: VoiceSettingsChange) => api<{ text_id: string; playback_rate: number }>("/voice/preview", { method: "POST", body: settings }),
   // ---- Web Push (DESIGN.md 8.5) ----
   pushKey: () => api<{ public_key: string }>("/push/key"),
   pushSettings: () => api<PushSettings>("/push/settings"),
@@ -197,11 +203,35 @@ export const endpoints = {
   pushTest: (endpoint?: string) => api<PushTestResult>("/push/test", { method: "POST", body: endpoint ? { endpoint } : {} }),
 };
 
-/** POST /voice/talk's answer. */
-export interface TalkStatus {
-  talk: boolean;
-  heartbeat_seconds: number;
-  max_recording_seconds: number;
+/** GET/PUT /voice/settings: how replies are spoken, and where the voice came from. */
+export interface VoiceSettings {
+  voice_id: string;
+  /** "settings" when chosen in the app; else the configuration that set the default. */
+  voice_source: string;
+  default_voice_id: string;
+  speed: number;
+  speed_min: number;
+  speed_max: number;
+  /** The browser's share of speed: ElevenLabs speaks at most 1.2x, the rest is playbackRate. */
+  playback_rate: number;
+  model: string;
+  models: { id: string; model_id: string; label: string }[];
+}
+
+/** PUT /voice/settings: an empty voice_id means the configured default. */
+export interface VoiceSettingsChange {
+  voice_id: string;
+  speed: number;
+  model: string;
+}
+
+/** One ElevenLabs voice of the account. */
+export interface VoiceInfo {
+  voice_id: string;
+  name: string;
+  category?: string;
+  description?: string;
+  labels?: Record<string, string>;
 }
 
 /** Where an <audio> element fetches a server-held text's speech. */

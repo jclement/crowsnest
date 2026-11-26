@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { TAP_MS, formatElapsed, initialPtt, pttEffects, pttReducer, type PttEvent, type PttState } from "./ptt";
+import {
+  MAX_RECORDING_MS,
+  MIN_CLIP_MS,
+  SHORT_CLIP_HINT,
+  SHORT_KEY_HINT,
+  TAP_MS,
+  formatElapsed,
+  initialPtt,
+  nearLimit,
+  pttEffects,
+  pttReducer,
+  type PttEvent,
+  type PttState,
+} from "./ptt";
 
 /** Runs events from idle and returns every state along the way. */
 function run(...events: PttEvent[]): PttState[] {
@@ -47,7 +60,38 @@ describe("push-to-talk state machine", () => {
     expect(last(run({ type: "press", at: 0 }, { type: "release", at: 3000 }))).toEqual(initialPtt);
   });
 
-  it("the 60 s limit stops a recording and uploads it", () => {
+  // The hold-space bugs found driving the real app: a quick Space locked the mic on (Chromium),
+  // and a quick Space before the mic was ready went on to send a clip (WebKit).
+  it("a short key press never locks recording on, before or after the mic is ready", () => {
+    const after = run({ type: "press", at: 0, source: "key" }, { type: "micReady", at: 40 }, { type: "release", at: 100 });
+    expect(last(after)).toEqual({ phase: "error", message: SHORT_KEY_HINT });
+    expect(pttEffects(after[1]!, after[2]!)).toEqual(["discardMic"]);
+    const before = run({ type: "press", at: 0, source: "key" }, { type: "release", at: 100 }, { type: "micReady", at: 800 });
+    expect(before.map((state) => state.phase)).toEqual(["starting", "error", "error"]);
+  });
+
+  it("a key held long enough records while held and sends on release", () => {
+    const states = run({ type: "press", at: 0, source: "key" }, { type: "micReady", at: 50 }, { type: "release", at: 30_000 });
+    expect(last(states)).toEqual({ phase: "uploading" });
+  });
+
+  it("a recording too short to hold speech is thrown away, not sent", () => {
+    // A key hold past TAP_MS whose mic only just started.
+    const held = run({ type: "press", at: 0, source: "key" }, { type: "micReady", at: 350 }, { type: "release", at: 400 });
+    expect(last(held)).toEqual({ phase: "error", message: SHORT_CLIP_HINT });
+    expect(pttEffects(held[1]!, held[2]!)).toEqual(["discardMic"]);
+    // A pointer tap-lock stopped straight away.
+    const locked = run({ type: "press", at: 0 }, { type: "micReady", at: 10 }, { type: "release", at: 50 }, { type: "press", at: 10 + MIN_CLIP_MS - 1 });
+    expect(last(locked)).toEqual({ phase: "error", message: SHORT_CLIP_HINT });
+  });
+
+  it("warns in the last 30 seconds of the five minutes", () => {
+    expect(MAX_RECORDING_MS).toBe(300_000);
+    expect(nearLimit(269_000)).toBe(false);
+    expect(nearLimit(270_000)).toBe(true);
+  });
+
+  it("the five-minute limit stops a recording and uploads it", () => {
     expect(last(run({ type: "press", at: 0 }, { type: "micReady", at: 1 }, { type: "limit" }))).toEqual({ phase: "uploading" });
   });
 
@@ -78,8 +122,8 @@ describe("push-to-talk state machine", () => {
   });
 
   it("names the side effects of each transition", () => {
-    const starting: PttState = { phase: "starting", mode: "hold", pressedAt: 0 };
-    const recording: PttState = { phase: "recording", mode: "hold", pressedAt: 0, startedAt: 1 };
+    const starting: PttState = { phase: "starting", mode: "hold", source: "pointer", pressedAt: 0 };
+    const recording = { phase: "recording", mode: "hold", source: "pointer", pressedAt: 0, startedAt: 1 } as const;
     expect(pttEffects(initialPtt, starting)).toEqual(["startMic"]);
     expect(pttEffects(recording, { phase: "uploading" })).toEqual(["stopAndUpload"]);
     expect(pttEffects(recording, initialPtt)).toEqual(["discardMic"]);

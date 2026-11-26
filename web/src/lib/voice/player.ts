@@ -14,6 +14,8 @@ export interface SpeechItem {
   textId: string;
   /** The sentence, shown as the caption while it plays. */
   text: string;
+  /** Playback rate for this item (a preview); otherwise the saved settings' rate. */
+  rate?: number;
 }
 
 export interface PlayerSnapshot {
@@ -29,6 +31,8 @@ export interface PlayerSnapshot {
 const MAX_QUEUE = 8;
 
 export class SpeechPlayer {
+  /** The saved settings' playback rate (the part of the chosen speed ElevenLabs cannot do). */
+  rate = 1;
   private audio: HTMLAudioElement | null = null;
   private context: AudioContext | null = null;
   private queue: SpeechItem[] = [];
@@ -117,7 +121,12 @@ export class SpeechPlayer {
 
   private async start(item: SpeechItem): Promise<void> {
     const audio = this.element();
+    // Assigning src streams: the browser starts playing once the first MP3 frames have arrived,
+    // while ElevenLabs is still generating the rest (the server flushes each chunk through).
     audio.src = speechUrl(item.textId);
+    // After src: loading a new source resets playbackRate to defaultPlaybackRate.
+    audio.defaultPlaybackRate = audio.playbackRate = item.rate ?? this.rate;
+    audio.preservesPitch = true;
     try {
       await audio.play();
     } catch (error) {

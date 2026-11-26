@@ -3,10 +3,11 @@
 // released straight after, so the browser's "recording" indicator is only on while it records.
 import { useEffect, useRef, useState } from "react";
 import { endpoints } from "../api";
-import { MAX_RECORDING_MS, REVIEW_MS, initialPtt, pttEffects, pttReducer, type PttEffect, type PttEvent, type PttState } from "./ptt";
+import { MAX_RECORDING_MS, REVIEW_MS, initialPtt, pttEffects, pttReducer, type PttEffect, type PttEvent, type PttSource, type PttState } from "./ptt";
 import { micErrorMessage, recordingType } from "./support";
 
-/** Bit rate asked of the recorder: plenty for speech, and a minute stays far under the upload cap. */
+/** Bit rate asked of the recorder: plenty for speech. Five minutes at it is 2.4 MB; the server's
+ * cap (voice.MaxRecordingBytes) allows three times this, for a Safari that ignores the request. */
 const AUDIO_BITS_PER_SECOND = 64_000;
 /** MediaRecorder hands over data in slices this long, so a stop loses at most this much. */
 const TIMESLICE_MS = 250;
@@ -95,7 +96,7 @@ export class PushToTalkController {
     for (const effect of pttEffects(prev, next)) this.run(effect, next);
   };
 
-  press = () => this.dispatch({ type: "press", at: performance.now() });
+  press = (source: PttSource = "pointer") => this.dispatch({ type: "press", at: performance.now(), source });
   release = () => this.dispatch({ type: "release", at: performance.now() });
   cancel = () => {
     window.clearTimeout(this.reviewTimer);
@@ -179,7 +180,7 @@ function errorText(error: unknown, fallback: string): string {
 
 export interface PushToTalk {
   state: PttState;
-  press: () => void;
+  press: (source?: PttSource) => void;
   release: () => void;
   cancel: () => void;
   sendNow: () => void;

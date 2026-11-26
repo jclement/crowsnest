@@ -8,7 +8,7 @@ import { queryKeys } from "./api";
 import { notifyQuestion } from "./notifications";
 import type { QuestionEvent } from "./questions";
 import { useEventStream, type StreamState } from "./sse";
-import { onSayEvent } from "./voice/talk";
+import { onSayEvent } from "./voice/speak";
 import type { EventName, Fleet } from "./types";
 
 /**

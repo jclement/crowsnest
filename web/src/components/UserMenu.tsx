@@ -1,14 +1,16 @@
-// The user menu in the header: who is signed in, Notifications (the Web Push sheet) and "Sign
-// out". With --no-auth there is no one to sign out, so the menu says so instead.
-import { Bell, CircleUser, LogOut } from "lucide-react";
+// The user menu in the header: who is signed in, Notifications (the Web Push sheet), Voice (the
+// voice, speed and model of spoken replies, when voice is on) and "Sign out". With --no-auth there is no one to sign out, so the menu says so instead.
+import { AudioLines, Bell, CircleUser, LogOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Me } from "../lib/api";
 import { NotificationSettings } from "./push/NotificationSettings";
+import { VoiceSettingsSheet } from "./voice/VoiceSettings";
 import { IconButton } from "./ui/Button";
 
 export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,6 +54,20 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Bell className="h-4 w-4 text-muted" aria-hidden />
             Notifications
           </button>
+          {me.features.voice && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                setVoiceOpen(true);
+              }}
+              className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
+            >
+              <AudioLines className="h-4 w-4 text-muted" aria-hidden />
+              Voice
+            </button>
+          )}
           {me.features.auth && (
             <button
               type="button"
@@ -69,6 +85,7 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         </div>
       )}
       <NotificationSettings open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
+      {me.features.voice && <VoiceSettingsSheet open={voiceOpen} onClose={() => setVoiceOpen(false)} />}
     </div>
   );
 }

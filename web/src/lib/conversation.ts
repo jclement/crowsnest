@@ -106,6 +106,8 @@ export interface OrchestratorStatus {
   pane_id: string;
   session_id: string;
   dir: string;
+  /** The model Claude was started with; empty means Claude's own default. */
+  model?: string;
   detail?: string;
   restarts: number;
   updated_at: string;

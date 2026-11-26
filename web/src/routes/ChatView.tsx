@@ -1,15 +1,16 @@
 // The Chat view (DESIGN.md section 12): the orchestrator's conversation, a sticky composer, its
 // status chip (driven by `orchestrator` events), and a menu with thinking, Restart and New
 // conversation. When the orchestrator needs the terminal (a start-up prompt) or is not running,
-// a banner says why and links to its pane in Fleet. With voice on, the header has the talk-mode
-// toggle and the composer area the push-to-talk panel (components/voice/TalkPanel.tsx).
+// a banner says why and links to its pane in Fleet. With voice on, the composer has the microphone
+// (components/voice/VoiceComposer.tsx) and each reply's SAY caption a play button; speak mode
+// itself is the app header's switch, on every view.
 import { useNavigate } from "@tanstack/react-router";
 import { MessageSquare, SquareTerminal } from "lucide-react";
 import { useState } from "react";
 import { ChatMenu } from "../components/chat/ChatMenu";
 import { ChatStatusChip } from "../components/chat/ChatStatusChip";
 import { ConversationView } from "../components/chat/ConversationView";
-import { TalkPanel, TalkToggle } from "../components/voice/TalkPanel";
+import { VoiceComposer } from "../components/voice/VoiceComposer";
 import { Banner } from "../components/ui/Banner";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -51,8 +52,8 @@ export function ChatView() {
           </span>
         )}
         <div className="ml-auto flex items-center gap-1.5">
-          {voice && <TalkToggle />}
           <ChatMenu
+            model={orchestrator.model}
             showThinking={showThinking}
             onToggleThinking={() => setShowThinking((value) => !value)}
             canRelaunch={orchestrator.state !== "disabled"}
@@ -87,13 +88,8 @@ export function ChatView() {
           showThinking={showThinking}
           onOpenTerminal={openTerminal}
           paneFallback={false}
-          composerExtra={
-            voice
-              ? (scrollToBottom) => (
-                  <TalkPanel target={ORCHESTRATOR} onSent={scrollToBottom} disabled={state === "blocked" || state === "needs_terminal" || state === "failed"} />
-                )
-              : undefined
-          }
+          renderComposer={voice ? (props) => <VoiceComposer {...props} /> : undefined}
+          playTarget={voice ? ORCHESTRATOR : undefined}
         />
       ) : (
         <EmptyState icon={MessageSquare} title="Starting the orchestrator">

@@ -4,7 +4,7 @@
 // at a dialog the box is replaced by a note pointing at the dialog, because typed text would land
 // in the dialog. A draft typed at the terminal stops the send until the human says to append.
 import { Send, SquareTerminal } from "lucide-react";
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ApiError } from "../../lib/api";
 import type { ChatState, DraftDetail, PromptResult } from "../../lib/conversation";
 import { useSendPrompt } from "../../lib/conversation-queries";
@@ -16,7 +16,7 @@ import { useToast } from "../ui/toast-context";
 /** The textarea grows with its text up to this height, then scrolls. */
 const MAX_INPUT_PX = 200;
 
-interface ComposerProps {
+export interface ComposerProps {
   /** The API target: a pane id, or "orchestrator". */
   target: string;
   agentName: string;
@@ -25,9 +25,13 @@ interface ComposerProps {
   onSent?: (result: PromptResult) => void;
   /** Shown as "Open terminal" when the agent needs the terminal; omitted inside the Fleet panel. */
   onOpenTerminal?: () => void;
+  /** A control beside the Send button (Chat's microphone). */
+  accessory?: ReactNode;
+  /** A second hint after the keyboard one (Chat's "hold Space to talk"), desktop only. */
+  extraHint?: ReactNode;
 }
 
-export function Composer({ target, agentName, state, onSent, onOpenTerminal }: ComposerProps) {
+export function Composer({ target, agentName, state, onSent, onOpenTerminal, accessory, extraHint }: ComposerProps) {
   const [text, setText] = useState("");
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [queued, setQueued] = useState(false);
@@ -126,6 +130,7 @@ export function Composer({ target, agentName, state, onSent, onOpenTerminal }: C
           placeholder={starting ? "Starting…" : `Message ${agentName}…`}
           className="min-h-11 min-w-0 flex-1 resize-none rounded border border-border-strong bg-surface px-3 py-2.5 text-sm text-heading placeholder:text-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-60 md:min-h-9 md:py-2"
         />
+        {accessory}
         <Button type="submit" variant="primary" icon={Send} disabled={!text.trim() || send.isPending || starting} aria-label="Send" className="min-w-11">
           <span className="hidden md:inline">Send</span>
         </Button>
@@ -136,7 +141,9 @@ export function Composer({ target, agentName, state, onSent, onOpenTerminal }: C
         ) : state === "working" ? (
           "Working. What you send now is queued until this turn ends."
         ) : desktop ? (
-          "Enter sends, Shift+Enter adds a line."
+          <>
+            Enter sends, Shift+Enter adds a line.{extraHint && <> {extraHint}</>}
+          </>
         ) : null}
       </p>
     </form>

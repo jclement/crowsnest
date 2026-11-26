@@ -1,4 +1,5 @@
-// The signed-in frame: a dark header (session, connection state, theme, user menu), the five
+// The signed-in frame: a dark header (session, connection state, speak mode when voice is on,
+// theme, user menu) with the now-playing strip under it, the five
 // views as a left rail from md and a bottom nav on mobile, the reconnect banner, and the
 // footer. It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
 // badge and the tab title count what needs Jeff: open questions plus agents at a terminal dialog.
@@ -17,6 +18,8 @@ import { Footer } from "./Footer";
 import { navItems } from "./nav";
 import { ThemeToggle } from "./ThemeToggle";
 import { UserMenu } from "./UserMenu";
+import { NowPlaying, SpeakToggle } from "./voice/SpeakMode";
+import { useSyncPlaybackRate } from "../lib/voice/settings";
 
 export function AppFrame() {
   const queryClient = useQueryClient();
@@ -27,6 +30,8 @@ export function AppFrame() {
   const fleet = useFleet();
   const summary = useInboxSummary();
   const needsYou = inboxCount(summary.data?.open, needsYouCount(fleet.data));
+  const voice = me.data?.features.voice ?? false;
+  useSyncPlaybackRate(voice);
 
   useEffect(() => {
     document.title = needsYou > 0 ? `(${needsYou}) crowsnest` : "crowsnest";
@@ -70,11 +75,13 @@ export function AppFrame() {
         )}
         <div className="ml-auto flex items-center">
           <ConnectionState status={stream.status} />
+          {voice && <SpeakToggle />}
           <ThemeToggle />
           {me.data && <UserMenu me={me.data} onSignOut={() => void signOut()} />}
         </div>
       </header>
       <ConnectionBanner stream={stream} />
+      {voice && <NowPlaying />}
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Views" className="hidden w-44 shrink-0 flex-col gap-0.5 border-r border-border bg-surface-raised p-2 md:flex">
           {navItems.map((item) => (

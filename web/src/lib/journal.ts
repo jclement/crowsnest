@@ -59,14 +59,16 @@ export interface ParsedPoke {
   reasons: string[];
 }
 
-const pokeHeader = /^\[crowsnest poke (\S+) talk=(on|off)\]/;
+// The talk flag was dropped when the orchestrator began writing a SAY line on every reply; older
+// transcripts still carry it, so it stays optional here.
+const pokeHeader = /^\[crowsnest poke (\S+?)(?: talk=(on|off))?\]/;
 
-/** Splits `[crowsnest poke <time> talk=on|off]` and its `- reason` lines. Null when it is not a poke. */
+/** Splits `[crowsnest poke <time>]` and its `- reason` lines. Null when it is not a poke. */
 export function parsePoke(text: string): ParsedPoke | null {
   const [first, ...rest] = text.split("\n");
   const header = pokeHeader.exec(first ?? "");
   if (!header) return text.startsWith("[crowsnest poke") ? { reasons: rest.map(stripBullet).filter(Boolean) } : null;
-  return { at: header[1], talk: header[2] === "on", reasons: rest.map(stripBullet).filter(Boolean) };
+  return { at: header[1], talk: header[2] === undefined ? undefined : header[2] === "on", reasons: rest.map(stripBullet).filter(Boolean) };
 }
 
 function stripBullet(line: string): string {

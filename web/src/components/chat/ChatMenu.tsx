@@ -1,8 +1,8 @@
-// ChatMenu: the Chat view's menu: Poke now (the result comes back as a toast: sent, or skipped
+// ChatMenu: the Chat view's menu: the model the orchestrator runs on, Poke now (the result comes back as a toast: sent, or skipped
 // and why), the Journal, show or hide thinking, Restart (same conversation, --resume), and New
 // conversation (fresh session). Both relaunches ask for confirmation first, in a Sheet, because
 // they interrupt whatever the orchestrator is doing.
-import { BellRing, Brain, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
+import { BellRing, Brain, Cpu, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useOrchestratorAction } from "../../lib/conversation-queries";
 import { pokeToast } from "../../lib/journal";
@@ -28,13 +28,15 @@ const confirmations: Record<Action, { title: string; body: string; button: strin
 };
 
 interface ChatMenuProps {
+  /** The orchestrator's model; empty or missing means Claude's own default. */
+  model?: string;
   showThinking: boolean;
   onToggleThinking: () => void;
   /** Restart and New conversation are offered only when there is an orchestrator to relaunch. */
   canRelaunch: boolean;
 }
 
-export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMenuProps) {
+export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }: ChatMenuProps) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<Action | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -84,6 +86,11 @@ export function ChatMenu({ showThinking, onToggleThinking, canRelaunch }: ChatMe
       <IconButton icon={MoreVertical} label="Conversation menu" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} />
       {open && (
         <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl">
+          <div className="flex items-center gap-2 border-b border-border px-3 pb-1.5 pt-1 text-xs" data-testid="orchestrator-model" title="Set with --model or CROWSNEST_MODEL">
+            <Cpu className="h-4 w-4 text-muted" aria-hidden />
+            <span className="text-muted">Model</span>
+            <span className="ml-auto font-mono text-heading">{model || "Claude's default"}</span>
+          </div>
           {canRelaunch && (
             <MenuItem icon={<BellRing className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(pokeNow)} disabled={poke.isPending}>
               {poke.isPending ? "Poking…" : "Poke now"}
