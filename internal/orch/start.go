@@ -184,31 +184,44 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 	}
 }
 
-// codeAgentNameTaken is herdr's answer to agent.start when another agent record holds the name.
-const codeAgentNameTaken = "agent_name_taken"
+// herdr's answers to agent.start that are worth retrying for a short while (both found in M4).
+const (
+	codeAgentNameTaken = "agent_name_taken" // another (dead) agent record holds the name
+	codeAgentPaneBusy  = "agent_pane_busy"  // the pane's shell is not an available prompt yet
+)
 
-// nameReleaseWait bounds how long a start waits for herdr to let go of a dead agent's name.
-const nameReleaseWait = 15 * time.Second
+// startRetryWait bounds how long a start keeps retrying those answers.
+const startRetryWait = 15 * time.Second
 
-// agentStart calls agent.start, coping with a stale name. herdr keeps a named agent's record for
-// a while after Claude exits (found in M4: a restart right after /exit was refused with
-// agent_name_taken), so the dead record's name is cleared and the start retried until herdr lets
-// go of it or nameReleaseWait passes. Only a record whose pane is at a bare shell is touched.
+// agentStart calls agent.start, riding out two transient refusals seen against real herdr:
+//
+//   - agent_pane_busy right after a workspace is created: the shell process exists (so the pane
+//     passed the bare-shell check) but herdr does not count it as an available prompt yet. The
+//     start is simply retried.
+//   - agent_name_taken right after Claude exits: herdr keeps the named record for a while, so the
+//     dead record's name is cleared and the start retried. Only a record whose pane is at a bare
+//     shell is touched.
 func (o *Orchestrator) agentStart(ctx context.Context, params herdr.AgentStartParams) (herdr.Agent, error) {
-	deadline := o.opts.Now().Add(nameReleaseWait)
+	deadline := o.opts.Now().Add(startRetryWait)
 	for {
 		startCtx, cancel := context.WithTimeout(ctx, startTimeoutMS*time.Millisecond+10*time.Second)
 		agent, err := o.opts.Client.AgentStart(startCtx, params)
 		cancel()
 		var herdrErr *herdr.Error
-		if !errors.As(err, &herdrErr) || herdrErr.Code != codeAgentNameTaken || o.opts.Now().After(deadline) {
+		if !errors.As(err, &herdrErr) || o.opts.Now().After(deadline) {
 			return agent, err
 		}
-		o.releaseStaleName(ctx)
+		switch herdrErr.Code {
+		case codeAgentNameTaken:
+			o.releaseStaleName(ctx)
+		case codeAgentPaneBusy:
+		default:
+			return agent, err
+		}
 		select {
 		case <-ctx.Done():
 			return agent, ctx.Err()
-		case <-time.After(time.Second):
+		case <-time.After(500 * time.Millisecond):
 		}
 	}
 }

@@ -378,6 +378,9 @@ Claude Code 2.1.332 by `mise run test:claude`):
   agent whose pane shows only a bare shell (and is not mid-launch) counts as gone, and a start
   refused for the name clears the stale record's name (`agent.rename` to empty) and retries for
   up to 15 s.
+- **A brand-new pane can refuse `agent.start` with `agent_pane_busy`** for a moment: its shell
+  process already shows in `pane.process_info`, but herdr does not count it as an available
+  prompt yet (one run in five on the tip). Start retries that refusal every 500 ms for up to 15 s.
 - **Claude writes the transcript on the first prompt**, not at start (in a fresh directory, no
   file existed until the first turn). A conversation with no transcript shows the pane-text
   fallback, and switches to the transcript (a reset page) when the file appears. After "New

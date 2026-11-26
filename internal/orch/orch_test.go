@@ -345,3 +345,13 @@ func TestRunFollowsFleetEvents(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestStartRetriesAPaneThatIsNotReadyYet(t *testing.T) {
+	f := fake.New()
+	f.FailNext("agent.start", &herdr.Error{Code: "agent_pane_busy", Message: "agent target pane w1:p1 is not an available shell"})
+	rig := newRig(t, f)
+	status, err := rig.orch.Ensure(context.Background())
+	if err != nil || status.State != StateIdle || len(f.Starts()) != 1 {
+		t.Fatalf("status = %+v, %v, starts %d", status, err, len(f.Starts()))
+	}
+}
