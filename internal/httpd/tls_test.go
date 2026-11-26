@@ -98,7 +98,9 @@ func TestRunServesHTTPSWithASelfSignedPair(t *testing.T) {
 	go func() { done <- server.Run(ctx) }()
 	t.Cleanup(func() {
 		cancel()
-		<-done
+		if err := <-done; err != nil {
+			t.Errorf("Run after cancel: %v", err)
+		}
 	})
 
 	pool := x509.NewCertPool()
