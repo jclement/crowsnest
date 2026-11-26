@@ -74,6 +74,9 @@ type Config struct {
 
 	Demo                bool   // fake herdr and scripted orchestrator
 	IKnowThisIsOpen     bool   // allow --no-auth on a non-loopback, non-tailnet bind
+	// NoAuthFromSuppressAuth is true when NoAuth came from the generic SUPPRESS_AUTH variable
+	// rather than --no-auth or CROWSNEST_NO_AUTH; it is then honoured on loopback only (R1 L4).
+	NoAuthFromSuppressAuth bool
 	AllowDefaultSession bool   // allow --session default
 	WebDev              bool   // UI is served by Vite; do not require embedded assets
 	DataDir             string // where the SQLite database lives

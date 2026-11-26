@@ -272,6 +272,7 @@ func (l *loader) loadAuth(cfg *Config) error {
 	if cfg.NoAuth, err = l.boolean(optNoAuth); err != nil {
 		return err
 	}
+	cfg.NoAuthFromSuppressAuth = cfg.NoAuth && l.lookup(optNoAuth).where == envSuppressAuth
 	cfg.Username = l.str(optUsername)
 	password := l.lookup(optPassword)
 	passwordFile := l.path(optPasswordFile)

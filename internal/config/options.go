@@ -61,12 +61,17 @@ const (
 	optWebDev              = "web-dev"
 )
 
+// envSuppressAuth is the generic dev-bypass variable of Jeff's other projects. It may well be
+// exported by some other project's environment, so it only ever turns auth off on a
+// loopback-only bind (R1 L4); CROWSNEST_NO_AUTH and --no-auth are the deliberate switches.
+const envSuppressAuth = "SUPPRESS_AUTH"
+
 // options is the table. Order here is the order of --help.
 var options = []option{
 	{name: optUsername, env: []string{"CROWSNEST_USERNAME"}, usage: "login name"},
 	{name: optPassword, env: []string{"CROWSNEST_PASSWORD"}, usage: "login password (visible in ps: prefer CROWSNEST_PASSWORD or --password-file)"},
 	{name: optPasswordFile, env: []string{"CROWSNEST_PASSWORD_FILE"}, usage: "file holding the password (first line)"},
-	{name: optNoAuth, env: []string{"CROWSNEST_NO_AUTH", "SUPPRESS_AUTH"}, kind: kindBool, def: "false", usage: "serve without a login (trusted tailnet or localhost only)"},
+	{name: optNoAuth, env: []string{"CROWSNEST_NO_AUTH", envSuppressAuth}, kind: kindBool, def: "false", usage: "serve without a login (trusted tailnet or localhost only)"},
 	{name: optBind, env: []string{"CROWSNEST_BIND"}, kind: kindList, def: "localhost", usage: "localhost, tailnet, an interface name, an IP, or ip:port (repeatable)"},
 	{name: optPort, env: []string{"CROWSNEST_PORT"}, kind: kindInt, def: strconv.Itoa(DefaultPort), usage: "port for binds that do not name one"},
 	{name: optSession, env: []string{"CROWSNEST_SESSION"}, def: DefaultSession, usage: "herdr session to create or connect to"},

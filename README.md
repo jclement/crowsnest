@@ -114,7 +114,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--username` | `CROWSNEST_USERNAME` | none | Login name |
 | `--password` | `CROWSNEST_PASSWORD` | none | Login password. Prefer the env var or `--password-file`: a flag is visible in `ps` |
 | `--password-file` | `CROWSNEST_PASSWORD_FILE` | none | File holding the password (first line) |
-| `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured) | `false` | No login. For a trusted localhost or tailnet only |
+| `--no-auth` | `CROWSNEST_NO_AUTH` (`SUPPRESS_AUTH=true` also honoured, on a localhost-only bind) | `false` | No login. For a trusted localhost or tailnet only; on a tailnet, every peer your ACL lets reach the port has a shell, including nodes shared into your tailnet |
 | `--bind` | `CROWSNEST_BIND` | `localhost` | `localhost`, `tailnet`, an interface name, an IP, or `ip:port`. Repeatable |
 | `--port` | `CROWSNEST_PORT` | `2769` | Port for binds that do not name one (C-R-O-W on a keypad) |
 | `--session` | `CROWSNEST_SESSION` | `crowsnest` | herdr session to create or connect to |
@@ -150,6 +150,9 @@ Crowsnest refuses to start, and says what to pass instead, when:
 - there are neither credentials nor `--no-auth` (or both are given);
 - `--no-auth` is combined with a bind that is not loopback or a Tailscale address (including
   `0.0.0.0`), unless `--i-know-this-is-open` is also given;
+- the login is off through `SUPPRESS_AUTH` (rather than `--no-auth` or `CROWSNEST_NO_AUTH`) on a
+  bind that is not localhost-only: that generic variable is often exported by other projects'
+  environments, so it never opens anything beyond this machine;
 - `--session default` is given without `--allow-default-session`;
 - `--bind tailnet` finds no Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48); it never
   falls back to all interfaces.

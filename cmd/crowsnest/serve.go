@@ -60,12 +60,25 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	slog.SetDefault(logger)
 	logger.Info("starting crowsnest", "version", version, "config", cfg)
 	if cfg.NoAuth {
-		logger.Warn("AUTHENTICATION IS OFF (--no-auth): anyone who can reach this port has a shell as you")
+		logger.Warn(noAuthWarning(cfg))
 	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return serve(ctx, cfg, logger)
+}
+
+// noAuthWarning is the startup warning under --no-auth. On a tailnet bind it says who "anyone
+// who can reach this port" is: every tailnet peer the ACL lets through, including nodes shared
+// into the tailnet by other people (R1 I7).
+func noAuthWarning(cfg config.Config) string {
+	warning := "AUTHENTICATION IS OFF (--no-auth): anyone who can reach this port has a shell as you"
+	for _, listener := range cfg.Listeners {
+		if config.IsTailnet(listener.Addr.Addr().Unmap()) {
+			return warning + ". On the tailnet that is every peer your Tailscale ACL lets reach this port, including nodes other people have shared into your tailnet"
+		}
+	}
+	return warning
 }
 
 // serve wires the services together and blocks until ctx ends.

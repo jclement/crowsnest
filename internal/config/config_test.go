@@ -415,6 +415,18 @@ func TestHostNames(t *testing.T) {
 			t.Errorf("an unbound LAN IP must not be an allowed host: %v", cfg.HostNames)
 		}
 	})
+	t.Run("loopback-only bind leaves the machine names out", func(t *testing.T) {
+		// R1 I4: on loopback the machine's names add only DNS-rebinding surface.
+		cfg := newHarness(t).mustLoad()
+		for _, name := range []string{"quark", "quark.local", "quark.example.lan"} {
+			if slices.Contains(cfg.HostNames, name) {
+				t.Errorf("host names %v include %q on a loopback-only bind", cfg.HostNames, name)
+			}
+		}
+		if !slices.Contains(cfg.HostNames, "localhost") {
+			t.Errorf("host names %v lost localhost", cfg.HostNames)
+		}
+	})
 	t.Run("unspecified bind allows every interface IP", func(t *testing.T) {
 		cfg := newHarness(t, "--bind", "0.0.0.0").mustLoad()
 		if !slices.Contains(cfg.HostNames, "192.168.1.20") || slices.Contains(cfg.HostNames, "0.0.0.0") {
@@ -447,6 +459,11 @@ func TestStartupRefusals(t *testing.T) {
 		{name: "default session refuses", args: []string{"--session", "default"}, env: creds, wantErr: "--allow-default-session"},
 		{name: "default session with override starts", args: []string{"--session", "default", "--allow-default-session"}, env: creds},
 		{name: "tailnet with no Tailscale refuses", args: []string{"--bind", "tailnet"}, env: creds, interfaces: noTailnetInterfaces, wantErr: "--bind localhost"},
+		// R1 L4: the generic SUPPRESS_AUTH turns auth off on loopback only.
+		{name: "SUPPRESS_AUTH on localhost starts", env: []string{"SUPPRESS_AUTH", "true"}},
+		{name: "SUPPRESS_AUTH on tailnet refuses", args: []string{"--bind", "tailnet"}, env: []string{"SUPPRESS_AUTH", "true"}, wantErr: "CROWSNEST_NO_AUTH"},
+		{name: "SUPPRESS_AUTH open refuses even with the override", args: []string{"--bind", "0.0.0.0", "--i-know-this-is-open"}, env: []string{"SUPPRESS_AUTH", "true"}, wantErr: "CROWSNEST_NO_AUTH"},
+		{name: "CROWSNEST_NO_AUTH on tailnet starts", args: []string{"--bind", "tailnet"}, env: []string{"CROWSNEST_NO_AUTH", "true"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

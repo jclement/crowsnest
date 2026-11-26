@@ -6,6 +6,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/spf13/pflag"
 )
@@ -18,7 +20,9 @@ var ErrRefused = errors.New("refusing to start")
 //
 //   - neither credentials nor --no-auth;
 //   - --no-auth on a bind that is not loopback or tailnet, without --i-know-this-is-open;
-//   - --session default without --allow-default-session.
+//   - --session default without --allow-default-session;
+//   - SUPPRESS_AUTH (rather than --no-auth or CROWSNEST_NO_AUTH) on a bind that is not
+//     loopback-only (R1 L4).
 //
 // The fourth rule, `tailnet` with no Tailscale address, is enforced during bind resolution in
 // Load because there is nothing to listen on without it.
@@ -26,6 +30,11 @@ func (c Config) CheckStartup() error {
 	if !c.NoAuth && (c.Username == "" || c.Password == "") {
 		return fmt.Errorf("%w: no login is configured. Pass --username with CROWSNEST_PASSWORD (or --password-file), "+
 			"or pass --no-auth for a trusted localhost or tailnet", ErrRefused)
+	}
+	if c.NoAuthFromSuppressAuth && !c.LoopbackOnly() {
+		return fmt.Errorf("%w: SUPPRESS_AUTH turns the login off only on a localhost bind, and this bind (%s) is not. "+
+			"Use CROWSNEST_NO_AUTH=true (or --no-auth) if you really mean to serve without a login here, "+
+			"or add a login (--username and CROWSNEST_PASSWORD)", ErrRefused, c.bindSources())
 	}
 	if c.NoAuth && !c.IKnowThisIsOpen {
 		for _, listener := range c.Listeners {
@@ -42,6 +51,20 @@ func (c Config) CheckStartup() error {
 			"or --allow-default-session if you really mean it", ErrRefused)
 	}
 	return nil
+}
+
+// LoopbackOnly reports whether every listen address is a loopback address.
+func (c Config) LoopbackOnly() bool { return loopbackOnly(c.Listeners) }
+
+// bindSources lists the distinct --bind values, for messages.
+func (c Config) bindSources() string {
+	var sources []string
+	for _, listener := range c.Listeners {
+		if !slices.Contains(sources, listener.Source) {
+			sources = append(sources, listener.Source)
+		}
+	}
+	return strings.Join(sources, ", ")
 }
 
 // LoadForServe is Load followed by CheckStartup: the one call `serve` makes.

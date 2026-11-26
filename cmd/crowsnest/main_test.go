@@ -189,3 +189,15 @@ func TestDemoServeLeavesTheRealDirectoriesAlone(t *testing.T) {
 	}
 }
 
+// TestNoAuthWarningNamesTailnetPeers is R1 I7.
+func TestNoAuthWarningNamesTailnetPeers(t *testing.T) {
+	local := config.Config{NoAuth: true, Listeners: []config.Listener{{Addr: netip.MustParseAddrPort("127.0.0.1:2769")}}}
+	if warning := noAuthWarning(local); !strings.Contains(warning, "AUTHENTICATION IS OFF") || strings.Contains(warning, "tailnet") {
+		t.Fatalf("localhost warning: %q", warning)
+	}
+	tailnet := config.Config{NoAuth: true, Listeners: []config.Listener{{Addr: netip.MustParseAddrPort("100.101.102.103:2769")}}}
+	if warning := noAuthWarning(tailnet); !strings.Contains(warning, "shared into your tailnet") {
+		t.Fatalf("tailnet warning does not say who can reach it: %q", warning)
+	}
+}
+
