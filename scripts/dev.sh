@@ -71,4 +71,4 @@ until curl -fsS -o /dev/null "http://127.0.0.1:$port/api/v1/health" 2>/dev/null;
   sleep 0.5
 done
 echo "API is up; starting Vite"
-npm --prefix web run dev
+npm --prefix web run dev -- --clearScreen false
