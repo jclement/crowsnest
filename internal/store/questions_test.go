@@ -35,7 +35,7 @@ func TestListsAndDeliveryLeaveTheFilesBehind(t *testing.T) {
 	if err := db.SettleQuestion(ctx, id, "answered", json.RawMessage(`"ack"`), "", "type", now); err != nil {
 		t.Fatal(err)
 	}
-	ids, err := db.PendingDeliveryIDs(ctx, 10)
+	ids, err := db.PendingDeliveryIDs(ctx, 0, 10)
 	if err != nil || len(ids) != 1 || ids[0] != id {
 		t.Fatalf("pending ids %v %v", ids, err)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jclement/crowsnest/internal/store"
 	"io"
 	"log/slog"
 	"net/http"
@@ -403,5 +404,51 @@ func TestTextNotifierIsCleanedAndRateLimited(t *testing.T) {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// R2-C14: a thousand answers held for a blocked pane cannot keep a newer, deliverable one out
+// of every scan.
+func TestHeldBacklogDoesNotStarveNewAnswers(t *testing.T) {
+	db, err := store.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	clock := &fakeClock{now: time.Date(2026, 11, 26, 3, 0, 0, 0, time.UTC)}
+	service := New(Options{Store: db, Now: clock.Now})
+	ctx := context.Background()
+	answer := func(caller Caller, title string) string {
+		q, err := service.Ask(ctx, AskInput{Title: title, Kind: KindAck}, caller)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Answer(ctx, q.ID, AnswerInput{}); err != nil {
+			t.Fatal(err)
+		}
+		return q.ID
+	}
+	for i := range pendingScanLimit + 5 {
+		answer(Caller{PaneID: "w1:p1"}, fmt.Sprintf("held %d", i))
+	}
+	fresh := answer(Caller{PaneID: "w2:p2"}, "deliverable")
+	var mu sync.Mutex
+	delivered := false
+	deliverer := NewDeliverer(DelivererOptions{Store: db, Now: clock.Now, Prompt: func(_ context.Context, pane, _ string) error {
+		if pane == "w1:p1" {
+			return ErrHold // a dialog is up in that pane, for good
+		}
+		mu.Lock()
+		delivered = true
+		mu.Unlock()
+		return nil
+	}})
+	for range 2 * pendingScanLimit / deliveryBatch {
+		deliverer.DeliverPending(ctx)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !delivered {
+		t.Fatalf("%s was never delivered behind the held backlog", fresh)
 	}
 }

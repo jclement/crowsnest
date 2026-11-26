@@ -148,12 +148,13 @@ func (s *Store) ExpiredOpenQuestions(ctx context.Context, now time.Time) ([]int6
 
 // ---- Delivery ----------------------------------------------------------------------------
 
-// PendingDeliveryIDs returns the ids of settled questions whose outcome is to be typed into the
-// asker's pane and which nobody has claimed yet, oldest first, at most limit. Ids only: the
-// deliverer skips the ones still in their retry backoff before loading anything (R1b-C09).
-func (s *Store) PendingDeliveryIDs(ctx context.Context, limit int) ([]int64, error) {
+// PendingDeliveryIDs returns the ids, above after, of settled questions whose outcome is to be
+// typed into the asker's pane and which nobody has claimed yet, in id order, at most limit. Ids
+// only: the deliverer skips the ones still in their retry backoff before loading anything
+// (R1b-C09), and pages through them with after so held rows cannot hide newer ones (R2-C14).
+func (s *Store) PendingDeliveryIDs(ctx context.Context, after int64, limit int) ([]int64, error) {
 	return s.queryIDs(ctx, `SELECT id FROM questions
-		WHERE delivery = 'type' AND delivery_claimed_at IS NULL AND delivered_at IS NULL ORDER BY settled_at, id LIMIT ?`, limit)
+		WHERE delivery = 'type' AND delivery_claimed_at IS NULL AND delivered_at IS NULL AND id > ? ORDER BY id LIMIT ?`, after, limit)
 }
 
 // GetDelivery returns one question as the deliverer needs it: no body, no files.
