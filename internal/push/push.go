@@ -82,6 +82,9 @@ type Options struct {
 	AllowLoopbackHTTP bool
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// Name is this instance's name (--name): notification titles start with it, so two
+	// crowsnests on two machines can be told apart on one phone. Empty: titles as they are.
+	Name string
 }
 
 // Service holds the keys, subscriptions and settings, and sends notices.

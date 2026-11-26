@@ -197,6 +197,7 @@ func TestKeysAreMadeOnceKeptAndNeverLogged(t *testing.T) {
 func TestDeliverEncryptsForTheBrowserAndSignsWithVAPID(t *testing.T) {
 	fake := newFakePushService(t, http.StatusCreated)
 	service, _ := newTestService(t, memoryStore(t), fake.server.Client())
+	service.opts.Name = "quark" // --name: titles say which crowsnest
 	browser := newBrowser(t)
 	ctx := context.Background()
 	if _, err := service.Subscribe(ctx, browser.subscription(fake.server.URL+"/push/secret-token-abc"), "Mozilla/5.0 test"); err != nil {
@@ -216,7 +217,7 @@ func TestDeliverEncryptsForTheBrowserAndSignsWithVAPID(t *testing.T) {
 	if err := json.Unmarshal(browser.decrypt(t, request.body), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := payload{Title: notice.Title, Body: notice.Body, Tag: "q_7", URL: "/inbox?q=q_7", Kind: KindQuestion}
+	want := payload{Title: "quark: " + notice.Title, Body: notice.Body, Tag: "q_7", URL: "/inbox?q=q_7", Kind: KindQuestion}
 	if got != want {
 		t.Fatalf("decrypted payload %+v, want %+v", got, want)
 	}

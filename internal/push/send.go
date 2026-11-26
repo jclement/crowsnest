@@ -50,6 +50,9 @@ type payload struct {
 // empty (a test from one device). The notice is cleaned first (Notice.Clean). Delivery to one
 // device failing never stops the others.
 func (s *Service) Deliver(ctx context.Context, notice Notice, endpoint string) (Result, error) {
+	if s.opts.Name != "" && notice.Title != "" {
+		notice.Title = s.opts.Name + ": " + notice.Title
+	}
 	notice = notice.Clean()
 	body, err := json.Marshal(payload{Title: notice.Title, Body: notice.Body, Tag: notice.Tag, URL: notice.URL, Kind: notice.Kind})
 	if err != nil {
