@@ -27,9 +27,9 @@ const ownerPassword = "a long owner password"
 // the normal server over the same database once setup is done.
 type setupHarness struct {
 	*harness
-	db      *store.Store
-	setup   *setup.Service
-	mu      sync.Mutex
+	db       *store.Store
+	setup    *setup.Service
+	mu       sync.Mutex
 	tokens   []string
 	authSvc  *auth.Service
 	handoffs *opener.Handoffs
