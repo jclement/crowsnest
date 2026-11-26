@@ -39,6 +39,16 @@ func (o *Orchestrator) Watch(ctx context.Context) {
 	if o.Status().State == StateFailed {
 		return // waiting for a manual restart
 	}
+	if reason := o.gateReason(ctx); reason != "" {
+		o.setWaiting(reason) // herdr or the agent went away, or first run is not finished
+		return
+	}
+	if o.Status().State == StateWaiting {
+		if _, err := o.ensureLocked(ctx, true); err != nil { // the gate just opened: a first start, not a restart
+			o.opts.Logger.Warn("orchestrator did not start", "err", err)
+		}
+		return
+	}
 	o.recover(ctx)
 }
 
@@ -106,7 +116,14 @@ func (o *Orchestrator) journalRestart(ctx context.Context, summary string, autom
 	o.opts.Journal.Add(ctx, journal.KindRestart, summary, detail)
 }
 
+// ErrWaiting is returned by a manual restart while the gate says not yet.
+var ErrWaiting = errors.New("the orchestrator cannot start yet")
+
 func (o *Orchestrator) relaunchLocked(ctx context.Context, resume bool) (Status, error) {
+	if reason := o.gateReason(ctx); reason != "" {
+		o.setWaiting(reason)
+		return o.Status(), fmt.Errorf("%w: %s", ErrWaiting, reason)
+	}
 	o.lifecycle.Lock()
 	defer o.lifecycle.Unlock()
 	o.mu.Lock()
