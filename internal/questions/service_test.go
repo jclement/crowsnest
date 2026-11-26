@@ -222,7 +222,7 @@ func TestLongPollWakesOnAnswer(t *testing.T) {
 	question := f.ask(t, confirm("Ship?"))
 	result := make(chan Question, 1)
 	go func() {
-		got, err := f.service.Wait(ctx, question.ID, 30*time.Second)
+		got, err := f.service.Wait(ctx, question.ID, 30*time.Second, asker)
 		if err != nil {
 			t.Errorf("wait: %v", err)
 		}
@@ -249,14 +249,14 @@ func TestLongPollWakesOnAnswer(t *testing.T) {
 func TestLongPollTimesOutOpenAndHonoursCancel(t *testing.T) {
 	f := newFixture(t)
 	question := f.ask(t, confirm("Ship?"))
-	got, err := f.service.Wait(context.Background(), question.ID, 50*time.Millisecond)
+	got, err := f.service.Wait(context.Background(), question.ID, 50*time.Millisecond, asker)
 	if err != nil || got.Status != StatusOpen {
 		t.Fatalf("timed-out poll: %+v %v", got, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.service.Wait(ctx, question.ID, 30*time.Second)
+		_, err := f.service.Wait(ctx, question.ID, 30*time.Second, asker)
 		done <- err
 	}()
 	waitForWaiter(t, f.service, question.ID)
@@ -369,6 +369,122 @@ func TestParseID(t *testing.T) {
 			t.Errorf("ParseID(%q) = %d, %v", text, got, err)
 		}
 	}
+}
+
+// TestOnlyTheAskerCountsAsWaiting is part of R1b N2: another caller polling a question must not
+// turn its delivery into "poll" (and so keep it from being typed into the asker's pane).
+func TestOnlyTheAskerCountsAsWaiting(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	question := f.ask(t, confirm("Ship?"))
+	go func() { _, _ = f.service.Wait(ctx, question.ID, 30*time.Second, Caller{PaneID: "w9:p9"}) }()
+	go func() { _, _ = f.service.Wait(ctx, question.ID, 30*time.Second, Caller{}) }()
+	waitForPollers(t, f.service, question.ID, 2)
+	got, _ := f.service.Answer(context.Background(), question.ID, AnswerInput{Value: json.RawMessage(`"yes"`)})
+	if got.Delivery != DeliveryType {
+		t.Fatalf("delivery %q: a poll by someone else must not stand in for the asker", got.Delivery)
+	}
+}
+
+// TestCancelledPollIsNotAReturningReader is R1b-C06: a poll cut off by its caller (a cancelled
+// tool call) does not leave a grace period in which the answer would go to a poll nobody makes.
+func TestCancelledPollIsNotAReturningReader(t *testing.T) {
+	f := newFixture(t)
+	question := f.ask(t, confirm("Ship?"))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _, _ = f.service.Wait(ctx, question.ID, 30*time.Second, asker); close(done) }()
+	waitForWaiter(t, f.service, question.ID)
+	cancel()
+	<-done
+	f.clock.Advance(5 * time.Second) // well inside pollGrace
+	got, _ := f.service.Answer(context.Background(), question.ID, AnswerInput{Value: json.RawMessage(`"yes"`)})
+	if got.Delivery != DeliveryType {
+		t.Fatalf("delivery %q after the asker's poll was cancelled; the answer would never arrive", got.Delivery)
+	}
+}
+
+// TestUncollectedPollAnswerIsTyped is R1b-C06's other half: the asker was polling (so the answer
+// went to the poll) but never collected it; after collectGrace it is typed instead. A collected
+// one is not.
+func TestUncollectedPollAnswerIsTyped(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	waiting := confirm("Approve the deploy?")
+	waiting.Wait = true
+	lost := f.ask(t, waiting)
+	kept := f.ask(t, waiting)
+	lostAnswer, _ := f.service.Answer(ctx, lost.ID, AnswerInput{Value: json.RawMessage(`"yes"`)})
+	keptAnswer, _ := f.service.Answer(ctx, kept.ID, AnswerInput{Value: json.RawMessage(`"yes"`)})
+	if lostAnswer.Delivery != DeliveryPoll || keptAnswer.Delivery != DeliveryPoll {
+		t.Fatalf("deliveries %q %q, want poll", lostAnswer.Delivery, keptAnswer.Delivery)
+	}
+	f.service.Collected(ctx, keptAnswer, Caller{PaneID: "w9:p9"}) // not the asker: ignored
+	f.service.Collected(ctx, keptAnswer, asker)
+	if n, _ := f.service.RetypeUncollected(ctx); n != 0 {
+		t.Fatalf("%d answers re-routed inside the grace period", n)
+	}
+	f.clock.Advance(collectGrace + time.Second)
+	if n, err := f.service.RetypeUncollected(ctx); err != nil || n != 1 {
+		t.Fatalf("re-routed %d (%v), want the one nobody collected", n, err)
+	}
+	if got, _ := f.service.Get(ctx, lost.ID); got.Delivery != DeliveryType {
+		t.Fatalf("uncollected answer delivery %q, want type", got.Delivery)
+	}
+	if got, _ := f.service.Get(ctx, kept.ID); got.Delivery != DeliveryPoll || got.DeliveredAt == nil {
+		t.Fatalf("collected answer: %+v", got)
+	}
+}
+
+// TestWaiterEntriesDoNotLeak is R1b-C07: polls on missing and settled questions, and expired
+// grace periods, leave nothing behind.
+func TestWaiterEntriesDoNotLeak(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	for i := range 20 {
+		if _, err := f.service.Wait(ctx, FormatID(int64(1000+i)), 90*time.Second, asker); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("missing question: %v", err)
+		}
+	}
+	settled := f.ask(t, confirm("Done already"))
+	_, _ = f.service.Answer(ctx, settled.ID, AnswerInput{Value: json.RawMessage(`"yes"`)})
+	if _, err := f.service.Wait(ctx, settled.ID, 90*time.Second, asker); err != nil {
+		t.Fatal(err)
+	}
+	open := f.ask(t, confirm("Still open"))
+	if _, err := f.service.Wait(ctx, open.ID, time.Millisecond, asker); err != nil {
+		t.Fatal(err)
+	}
+	waiting := confirm("Asked with wait")
+	waiting.Wait = true
+	f.ask(t, waiting)
+	f.clock.Advance(pollGrace + time.Second)
+	f.service.mu.Lock()
+	f.service.pruneWaitersLocked()
+	left := len(f.service.waiters)
+	f.service.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d waiter entries left behind", left)
+	}
+}
+
+// waitForPollers blocks until n long-polls on id are registered.
+func waitForPollers(t *testing.T, service *Service, id string, n int) {
+	t.Helper()
+	numeric, _ := ParseID(id)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		service.mu.Lock()
+		state, ok := service.waiters[numeric]
+		active := ok && state.active >= n
+		service.mu.Unlock()
+		if active {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("%d long-polls not registered", n)
 }
 
 // waitForWaiter blocks until a long-poll on id is registered.

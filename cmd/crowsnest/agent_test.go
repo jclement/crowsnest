@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
 // agentSocket serves the agent API on a short temp socket, exports it as CROWSNEST_SOCKET with
-// a pane id, and returns the service behind it.
+// an agent token for pane w2:p3 as CROWSNEST_TOKEN, and returns the service behind it.
 func agentSocket(t *testing.T) *questions.Service {
 	t.Helper()
 	db, err := store.OpenMemory(context.Background())
@@ -25,6 +26,11 @@ func agentSocket(t *testing.T) *questions.Service {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	service := questions.New(questions.Options{Store: db})
+	identity := agentid.New(db, nil)
+	token, err := identity.Mint(context.Background(), agentid.Binding{PaneID: "w2:p3", Kind: agentid.KindPane})
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir, err := os.MkdirTemp("/tmp", "cn-cli-")
 	if err != nil {
 		t.Fatal(err)
@@ -38,13 +44,13 @@ func agentSocket(t *testing.T) *questions.Service {
 	}
 	done := make(chan struct{})
 	go func() {
-		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: service}).Serve(ctx, listener)
+		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity}).Serve(ctx, listener)
 		close(done)
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 	t.Setenv(agentapi.EnvSocket, path)
-	t.Setenv(agentapi.EnvPane, "w2:p3")
-	t.Setenv(agentapi.EnvJob, "")
+	t.Setenv(agentapi.EnvToken, token)
+	t.Setenv("HERDR_PANE_ID", "orchestrator") // what a pane says about itself is not believed
 	return service
 }
 

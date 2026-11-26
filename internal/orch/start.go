@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/transcript"
 )
@@ -92,34 +93,51 @@ func (o *Orchestrator) shellPaneIn(ctx context.Context, workspaceID string) stri
 }
 
 // createPane makes the orchestrator a pane: a tab in its workspace when that exists (and has no
-// free shell), otherwise the workspace itself. Either way the pane gets the crowsnest env.
+// free shell), otherwise the workspace itself. Either way the pane gets the crowsnest env,
+// including a fresh agent token, bound to the pane once herdr has named it.
 func (o *Orchestrator) createPane(ctx context.Context, workspaceID string) (string, error) {
 	if err := os.MkdirAll(o.opts.Dir, 0o750); err != nil {
 		return "", fmt.Errorf("creating the orchestrator directory %s: %w", o.opts.Dir, err)
 	}
+	env, token, err := o.paneEnv()
+	if err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
 	defer cancel()
+	var paneID string
 	if workspaceID != "" {
 		created, err := o.opts.Client.TabCreate(ctx, herdr.TabCreateParams{
-			WorkspaceID: workspaceID, Label: WorkspaceLabel, Cwd: o.opts.Dir, Env: o.paneEnv(),
+			WorkspaceID: workspaceID, Label: WorkspaceLabel, Cwd: o.opts.Dir, Env: env,
 		})
 		if err != nil {
 			return "", fmt.Errorf("creating a tab for the orchestrator: %w", err)
 		}
-		return created.RootPane.ID, nil
+		paneID = created.RootPane.ID
+	} else {
+		created, err := o.opts.Client.WorkspaceCreate(ctx, herdr.WorkspaceCreateParams{
+			Label: WorkspaceLabel, Cwd: o.opts.Dir, Env: env,
+		})
+		if err != nil {
+			return "", fmt.Errorf("creating the orchestrator workspace: %w", err)
+		}
+		paneID = created.RootPane.ID
 	}
-	created, err := o.opts.Client.WorkspaceCreate(ctx, herdr.WorkspaceCreateParams{
-		Label: WorkspaceLabel, Cwd: o.opts.Dir, Env: o.paneEnv(),
-	})
-	if err != nil {
-		return "", fmt.Errorf("creating the orchestrator workspace: %w", err)
+	if token != "" {
+		if err := o.opts.Identity.Bind(ctx, token, agentid.Binding{PaneID: paneID, Kind: agentid.KindPane}); err != nil {
+			// The MCP token written at start still identifies the orchestrator; only a
+			// `crowsnest ask` typed in its shell would be unidentified.
+			o.opts.Logger.Warn("binding the orchestrator pane's agent token", "pane", paneID, "err", err)
+		}
 	}
-	return created.RootPane.ID, nil
+	return paneID, nil
 }
 
 // paneEnv is the environment of the orchestrator's pane (DESIGN.md 7, step 2): the agent socket
-// so `crowsnest ask` can reach the server, and the binary's directory first on PATH so it resolves.
-func (o *Orchestrator) paneEnv() map[string]string {
+// so `crowsnest ask` can reach the server, the pane's agent token so the server knows who asks,
+// and the binary's directory first on PATH so it resolves. The token is returned to be bound once
+// the pane exists ("" without an identity registry).
+func (o *Orchestrator) paneEnv() (map[string]string, string, error) {
 	env := map[string]string{"CROWSNEST": "1", "CROWSNEST_SESSION": o.opts.Session}
 	if o.opts.AgentSocket != "" {
 		env["CROWSNEST_SOCKET"] = o.opts.AgentSocket
@@ -127,7 +145,15 @@ func (o *Orchestrator) paneEnv() map[string]string {
 	if o.opts.BinDir != "" {
 		env["PATH"] = o.opts.BinDir + string(os.PathListSeparator) + o.opts.BasePath
 	}
-	return env
+	if o.opts.Identity == nil || o.opts.AgentSocket == "" {
+		return env, "", nil
+	}
+	token, err := agentid.NewToken()
+	if err != nil {
+		return nil, "", err
+	}
+	env[agentid.EnvToken] = token
+	return env, token, nil
 }
 
 // atShell reports whether a pane's foreground holds only a shell.
@@ -169,7 +195,7 @@ func (o *Orchestrator) waitForShell(ctx context.Context, paneID string) error {
 
 // start writes the start-up files and starts Claude in paneID.
 func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (Status, error) {
-	files, err := o.writeFiles()
+	files, err := o.writeFiles(ctx, paneID)
 	if err != nil {
 		return o.fail(err)
 	}
@@ -328,9 +354,10 @@ func (o *Orchestrator) startArgs(sessionID string, resume bool, files startFiles
 }
 
 // writeFiles renders CROWSNEST.md and writes the Claude settings file and, when there is an agent
-// socket, the MCP config. All are rewritten on every start so an upgraded crowsnest brings its
-// new instructions. M7 adds the supervisor's hooks to the settings.
-func (o *Orchestrator) writeFiles() (startFiles, error) {
+// socket, the MCP config, carrying a new agent token bound to paneID. All are rewritten on every
+// start so an upgraded crowsnest brings its new instructions. M7 adds the supervisor's hooks to
+// the settings.
+func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFiles, error) {
 	if err := os.MkdirAll(o.opts.StateDir, 0o700); err != nil {
 		return startFiles{}, fmt.Errorf("creating the state directory %s: %w", o.opts.StateDir, err)
 	}
@@ -349,12 +376,30 @@ func (o *Orchestrator) writeFiles() (startFiles, error) {
 		return startFiles{}, err
 	}
 	if o.mcpEnabled() {
+		token, err := o.mintMCPToken(ctx, paneID)
+		if err != nil {
+			return startFiles{}, err
+		}
 		files.mcpConfig = filepath.Join(o.opts.StateDir, MCPConfigFile)
-		if err := writeJSONFile(files.mcpConfig, MCPConfig(o.opts.Executable, o.opts.AgentSocket)); err != nil {
+		if err := writeJSONFile(files.mcpConfig, MCPConfig(o.opts.Executable, o.opts.AgentSocket, token)); err != nil {
 			return startFiles{}, err
 		}
 	}
 	return files, nil
+}
+
+// mintMCPToken returns a token for this start's MCP server, bound to paneID ("" without an
+// identity registry). It is minted per start, so it identifies the orchestrator even in a pane
+// it adopted rather than created (whose environment carries no token of crowsnest's).
+func (o *Orchestrator) mintMCPToken(ctx context.Context, paneID string) (string, error) {
+	if o.opts.Identity == nil {
+		return "", nil
+	}
+	token, err := o.opts.Identity.Mint(ctx, agentid.Binding{PaneID: paneID, Kind: agentid.KindMCP})
+	if err != nil {
+		return "", fmt.Errorf("minting the orchestrator's agent token: %w", err)
+	}
+	return token, nil
 }
 
 func (o *Orchestrator) mcpEnabled() bool {
@@ -371,15 +416,19 @@ func ClaudeSettings(withMCP bool) map[string]any {
 }
 
 // MCPConfig is the --mcp-config file: one stdio server, `<executable> mcp`, told where the agent
-// socket is. The pane's own environment (HERDR_PANE_ID) reaches it too, which is how the server
-// knows which pane is asking.
-func MCPConfig(executable, socket string) map[string]any {
+// socket is and given the agent's token (when there is one), which is how the socket knows which
+// pane is asking. The file is 0600 in the 0700 state directory.
+func MCPConfig(executable, socket, token string) map[string]any {
+	env := map[string]string{"CROWSNEST_SOCKET": socket}
+	if token != "" {
+		env[agentid.EnvToken] = token
+	}
 	return map[string]any{"mcpServers": map[string]any{
 		"crowsnest": map[string]any{
 			"type":    "stdio",
 			"command": executable,
 			"args":    []string{"mcp"},
-			"env":     map[string]string{"CROWSNEST_SOCKET": socket},
+			"env":     env,
 		},
 	}}
 }

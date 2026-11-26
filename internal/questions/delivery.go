@@ -49,6 +49,9 @@ const (
 	holdGiveUp = 7 * 24 * time.Hour
 	// deliveryTimeout bounds one attempt (agent.prompt waits up to 30 s for the turn).
 	deliveryTimeout = 45 * time.Second
+	// pendingScanLimit bounds the ids one pass looks at; deliveryBatch bounds the attempts.
+	pendingScanLimit = 1000
+	deliveryBatch    = 20
 	// cleanupTimeout bounds the store writes that close an attempt. They run detached from the
 	// attempt's context: shutdown cancelling an attempt that provably typed nothing must still
 	// release its claim, or the next start would abandon a retryable answer (R1b-C08).
@@ -124,22 +127,31 @@ func (d *Deliverer) Run(ctx context.Context) {
 	}
 }
 
-// DeliverPending makes one attempt at every pending delivery that is due.
+// DeliverPending makes one attempt at every pending delivery that is due. It looks at ids
+// first and loads a question only once its retry backoff has passed, at most deliveryBatch per
+// pass, so a backlog of held answers costs one small query a pass (R1b-C09).
 func (d *Deliverer) DeliverPending(ctx context.Context) {
-	pending, err := d.opts.Store.PendingDeliveries(ctx)
+	ids, err := d.opts.Store.PendingDeliveryIDs(ctx, pendingScanLimit)
 	if err != nil {
 		if ctx.Err() == nil {
 			d.opts.Logger.Warn("listing answers to deliver", "err", err)
 		}
 		return
 	}
-	for _, record := range pending {
-		if ctx.Err() != nil {
+	attempted := 0
+	for _, id := range ids {
+		if ctx.Err() != nil || attempted == deliveryBatch {
 			return
 		}
-		if d.due(record.ID) {
-			d.deliver(ctx, record)
+		if !d.due(id) {
+			continue
 		}
+		record, err := d.opts.Store.GetDelivery(ctx, id)
+		if err != nil {
+			continue
+		}
+		attempted++
+		d.deliver(ctx, record)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
@@ -26,7 +27,7 @@ import (
 // or stop is called; stop returns once the deliverer and the sweeper have finished, and serve
 // calls it before the database closes, so an attempt cut short by shutdown can still record its
 // outcome (R1b-C08).
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, logger *slog.Logger) (*questions.Service, string, func(), error) {
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, logger *slog.Logger) (*questions.Service, string, func(), error) {
 	var deliverer *questions.Deliverer
 	options := questions.Options{
 		Store: db, Hub: events, Logger: logger,
@@ -52,12 +53,12 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	workers.Go(func() { deliverer.Run(ctx) })
 	workers.Go(func() { service.RunSweeper(ctx, 0) })
 
-	socket := agentapi.SocketPath(os.Getenv("XDG_RUNTIME_DIR"), cfg.StateDir, cfg.Session)
+	socket := agentapi.SocketPath(socketRuntimeDir(cfg), cfg.StateDir, cfg.Session)
 	listener, err := agentapi.Listen(ctx, socket)
 	if err != nil {
 		return nil, "", stop, err
 	}
-	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Hub: events, Logger: logger, Version: version})
+	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Hub: events, Logger: logger, Version: version})
 	go func() {
 		if err := server.Serve(ctx, listener); err != nil {
 			logger.Error("agent socket stopped", "err", err)
@@ -71,6 +72,17 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 		}
 	}
 	return service, socket, stop, nil
+}
+
+// socketRuntimeDir is where the agent socket goes before the state directory is considered:
+// $XDG_RUNTIME_DIR, except under --demo, whose socket stays in its throwaway state directory so a
+// demo never collides with, or refuses to start beside, a real instance of the same --session
+// (R1 L2, R1b N11).
+func socketRuntimeDir(cfg config.Config) string {
+	if cfg.Demo {
+		return ""
+	}
+	return os.Getenv("XDG_RUNTIME_DIR")
 }
 
 // startDemoQuestions seeds the demo inbox and keeps asking.
