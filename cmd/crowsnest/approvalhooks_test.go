@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,7 @@ type approvalRig struct {
 	db        *store.Store
 	socket    string
 	token     string
+	other     string // a token for another pane
 	jobID     string
 	stop      func() // stops the agent socket's server
 }
@@ -53,6 +55,10 @@ func newApprovalRig(t *testing.T, ttl time.Duration) *approvalRig {
 	}})
 	identity := agentid.New(db, nil)
 	rig.token, err = identity.Mint(context.Background(), agentid.Binding{PaneID: "w2:p3", Kind: agentid.KindPane})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig.other, err = identity.Mint(context.Background(), agentid.Binding{PaneID: "w9:p9", Kind: agentid.KindPane})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,4 +324,19 @@ func TestGuardHook(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("no rules file: %q", stdout.String())
 	}
+}
+
+func TestAnotherPaneCannotPollAnApproval(t *testing.T) {
+	rig := newApprovalRig(t, 0)
+	out := runRequestHook(rig, rig.env)
+	approval := pendingApproval(t, rig)
+	for _, token := range []string{rig.other, ""} {
+		_, err := agentapi.NewClient(rig.socket, token).WaitApproval(context.Background(), approval.ID, 0)
+		var apiErr *agentapi.APIError
+		if !errors.As(err, &apiErr) || apiErr.Status != 404 {
+			t.Fatalf("polling another pane's approval (with a token: %v): %v, want 404", token != "", err)
+		}
+	}
+	_, _ = rig.approvals.Decide(context.Background(), approval.ID, approvals.Decision{})
+	hookResult(t, out, 5*time.Second)
 }
