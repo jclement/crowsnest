@@ -33,10 +33,14 @@ const (
 	KindBackstop Kind = "backstop" // the herdr-side backstop nudged an agent without hooks
 	KindTask     Kind = "task"     // a scheduled task started its job (7.8)
 	KindUpkeep   Kind = "upkeep"   // the orchestrator was compacted or handed over to a new conversation (7.9)
+	KindPause    Kind = "pause"    // the automation was paused or resumed, or held something while paused (6.13)
+	KindLand     Kind = "land"     // a finished job was merged, pushed, discarded or torn down (6.11)
+	KindReview   Kind = "review"   // the review gate started a reviewer or settled a round (6.7)
+	KindDigest   Kind = "digest"   // the daily digest was written (7.12)
 )
 
 // Kinds lists every kind, for validating a filter.
-var Kinds = []Kind{KindPoke, KindSkip, KindSend, KindAnswer, KindRestart, KindAlert, KindBackstop, KindTask, KindUpkeep}
+var Kinds = []Kind{KindPoke, KindSkip, KindSend, KindAnswer, KindRestart, KindAlert, KindBackstop, KindTask, KindUpkeep, KindPause, KindLand, KindReview, KindDigest}
 
 // Valid reports whether k is a known kind.
 func (k Kind) Valid() bool {

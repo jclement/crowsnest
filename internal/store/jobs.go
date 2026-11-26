@@ -76,6 +76,24 @@ type JobRecord struct {
 	RootDir string
 	// ProjectID is the project the job belongs to (migration 0013); 0 is "Unfiled".
 	ProjectID int64
+
+	// Landing and review (migration 0014, DESIGN.md 6.7 and 6.11).
+	BaseBranch     string
+	BaseCommit     string
+	WorkspaceID    string
+	WalkthroughMD  string
+	Reviewer       string
+	ReviewOf       int64
+	ReviewRound    int
+	ReviewVerdict  string
+	ReviewMD       string
+	LandState      string
+	LandDetail     string
+	LandedAt       time.Time
+	TornDownAt     time.Time
+	LandRequest    string
+	LandQuestionID int64
+	StartAnyway    bool
 }
 
 // JobEventRecord is one row of job_events.
@@ -119,6 +137,12 @@ func jobColumns(r *JobRecord) []column {
 		textCol("lifecycle_op", &r.LifecycleOp), textCol("lifecycle_owner", &r.LifecycleOwner),
 		timeCol("lifecycle_at", &r.LifecycleAt), int64Col("lifecycle_gen", &r.LifecycleGen),
 		textCol("origin", &r.Origin), textCol("root_dir", &r.RootDir), int64Col("project_id", &r.ProjectID),
+		textCol("base_branch", &r.BaseBranch), textCol("base_commit", &r.BaseCommit), textCol("workspace_id", &r.WorkspaceID),
+		textCol("walkthrough_md", &r.WalkthroughMD), textCol("reviewer", &r.Reviewer), int64Col("review_of", &r.ReviewOf),
+		intCol("review_round", &r.ReviewRound), textCol("review_verdict", &r.ReviewVerdict), textCol("review_md", &r.ReviewMD),
+		textCol("land_state", &r.LandState), textCol("land_detail", &r.LandDetail), timeCol("landed_at", &r.LandedAt),
+		timeCol("torn_down_at", &r.TornDownAt), textCol("land_request", &r.LandRequest),
+		int64Col("land_question_id", &r.LandQuestionID), boolCol("start_anyway", &r.StartAnyway),
 	}
 	return cols
 }
