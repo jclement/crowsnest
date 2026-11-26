@@ -141,7 +141,6 @@ func newStopRig(t *testing.T) *stopRig {
 	// crowsnest's totals with the transcript's own.
 	meter := spend.NewMeter(spend.Options{Store: db, Prices: spend.Embedded(), ClaudeConfigDir: claudeDir, Logger: logger, Interval: time.Second,
 		Sources: func(ctx context.Context) ([]spend.Source, error) { return jobService.SpendSources(ctx) }})
-	go meter.Run(ctx)
 	jobService = jobs.New(jobs.Options{
 		Store: db, Hub: events, Logger: logger, Herdr: session.Client, Spend: meter,
 		Launch: jobs.LaunchOptions{
@@ -158,6 +157,7 @@ func newStopRig(t *testing.T) *stopRig {
 		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: questionService, Jobs: jobService, Identity: identity, Hub: events, Logger: logger}).Serve(ctx, listener)
 	}()
 	go jobService.Run(ctx, 2*time.Second)
+	go meter.Run(ctx) // after jobService exists: its Sources read it
 
 	authService, err := auth.New(ctx, auth.Options{NoAuth: true}, db)
 	if err != nil {
