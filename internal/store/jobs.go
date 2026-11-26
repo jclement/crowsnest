@@ -61,6 +61,9 @@ type JobRecord struct {
 	RetryCount      int
 	// LastStopAt is when the agent's Stop hook last ran (migration 0005); the backstop reads it.
 	LastStopAt time.Time
+	// Origin is who created the job (migration 0006, R2-H1): "" the human, "agent" a job agent,
+	// "orchestrator" the orchestrator.
+	Origin string
 }
 
 // JobEventRecord is one row of job_events.
@@ -100,7 +103,7 @@ func jobColumns(r *JobRecord) []column {
 		intCol("nudges", &r.Nudges), intCol("nudge_streak", &r.NudgeStreak), timeCol("last_nudge_at", &r.LastNudgeAt),
 		intCol("denials", &r.Denials), intCol("restarts", &r.Restarts), textCol("restart_times", &r.RestartTimes),
 		timeCol("retry_at", &r.RetryAt), intCol("retry_count", &r.RetryCount),
-		timeCol("last_stop_at", &r.LastStopAt),
+		timeCol("last_stop_at", &r.LastStopAt), textCol("origin", &r.Origin),
 	}
 	return cols
 }
@@ -214,6 +217,28 @@ func (s *Store) ListJobs(ctx context.Context, states []string, limit int) ([]Job
 	query += " ORDER BY id DESC LIMIT ?"
 	args = append(args, limit)
 	return s.queryJobs(ctx, query, args...)
+}
+
+// CountChildJobs is how many jobs name parentID as their parent, in any state (R2-H1's fan-out
+// cap counts every child ever made, so a loop that finishes its children quickly is still
+// stopped).
+func (s *Store) CountChildJobs(ctx context.Context, parentID int64) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs WHERE parent_id = ?`, parentID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting the children of job %d: %w", parentID, err)
+	}
+	return count, nil
+}
+
+// CountLiveAgentJobs is how many jobs an agent (or the orchestrator) created that are not yet
+// done, failed or cancelled (R2-H1's global cap).
+func (s *Store) CountLiveAgentJobs(ctx context.Context) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM jobs WHERE origin != '' AND state NOT IN ('done', 'failed', 'cancelled')`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting live agent-created jobs: %w", err)
+	}
+	return count, nil
 }
 
 func (s *Store) queryJobs(ctx context.Context, query string, args ...any) ([]JobRecord, error) {

@@ -133,6 +133,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	refs := &jobRefs{}
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, logger)
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), agentSocket, logger)
+	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err

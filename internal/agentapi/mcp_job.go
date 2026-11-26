@@ -44,9 +44,9 @@ type JobCreateArgs struct {
 	Role     string `json:"role,omitempty" jsonschema:"builder (default with a dir), reviewer, tester, lead, or a custom role"`
 	Dir      string `json:"dir,omitempty" jsonschema:"absolute path of the directory or git repo to work in. A builder in a git repo gets its own worktree. Required for code work"`
 	DoneWhen string `json:"done_when,omitempty" jsonschema:"how the child knows it is finished"`
-	Engine   string `json:"engine,omitempty" jsonschema:"claude (default) or codex"`
-	Model    string `json:"model,omitempty" jsonschema:"model name, when not the default"`
-	Isolate  *bool  `json:"isolate,omitempty" jsonschema:"force a git worktree on or off (default: builders isolate)"`
+	Engine   string `json:"engine,omitempty" jsonschema:"claude or codex; default: your own engine (another one needs the human's approval)"`
+	Model    string `json:"model,omitempty" jsonschema:"model name, when not your own"`
+	Isolate  *bool  `json:"isolate,omitempty" jsonschema:"force a git worktree on or off (default: yours, or the role's)"`
 }
 
 // JobGetArgs are job_get's arguments.
@@ -63,6 +63,7 @@ const (
 		"Never call done over failing tests; say so in not_verified or call fail."
 	failDescription      = "Declare that your job cannot be finished, with the reason and what you tried. Use it only when no path forward is left; if you need a decision, call ask instead."
 	jobCreateDescription = "Delegate a unit of work as a child job (leads). crowsnest starts a new agent for it with the role's instructions; a builder given a git repo works in its own worktree. " +
+		"A child inside your own directory, with your engine, starts at once; anything wider (another directory, no directory, another engine, isolate=false when you are isolated) waits for the human's approval. " +
 		"Returns the child's id. Follow it with job_get(job_id), and check its evidence when it is done before relying on it."
 	jobGetDescription = "Read a job: its brief, state, progress, and your questions with their answers. Read your own after a restart or compaction, or when you lose track. A lead reads a child's by id."
 )
@@ -117,6 +118,11 @@ func init() {
 				job, err := client.CreateJob(ctx, jobs.CreateInput{Brief: args.Brief, Role: args.Role, Dir: args.Dir, DoneWhen: args.DoneWhen, Engine: args.Engine, Model: args.Model, Isolate: args.Isolate})
 				if err != nil {
 					return errorResult(toolError("The job was not created", err)), nil, nil
+				}
+				if job.Cause == jobs.CauseApproval {
+					return textResult(fmt.Sprintf("Created %s (%s), but it waits for the human's approval (%s): it asks for more than your own directory, engine and isolation. "+
+						"It starts only if they allow it; otherwise it is cancelled. The answer arrives as a message starting [crowsnest answer %s]. Carry on with other work meanwhile.",
+						job.ID, job.Title, job.CauseDetail, job.CauseDetail)), nil, nil
 				}
 				return textResult(fmt.Sprintf("Created %s (%s, role %s). It is starting now. Check on it with job_get(job_id=%q).", job.ID, job.Title, job.Role, job.ID)), nil, nil
 			})

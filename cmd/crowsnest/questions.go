@@ -38,6 +38,9 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 		OnSettled: func(question questions.Question) {
 			deliverer.Kick()
 			jobQuestionChanged(ctx, jobService, question, string(question.Status))
+			if jobID, ok := jobs.IsApprovalQuestion(question); ok && jobService != nil {
+				go jobService.ApprovalSettled(context.WithoutCancel(ctx), jobID) // R2-H1
+			}
 		},
 		OnAsked: func(question questions.Question) {
 			if notifyAsked != nil {

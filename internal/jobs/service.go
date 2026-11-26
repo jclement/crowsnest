@@ -17,6 +17,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -86,6 +87,11 @@ type Options struct {
 	Roles *Roles
 	// Synchronous runs launches and restarts inline instead of in goroutines (tests).
 	Synchronous bool
+	// AskHuman asks the human a question (questions.Service.Ask): a job an agent asked for beyond
+	// its own directory, engine or isolation waits on one (R2-H1). Nil: such jobs are refused.
+	AskHuman func(ctx context.Context, input questions.AskInput, caller questions.Caller) (questions.Question, error)
+	// Delegation bounds what agents may create; zero fields take the defaults (delegate.go).
+	Delegation DelegationLimits
 }
 
 // Service holds the jobs.
@@ -347,7 +353,7 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 		LastActivityAt: timePtr(r.LastActivityAt), Nudges: r.Nudges, Restarts: r.Restarts,
 		RetryAt: timePtr(r.RetryAt), RetryCount: r.RetryCount, OpenQuestions: open,
 		Verified: decodeList(r.VerifiedJSON), NotVerified: decodeList(r.NotVerifiedJSON),
-		Isolate: r.Isolate, isolate: r.Isolate,
+		Isolate: r.Isolate, isolate: r.Isolate, Origin: r.Origin,
 	}
 	if r.ParentID > 0 {
 		job.ParentID = FormatID(r.ParentID)

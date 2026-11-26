@@ -26,8 +26,10 @@
 // that holds j (the orchestrator, whose tokens name no job; DESIGN.md 6.2).
 //
 // Quotas (R1b N6), per caller (its pane, or one shared bucket for every unidentified caller):
-// asks are rate limited, open questions are capped per caller and in total, and concurrent
-// long-polls are capped. Each refusal is a 429 that says what to do.
+// asks, says and job creations are rate limited, open questions are capped per caller and in
+// total, and concurrent long-polls are capped. Each refusal is a 429 that says what to do. A job
+// agent may hold fewer open questions than the orchestrator, and the orchestrator is not counted
+// against the inbox-wide cap, so a handful of job agents cannot lock the lead out (R2-L5).
 package agentapi
 
 import (
@@ -74,9 +76,14 @@ const (
 	askRefill         = 30 * time.Second // then one more every this long
 	sayBurst          = 10
 	sayRefill         = 6 * time.Second
-	maxOpenPerCaller  = 30  // open questions one caller may have
-	maxOpenTotal      = 200 // open questions across every caller (the Inbox's list size)
+	maxOpenPerCaller  = 30  // open questions the orchestrator, or the unidentified bucket, may have
+	maxOpenPerJob     = 10  // open questions one job agent may have (R2-L5)
+	maxOpenTotal      = 200 // open questions across every caller but the orchestrator
 	maxWaitsPerCaller = 8   // concurrent long-polls one caller may hold
+	// createBurst job_create calls one caller may make at once, then one every createRefill
+	// (R2-H1; the jobs service caps depth, fan-out and the live total as well).
+	createBurst  = 5
+	createRefill = time.Minute
 	// unidentifiedKey is the one quota bucket every caller without a token shares.
 	unidentifiedKey = "unidentified"
 )
@@ -111,9 +118,10 @@ type Server struct {
 	version   string
 	handler   http.Handler
 
-	asks  *ratelimit.Limiter
-	says  *ratelimit.Limiter
-	waits *waitCounter
+	asks    *ratelimit.Limiter
+	says    *ratelimit.Limiter
+	creates *ratelimit.Limiter
+	waits   *waitCounter
 }
 
 // ServerOptions configure a Server. Questions is required.
@@ -139,8 +147,9 @@ func NewServer(opts ServerOptions) *Server {
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version,
 		asks:  ratelimit.New(askBurst, askRefill, opts.Now),
-		says:  ratelimit.New(sayBurst, sayRefill, opts.Now),
-		waits: &waitCounter{active: map[string]int{}},
+		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
+		creates: ratelimit.New(createBurst, createRefill, opts.Now),
+		waits:   &waitCounter{active: map[string]int{}},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", server.handleHealth)
@@ -224,6 +233,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	caller := s.callerOf(r)
 	if ok, retry := s.asks.Allow(quotaKey(caller)); !ok {
+		if caller.PaneID == "" {
+			s.logger.Warn("the shared quota of callers without a token is spent: a local process without CROWSNEST_TOKEN is asking a lot")
+		}
 		writeQuota(w, retry, "Too many questions in a short time. Wait, then ask one question that covers what you need; carry on with other work meanwhile.")
 		return
 	}
@@ -251,10 +263,21 @@ func (s *Server) openQuota(r *http.Request, caller questions.Caller) string {
 		s.logger.Warn("counting open questions for the quota", "err", err)
 		return ""
 	}
+	// An identified caller whose token names no job is the orchestrator (job agents' tokens
+	// always name their job): the lead the human talks to keeps its voice when agents fill the
+	// inbox.
+	orchestrator := caller.PaneID != "" && caller.JobID == ""
+	limit := maxOpenPerCaller
+	if caller.JobID != "" {
+		limit = maxOpenPerJob
+	}
 	switch {
-	case total >= maxOpenTotal:
+	case total >= maxOpenTotal && !orchestrator:
 		return fmt.Sprintf("The human's inbox already holds %d open questions. Do not ask more now: carry on with what you can, and mention the question in your reply instead.", total)
-	case mine >= maxOpenPerCaller:
+	case mine >= limit:
+		if caller.PaneID == "" {
+			s.logger.Warn("callers without a token hold the most open questions their shared quota allows")
+		}
 		return fmt.Sprintf("You already have %d open questions. Wait for answers, or withdraw ones that no longer matter, before asking more.", mine)
 	}
 	return ""
@@ -322,6 +345,12 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 	caller := s.callerOf(r)
+	if caller.PaneID == "" {
+		// R2-I4: `say` speaks in the orchestrator's voice into the human's ear; a process without
+		// a token (not an agent crowsnest started) does not get that channel.
+		writeError(w, http.StatusForbidden, codeForbidden, "Only an agent crowsnest started can speak (no valid CROWSNEST_TOKEN came with this request).")
+		return
+	}
 	if ok, retry := s.says.Allow(quotaKey(caller)); !ok {
 		writeQuota(w, retry, "Too many spoken lines in a short time; say less, less often.")
 		return

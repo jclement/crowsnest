@@ -90,6 +90,9 @@ const (
 	CauseExited       Cause = "exited"       // the agent process left; restarting
 	CauseLaunch       Cause = "launch"       // the agent could not be started
 	CauseConfig       Cause = "config"       // needs_you: Claude refused the request (model, request)
+	// CauseApproval: queued, held until the human allows a job an agent asked for beyond its
+	// own directory, engine or isolation (R2-H1). CauseDetail is the question's id.
+	CauseApproval Cause = "approval"
 )
 
 // Describe is the cause in words, for the card and notices.
@@ -119,6 +122,8 @@ func (c Cause) Describe() string {
 		return "The agent could not be started"
 	case CauseConfig:
 		return "Claude refused the request (model or settings)"
+	case CauseApproval:
+		return "Waiting for your approval: an agent asked for it"
 	}
 	return ""
 }
@@ -169,6 +174,8 @@ type Job struct {
 	RetryCount     int        `json:"retry_count"`
 	OpenQuestions  int        `json:"open_questions"`
 	Isolate        bool       `json:"isolate"`
+	// Origin is who created it: "" the human, "agent" a job agent, "orchestrator" (R2-H1).
+	Origin string `json:"origin"`
 
 	isolate bool // the job asked for a worktree (Isolated)
 }

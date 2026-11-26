@@ -89,8 +89,8 @@ func (s *Service) launch(ctx context.Context, id string) {
 		return
 	}
 	detail, err := s.Get(ctx, id)
-	if err != nil || detail.State != StateQueued {
-		return
+	if err != nil || detail.State != StateQueued || detail.Cause == CauseApproval {
+		return // a job held for the human's approval starts only once allowed (delegate.go)
 	}
 	if detail.Dir == "" {
 		s.DispatchOrchestrator(ctx)
@@ -482,7 +482,7 @@ func (s *Service) DispatchOrchestrator(ctx context.Context) {
 		if record.AgentName == OrchestratorName && State(record.State) == StateRunning {
 			return // it is busy with one
 		}
-		if record.Dir == "" && State(record.State) == StateQueued && record.AgentName == "" {
+		if record.Dir == "" && State(record.State) == StateQueued && record.AgentName == "" && !held(record) {
 			next = &queued[i] // ListJobs is newest first, so the last match is the oldest
 		}
 	}

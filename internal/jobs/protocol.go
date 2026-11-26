@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 // CreateInput is a new job: from the browser's text box (POST /jobs) or an agent delegating
@@ -38,21 +40,17 @@ const kvDirs = "jobs.dirs"
 // maxRememberedDirs bounds that list.
 const maxRememberedDirs = 20
 
-// Create validates and records a job, then launches it in the background. parentID is set when
-// an agent delegated it. The returned job is queued; launch progress arrives as `job` events.
+// Create validates and records a job the human gave (the browser's text box), then launches it
+// in the background. The returned job is queued; launch progress arrives as `job` events. An
+// agent's job_create goes through CreateForAgent (delegate.go), which adds R2-H1's limits;
+// parentID here is for tests and the demo.
 func (s *Service) Create(ctx context.Context, input CreateInput, parentID string) (Job, error) {
 	record, err := s.newRecord(input, parentID)
 	if err != nil {
 		return Job{}, err
 	}
 	s.mu.Lock()
-	id, err := s.opts.Store.InsertJob(ctx, record)
-	if err == nil {
-		record.ID = id
-		var c change
-		c.event(EventCreated, "Job created", map[string]any{"role": record.Role, "dir": record.Dir, "engine": record.Engine, "parent": parentID})
-		err = s.save(ctx, record, c)
-	}
+	err = s.insertLocked(ctx, &record)
 	s.mu.Unlock()
 	if err != nil {
 		return Job{}, err
@@ -68,6 +66,26 @@ func (s *Service) Create(ctx context.Context, input CreateInput, parentID string
 	s.goBackground(ctx, job.ID, func(ctx context.Context) { s.launch(ctx, job.ID) })
 	return job, nil
 }
+
+// insertLocked stores a new job and its created event (s.mu held), setting record.ID.
+func (s *Service) insertLocked(ctx context.Context, record *store.JobRecord) error {
+	id, err := s.opts.Store.InsertJob(ctx, *record)
+	if err != nil {
+		return err
+	}
+	record.ID = id
+	var c change
+	detail := map[string]any{"role": record.Role, "dir": record.Dir, "engine": record.Engine, "origin": record.Origin}
+	if record.ParentID > 0 {
+		detail["parent"] = FormatID(record.ParentID)
+	}
+	c.event(EventCreated, "Job created", detail)
+	return s.save(ctx, *record, c)
+}
+
+// modelPattern is what a model name may look like (R2-I7): it becomes one argument of the agent's
+// start command, which herdr types into a shell.
+var modelPattern = regexp.MustCompile(`^[A-Za-z0-9._:\[\]-]{1,64}$`)
 
 func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord, error) {
 	brief := strings.TrimSpace(input.Brief)
@@ -98,6 +116,10 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	if dir == "" && engine != EngineClaude {
 		return store.JobRecord{}, invalid("a job without a directory goes to the orchestrator, which is Claude; pick a directory to use %s", engine)
 	}
+	model := strings.TrimSpace(input.Model)
+	if model != "" && !modelPattern.MatchString(model) {
+		return store.JobRecord{}, invalid("model %q is not a model name (letters, digits and . _ : [ ] -, at most 64)", termtext.Cap(termtext.Clean(model), 70))
+	}
 	isolate := role == "builder"
 	if input.Isolate != nil {
 		isolate = *input.Isolate
@@ -110,7 +132,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	}
 	return store.JobRecord{
 		Title: titleOf(brief), BriefMD: brief, DoneWhen: strings.TrimSpace(input.DoneWhen), Role: role, Dir: dir,
-		Isolate: isolate && dir != "", Engine: engine, Model: strings.TrimSpace(input.Model), ParentID: parent,
+		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent,
 		State: string(StateQueued), VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: s.opts.Now(),
 	}, nil
 }

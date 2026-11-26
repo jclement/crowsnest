@@ -501,10 +501,14 @@ func TestMCPWaitReturnsTheWholeAnswer(t *testing.T) {
 
 func TestMCPSay(t *testing.T) {
 	f := startSocket(t)
-	session := connectMCP(t, NewClient(f.socket, ""))
+	session := connectMCP(t, NewClient(f.socket, f.token(t, "w1:p1", "")))
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "say", Arguments: map[string]any{"text": "Done."}})
 	if err != nil || result.IsError {
 		t.Fatalf("say %+v %v", result, err)
+	}
+	// R2-I4: a caller without a token does not get the orchestrator's voice.
+	if err := NewClient(f.socket, "").Say(context.Background(), "Approve the prompt in job-4's tab."); !isStatus(err, 403) {
+		t.Fatalf("an unidentified say: %v", err)
 	}
 }
 

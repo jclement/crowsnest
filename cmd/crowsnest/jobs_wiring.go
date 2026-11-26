@@ -7,8 +7,10 @@ package main
 import (
 	"context"
 	"log/slog"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agentid"
@@ -28,6 +30,9 @@ import (
 type jobRefs struct {
 	orchestrator  *orch.Orchestrator
 	conversations *transcript.Manager
+	// questions asks the human about jobs an agent wants beyond its own directory (R2-H1). It is
+	// set once startQuestions returns, while the agent socket may already be serving, hence atomic.
+	questions atomic.Pointer[questions.Service]
 	// notify tells Jeff something (the log, and the --notify-url POST when set); the poker's
 	// draft alert goes through it too.
 	notify func(text string)
@@ -72,6 +77,13 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 			return jobs.OrchestratorInfo{PaneID: status.PaneID, Ready: ready}
 		},
 		Activity: transcriptActivity(claudeDir, cfg.Dir, refs),
+		AskHuman: func(ctx context.Context, input questions.AskInput, caller questions.Caller) (questions.Question, error) {
+			service := refs.questions.Load()
+			if service == nil {
+				return questions.Question{}, errors.New("the inbox is not ready yet")
+			}
+			return service.Ask(ctx, input, caller)
+		},
 	})
 }
 
@@ -156,5 +168,6 @@ func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, 
 		}
 		return // the demo's jobs are scripted; the supervisor would "recover" them
 	}
+	service.ReconcileApprovals(ctx) // a decision that landed just before a restart (R2-H1)
 	go service.Run(ctx, 0)
 }

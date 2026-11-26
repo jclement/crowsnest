@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,12 +14,19 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 )
 
-// startRunningJob creates a job over the socket and marks it running, as a launch would.
+// startRunningJob creates a job as the human would (the browser) and marks it running in its
+// directory, as a launch would. It returns the job's id and directory.
 func startRunningJob(t *testing.T, f *socketFixture) string {
 	t.Helper()
+	id, _ := startRunningJobIn(t, f)
+	return id
+}
+
+func startRunningJobIn(t *testing.T, f *socketFixture) (string, string) {
+	t.Helper()
 	ctx := context.Background()
-	client := NewClient(f.socket, f.token(t, "w9:p9", "")) // creating a job needs an identified caller
-	job, err := client.CreateJob(ctx, jobs.CreateInput{Brief: "Build the thing", Dir: t.TempDir()})
+	dir := t.TempDir()
+	job, err := f.jobs.Create(ctx, jobs.CreateInput{Brief: "Build the thing", Dir: dir}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,17 +35,17 @@ func startRunningJob(t *testing.T, f *socketFixture) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record.State = string(jobs.StateRunning)
+	record.State, record.WorkDir = string(jobs.StateRunning), dir
 	if err := f.db.UpdateJob(ctx, record); err != nil {
 		t.Fatal(err)
 	}
-	return job.ID
+	return job.ID, dir
 }
 
 func TestSocketJobVerbs(t *testing.T) {
 	f := startSocket(t)
 	ctx := context.Background()
-	id := startRunningJob(t, f)
+	id, dir := startRunningJobIn(t, f)
 	client := NewClient(f.socket, f.token(t, "w5:p1", id)).WithJob(id)
 
 	if _, err := client.UpdateJob(ctx, id, jobs.UpdateInput{}); !isStatus(err, 400) {
@@ -59,7 +68,11 @@ func TestSocketJobVerbs(t *testing.T) {
 	if err != nil || !strings.Contains(text, "Build the thing") {
 		t.Fatalf("context %q %v", text, err)
 	}
-	child, err := client.CreateJob(ctx, jobs.CreateInput{Brief: "A child", Dir: t.TempDir(), Role: "tester"})
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	child, err := client.CreateJob(ctx, jobs.CreateInput{Brief: "A child", Dir: sub, Role: "tester"})
 	if err != nil || child.ParentID != id {
 		t.Fatalf("child %+v %v", child, err)
 	}
