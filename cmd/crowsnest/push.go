@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jclement/crowsnest/internal/actions"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/push"
@@ -22,7 +23,7 @@ func startPush(ctx context.Context, cfg config.Config, db *store.Store, events *
 	if err != nil {
 		return nil, nil, fmt.Errorf("starting Web Push: %w", err)
 	}
-	watcher := push.NewWatcher(push.WatcherOptions{Sender: service, Hub: events, Logger: logger})
+	watcher := push.NewWatcher(push.WatcherOptions{Sender: service, Hub: events, Logger: logger, Tokens: &actions.Tokens{Store: db}})
 	go watcher.Run(ctx)
 	return service, watcher, nil
 }

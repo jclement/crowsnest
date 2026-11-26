@@ -16,6 +16,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/instructions"
@@ -117,6 +118,7 @@ type leadDeps struct {
 	journal     *journal.Journal
 	identity    *agentid.Registry
 	agentSocket string
+	guard       *guard.Rules // the guard hook's rules (8.7), as the orchestrator's
 	logger      *slog.Logger
 	// onStatus is told every status change of every lead (serve pins its conversation).
 	onStatus func(project projects.Project, status orch.Status)
@@ -144,7 +146,7 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 			Model: deps.cfg.Model, PermissionMode: permission, Version: version,
 			RemoteControlName: leadRemoteControl(deps.cfg, project),
 			BinDir:            binDir, Executable: executable, AgentSocket: deps.agentSocket, BasePath: os.Getenv("PATH"),
-			ClaudeConfigDir: claudeConfigDir(deps.cfg), Identity: deps.identity,
+			ClaudeConfigDir: claudeConfigDir(deps.cfg), Identity: deps.identity, Guard: deps.guard,
 			AgentName: projects.AgentName(project.Slug), Workspace: "lead " + project.Slug, KVPrefix: "lead." + project.Slug,
 			Render: func() (string, error) { return w.leadInstructions(deps.cfg.Session, project) },
 			OnStatus: func(status orch.Status) {

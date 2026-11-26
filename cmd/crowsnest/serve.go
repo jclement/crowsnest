@@ -19,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jclement/crowsnest/internal/actions"
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
@@ -167,7 +168,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
 	journalLog := journal.New(db, events, logger, nil)
-	refs := &jobRefs{projects: newProjectWiring(cfg, db, events), instructions: instructions.New(instructions.Options{Store: db, RolesDir: rolesDir(cfg), Hub: events, Logger: logger})}
+	refs := &jobRefs{guard: guardRules(cfg, logger), projects: newProjectWiring(cfg, db, events), instructions: instructions.New(instructions.Options{Store: db, RolesDir: rolesDir(cfg), Hub: events, Logger: logger})}
+	approvalLinks := &approvalWiring{}
+	approvalService, err := newApprovals(cfg, db, events, refs.guard, approvalLinks, logger)
+	if err != nil {
+		return err
+	}
+	refs.approvals = approvalService
 	files, err := newAttachments(cfg, db, events, refs, logger)
 	if err != nil {
 		return err
@@ -178,20 +185,23 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	meter := newSpendMeter(cfg, db, events, refs, jobServiceRef.Load, logger)
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, files, meter, logger)
 	jobServiceRef.Store(jobService)
+	approvalLinks.jobs.Store(jobService)
 	files.jobs = jobService
 	go files.run(ctx, events, refs.questions.Load)
 	pushService, pusher, err := startPush(ctx, cfg, db, events, logger)
 	if err != nil {
 		return err
 	}
+	approvalLinks.pusher.Store(pusher)
+	runApprovals(ctx, approvalService, fleetCache, client, logger)
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, logger)
+		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err
 	}
-	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.instructions, logger)
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	var projectOf func(string) (int64, string)
 	if cfg.Demo {
@@ -213,7 +223,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	refs.projects.taskSource.Store(&tasksFor)
 	refs.projects.useInstructions(refs.instructions, logger)
 	leads := refs.projects.startLeads(ctx, leadDeps{
-		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, logger: logger,
+		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, guard: refs.guard, logger: logger,
 		onStatus: func(project projects.Project, status orch.Status) {
 			if status.PaneID != "" {
 				go func() { _ = conversations.Pin(ctx, status.Name) }()
@@ -238,7 +248,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
 		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
-		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions,
+		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

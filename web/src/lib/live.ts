@@ -5,7 +5,9 @@
 import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { queryKeys } from "./api";
+import type { ApprovalEvent } from "./approvals";
 import { notifyQuestion } from "./notifications";
+import { onTrayArrival } from "./traySound";
 import type { QuestionEvent } from "./questions";
 import { useEventStream, type StreamState } from "./sse";
 import { onSayEvent } from "./voice/speak";
@@ -34,6 +36,7 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   project: [queryKeys.projects, queryKeys.instructions, queryKeys.voiceAgents],
   lead: [queryKeys.projects, queryKeys.fleet, queryKeys.agents],
   instructions: [queryKeys.instructions],
+  approval: [queryKeys.approvals, queryKeys.jobs],
 };
 
 /**
@@ -52,7 +55,13 @@ export const payloads: Partial<Record<EventName, { key: QueryKey; accept: (data:
 export const sideEffects: Partial<Record<EventName, (data: unknown) => void>> = {
   say: onSayEvent,
   question: (data) => {
-    if (data && typeof data === "object" && "change" in data) notifyQuestion(data as QuestionEvent);
+    if (data && typeof data === "object" && "change" in data) {
+      notifyQuestion(data as QuestionEvent);
+      if ((data as QuestionEvent).change === "asked") onTrayArrival();
+    }
+  },
+  approval: (data) => {
+    if (data && typeof data === "object" && (data as ApprovalEvent).change === "requested") onTrayArrival();
   },
 };
 

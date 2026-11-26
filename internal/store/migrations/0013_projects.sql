@@ -1,4 +1,4 @@
--- 0012: projects, instruction layers, schedules made in the app, and what each agent loaded
+-- 0013: projects, instruction layers, schedules made in the app, and what each agent loaded
 -- (DESIGN.md section 21). Times are unix seconds; 0 means unset.
 
 -- A project is a repository's main checkout with its own defaults and, optionally, a standing

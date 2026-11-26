@@ -179,25 +179,27 @@ test("a terminal dialog is answered from its card; a press against a changed scr
 
 test("the badge and the tab title count what needs you, and follow new questions live", async ({ page, app }) => {
   await page.goto("/");
-  // Six open demo questions, the job's question and the docs writer's dialog.
-  await expect(page).toHaveTitle(/^\(8\) crowsnest/);
+  // Six open demo questions, the job's question, the docs writer's dialog and the three demo
+  // tool-call approvals (DESIGN.md 8.7).
+  await expect(page).toHaveTitle(/^\(11\) crowsnest/);
   const badge = page.getByRole("navigation", { name: "Views" }).getByLabel(/need you/).first();
-  await expect(badge).toHaveAttribute("aria-label", "8 need you");
+  await expect(badge).toHaveAttribute("aria-label", "11 need you");
 
   await askAsAgent(app, { title: "A new question from an agent", kind: "ack" });
-  await expect(page).toHaveTitle(/^\(9\) crowsnest/, { timeout: 10_000 });
-  await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("9 need you").first()).toBeAttached();
+  await expect(page).toHaveTitle(/^\(12\) crowsnest/, { timeout: 10_000 });
+  await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("12 need you").first()).toBeAttached();
 
   // Answering one from another tab brings it down here, without a reload.
   const other = await page.context().newPage();
   await other.goto("/inbox?q=q_5");
   await other.getByRole("button", { name: "Acknowledge", exact: true }).click();
-  await expect(page).toHaveTitle(/^\(8\) crowsnest/, { timeout: 10_000 });
+  await expect(page).toHaveTitle(/^\(11\) crowsnest/, { timeout: 10_000 });
   await other.close();
 });
 
 test("an empty Inbox says nothing needs you", async ({ page }) => {
   await page.route("**/api/v1/questions?status=open", (route) => route.fulfill({ json: { data: [] } }));
+  await page.route("**/api/v1/approvals?status=pending", (route) => route.fulfill({ json: { data: [] } }));
   await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: { data: [] } }));
   await page.route("**/api/v1/fleet", async (route) => {
     const response = await route.fetch();

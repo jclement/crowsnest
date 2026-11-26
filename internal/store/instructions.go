@@ -1,4 +1,4 @@
-// Instruction layers and what agents loaded (DESIGN.md 21.3, migration 0012). internal/instructions
+// Instruction layers and what agents loaded (DESIGN.md 21.3, migration 0013). internal/instructions
 // owns the layering, the built-ins and the file overrides; the store keeps the human's text, its
 // revisions, the layers each agent was started with, and the files Claude reported loading.
 

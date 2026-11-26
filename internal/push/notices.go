@@ -15,6 +15,7 @@ package push
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -35,10 +36,11 @@ const (
 	KindJob          Kind = "job"          // a job went stuck, failed, or needs a fix only Jeff can make
 	KindDone         Kind = "done"         // a job finished
 	KindOrchestrator Kind = "orchestrator" // the orchestrator needs the terminal, or has stopped
+	KindApproval     Kind = "approval"     // a tool call waits for approval (DESIGN.md 8.7)
 )
 
 // AllKinds in the order the Settings sheet lists them.
-var AllKinds = []Kind{KindQuestion, KindDialog, KindJob, KindDone, KindOrchestrator}
+var AllKinds = []Kind{KindApproval, KindQuestion, KindDialog, KindJob, KindDone, KindOrchestrator}
 
 // Urgency is how soon the push service should wake the device (RFC 8030 section 5.3).
 type Urgency string
@@ -71,7 +73,27 @@ type Notice struct {
 	Urgency Urgency `json:"urgency"`
 	// Source is the rate-limit key (the asking pane, the job, the pane at a dialog); not sent.
 	Source string `json:"-"`
+	// Actions are the notification's buttons (DESIGN.md 8.7): only a low-risk approval and a
+	// confirm or choice question carry them. ActionItem names the item they answer
+	// ("approval:ap_3"); the watcher mints a single-use token for it before delivery, and a
+	// notice whose token could not be minted goes without buttons.
+	Actions     []NoticeAction `json:"actions,omitempty"`
+	ActionItem  string         `json:"-"`
+	ActionToken string         `json:"-"`
 }
+
+// NoticeAction is one notification button: the action name sent back, and its label.
+type NoticeAction struct {
+	Action string `json:"action"`
+	Title  string `json:"title"`
+}
+
+// maxActions is how many buttons a notification gets (Chrome shows two).
+const maxActions = 2
+
+// actionName is what an action may be called: an approval's allow or deny, or a question's
+// option key (questions/validate.go allows the same characters).
+var actionName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
 
 // Clean returns the notice with its text sanitised, redacted and capped, and its URL forced to a
 // path on this origin (the service worker opens it; it must never leave the app).
@@ -84,6 +106,17 @@ func (n Notice) Clean() Notice {
 	}
 	if n.Urgency == "" {
 		n.Urgency = UrgencyNormal
+	}
+	var actions []NoticeAction
+	for _, action := range n.Actions {
+		if len(actions) == maxActions || !actionName.MatchString(action.Action) {
+			continue
+		}
+		actions = append(actions, NoticeAction{Action: action.Action, Title: termtext.Cap(redact.String(termtext.Clean(action.Title)), 24)})
+	}
+	n.Actions = actions
+	if len(n.Actions) == 0 || n.ActionToken == "" {
+		n.Actions, n.ActionToken = nil, ""
 	}
 	return n
 }
@@ -113,6 +146,44 @@ func (n Notice) webpushUrgency() webpush.Urgency {
 }
 
 // ---- Building notices from events ------------------------------------------------
+
+// ApprovalNotice is the notice for a tool call waiting for approval. Only a low-risk one carries
+// Allow and Deny buttons: an elevated one is answered in the app, a dangerous one only with the
+// card's second confirmation (DESIGN.md 8.7). The body is the call's one-line summary, cleaned
+// and capped like every notice.
+func ApprovalNotice(id, risk, agentName, summary, paneID string) Notice {
+	who := agentName
+	if who == "" {
+		who = "An agent"
+	}
+	notice := Notice{
+		Kind: KindApproval, Body: who + " wants to run " + summary, Tag: "approval:" + id,
+		URL: "/inbox?q=" + url.QueryEscape("approval:"+id), Urgency: UrgencyHigh, Source: "pane:" + paneID,
+	}
+	switch risk {
+	case "low":
+		notice.Title = "Allow this tool call?"
+		notice.Actions = []NoticeAction{{Action: "allow", Title: "Allow"}, {Action: "deny", Title: "Deny"}}
+		notice.ActionItem = "approval:" + id
+	case "elevated":
+		notice.Title = "A tool call needs your approval"
+	default:
+		notice.Title = "A dangerous tool call needs you"
+	}
+	return notice
+}
+
+// QuestionActions are a confirm or choice question's first two options as notification buttons
+// (none for a multi-select or any other kind).
+func QuestionActions(kind string, multi bool, options []NoticeAction) []NoticeAction {
+	if multi || (kind != "confirm" && kind != "choice") || len(options) == 0 {
+		return nil
+	}
+	if len(options) > maxActions {
+		options = options[:maxActions]
+	}
+	return options
+}
 
 // QuestionNotice is the notice for a newly asked question; ok is false for one that is not
 // pushed (low urgency).

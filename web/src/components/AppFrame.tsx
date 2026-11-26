@@ -1,8 +1,9 @@
 // The signed-in frame: a dark header (session, connection state, speak mode when voice is on,
 // theme, user menu) with the now-playing strip under it, the five
 // views as a left rail from md and a bottom nav on mobile, the reconnect banner, and the
-// footer, and the command palette (⌘K; components/palette). It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
-// badge and the tab title count what needs Jeff: open questions plus agents at a terminal dialog.
+// footer, the command palette (⌘K; components/palette) and the needs-you tray (components/tray). It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
+// badge and the tab title count what needs Jeff: open questions, pending tool-call approvals, and agents
+// at a terminal dialog (one whose pane has a pending approval counts once, as the approval).
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
@@ -11,7 +12,7 @@ import { cn } from "../lib/cn";
 import { inboxCount, needsYouCount, pageTitle } from "../lib/fleet";
 import { listenForNavigation, registerServiceWorker } from "../lib/push";
 import { useLiveQueries } from "../lib/live";
-import { useFleet, useInboxSummary, useMe } from "../lib/queries";
+import { useApprovals, useFleet, useInboxSummary, useMe } from "../lib/queries";
 import type { StreamStatus } from "../lib/sse";
 import { useNoStrayFileDrops } from "./attach/useAttachments";
 import { ConnectionBanner } from "./ConnectionBanner";
@@ -20,6 +21,7 @@ import { navItems } from "./nav";
 import { PaletteButton } from "./palette/PaletteButton";
 import { PaletteProvider } from "./palette/PaletteProvider";
 import { ThemeToggle } from "./ThemeToggle";
+import { TrayBar, TrayPanel } from "./tray/NeedsYouTray";
 import { UserMenu } from "./UserMenu";
 import { NowPlaying, SpeakToggle } from "./voice/SpeakMode";
 import { useSyncPlaybackRate } from "../lib/voice/settings";
@@ -33,7 +35,8 @@ export function AppFrame() {
   const stream = useLiveQueries();
   const fleet = useFleet();
   const summary = useInboxSummary();
-  const needsYou = inboxCount(summary.data?.open, needsYouCount(fleet.data));
+  const approvals = useApprovals("pending");
+  const needsYou = inboxCount(summary.data?.open, needsYouCount(fleet.data, approvals.data)) + (approvals.data?.length ?? 0);
   const voice = me.data?.features.voice ?? false;
   useSyncPlaybackRate(voice);
 
@@ -121,6 +124,8 @@ export function AppFrame() {
           {pathname !== "/chat" && <Footer className="border-t border-border px-3 py-2 md:hidden" />}
         </main>
       </div>
+      <TrayBar />
+      <TrayPanel />
       <nav
         aria-label="Views"
         className="flex shrink-0 border-t border-border bg-surface-raised pb-[env(safe-area-inset-bottom)] md:hidden"
@@ -152,7 +157,7 @@ function Badge({ count, className }: { count: number; className?: string }) {
     <span
       aria-label={`${count} need you`}
       className={cn(
-        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-blocked px-1 text-[10px] font-semibold leading-none text-white tabular-nums",
+        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-blocked px-1 text-[10px] font-semibold leading-none text-white tabular-nums dark:text-surface",
         className,
       )}
     >

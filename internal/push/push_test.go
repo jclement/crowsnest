@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -218,7 +219,7 @@ func TestDeliverEncryptsForTheBrowserAndSignsWithVAPID(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := payload{Title: "quark: " + notice.Title, Body: notice.Body, Tag: "q_7", URL: "/inbox?q=q_7", Kind: KindQuestion}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("decrypted payload %+v, want %+v", got, want)
 	}
 	for header, value := range map[string]string{"Content-Encoding": "aes128gcm", "Urgency": "high", "TTL": "86400", "Topic": topicFor("q_7")} {

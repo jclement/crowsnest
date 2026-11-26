@@ -1,4 +1,4 @@
-// Project rows (DESIGN.md 21.1, migration 0012). internal/projects owns validation, slugs, the
+// Project rows (DESIGN.md 21.1, migration 0013). internal/projects owns validation, slugs, the
 // directory rules and the leads; the store reads and writes rows. Projects are archived, never
 // deleted, so a job's project_id always names a row.
 

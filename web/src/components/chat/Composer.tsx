@@ -5,6 +5,7 @@
 // in the dialog. A draft typed at the terminal stops the send until the human says to append.
 // Files (DESIGN.md 8.6) come by paste (a screenshot; a long text becomes a file), by a drop on
 // the box or on the whole conversation pane, or by the paperclip; a send waits for their uploads.
+import { useTrayKeepOut } from "../../lib/trayKeepOut";
 import { Send, SquareTerminal } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type MutableRefObject, type ReactNode } from "react";
 import { ApiError } from "../../lib/api";
@@ -49,6 +50,7 @@ export function Composer({ target, agentName, state, onSent, onOpenTerminal, acc
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  useTrayKeepOut(formRef, "composer");
   const hintId = useId();
   const attachments = useAttachments();
   const insertText = useCallback((pasted: string) => {

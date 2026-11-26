@@ -93,6 +93,12 @@ type Config struct {
 	CompactAt        int    // compact the orchestrator past this many tokens; 0 off
 	FreshAt          int    // daily new conversation, minutes after local midnight; -1 off
 
+	// ---- The guard hook and approvals (guard.go) ----
+
+	ProtectedHosts     []string // --protected-host; the file's hosts are added by the caller (guard.ReadHostsFile)
+	ProtectedHostsFile string   // --protected-hosts-file, ~ expanded; "" for none
+	ProtectedBranches  []string // --protected-branch
+
 	// ---- Attachments (attach.go) ----
 
 	AttachmentMaxMB   int // largest attachment, MB

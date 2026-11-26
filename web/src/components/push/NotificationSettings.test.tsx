@@ -46,8 +46,8 @@ function fakeEnv(overrides: Partial<PushEnvironment> = {}, subscribed = false) {
 
 function settingsWith(devices: PushDevice[]): PushSettings {
   return {
-    kinds: { question: true, dialog: true, job: true, done: true, orchestrator: true },
-    order: ["question", "dialog", "job", "done", "orchestrator"],
+    kinds: { approval: true, question: true, dialog: true, job: true, done: true, orchestrator: true },
+    order: ["approval", "question", "dialog", "job", "done", "orchestrator"],
     devices,
     max_devices: 20,
   };

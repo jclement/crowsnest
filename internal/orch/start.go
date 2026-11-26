@@ -403,7 +403,14 @@ func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFile
 			return startFiles{}, err
 		}
 	}
-	if err := writeJSONFile(files.settings, o.claudeSettings(tokenFile)); err != nil {
+	guardRules := ""
+	if o.opts.Guard != nil && o.mcpEnabled() {
+		guardRules = filepath.Join(o.opts.StateDir, GuardRulesFile)
+		if err := writeJSONFile(guardRules, o.opts.Guard); err != nil {
+			return startFiles{}, err
+		}
+	}
+	if err := writeJSONFile(files.settings, o.claudeSettings(tokenFile, guardRules)); err != nil {
 		return startFiles{}, err
 	}
 	if o.opts.OnStart != nil {
@@ -440,12 +447,15 @@ func (o *Orchestrator) mcpEnabled() bool {
 // claudeSettings is the --settings file: the allow rule for crowsnest's MCP tools and the
 // supervisor's hooks (M7), built by agentcfg like every job agent's. The orchestrator's hooks
 // carry no job id: the server maps them to the job the orchestrator currently holds.
-func (o *Orchestrator) claudeSettings(tokenFile string) map[string]any {
+func (o *Orchestrator) claudeSettings(tokenFile, guardRules string) map[string]any {
 	// Its attachment inbox (Chat's pasted files, and those of jobs it holds) is readable without
 	// a prompt (DESIGN.md 8.6).
-	return agentcfg.AllowRead(agentcfg.ClaudeSettings(o.opts.Executable, o.opts.AgentSocket, "", tokenFile, o.mcpEnabled()),
+	return agentcfg.AllowRead(agentcfg.ClaudeSettings(o.opts.Executable, o.opts.AgentSocket, "", tokenFile, guardRules, o.mcpEnabled()),
 		attach.Layout{StateDir: o.opts.StateDir}.Orchestrator().Dir)
 }
+
+// GuardRulesFile is the guard hook's rules file in the state directory (DESIGN.md 8.7).
+const GuardRulesFile = "guard.json"
 
 // MCPConfig is the --mcp-config file (agentcfg.MCPConfig with no job): one stdio server,
 // `<executable> mcp`, told where the agent socket is and given the agent's token (when there is

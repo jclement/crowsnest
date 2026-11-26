@@ -89,6 +89,9 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--fresh-at` | `CROWSNEST_FRESH_AT` | off | `HH:MM`: the daily hand-over and new conversation (7.9) |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Largest attachment, pasted, dropped or attached by an agent (8.6) |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Disk all attachments may take; past it the oldest unneeded files are deleted, else an upload is refused (8.6) |
+| `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host: the guard hook refuses commands that would reach it, and an approval naming it is dangerous (8.7). Repeatable; added to the file's hosts |
+| `--protected-hosts-file` | `CROWSNEST_PROTECTED_HOSTS_FILE` | `~/Developer/claude-agent/config/protected-hosts` | One host per line, `#` comments; read when it exists, `''` for none (8.7) |
+| `--protected-branch` | `CROWSNEST_PROTECTED_BRANCHES` | none | A branch agents may not commit or push onto, nor force-push: the guard hook (8.7). Repeatable |
 | `--allowed-host` | `CROWSNEST_ALLOWED_HOSTS` | derived | Extra Host/Origin names (reverse proxy, MagicDNS). Repeatable |
 | `--trusted-proxy` | `CROWSNEST_TRUSTED_PROXY` | none | `loopback`, an IP or a CIDR whose client-IP header is believed (4.2, R2-L2). Repeatable |
 | `--trusted-proxy-header` | `CROWSNEST_TRUSTED_PROXY_HEADER` | `x-forwarded-for` | The one header a trusted proxy's client is read from: `x-forwarded-for` (its last hop) or `cf-connecting-ip` (cloudflared only; 4.2, R3-L1) |
@@ -159,6 +162,8 @@ rebinding against `--no-auth` on localhost); secrets leaking into logs; agent ou
 
     **The window between start and setup, plainly.** From the moment a fresh instance listens until someone completes setup, whoever presents the token becomes the owner, and the owner has a shell. The token is in crowsnest's log and nowhere else: on a workstation that is the user's terminal or the log file only they can read; in the devbox it is `docker logs`, readable by whoever operates the container (and, as for every secret in the container, by an agent running as `crow`, though no agent runs before setup since nothing is started). So the people who can win the window are the machine's owner and the container's operator, who could take the shell anyway; a network peer, without the token, sees a setup page and a refusal, and at five tries a minute against 256 bits cannot guess it. That is why a locked start is acceptable where an open start was refused, also on a non-loopback bind. What it does not cover: a log shipped somewhere others read (a shared log aggregator) carries the token until setup is done, and the token works until then; complete setup promptly, or give the login in the environment for an unattended install. Anyone on the network can spend the global attempt budget and force rotations, delaying setup (the owner re-reads the newest link); that is availability, not compromise, the same trade as the login's global cap.
 15. **Attachments** (8.6): types are sniffed from the bytes; only raster images, PDF and plain text are served inline, and never under an active name; SVG, HTML and everything else are `Content-Disposition: attachment`; every file carries `nosniff` and (but an inline PDF) a sandboxing CSP. Blobs are named by hash under the 0700 data directory, never by a client's name. An agent can have crowsnest read a file only with a token and only inside its own directories (`os.Root`).
+
+16. **Approvals and the guard** (8.7). A browser allow is once: no endpoint can grant an agent a standing permission ("always allow" stays in the terminal), and the hook's decision never carries `updatedPermissions` or `updatedInput`. A dangerous call needs an explicit confirmation the server checks (`409 CONFIRM_REQUIRED`), not only the UI. An approval's hook fails open to Claude's own dialog, never to an allow: crowsnest down, a refusal, an expiry or a supersession all print nothing. Requesting and polling an approval need an agent token, and only the pane that asked may poll it; as for every hook, a same-uid process that reads another agent's token can post or poll as it (4.6), but cannot decide anything: deciding is a browser (session, Origin, `X-Crowsnest`) or notification-token action. **Notification actions** are authorised by a single-use, item-scoped, 15-minute token in the push payload, kept only as a hash, sent by the service worker with `credentials: "omit"`; `/push/action` takes no cookie but keeps the host, origin and `X-Crowsnest` checks, so a cross-site page cannot replay one, and the token can answer only its one item, once, with an action it was minted for. Anyone who sees the push payload (the device, its push service: the payload is end-to-end encrypted to the device, RFC 8291) could use the token within its minutes; that is why only low-risk approvals and question options carry one. The **guard** is a seatbelt, not a boundary: it stops an agent that means well from reaching a protected host, a protected branch or the herdr server by accident, and a hostile process that writes its own script gets past it, as it could get past anything else of one uid (4.6).
 
 Residual risk, stated plainly: anyone with the password has a shell as the user. Basic password
 login over plain HTTP on a tailnet relies on WireGuard for confidentiality.
@@ -278,8 +283,10 @@ cannot be reached the hook prints nothing and exits 0: crowsnest being down must
 | **Notification** | `permission_prompt` and `idle_prompt` raise a needs-you dialog item at once instead of waiting for screen detection |
 | **StopFailure** | `rate_limit`, `server_error`, `billing_error`, `authentication_failed`: sets `stuck` with that cause and schedules the recovery in 6.4 |
 | **PermissionDenied** | Journalled; three in a row marks `stuck: permissions` |
-| **SessionEnd** | The agent process is leaving; if the job is not terminal, recovery in 6.4 |
-| **PostToolUse** (added in M7) | Progress for the nudge budget, and the last tool call for "doing now" (6.8) |
+| **SessionEnd** | The agent process is leaving; if the job is not terminal, recovery in 6.4. Stop, StopFailure and SessionEnd also supersede the pane's pending approvals (8.7) |
+| **PostToolUse** (added in M7) | Progress for the nudge budget, and the last tool call for "doing now" (6.8); a pending approval for the same call is superseded (answered in the terminal, 8.7) |
+| **PermissionRequest** (added on `wip/approvals`; verified: the dialog is drawn beside it, they race; a hook can hold past 600 s with `"timeout": 86400`) | Structured approval (8.7): posts the call, long-polls for the human's decision, prints `decision.behavior` allow or deny (with the note as `message`); prints nothing on expiry, supersession or any failure, which leaves Claude's own dialog. The job is `needs_you`/`approval-tool` meanwhile |
+| **PreToolUse** on `Bash` (added on `wip/approvals`) | The guard (8.7): decided locally from the agent's `guard.json`, no server round trip; refuses a few commands outright with `permissionDecision: deny` and a reason; reports a refusal afterwards |
 
 **The disposition check** (on Stop). The turn may end only if one of these holds: the job is
 `done`, `failed`, `cancelled`, `blocked` or `needs_you`; or there are open questions and the agent
@@ -1199,7 +1206,7 @@ Push (8.5) reaches subscribed devices with no tab open.
   normal questions, jobs done and tests. `Topic` is a hash of the notice's tag, so the push service
   also collapses a pending notice about the same thing. 404/410 deletes the subscription; other
   failures count a streak. Logs name the device id, the service host and the status only.
-- **What is pushed** (`push.Watcher`, kinds switchable in `kv` `push.settings`, all on by default):
+- **What is pushed** (`push.Watcher`, kinds switchable in `kv` `push.settings`, all on by default; `approval`, with its buttons, is 8.7's):
   `question` (asked, blocking or normal; from the same `OnAsked` hook as `--notify-url`), `dialog`
   (a fleet agent `needs_you` for 10 s, once until it clears), `job` (stuck once per cause except
   `exited`, failed, needs you for auth/config/launch), `done`, `orchestrator` (`needs_terminal`,
@@ -1363,6 +1370,169 @@ screenshot and a report, long paste to file, HTML and SVG never inline; screensh
 screenshot and a Markdown report to the seeded question "Which findings should the builder fix
 before merge?".
 
+**8.7 Structured approvals, the needs-you tray and the guard** (built on `wip/approvals`;
+`internal/approvals`, `internal/risk`, `internal/guard`, `internal/actions`,
+`internal/agentapi/approvals.go`, `internal/httpd/approvals.go`, `cmd/crowsnest/approvalhooks.go`,
+`cmd/crowsnest/approvals_wiring.go`, migration `0012_approvals.sql`; the web app's
+`lib/approvals.ts`, `lib/needsYou.ts`, `components/approvals/`, `components/tray/`). A terminal
+dialog (8.2) is answered by its digits against a screen hash; an approval is the same permission
+request as a structured record: the tool, its input, its directory, a risk level, and Allow or
+Deny with a note.
+
+**What Claude Code does, verified** (Claude Code 2.1.332, haiku, `--permission-mode default`, a
+command hook that logs its input, holds, then prints a decision; interactive runs in a throwaway
+tmux session, one `-p` run):
+
+| Question | What happened |
+|---|---|
+| Does the hook fire before the dialog is drawn? | **No: they race.** The terminal dialog ("Do you want to proceed? 1 Yes / 2 Yes, and always allow access to … / 3 Yes, and switch to auto mode / 4 No") is on screen within a second while the hook runs. Whichever answers first wins. |
+| Can it hold for minutes? | **Yes.** Held 90 s (`-p`) and 700 s (interactive, past the 600 s default) with `"timeout": 86400`; the allow then went through ("Allowed by PermissionRequest hook") and the command ran. The hooks reference documents no ceiling for a command hook's timeout; crowsnest sets 86400 s and its own approval expiry (12 h) ends a wait first. |
+| Allow | The dialog closes, the transcript says "Allowed by PermissionRequest hook", the tool runs. |
+| Deny with a message | "Denied by PermissionRequest hook"; the model receives the `message` verbatim (it quoted it, and treated it as tool output rather than as the user's instruction). |
+| Timeout | Claude kills the hook; the dialog stays up; the human answers it as before. Fail open to the existing behaviour, never to an allow. |
+| Answered in the terminal first | The terminal wins and the tool runs; **Claude does not kill the hook**, which keeps waiting; its later output is ignored. So crowsnest must notice and release it. |
+| Input | `session_id, transcript_path, cwd, permission_mode, hook_event_name, tool_name, tool_input, permission_suggestions` (e.g. `addDirectories`, `setMode acceptEdits`), plus `scratchpad_dir, prompt_id, effort`. |
+
+So the path built is the hook path, not the fallback: the hook holds, and the terminal dialog is
+the fallback that is always there.
+
+- **The hook.** Every Claude agent crowsnest starts (orchestrator and jobs) gets `PermissionRequest`
+  → `crowsnest hook permission-request` with `"timeout": 86400` (`agentcfg.PermissionRequestTimeout`).
+  It posts the hook's input to `POST /api/v1/approvals` on the agent socket (token-identified like
+  every hook; a caller without a known token gets 403 and the hook prints nothing), then long-polls
+  `GET /api/v1/approvals/{id}?wait=50` (only the pane that asked may poll it). Allowed → `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`;
+  denied → `behavior: deny` with `message` "The human denied this tool call in crowsnest. Their
+  note: …" (or, with no note, "do not retry it as it was; carry on, or ask"). Anything else
+  (expired, superseded, crowsnest down at the start, 403/404, two minutes of failed polls, a
+  minute past the 12 h expiry) prints nothing and exits 0: Claude's own dialog. An allow never
+  carries `updatedPermissions` or `updatedInput`.
+- **The record** (`approvals`): id `ap_N`, job, pane, agent name, session, cwd, tool, input (JSON,
+  at most 256 KB), the suggestions (shown, never applied), risk and its reasons, status
+  `pending | allowed | denied | expired | superseded`, how it was decided (`browser` or
+  `notification`), the note, why it expired or was superseded, times. Settling is one conditional
+  UPDATE (`WHERE status = 'pending'`): a browser answer, a notification answer, the sweep and a
+  supersession have one winner; the others get 409.
+- **Superseded: the agent stopped waiting.** Because the terminal can win (and Claude keeps the
+  hook running), crowsnest supersedes a pending approval when (a) the agent's Stop, StopFailure or
+  SessionEnd hook fires for that pane (a "No" in the terminal ends the turn; an interrupt does
+  too); (b) its PostToolUse reports the same tool with the same input (a "Yes" in the terminal);
+  (c) the pane has shown no dialog on two looks in a row, 5 s apart, once the approval is 15 s
+  old (the fleet's dialog detection, 8.2); (d) nobody has polled it for 45 s (the hook was killed
+  at its timeout, or the agent went away); (e) crowsnest restarted (the hooks' long-polls died
+  with it). A superseded approval leaves the tray and its hook prints nothing.
+- **The job.** While one is pending the job is `needs_you` with cause `approval-tool` ("A tool
+  call is waiting for your approval", the call as the detail); when none is, it goes back to
+  `running`. The approvals service's change callback does this; the tick re-checks it with
+  `Options.ApprovalPending` in case a callback was lost. `needs_you` is already a disposition the
+  Stop hook accepts, the backstop and the idle and silent checks only watch `running` jobs, and
+  `JobNotice` does not push `approval-tool` (the approval is pushed itself), so no nudge,
+  backstop or restart touches an agent that is waiting on an approval; a liveness check still
+  runs, so an agent that died while waiting is restarted.
+- **Risk** (`internal/risk`): low, elevated or dangerous, from a small table (`risk.Builtins`)
+  plus three checks in code. Dangerous: force push, `rm -rf` in its spellings, `git reset --hard`,
+  `git clean -f`, `drop table|database|schema` and `truncate`, `sudo`, writing a disk (`mkfs`,
+  `dd of=`), `curl … | sh`, `chmod 777`, and any input naming a protected host (whole word).
+  Elevated: `git push`, network commands, installs, `kill`, removing containers, any MCP tool,
+  `ExitPlanMode`, a file write outside the job's directory (Edit, Write, MultiEdit, NotebookEdit;
+  not for the orchestrator, which has no job directory), and a secrets-looking path (`.env`,
+  `.ssh/`, keys, `credentials`, `*.pem`, tokens). Everything else is low. The patterns come from
+  the front door's relay lists (claude-agent `frontdoor/relay-refuse-patterns`). `~/.config/crowsnest/risk.yaml`
+  (next to the config file) can `disable:` built-in ids and add `rules:` (`id, level, tools,
+  field: command|path|url|any, pattern, reason`); a file rule that matches decides the level
+  outright (so it can lower one too); an invalid file stops the start rather than loosening
+  anything silently.
+- **Where each level may be answered.** Low: the tray, the Inbox, the palette (opens the card) and
+  a notification's buttons. Elevated: the tray and the Inbox, never a notification (no buttons;
+  the server refuses a notification answer for one anyway). Dangerous: the card only, with an
+  explicit second confirmation ("This is dangerous. Allow it anyway?", the reasons, "Yes, allow
+  it"); `POST /approvals/{id}/decide` refuses an unconfirmed allow with `409 CONFIRM_REQUIRED`;
+  never a notification. Deny needs no confirmation anywhere.
+- **No "always allow" from the browser.** A browser allow is once. Widening an agent's permanent
+  permissions (Claude's options 2 and 3, `permission_suggestions`) is a terminal action: it
+  outlives the request, and a phone tap should not be able to grant it. The card says so.
+- **The card** (`ApprovalCard`): by tool. Bash: the command in a code block, the description, the
+  directory; Edit, Write, MultiEdit: a diff (the Inbox's `DiffView`; Write against nothing:
+  crowsnest does not read the file on the browser's behalf); WebFetch: the URL and the prompt; MCP:
+  server, tool and arguments; anything else: indented JSON. Then the risk line in words, the
+  note ("sent with a deny"), and Allow once, Deny, Open terminal. A settled one shows how it
+  ended. Keyboard: `y` and `n` answer only while the card itself has focus (a key in the note, on a
+  button or anywhere else answers nothing); `y` on a dangerous card opens the confirmation.
+- **The needs-you tray** (`components/tray`), on every view: pending approvals, open questions
+  (not notices), terminal dialogs (not one whose pane has a pending approval: that dialog is the
+  same request) and stuck jobs or jobs needing a login or config fix; most urgent first (dangerous
+  approvals, then elevated approvals and blocking questions, then low approvals and dialogs, then
+  other questions, then jobs), newest first within each. Each row expands in place: an approval's
+  card; a confirm or choice question's options (one tap answers; "Open in the Inbox" to add a
+  note); a dialog's card with its digit buttons (8.2's `DialogCard`); a job's cause and "Open the
+  job". Every row has "Snooze for 10 minutes" (kept in `localStorage`). Desktop: a stack anchored
+  bottom-right showing the top three ("Show all N"), foldable into a pill, with a count, an
+  arrival slide and an optional chime (off by default, a switch in its header, remembered in the
+  browser). Phone: a 44 px bar in the page's flow between the content and the bottom nav (the top
+  item and the count) that opens a sheet; in-flow arrivals flash instead of sliding, since a slide
+  pushed the page sideways for a moment. **It never covers** the Chat composer (the talk review
+  above it included) or the terminal's last rows: each registers itself (`useTrayKeepOut`), and
+  the tray's `bottom` is `--tray-bottom`, kept above the highest of them on the right half of the
+  window (a terminal keeps its bottom 40%, at most 240 px, clear). On a phone it is in the flow,
+  so it covers nothing, the bottom nav included. `g` then `n` focuses it (expanding it); Enter
+  opens a row; an opened approval takes focus so `y`/`n` work. It replaces nothing in the Inbox,
+  which lists approvals first (`?q=approval:ap_3`) and keeps settled ones in History; the palette's
+  "Needs you" group lists them too (opening the card; the palette allows nothing itself). The nav
+  badge and the tab title count pending approvals as well.
+- **Answering from a notification.** A Web Push for a low-risk approval carries Allow and Deny
+  buttons, and one for a confirm or choice question (not multi-select) its first two options, with
+  a single-use action token minted for that one notice (`internal/actions`): 32 random bytes
+  (`cna_…`), kept only as its SHA-256, scoped to one item (`approval:ap_3`, `question:q_7`) and
+  the actions it was minted for, spent in one conditional UPDATE (a replay, a second device or a
+  double tap gets nothing; a token probed with the wrong action is spent too), expiring after 15
+  minutes. The service worker posts `{token, action}` to `POST /api/v1/push/action` with
+  `credentials: "omit"` (the session cookie is never sent; the route needs no session, but the
+  host and origin checks and `X-Crowsnest` still apply), then replaces the notification with the
+  outcome ("Allowed: Bash: …", or why not, with a tap to open it). Elevated and dangerous
+  approvals are never given a token, and the approvals service refuses a notification's answer
+  for them regardless. Buttons appear only where the platform shows them (`Notification.maxActions
+  > 0`: Chrome on desktop and Android); Safari, iOS and Firefox get the plain notification and a
+  tap opens the card. The approval's own terminal dialog is then not pushed again as a dialog.
+  New push kind `approval` (on by default, switchable in the Notifications sheet).
+- **The guard** (`internal/guard`, `crowsnest hook pre-tool-use`). Every agent crowsnest starts
+  also gets a `PreToolUse` hook on `Bash` (timeout 10 s) naming a rules file written at its start
+  (`<state>/jobs/j_N/guard.json`, `<state>/guard.json` for the orchestrator; read-only like the
+  other job files): its own herdr session, the protected hosts (`--protected-host` plus
+  `--protected-hosts-file`, default claude-agent's `config/protected-hosts` when it exists) and the
+  protected branches (`--protected-branch`, default none). It decides locally, with no server round
+  trip, and refuses outright, with `permissionDecision: deny` and a reason that ends "refused by
+  crowsnest's guard and cannot be approved from here; if it really is needed, stop and ask the
+  human": a command that could reach a protected host (a network program with the host in its
+  arguments, or the host written as an address: `user@host`, `scheme://host`, `host:port`; a bare
+  mention in a commit message is not refused, as claude-agent's guard does); `git commit`,
+  `merge`, `cherry-pick`, `revert`, `am`, `rebase` while a protected branch is checked out (one
+  `git rev-parse`, only for such a command when branches are configured); `git push` onto a
+  protected branch, and a force push onto one; `herdr server stop` and `herdr session
+  stop|delete`; `herdr` or `crowsnest` with `--session` naming another session. Only a refusal is
+  reported, after the decision is printed, with a one-second cap (`POST /api/v1/guard/denied`,
+  journalled on the job). No approval is offered for these. It reads commands with a small
+  shell-word splitter (quotes, `;`, `&&`, `|`, `$(…)`, backticks, wrappers such as `sudo`,
+  `env`, `timeout`): a seatbelt for an agent that means well, not a sandbox (a script, an alias,
+  `eval` or `python -c` gets past it). A missing or broken rules file allows (fail open, like
+  every hook).
+- **`--demo`** seeds three approvals (a low Bash `go test`, a low Edit with a diff, a dangerous
+  force push) from the builder, linter and reviewer panes, with no hook waiting on them (so they
+  are never superseded), and adds one from a rotation every three minutes while fewer than three
+  are pending.
+- **Tests**: `internal/risk` and `internal/guard` tables; `internal/approvals` (allow wakes the
+  waiter, deny with the note, the dangerous confirmation, notification only for low, expiry, a
+  hook that stops polling, an active waiter kept, demo ones kept, supersession by pane, by the tool
+  having run, by the screen, at restart, the change callback); `internal/actions` (single use,
+  racing redeems, expiry, scope); the hook CLI (`cmd/crowsnest/approvalhooks_test.go`: holds then
+  allows, deny with the note, expiry and supersession print nothing, crowsnest down at the start
+  and gone mid-wait print nothing, no token prints nothing, the guard); `internal/httpd`
+  (sessions, CSRF, decide, the confirmation, `/push/action` with the token alone, never for
+  elevated or dangerous, cross-site refused, a question answered); `internal/push` (buttons only on
+  low approvals and confirm/choice questions, no minter no buttons, the approval's dialog not
+  pushed twice); `internal/jobs` (needs_you/approval-tool, no nudge, no backstop, no idle, the
+  lost callback); Vitest (`ApprovalCard`, the tray, `needsYou`, the `g n` hotkey); Playwright
+  (`e2e/hermetic/tray.spec.ts`, all three projects; screenshots `web/screenshots/tray-*.png`);
+  and real Claude (`internal/jobs/approvals_integration_test.go`, part of `mise run test:claude`).
+
 ## 9. Agent-side CLI
 
 The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identified by
@@ -1375,7 +1545,7 @@ The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identif
 | `crowsnest notify "text" [--urgency]` | A `notice` question (no answer needed) |
 | `crowsnest say "sentence"` | Speak now in talk mode (progress lines); no-op when off |
 | `crowsnest job update|done|fail|get|create|list` | The job protocol of section 6.2 for agents without MCP (Codex) and for scripts. The job is `CROWSNEST_JOB` unless `--job` is given; `done --attach file` attaches files to the result (8.6) |
-| `crowsnest hook <event> [--job j_<n>] [--socket PATH] [--token-file PATH]` | Claude Code hook entry point (section 6.3): stdin JSON to the server with a 5 s timeout, the server's decision to stdout; silent success when the server is unreachable, slow, or anything else fails |
+| `crowsnest hook <event> [--job j_<n>] [--socket PATH] [--token-file PATH] [--rules PATH]` | Claude Code hook entry point (section 6.3): stdin JSON to the server with a 5 s timeout, the server's decision to stdout (`permission-request` instead holds on a long-poll until the human decides, 8.7; `pre-tool-use` decides locally from `--rules`, the guard); silent success when the server is unreachable, slow, or anything else fails |
 | `crowsnest project list\|get <slug>` | The projects with their leads and job counts, or one project with its defaults and live jobs (21.2): what the orchestrator reads before handing a project work |
 | `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done`, `fail`, `job_create` (with `project` and `to` for the orchestrator, 21.2), `job_get`, `project_list`, `project_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
 
@@ -1400,7 +1570,7 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`, and the instance's `name`, 7.10) |
 | `GET /setup`, `POST /setup` | First-run setup (4.14), unauthenticated: `{required, default_name?, min_password_length}`; `{token, username, password, name}` → `201` + session cookie, `403 BAD_TOKEN`, `400`, `429` + `Retry-After`, `410` once done. While setup waits every other `/api/` path is `403 SETUP_REQUIRED` (`503 STARTING` between completion and the full server) |
 | `GET /account`, `POST /account/password`, `PUT /account/name` | The Account sheet: `{username, source: database\|config\|none, name, name_managed, min_password_length}`; `{current_password, new_password}` (`403 WRONG_PASSWORD`, `409` for a configured login; signs every other session out and re-issues this one's cookie); `{name}` (`409` under `--name`). The name is live in `/auth/me` at once; push titles and the Remote Control name take it at the next start |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend`, `instructions` events (`instructions`: `{at}`, a layer changed, 21.3; `poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `approval` (`{id, status, risk, tool, job_id, pane_id, change}`, 8.7), `instructions` (`{at}`, a layer changed, 21.3), `project` (`{id, change}`, 21.1), `lead` (a lead's status, 21.2), `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
@@ -1423,6 +1593,8 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /schedule`, `DELETE /schedule/{name}` | An app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list (`400` invalid, `409` a taken name); delete one (`409` for a task file, `404` unknown) → the list (7.8) |
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
+| `GET /approvals?status=pending\|all\|<status>`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` | Tool-call approvals (8.7): `{id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, created_at, settled_at, expires_at, summary}`; decide `{decision: allow\|deny, note, confirm}` → the approval, `409 CONFLICT` when no longer pending, `409 CONFIRM_REQUIRED` for an unconfirmed dangerous allow |
+| `POST /push/action` | A notification's button (8.7): `{token, action}` with the single-use action token alone (no session) → `{item, message}`; `403` for an unknown, used, expired or out-of-scope token, or an elevated or dangerous approval |
 | `GET /inbox/summary` | `{open, blocking}`: the Inbox badge (added in M6) |
 | `POST /orchestrator/poke` | "Poke now" (M8) → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}` (7.7) |
 | `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated (`task`, a scheduled job started, 7.8; `upkeep`, compaction and hand-over, 7.9); `limit` 50 by default, at most 200 |
@@ -1508,12 +1680,13 @@ The client sends a resize first; the server starts the process on that first res
 - `push_subscriptions(id, endpoint, p256dh, auth, user_agent, created_at, last_success_at, last_failure_at, failures)` (migration `0009_push.sql`, 8.5); `kv` keys `push.vapid` and `push.settings`
 - `spend_totals(subject, input, output, cache_write_5m, cache_write_1h, cache_read, turns, tool_calls, first_at, last_at, updated_at, state_json)`, `spend_daily(day, subject, model, …the same counts)` and `spend_turns(id, subject, message_id, at, model, …tokens)` (migration `0011_spend.sql`, 7.11): a subject is `j_<n>` or `orchestrator`; `model` is a pricing key
 - `attachments(id, name, type, size, sha256, has_thumb, origin, origin_pane, owner_kind, owner_id, role, ref, path, created_at, attached_at, released_at)` (migration `0010_attachments.sql`, 8.6): one row per upload or agent file; the bytes are `<data-dir>/attachments/<sha256>` (and `.thumb.jpg`); `owner_kind` is `''` (pending), `job`, `orchestrator`, `pane` or `question`; `role` is `brief`, `message`, `prompt`, `answer` (with `ref` the question), `ask` or `result`; `path` is the agent's copy
-- `schedules(id, name, every, after, run_as, project_id, body_md, dir, role, engine, created_at, updated_at)` (migration `0012_projects.sql`, 7.8): schedules made in the app; `name` unique and shared with task files (a file wins); `every`/`after` in the task-file grammar; `run_as` `poke` (to the orchestrator, `project_id` 0, or that project's lead) or `job` (`project_id` the job's project)
-- `schedule_runs(id, name, at, outcome, job_id)` (migration `0012_projects.sql`, 7.8): the run history of every scheduled task, file or app, keyed by name, the newest 20 per task kept
-- `instruction_layers(scope, key, body_md, revision, updated_at)` and `instruction_revisions(id, scope, key, revision, body_md, deleted, created_at)` (migration `0012_projects.sql`, 21.3): the human's text per layer, scope `global` (key `''`), `role` (the role name) or `project` (the project id in decimal); a row exists only while the text is in effect, and a reset or clear is a revision with `deleted = 1`. The newest 20 revisions per layer are kept
-- `agent_layers(subject, started_at, hash, layers_json)` (0012, 21.3): what an agent was last started with, replaced at every start: the manifest of its layers (scope, key, revision, source, size, sha256) and the sha256 of the composed text; `subject` is `j_<n>`, `orchestrator` or `lead:<slug>`
-- `agent_instructions(id, subject, session_id, at, path, memory_type, load_reason, size)` (0012, 21.3): the instruction files Claude reported loading (the `InstructionsLoaded` hook), paths and a stat's size only, at most 200 rows per subject
-- `projects(id, slug, name, dir, root_dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, archived_at, created_at, updated_at)` (migration `0012_projects.sql`, 21.1): archived, never deleted; a partial unique index keeps two live projects off one root; `jobs.project_id` (0 Unfiled) with an index on `(project_id, state)`
+- `approvals(id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, hooked, decided_via, note, status_reason, created_at, settled_at, expires_at)` and `action_tokens(hash, item, actions, created_at, expires_at, used_at)` (migration `0012_approvals.sql`, 8.7)
+- `schedules(id, name, every, after, run_as, project_id, body_md, dir, role, engine, created_at, updated_at)` (migration `0013_projects.sql`, 7.8): schedules made in the app; `name` unique and shared with task files (a file wins); `every`/`after` in the task-file grammar; `run_as` `poke` (to the orchestrator, `project_id` 0, or that project's lead) or `job` (`project_id` the job's project)
+- `schedule_runs(id, name, at, outcome, job_id)` (migration `0013_projects.sql`, 7.8): the run history of every scheduled task, file or app, keyed by name, the newest 20 per task kept
+- `instruction_layers(scope, key, body_md, revision, updated_at)` and `instruction_revisions(id, scope, key, revision, body_md, deleted, created_at)` (migration `0013_projects.sql`, 21.3): the human's text per layer, scope `global` (key `''`), `role` (the role name) or `project` (the project id in decimal); a row exists only while the text is in effect, and a reset or clear is a revision with `deleted = 1`. The newest 20 revisions per layer are kept
+- `agent_layers(subject, started_at, hash, layers_json)` (0013, 21.3): what an agent was last started with, replaced at every start: the manifest of its layers (scope, key, revision, source, size, sha256) and the sha256 of the composed text; `subject` is `j_<n>`, `orchestrator` or `lead:<slug>`
+- `agent_instructions(id, subject, session_id, at, path, memory_type, load_reason, size)` (0013, 21.3): the instruction files Claude reported loading (the `InstructionsLoaded` hook), paths and a stat's size only, at most 200 rows per subject
+- `projects(id, slug, name, dir, root_dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, archived_at, created_at, updated_at)` (migration `0013_projects.sql`, 21.1): archived, never deleted; a partial unique index keeps two live projects off one root; `jobs.project_id` (0 Unfiled) with an index on `(project_id, state)`
 - `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -2178,29 +2351,53 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 67. **Tokens are stored per pricing key; costs are computed when read.** A wrong or late price is
     one file away from being corrected for all of history, and an unknown model keeps its tokens
     until a price arrives. Storing dollars would freeze every mistake in.
-68. **App schedules are Tasks, and a file wins a shared name** (7.8). Turning a row into the same
+68. **Approvals ride the PermissionRequest hook, and the terminal dialog stays** (8.7). Verified:
+    the hook can hold for many minutes and its decision closes the dialog, but the dialog is
+    drawn beside it, not after it. That is the right shape: the browser answers in a structured
+    way when the human is away, the terminal answers when they are at it, and whichever is first
+    wins. The fallback the brief allowed (record the request, answer the dialog with a digit) was
+    not needed. The cost is supersession: Claude does not kill a hook the terminal beat, so
+    crowsnest releases it from the evidence (Stop, PostToolUse, the screen, the hook's polls).
+69. **Expiry and supersession print nothing; nothing ever defaults to allow.** A hook that cannot
+    get a human's answer gives Claude's own dialog back, which is the behaviour without
+    crowsnest. Expiry is not consent here either.
+70. **No "always allow" from the browser in v1.** A standing permission outlives the request it
+    was asked for, and widening it from a phone tap (or a notification button) is a permission
+    escalation; the terminal, where the human reads the real dialog, is the place for it.
+71. **Risk decides where an answer may come from, not whether it may be given.** Low: anywhere,
+    a notification included. Elevated: the app only. Dangerous: the card with a second
+    confirmation, checked by the server. The table is small and overridable by a file, and an
+    invalid file stops the start (a typo must not loosen anything).
+72. **The guard refuses rather than asks** (8.7). Commands that reach production, rewrite a
+    protected branch or stop the herdr server are not approvals: the agent is told why and must
+    ask the human in words. It is local and fast because it runs on every Bash call, and it is
+    a seatbelt, said so plainly, not a sandbox.
+73. **The tray is in the flow on a phone and keeps clear on a desktop.** A floating tray that
+    covers the composer or the terminal's prompt would be worse than none; the elements it must
+    not cover register themselves, so a new composer opts in with one line.
+74. **App schedules are Tasks, and a file wins a shared name** (7.8). Turning a row into the same
     Task a file becomes (through the same frontmatter rules) keeps one set of due rules, stamps,
     switches and poke lines. A file is what someone wrote and committed; an app schedule can be
     re-made in a click, so on a clash the file runs and the row is shown shadowed, never both
     (a double run costs a turn or a job). A poke-type schedule's body is materialised as a file
     because the poke line's contract is "read this file", and agents already read files.
-69. **One lifecycle for every standing agent, not a copy** (21.2). The orchestrator's start-up,
+75. **One lifecycle for every standing agent, not a copy** (21.2). The orchestrator's start-up,
     recovery, Remote Control, poker and gate were hard-won (M4, R1, R2); a lead that forked them
     would drift. Naming the agent, its workspace, its kv keys and its instructions as options,
     with the orchestrator's values as the defaults, kept the orchestrator's tests unchanged and
     gave leads every fix for free.
-70. **A project's directory is recorded resolved and never overlaps another's** (21.1). A job's
+76. **A project's directory is recorded resolved and never overlaps another's** (21.1). A job's
     directory must name at most one project, and the delegation boundary must be crowsnest's
     record, not something an agent can move (decision 47); `$HOME` and its ancestors are refused
     because they would claim everything.
-71. **Crowsnest never edits the user's instruction files** (21.3). `AGENTS.md`, `CLAUDE.md`,
+77. **Crowsnest never edits the user's instruction files** (21.3). `AGENTS.md`, `CLAUDE.md`,
     skills and the claude-agent repository have their own lifecycle (review, publishing, other
     machines); crowsnest adds its own layers through the prompt file it already writes, and shows
     the user's files by path only.
-72. **Leads hear their own project; the orchestrator hears everything** (21.2). The front door
+78. **Leads hear their own project; the orchestrator hears everything** (21.2). The front door
     keeps every reason it had; a lead's poker carries only its project's jobs, questions and
     tasks, so a lead never spends a turn on another project's news.
-73. **Spoken replies are opted into per agent, told apart by voice, and queued** (13.5, Jeff's
+79. **Spoken replies are opted into per agent, told apart by voice, and queued** (13.5, Jeff's
     words). A name prefix costs a second of every line and is noise once voices differ; a queue
     in the browser (the only place that plays audio) is the one place overlap can be prevented;
     a stale line is worse than none.
@@ -2350,7 +2547,7 @@ project's main checkout, workers in worktrees under it, and a front door above a
 
 ### 21.1 Projects
 
-(`internal/projects/projects.go`, `internal/store/projects.go`, migration `0012_projects.sql`,
+(`internal/projects/projects.go`, `internal/store/projects.go`, migration `0013_projects.sql`,
 `internal/httpd/projects.go`, `internal/jobs/projects.go`.)
 
 - **The record**: name, short name (`slug`, `[a-z0-9-]`, 1 to 32, from the name; it names the
@@ -2438,7 +2635,7 @@ agent it starts. Crowsnest does **not** edit the user's `AGENTS.md`, `CLAUDE.md`
 skills: those still load as Claude loads them. It injects its own layered markdown through the
 prompt file it already writes for each agent (`--append-system-prompt-file`, 6.2), so nothing
 lands in a repository or the user's own settings. `internal/instructions` owns the layering;
-the store keeps the text and its revisions (migration 0012, section 11).
+the store keeps the text and its revisions (migration 0013, section 11).
 
 **Layers, in order:**
 

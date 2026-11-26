@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
@@ -115,12 +116,22 @@ type Deps struct {
 	Setup *setup.Service
 	// Names stores an instance name chosen in the Account sheet. Nil: it cannot be changed.
 	Names NameStore
+	// Approvals serves /approvals (tool-call approvals, 8.7). Nil: those routes answer 503.
+	Approvals *approvals.Service
+	// Actions redeems the single-use tokens behind a notification's buttons (POST /push/action,
+	// 8.7). Nil: that route answers 503.
+	Actions ActionRedeemer
 	// Updater is self-update (16.1): /health reports what it found, POST /admin/update applies
 	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
 	// answers 409 with the reason.
 	Updater Updater
 	// Instructions serves /instructions and /agents-instructions (DESIGN.md 21.3). Nil: 503.
 	Instructions *instructions.Service
+}
+
+// ActionRedeemer spends a notification's action token (internal/actions.Tokens).
+type ActionRedeemer interface {
+	Redeem(ctx context.Context, token, action string) (string, error)
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -213,6 +224,7 @@ func (s *Server) routes() http.Handler {
 	s.registerSpendRoutes(mux)
 	s.registerAttachmentRoutes(mux)
 	s.registerInstructionRoutes(mux)
+	s.registerApprovalRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)

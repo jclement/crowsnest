@@ -74,7 +74,7 @@ type JobRecord struct {
 	// RootDir is the resolved directory the job's children may use without asking (migration
 	// 0008, R3-H1), recorded when crowsnest created its pane; "" grants nothing.
 	RootDir string
-	// ProjectID is the project the job belongs to (migration 0012); 0 is "Unfiled".
+	// ProjectID is the project the job belongs to (migration 0013); 0 is "Unfiled".
 	ProjectID int64
 }
 

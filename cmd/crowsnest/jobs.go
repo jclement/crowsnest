@@ -281,54 +281,79 @@ func readInput(stdin io.Reader, file string) ([]byte, error) {
 // ---- hook ----------------------------------------------------------------------------------
 
 func newHookCommand() *cobra.Command {
-	var jobID, socket, tokenFile string
+	var jobID, socket, tokenFile, rulesFile string
 	command := &cobra.Command{
 		Use:   "hook <event>",
 		Short: "Claude Code hook entry point (crowsnest writes it into the settings it starts agents with)",
 		Long: "Reads the hook's JSON on stdin, sends it to crowsnest over the agent socket with a 5 s timeout,\n" +
 			"and prints crowsnest's reply. Events: stop, session-start, notification, stop-failure,\n" +
 			"permission-denied, session-end, post-tool-use. If crowsnest cannot be reached, or anything\n" +
-			"else goes wrong, it prints nothing and exits 0: crowsnest being down never wedges an agent.",
+			"else goes wrong, it prints nothing and exits 0: crowsnest being down never wedges an agent.\n\n" +
+			"permission-request holds until a human allows or denies the tool call in crowsnest (or it\n" +
+			"expires, or the agent stops waiting), then prints the decision; anything else prints nothing,\n" +
+			"which leaves Claude's own permission dialog. pre-tool-use is the guard: it decides from\n" +
+			"--rules locally, refuses a few commands outright, and only tells crowsnest when it refuses.",
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return nil // fail open even on a malformed command line
 			}
-			runHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), os.Getenv, args[0], jobID, socket, tokenFile)
+			runHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), os.Getenv, args[0], hookFlags{job: jobID, socket: socket, tokenFile: tokenFile, rules: rulesFile})
 			return nil
 		},
 	}
 	command.Flags().StringVar(&jobID, "job", "", "the job this agent holds (baked into the job's settings.json)")
 	command.Flags().StringVar(&socket, "socket", "", "the agent socket (default: CROWSNEST_SOCKET)")
 	command.Flags().StringVar(&tokenFile, "token-file", "", "the file holding this agent's token (default: CROWSNEST_TOKEN)")
+	command.Flags().StringVar(&rulesFile, "rules", "", "pre-tool-use: the guard's rules file (crowsnest writes guard.json beside settings.json)")
 	command.FParseErrWhitelist.UnknownFlags = true // a newer crowsnest's settings must not break an older binary
 	return command
 }
 
+// hookFlags are `crowsnest hook`'s flags.
+type hookFlags struct {
+	job, socket, tokenFile, rules string
+}
+
 // runHook does the hook's work and swallows every failure (fail open).
-func runHook(ctx context.Context, stdin io.Reader, stdout io.Writer, getenv func(string) string, event, jobID, socket, tokenFile string) {
+func runHook(ctx context.Context, stdin io.Reader, stdout io.Writer, getenv func(string) string, event string, flags hookFlags) {
 	input, err := io.ReadAll(io.LimitReader(stdin, maxHookInput))
 	if err != nil || !json.Valid(input) {
 		return
 	}
+	socket := flags.socket
 	if socket == "" {
 		socket = getenv(agentapi.EnvSocket)
 	}
-	if socket == "" {
-		return
-	}
+	jobID := flags.job
 	if jobID == "" {
 		jobID = getenv(agentapi.EnvJob)
 	}
 	// The token says whose hook this is (R1b N2): from the file crowsnest named on the hook's
 	// command line, else the pane's environment. Without one the server ignores the hook.
 	token := getenv(agentapi.EnvToken)
-	if tokenFile != "" {
-		if fromFile, err := agentid.ReadTokenFile(tokenFile); err == nil {
+	if flags.tokenFile != "" {
+		if fromFile, err := agentid.ReadTokenFile(flags.tokenFile); err == nil {
 			token = fromFile
 		}
 	}
-	client := agentapi.NewClient(socket, token).WithJob(jobID)
+	var client *agentapi.Client
+	if socket != "" {
+		client = agentapi.NewClient(socket, token).WithJob(jobID)
+	}
+	switch event {
+	case "pre-tool-use":
+		runGuardHook(ctx, stdout, input, flags.rules, client)
+		return
+	case "permission-request":
+		if client != nil {
+			runPermissionRequest(ctx, stdout, input, client)
+		}
+		return
+	}
+	if client == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
 	defer cancel()
 	reply, err := client.Hook(ctx, event, input)

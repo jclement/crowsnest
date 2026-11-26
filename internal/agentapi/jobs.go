@@ -217,6 +217,7 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	caller := s.callerOf(r)
+	s.supersedeForHook(r.Context(), r.PathValue("event"), caller, input)
 	reply, err := service.HandleHook(r.Context(), r.PathValue("event"), caller.JobID, caller.PaneID, input)
 	if err != nil {
 		s.writeJobError(w, r, err)

@@ -1,5 +1,5 @@
 // Schedules made in the app and the run history of every scheduled task (DESIGN.md 7.8 and
-// 21.4, migration 0012). internal/schedule owns validation and the due rules; the store keeps
+// 21.4, migration 0013). internal/schedule owns validation and the due rules; the store keeps
 // rows. The on/off switch and the stamps stay in kv schedule.state for file and app tasks alike.
 
 package store

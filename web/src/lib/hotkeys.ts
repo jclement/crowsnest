@@ -8,7 +8,8 @@
 // - In a terminal only ⌘K opens it: Ctrl+K is the shell's kill-line and must reach the pane. The
 //   terminal is told to ignore ⌘K (XTerm.tsx) so xterm never swallows it.
 // - `?` opens the shortcuts sheet, and `g` then j, c, i, f or t goes to Jobs, Chat, Inbox, Fleet or
-//   Terminal; none of these fire while typing in a field or in a terminal, or with a modifier.
+//   Terminal, and `g` then n focuses the needs-you tray; none of these fire while typing in a field
+//   or in a terminal, or with a modifier.
 import { viewKeys, type ViewPath } from "./palette";
 
 export interface KeyInput {
@@ -28,7 +29,10 @@ export interface FocusContext {
   mac: boolean;
 }
 
-export type HotkeyAction = { kind: "palette" } | { kind: "help" } | { kind: "go"; to: ViewPath };
+export type HotkeyAction = { kind: "palette" } | { kind: "help" } | { kind: "go"; to: ViewPath } | { kind: "tray" };
+
+/** The key after `g` that focuses the needs-you tray (DESIGN.md 8.7). */
+export const TRAY_KEY = "n";
 
 export interface SequenceState {
   /** When `g` was pressed (ms), or null when no sequence is pending. */
@@ -64,6 +68,7 @@ export function hotkeyFor(input: KeyInput, focus: FocusContext, state: SequenceS
   if (pending) {
     const view = viewKeys.find((entry) => entry.key === input.key.toLowerCase());
     if (view && !input.shiftKey) return { action: { kind: "go", to: view.to }, state: initialSequence };
+    if (input.key.toLowerCase() === TRAY_KEY && !input.shiftKey) return { action: { kind: "tray" }, state: initialSequence };
   }
   if (input.key === "g" && !input.shiftKey) return { action: null, state: { gAt: now } };
   return { action: null, state: initialSequence };

@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
@@ -39,6 +40,9 @@ const (
 	// maxJobMarks bounds the per-job dedupe map; past it the oldest marks are simply forgotten
 	// (at worst a finished job's notice could repeat if it emitted another event).
 	maxJobMarks = 2000
+	// approvalDialogWindow: a dialog that appears this soon after its pane's approval was pushed
+	// is that approval's dialog, and is not pushed again.
+	approvalDialogWindow = 2 * time.Minute
 )
 
 // Sender is the part of the Service the watcher uses; tests pass a fake.
@@ -56,6 +60,14 @@ type WatcherOptions struct {
 	// Synchronous delivers in the caller's goroutine (tests); otherwise each notice goes out in
 	// the background so no event source ever waits on a push service.
 	Synchronous bool
+	// Tokens mints the single-use action tokens a notification's buttons carry (DESIGN.md 8.7).
+	// Nil: no notice carries buttons.
+	Tokens Minter
+}
+
+// Minter mints an action token for one item (internal/actions).
+type Minter interface {
+	Mint(ctx context.Context, item string, actions []string) (string, error)
 }
 
 // Watcher decides what to push.
@@ -70,6 +82,9 @@ type Watcher struct {
 	jobMarks map[string]string
 	// orchState is the orchestrator state last seen.
 	orchState orch.State
+	// approvalPanes are panes whose tool call was pushed as an approval, and when: their terminal
+	// dialog (the same request) is not pushed again.
+	approvalPanes map[string]time.Time
 }
 
 type dialogMark struct {
@@ -87,7 +102,7 @@ func NewWatcher(opts WatcherOptions) *Watcher {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Watcher{opts: opts, gate: newGate(opts.Now), dialogs: map[string]*dialogMark{}, jobMarks: map[string]string{}}
+	return &Watcher{opts: opts, gate: newGate(opts.Now), dialogs: map[string]*dialogMark{}, jobMarks: map[string]string{}, approvalPanes: map[string]time.Time{}}
 }
 
 // Run reads the hub until ctx ends.
@@ -130,12 +145,33 @@ func (w *Watcher) HandleEvent(ctx context.Context, event hub.Event) {
 	}
 }
 
-// QuestionAsked pushes a newly asked question (blocking and normal; low is not pushed).
+// QuestionAsked pushes a newly asked question (blocking and normal; low is not pushed). A confirm
+// or choice question carries its first two options as buttons.
 func (w *Watcher) QuestionAsked(question questions.Question) {
 	notice, ok := QuestionNotice(question.ID, question.Title, string(question.Kind), string(question.Urgency), question.SourcePane)
-	if ok {
-		w.notify(context.Background(), notice)
+	if !ok {
+		return
 	}
+	var options []NoticeAction
+	for _, option := range question.Options {
+		options = append(options, NoticeAction{Action: option.Key, Title: option.Label})
+	}
+	if notice.Actions = QuestionActions(string(question.Kind), question.Multi, options); notice.Actions != nil {
+		notice.ActionItem = "question:" + question.ID
+	}
+	w.notify(context.Background(), notice)
+}
+
+// ApprovalRequested pushes a tool call waiting for approval (DESIGN.md 8.7); its pane's terminal
+// dialog, the same request, is then not pushed as well.
+func (w *Watcher) ApprovalRequested(approval approvals.Approval) {
+	w.mu.Lock()
+	w.approvalPanes[approval.PaneID] = w.opts.Now()
+	if mark, ok := w.dialogs[approval.PaneID]; ok {
+		mark.pushed = true
+	}
+	w.mu.Unlock()
+	w.notify(context.Background(), ApprovalNotice(approval.ID, string(approval.Risk), approval.AgentName, approval.Summary, approval.PaneID))
 }
 
 func (w *Watcher) jobChanged(ctx context.Context, event jobs.HubEvent) {
@@ -166,7 +202,11 @@ func (w *Watcher) fleetChanged(current fleet.Fleet) {
 		}
 		atDialog[agent.PaneID] = true
 		if _, seen := w.dialogs[agent.PaneID]; !seen {
-			w.dialogs[agent.PaneID] = &dialogMark{since: now, name: agent.Name, workspace: agent.Workspace}
+			mark := &dialogMark{since: now, name: agent.Name, workspace: agent.Workspace}
+			if at, ok := w.approvalPanes[agent.PaneID]; ok && now.Sub(at) < approvalDialogWindow {
+				mark.pushed = true // already pushed as an approval
+			}
+			w.dialogs[agent.PaneID] = mark
 		}
 	}
 	for pane := range w.dialogs {
@@ -216,6 +256,7 @@ func (w *Watcher) notify(ctx context.Context, notice Notice) {
 		return
 	}
 	deliver := func() {
+		notice = w.withActionToken(context.WithoutCancel(ctx), notice)
 		result, err := w.opts.Sender.Deliver(context.WithoutCancel(ctx), notice, "")
 		if err != nil {
 			w.opts.Logger.Warn("pushing a notice failed", "kind", notice.Kind, "err", err)
@@ -230,4 +271,25 @@ func (w *Watcher) notify(ctx context.Context, notice Notice) {
 		return
 	}
 	go deliver()
+}
+
+// withActionToken mints the single-use token a notice's buttons carry; without one (no minter, no
+// item, a failed mint) the notice goes without buttons and a tap opens the app.
+func (w *Watcher) withActionToken(ctx context.Context, notice Notice) Notice {
+	if len(notice.Actions) == 0 || notice.ActionItem == "" || w.opts.Tokens == nil {
+		notice.Actions, notice.ActionToken = nil, ""
+		return notice
+	}
+	names := make([]string, 0, len(notice.Actions))
+	for _, action := range notice.Actions {
+		names = append(names, action.Action)
+	}
+	token, err := w.opts.Tokens.Mint(ctx, notice.ActionItem, names)
+	if err != nil {
+		w.opts.Logger.Warn("minting a notification's action token; sending it without buttons", "err", err)
+		notice.Actions, notice.ActionToken = nil, ""
+		return notice
+	}
+	notice.ActionToken = token
+	return notice
 }

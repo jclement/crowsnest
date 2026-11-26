@@ -5,6 +5,7 @@
 //
 // Sources are the queries the app already keeps live through the event stream (jobs, open
 // questions, the fleet, the orchestrator's status), so the palette never asks the server to search.
+import { compareApprovals, requester, riskLabels, type Approval } from "./approvals";
 import { chipText } from "./spend";
 import { fuzzyMatch, PERFECT_CHAR_SCORE, queryTokens } from "./fuzzy";
 import { relaunchConfirmations } from "./conversation";
@@ -146,6 +147,8 @@ export interface PaletteSources {
   jobs?: Job[];
   /** Open questions. */
   questions?: Question[];
+  /** Pending tool-call approvals (DESIGN.md 8.7). */
+  approvals?: Approval[];
   fleet?: Fleet;
   /** There is an orchestrator to poke, restart or start afresh (it is not disabled). */
   orchestrator: boolean;
@@ -253,6 +256,24 @@ function questionItem(question: Question): PaletteItem {
   };
 }
 
+/** A pending approval: opened in the Inbox, where its card answers it (the palette allows nothing
+ * itself: a dangerous call needs the card's second confirmation). */
+function approvalItem(approval: Approval): PaletteItem {
+  const open: PaletteCommand = { kind: "navigate", to: "/inbox", search: { q: `approval:${approval.id}` } };
+  return {
+    id: `approval:${approval.id}`,
+    group: "needs",
+    title: approval.summary,
+    subtitle: [approval.id, requester(approval), approval.job_id ?? ""].filter(Boolean).join(" · "),
+    keywords: [approval.id, approval.tool_name, approval.risk, approval.job_id ?? "", "approval", "permission", "allow"].filter(Boolean),
+    icon: "dialog",
+    chip: approval.risk === "low" ? { label: "Approval", tone: "neutral" } : { label: riskLabels[approval.risk], tone: approval.risk === "dangerous" ? "danger" : "warning" },
+    command: open,
+    verb: "Open",
+    actions: [{ id: "open", label: "Answer in Inbox", command: open }],
+  };
+}
+
 function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
   if (!fleet) return [];
   const items: PaletteItem[] = [];
@@ -352,11 +373,15 @@ export function projectItem(project: ProjectView): PaletteItem {
 /** Everything the palette can offer apart from the query's own Give job and Ask items. */
 export function buildItems(sources: PaletteSources): PaletteItem[] {
   const items: PaletteItem[] = [];
-  // Needs you, in the Inbox's order: blocking questions, then agents at a dialog, then the rest.
+  // Needs you, in the Inbox's order: approvals, blocking questions, then agents at a dialog (not
+  // one whose pane has a pending approval: that is the approval), then the rest.
+  const approvals = (sources.approvals ?? []).filter((approval) => approval.status === "pending").sort(compareApprovals);
+  items.push(...approvals.map(approvalItem));
+  const approvalPanes = new Set(approvals.map((approval) => `dialog:${approval.pane_id}`));
   const open = (sources.questions ?? []).filter((question) => question.status === "open").sort(compareQuestions);
   const blocking = open.filter((question) => question.urgency === "blocking" && question.kind !== "notice");
   items.push(...blocking.map(questionItem));
-  items.push(...fleetItems(sources.fleet).filter((item) => item.group === "needs"));
+  items.push(...fleetItems(sources.fleet).filter((item) => item.group === "needs" && !approvalPanes.has(item.id)));
   items.push(...open.filter((question) => !blocking.includes(question)).map(questionItem));
   for (const view of views) {
     items.push({
@@ -662,7 +687,7 @@ const RECENTS_MAX = 12;
 
 /** Items worth remembering: Give job and Ask texts are one-offs, and answers are done once. */
 export function rememberable(itemId: string): boolean {
-  return !itemId.startsWith("do:") && !itemId.startsWith("q:") && !itemId.startsWith("dialog:");
+  return !itemId.startsWith("do:") && !itemId.startsWith("q:") && !itemId.startsWith("dialog:") && !itemId.startsWith("approval:");
 }
 
 export function pushRecent(recents: readonly string[], itemId: string): string[] {

@@ -34,6 +34,7 @@ import (
 	"github.com/jclement/crowsnest/internal/agentcfg"
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/attach"
+	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
@@ -62,6 +63,9 @@ type LaunchOptions struct {
 	// RemoteControlPrefix, when set (--job-remote-control), starts Claude job agents with Remote
 	// Control named "<prefix> <job id> <short title>" (DESIGN.md 7.10). Empty: off.
 	RemoteControlPrefix string
+	// Guard, when set, is written to each job's guard.json and named on its PreToolUse guard hook
+	// (DESIGN.md 8.7). nil: no guard hook.
+	Guard *guard.Rules
 }
 
 func (o LaunchOptions) shellWait() time.Duration {
@@ -483,8 +487,15 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 			return jobFiles{}, fmt.Errorf("writing the job agent's token file: %w", err)
 		}
 	}
+	guardRules := ""
+	if s.opts.Launch.Guard != nil && withMCP {
+		guardRules = filepath.Join(dir, "guard.json")
+		if err := writeJSON(guardRules, s.opts.Launch.Guard); err != nil {
+			return jobFiles{}, err
+		}
+	}
 	// The job's attachment inbox is readable without a prompt (DESIGN.md 8.6).
-	settings := agentcfg.AllowRead(agentcfg.ClaudeSettings(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, tokenFile, withMCP),
+	settings := agentcfg.AllowRead(agentcfg.ClaudeSettings(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, tokenFile, guardRules, withMCP),
 		attach.Layout{StateDir: s.opts.Launch.StateDir}.JobDir(job.ID))
 	if err := writeJSON(files.settings, settings); err != nil {
 		return jobFiles{}, err

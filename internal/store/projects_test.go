@@ -1,4 +1,4 @@
-// Tests for migration 0012's tables: projects (unique slug, one live project per directory,
+// Tests for migration 0013's tables: projects (unique slug, one live project per directory,
 // archive), instruction layers with revisions, pruning and reset, agent records, schedules and
 // their run history.
 

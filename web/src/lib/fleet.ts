@@ -16,8 +16,10 @@ export function allAgents(fleet: Fleet | undefined): Agent[] {
 }
 
 /** How many agents are waiting on Jeff: the Inbox badge until questions arrive in M6. */
-export function needsYouCount(fleet: Fleet | undefined): number {
-  return allAgents(fleet).filter((agent) => agent.needs_you).length;
+export function needsYouCount(fleet: Fleet | undefined, approvals?: { pane_id?: string; status: string }[]): number {
+  // An agent whose pane has a pending approval is that approval (the same request), counted once.
+  const approvalPanes = new Set((approvals ?? []).filter((approval) => approval.status === "pending").map((approval) => approval.pane_id));
+  return allAgents(fleet).filter((agent) => agent.needs_you && !approvalPanes.has(agent.pane_id)).length;
 }
 
 /** The Inbox badge: open questions plus agents waiting at a terminal dialog. */

@@ -70,7 +70,7 @@ import {
   type RankedItem,
 } from "../../lib/palette";
 import { queryTokens } from "../../lib/fuzzy";
-import { useFleet, useJobs, useMe, useProjects, useQuestions } from "../../lib/queries";
+import { useApprovals, useFleet, useJobs, useMe, useProjects, useQuestions } from "../../lib/queries";
 import { readTheme, THEME_EVENT, type ThemeChoice } from "../../lib/theme";
 import { Chip, StatusDot } from "../ui/Chip";
 
@@ -422,6 +422,7 @@ export function CommandPalette({ inputRef, onClose, run, recents, onRan, mac, sp
 function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolean): PaletteSources {
   const jobs = useJobs();
   const questions = useQuestions("open");
+  const approvals = useApprovals("pending");
   const fleet = useFleet();
   const me = useMe();
   const orchestrator = useOrchestrator();
@@ -436,6 +437,7 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
     () => ({
       jobs: jobs.data,
       questions: questions.data,
+      approvals: approvals.data,
       fleet: fleet.data,
       orchestrator: !!orchestrator.data && orchestrator.data.state !== "disabled",
       auth: !!me.data?.features.auth,
@@ -444,7 +446,7 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
       voiceSettings,
       projects: projects.data?.projects,
     }),
-    [jobs.data, questions.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings, projects.data],
+    [jobs.data, questions.data, approvals.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings, projects.data],
   );
 }
 
