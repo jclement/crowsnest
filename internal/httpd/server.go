@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/auth"
@@ -74,6 +75,10 @@ type Server struct {
 	hosts     hostSet
 	handler   http.Handler
 	heartbeat time.Duration
+	// sseWriteTimeout is sseWriteTimeout unless a test shortens it.
+	sseWriteTimeout time.Duration
+	// openStreams counts SSE handlers still running, so tests can see one return.
+	openStreams atomic.Int32
 
 	// stopping is closed when shutdown begins, so long-lived SSE handlers return promptly
 	// instead of holding Shutdown open until its grace period runs out.
@@ -94,6 +99,8 @@ func New(deps Deps) (*Server, error) {
 		hosts:     newHostSet(deps.Config.HostNames),
 		heartbeat: deps.Heartbeat,
 		stopping:  make(chan struct{}),
+
+		sseWriteTimeout: sseWriteTimeout,
 	}
 	if server.heartbeat <= 0 {
 		server.heartbeat = DefaultHeartbeat
