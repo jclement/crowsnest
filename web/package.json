@@ -11,6 +11,7 @@
     "test": "vitest run",
     "screenshots": "playwright test e2e/screenshots.spec.ts",
     "screenshots:chat": "playwright test --config playwright.chat.config.ts",
+    "screenshots:inbox": "playwright test --config playwright.inbox.config.ts",
     "e2e:real": "playwright test -c playwright.real.config.ts"
   },
   "dependencies": {

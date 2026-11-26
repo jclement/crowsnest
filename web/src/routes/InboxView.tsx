@@ -49,7 +49,7 @@ export function InboxView() {
             value={tab}
             onChange={setTab}
             items={[
-              { value: "open", label: "Needs you" },
+              { value: "open", label: "Open" },
               { value: "history", label: "History" },
             ]}
           />
@@ -224,7 +224,7 @@ function DialogDetail({ paneId }: { paneId: string }) {
 
 function SheetTitle({ id }: { id?: string }) {
   if (!id) return null;
-  return <span className="truncate">{id.startsWith(DIALOG_PREFIX) ? "Terminal dialog" : id}</span>;
+  return <span className="truncate">{id.startsWith(DIALOG_PREFIX) ? "Terminal dialog" : `Question ${id}`}</span>;
 }
 
 // ---- Notifications -------------------------------------------------------------------------

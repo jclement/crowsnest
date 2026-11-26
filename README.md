@@ -4,13 +4,14 @@ One Go binary that starts a [herdr](https://herdr.dev) session and a Claude Code
 it, and serves a mobile-friendly web app for running that session from a browser: chat with the
 orchestrator, answer questions from agents, drive a terminal, and see every agent in the fleet.
 
-> **Status: M5 (terminals) and M4 (orchestrator and Chat).** crowsnest serves the login, the API
-> health and auth endpoints, the event stream and the web app; it connects to (or starts) its
-> herdr session and serves the fleet, agent screens, dialog key presses, and live terminals: the
-> whole herdr session (its TUI) in the Terminal view, and any one pane from the Fleet view. It
-> keeps the session's orchestrator (started, adopted, watched and restarted) and serves the Chat
-> view and every Claude agent's conversation, read live from Claude's transcripts. Questions and
-> talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
+> **Status: M6 (questions and the agent API), M5 (terminals) and M4 (orchestrator and Chat).**
+> crowsnest serves the login, the API, the event stream and the web app; it connects to (or
+> starts) its herdr session and serves the fleet, agent screens, dialog key presses, and live
+> terminals. It keeps the session's orchestrator running and serves the Chat view and every Claude
+> agent's conversation, read live from Claude's transcripts. Agents ask the human questions over a
+> unix socket (`crowsnest ask`, or the `ask` MCP tool the orchestrator is started with); the Inbox
+> shows them beside terminal dialogs, and an answer is typed back into the asker's pane. Jobs,
+> pokes and talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
 > [STATUS.md](STATUS.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
@@ -100,6 +101,27 @@ which also gives the HTTPS secure context the microphone needs later:
 
 Exit codes: `0` success, `1` runtime error, `2` usage error.
 
+### Agent side
+
+These run inside agent panes and talk to the server over the unix socket named by
+`CROWSNEST_SOCKET` (crowsnest sets it, and puts its own directory first on `PATH`, in the
+orchestrator's pane). The asking pane is taken from `HERDR_PANE_ID` (where answers are typed back)
+and the job from `CROWSNEST_JOB` (M7). Without `CROWSNEST_SOCKET`, or with no server answering,
+they fail with exit 1 and say so.
+
+| Command | Does |
+|---|---|
+| `crowsnest ask --file q.json\|- [--wait] [--timeout 12h]` | Post a question (DESIGN.md 8.1 shape: `title`, `body_md`, `kind` confirm/choice/ack/manual/notice, `multi`, `options`, `recommend`, `context`, `urgency`, `expires_in_hours`, `files`). Without `--wait` it prints the id (`q_7`) and returns; the answer is typed into the pane later as `[crowsnest answer q_7] <title> → <answer> (note: …)`. With `--wait` it blocks and prints `{id, status, answer_value, answer_note}`: exit `0` answered, `3` expired or cancelled, `1` error |
+| `crowsnest notify "text" [--urgency low\|normal\|blocking]` | A notice (no answer needed); the first line is its title. Prints the id |
+| `crowsnest say "sentence"` | Ask for one sentence to be spoken in talk mode (M11 speaks it; now it is published as a `say` event) |
+| `crowsnest mcp` | A stdio MCP server exposing `ask` and `say` (M7 adds the job tools), proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes |
+
+The socket is `$XDG_RUNTIME_DIR/crowsnest/<session>.sock` when `XDG_RUNTIME_DIR` is set, else
+`~/.local/state/crowsnest/<session>/agent.sock`; its directory is `0700` and the socket `0600`.
+Its routes are Meat Prompt's (`POST /api/v1/questions`, `GET /api/v1/questions/{id}?wait=90`,
+`GET /api/v1/questions?status=`, `DELETE /api/v1/questions/{id}`) plus `POST /api/v1/say` and
+`GET /api/v1/health`.
+
 ## Configuration
 
 Precedence: flag, then environment, then `~/.config/crowsnest/config.yaml` (keys are the flag
@@ -137,9 +159,10 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 `--web-dev` (`CROWSNEST_WEB_DEV`) is a hidden development flag used by `mise run dev`: the UI is
 served by Vite, so the binary does not require embedded web assets.
 
-`--session`, `--allow-default-session`, `--demo`, `--dir`, `--model`, `--permission-mode` and
-`--no-orchestrator` take effect now. `--poke-interval` (M8), talk mode and notices are parsed and
-validated now and take effect in their milestones.
+`--session`, `--allow-default-session`, `--demo`, `--dir`, `--model`, `--permission-mode`,
+`--no-orchestrator` and `--notify-url` (one plain-text line, the question's id and scrubbed title,
+POSTed for each `blocking` question) take effect now. `--poke-interval` (M8) and talk mode are
+parsed and validated now and take effect in their milestones.
 
 ### Startup refusals
 
@@ -164,7 +187,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
 | `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version}}` |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change; later `question`, … |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (`{text, pane_id, at}`); later `job`, … |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
@@ -172,6 +195,11 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /agents/{target}/prompt` | session | `{text, force_over_draft}` → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
 | `GET /orchestrator` | session | `{state, pane_id, session_id, dir, detail, restarts}`; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed` or `disabled` |
 | `POST /orchestrator/restart`, `POST /orchestrator/new` | session | Restart Claude on the same conversation (`--resume`), or with a fresh one |
+| `GET /questions?status=` | session | Questions with a status (`open`, `answered`, `expired`, `cancelled`, a comma-separated list, or `all`), open first; file contents left out (`file_count` says how many) |
+| `GET /questions/{id}` | session | One question with its `files` |
+| `POST /questions/{id}/answer` | session | `{answer_value, answer_note}`: a key, an array of keys for a multi-select, nothing for ack/notice; a `manual` answer is the note. `409 CONFLICT` once settled |
+| `DELETE /questions/{id}` | session | Cancel an open question; the asker is told |
+| `GET /inbox/summary` | session | `{open, blocking}` for the Inbox badge |
 | `GET /term/tui` (WebSocket) | session | The herdr TUI in a PTY. Binary frames are terminal bytes both ways; text frames are JSON control: the browser sends `{"type":"resize","cols","rows"}` first (the process starts on it), the server ends with `{"type":"exit","reason"}` |
 | `GET /term/pane/{pane_id}` (WebSocket) | session | One pane through `herdr terminal session control --takeover`, same protocol. `404` unless the pane is in the fleet |
 
@@ -184,13 +212,14 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
 | `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, and the pane and TUI terminal bridges |
-| `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation |
+| `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
 | `mise run e2e` | Playwright suite (not built until M9; fails with a message) |
 | `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures, and the terminals on a throwaway `crowsnest-test-*` herdr session. Each spec starts and stops its own instance on a random localhost port |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
+| `mise run screenshots:inbox` | Builds, then Playwright against `./bin/crowsnest --demo`: the Inbox list and a question (mermaid and a diff) at 375×812 and 1440×900, light and dark, a multi-select, the 375 px checks, and an answer round trip |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives and `checksums.txt`, nothing published |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |
@@ -214,10 +243,12 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | Path | Holds |
 |---|---|
 | `~/.config/crowsnest/config.yaml` | Optional config file |
-| `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed) and settings |
+| `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed), settings and questions |
 | `~/.local/state/crowsnest/<session>/herdr-server.log` | Output of a herdr server crowsnest started |
 | `~/.local/state/crowsnest/<session>/CROWSNEST.md` | The orchestrator's instructions (`--append-system-prompt-file`), rewritten from the embedded template on every start |
-| `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file (empty until the jobs supervisor adds hooks) |
+| `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` (M7 adds hooks) |
+| `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server and its `CROWSNEST_SOCKET` |
+| `~/.local/state/crowsnest/<session>/agent.sock` | The agent API socket (when `XDG_RUNTIME_DIR` is unset) |
 | `~/.local/state/crowsnest/<session>/demo-claude/` | `--demo` only: the demo agents' transcripts |
 
 ## License

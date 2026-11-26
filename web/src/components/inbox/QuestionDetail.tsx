@@ -35,7 +35,8 @@ export function QuestionDetail({ id, onDone }: QuestionDetailProps) {
 
 export function QuestionBody({ question, onDone }: { question: Question; onDone?: () => void }) {
   return (
-    <article aria-label={question.title} className="flex flex-col gap-3 p-3 md:p-4">
+    <article aria-label={question.title} className="flex max-w-4xl flex-col gap-3 p-3 md:p-4">
+      <h2 className="break-words text-base font-semibold leading-snug text-heading">{question.title}</h2>
       <QuestionMeta question={question} />
       {question.body_md.trim() && <Markdown className="text-sm">{question.body_md}</Markdown>}
       {question.files && question.files.length > 0 && <DiffView files={question.files} />}

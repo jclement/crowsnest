@@ -69,7 +69,7 @@ run = [
 ]
 
 [tasks."test:claude"]
-description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API"
+description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API, and calls the ask MCP tool whose answer is typed back"
 run = "CROWSNEST_E2E_CLAUDE=1 CGO_ENABLED=1 go test -count=1 -tags integration -run IntegrationClaude -v -timeout 6m ./internal/orch/..."
 
 [tasks.lint]
@@ -107,6 +107,11 @@ run = [
 [tasks.screenshots]
 description = "Fleet view with fixtures at 375 and 1440 px, light and dark, into web/screenshots; plus the 375 px layout checks"
 run = "npm --prefix web run screenshots"
+
+[tasks."screenshots:inbox"]
+description = "Inbox against the built binary in --demo mode (seeded questions, a mermaid body, a diff, a dialog) at 375 and 1440 px, light and dark, into web/screenshots; plus an answer round trip"
+depends = ["build"]
+run = "npm --prefix web run screenshots:inbox"
 
 [tasks."screenshots:chat"]
 description = "Chat view against the built binary in --demo mode (a real prompt round trip) at 375 and 1440 px, light and dark, into web/screenshots"

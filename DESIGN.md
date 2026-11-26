@@ -207,8 +207,8 @@ model; the prompt file flag works):
 
 - pane env `CROWSNEST_JOB=<id>`, `CROWSNEST_SOCKET`, and `crowsnest` on `PATH`;
 - `--append-system-prompt-file <state>/jobs/<id>/prompt.md` (role prompt plus the job protocol below);
-- `--settings <state>/jobs/<id>/settings.json`, carrying the hooks in 6.3 and `permissions.allow` for `mcp__crowsnest__*` (the allow rule through `--settings` is to be confirmed by the builder);
-- `--mcp-config` naming one stdio server, `crowsnest mcp`, which exposes the tools below (to be confirmed under `--permission-mode auto`; if MCP tools still prompt, the CLI is the fallback and the prompt names it instead).
+- `--settings <state>/jobs/<id>/settings.json`, carrying the hooks in 6.3 and `permissions.allow` for `mcp__crowsnest__*` (**verified in M6**: the wildcard rule through `--settings` pre-approves the tools, see 8.4);
+- `--mcp-config` naming one stdio server, `crowsnest mcp`, which exposes the tools below (**verified in M6** on the orchestrator under `--permission-mode auto`: `mcp__crowsnest__ask` is called with no prompt).
 
 Nothing is written into the repo or the user's own Claude settings. Codex agents get the same
 protocol through the CLI and their prompt; they have no hooks, so they rely on the herdr-side backstop.
@@ -396,10 +396,13 @@ Claude Code 2.1.332 by `mise run test:claude`):
   (which also clears the budget). Restart and New send Esc if a dialog is up, then `/exit`, wait
   15 s for the shell, then Ctrl+C twice and wait again.
 - **Start-up files**: `<state>/CROWSNEST.md` (rendered from `internal/orch/templates/`, with a
-  marked `crowsnest:job-protocol` section that M7 fills) and `<state>/claude-settings.json`
-  (`{}` until M7 adds the hooks). `--mcp-config` is not passed until M6. The pane env is
-  `CROWSNEST=1`, `CROWSNEST_SESSION` and `PATH` with the binary's directory first;
-  `CROWSNEST_SOCKET` joins with M6.
+  marked `crowsnest:job-protocol` section that M7 fills), `<state>/claude-settings.json`
+  (`permissions.allow: ["mcp__crowsnest__*"]` since M6; M7 adds the hooks) and `<state>/mcp.json`
+  (M6: one stdio server, `<abs path of the running binary> mcp`, with `CROWSNEST_SOCKET` in its
+  env), passed as `--settings` and `--mcp-config`. The pane env is `CROWSNEST=1`,
+  `CROWSNEST_SESSION`, `CROWSNEST_SOCKET` (M6) and `PATH` with the binary's directory first. The
+  binary path is `os.Executable` with symlinks resolved; under `go run` that is a temporary build,
+  so the MCP server only works from a built binary.
 - **Messages**: each has a stable `id` and `index` and a `seq` that grows when it is added or
   changed (a tool card gains its result). A cursor is `<generation>.<seq>`; the generation
   changes when the conversation starts over (new session, truncated or replaced file, the switch
@@ -462,6 +465,82 @@ SHA-256 over the ANSI-stripped visible screen with trailing spaces and blank lin
 Notification API when permitted; `--notify-url` gets a one-line POST for `blocking` items. Web Push
 comes in M12.
 
+**8.4 As built in M6** (`internal/questions`, `internal/agentapi`, `routes/InboxView.tsx`):
+
+- **Validation** (one place, `questions/validate.go`; the socket, the MCP tool and the browser all
+  refuse the same things): title required, one line, at most 200 characters; `body_md` at most
+  64 KB; kind defaults to `choice` when options are given, else `ack`; `confirm` defaults its
+  options to yes/no; `confirm` and `choice` need `recommend`, naming an option key; `choice` needs
+  2–12 options; `ack`, `manual` and `notice` take none; `multi` only on `choice`; option keys
+  unique, 1–32 of `[A-Za-z0-9_.-]`, labels required; `context` at most 16 short entries; `files`
+  at most 20, each side at most 256 KB; `expires_in_hours` defaults to 24, at most 168. Unknown
+  JSON fields are refused on the socket, so a misspelt field is an error, not silently dropped.
+- **Answers**: confirm/choice store the key (an array for `multi`, at least one, no repeats);
+  `ack` stores `"ack"`; `manual` needs a note (the answer is the note); dismissing a `notice`
+  stores `"dismissed"`. Notes are at most 8 KB. Expired and cancelled questions carry no value.
+- **Settling is exactly once**: the store's UPDATE is conditional on `status = 'open'`, so an
+  answer racing the 15 s expiry sweep has one winner and the other gets `409`.
+- **How the outcome reaches the asker** is decided at the moment of settling (`delivery`):
+  `poll` when the asker is on the long-poll, or ended one less than 10 s ago (a CLI or MCP loop
+  re-polls within milliseconds), or asked with `wait=true` less than 10 s ago; `none` for a
+  notice, a question the asker cancelled itself (the socket's DELETE), or one with no source
+  pane; otherwise `type`. Waiter state is in memory, so after a crowsnest restart a waiting
+  asker's answer is typed as well as returned to its next poll.
+- **Typing it back** (the Deliverer): one line, `[crowsnest answer q_7] <title> → <labels> (note:
+  …)`, or `→ expired with no answer (expiry is not consent)`, or `→ cancelled by the human`; ANSI
+  sequences and control characters removed, whitespace collapsed, capped at 600 characters. It
+  goes through the web app's send path (`orch.Prompt`), so it is queued when the agent works and
+  wakes it when idle; a dialog on screen, a draft in the input box, or an agent that cannot be
+  found means nothing is typed, and the delivery is held and retried (3 s, doubling to a minute,
+  given up after a week). **At most once**: `delivery_claimed_at` is set before typing and
+  released only when the attempt provably typed nothing (`orch.ErrNotTyped`, a dialog, a draft);
+  an attempt whose outcome is unknown is recorded in `delivery_error` and never retried, and a
+  claim left by a crash is marked "interrupted" at the next start, not retried.
+- **The socket**: `$XDG_RUNTIME_DIR/crowsnest/<session>.sock`, else `<state>/agent.sock`.
+  `Listen` creates the directory `0700` (and tightens an existing one), removes a stale socket
+  nobody answers on, refuses to take over a live one or to delete a non-socket file, and chmods
+  the socket `0600`. Routes: Meat Prompt's four, plus `POST /api/v1/say` and `GET
+  /api/v1/health` (the CLI's "is crowsnest running" check). Identity headers set by the client
+  from its environment: `X-Crowsnest-Pane` (`HERDR_PANE_ID`) and `X-Crowsnest-Job`
+  (`CROWSNEST_JOB`); values over 128 bytes or with control characters are dropped.
+  **(verified in M6)**: herdr sets `HERDR_PANE_ID` in its panes, and Claude passes its own
+  environment through to the MCP servers it starts, so `crowsnest mcp` knows the asking pane.
+- **MCP**: `github.com/modelcontextprotocol/go-sdk` v1.8.0, stdio. Each tool is one file
+  (`mcp_ask.go`, `mcp_say.go`) that calls `registerTool` from `init`; M7 adds `job_update`, `done`,
+  `fail`, `job_create`, `job_get` the same way. Errors come back as tool results with `isError`,
+  worded for the model. `ask` returns at once with "carry on; the answer will arrive as a message
+  starting `[crowsnest answer q_7]`", or with `wait=true` long-polls until settled and says that an
+  expired or cancelled question is not consent.
+- **Permissions (probed in M6 with `mise run test:claude`, Claude Code 2.1.332, haiku)**: with
+  `permissions.allow: ["mcp__crowsnest__*"]` in `--settings`, `ask` ran without a prompt under
+  both `auto` and `default`. With the rule removed, `default` stopped at a permission dialog
+  ("Calling crowsnest…"), while `auto` let the call through (its classifier allowed it). The rule
+  is what makes it dependable, so it stays.
+- **`say`**: one sentence (whitespace collapsed, at most 300 characters) published as a `say` hub
+  event `{text, pane_id, at}`; nothing speaks it until M11.
+- **`--notify-url`**: for `blocking` questions only, one `text/plain` POST, `crowsnest: q_7 needs
+  you: <title>`, run through `internal/redact` and capped at 200 characters; never the body.
+- **Browser**: `GET /questions?status=` (lists leave out file contents; `file_count` says how
+  many), `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` (a cancel
+  from the inbox is typed back), and `GET /inbox/summary` `{open, blocking}`. A `question` event
+  is `{id, status, title, kind, urgency, change}` with `change` one of asked, answered, expired,
+  cancelled, delivered.
+- **The Inbox view**: Open and History tabs. Open lists blocking questions, then terminal dialogs
+  (fleet agents with `needs_you`, answered with the Fleet view's `DialogCard`), then other open
+  questions newest first, notices last. The selection is in the URL (`/inbox?q=q_7`, or
+  `?q=dialog:<pane id>`); a full-screen sheet on a phone, the right-hand panel from `md`. The
+  detail shows the title, chips (id, kind, urgency, context), the body through `Markdown`, the
+  files as a diff (the `diff` package for line changes; unified below `lg`, split from `lg`;
+  unchanged runs over 7 lines fold into an expandable row), and the form: a button per option
+  (one press answers, the recommended one marked but never preselected), checkboxes and Submit for
+  `multi`, Acknowledge, free text for `manual`, Dismiss for a notice, a note field, and "Cancel
+  question". The badge and tab title count open questions plus dialogs. "Notify me" asks for
+  Notification permission on a press; a notification is shown when a question is newly asked while
+  the tab is hidden.
+- **`--demo`** seeds six open questions (every kind, a mermaid body, a diff, a multi-select) and
+  one answered one into an empty inbox, and asks another from a rotation every 90 s, from the demo
+  fleet's panes, so answers are typed into the fake agents.
+
 ## 9. Agent-side CLI
 
 The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`:
@@ -504,7 +583,8 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
 | `GET /orchestrator` | The orchestrator's status (added in M4; 7.6) |
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
-| `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox |
+| `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
+| `GET /inbox/summary` | `{open, blocking}`: the Inbox badge (added in M6) |
 | `GET /journal` | Pokes, sends, answers, restarts |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
@@ -560,7 +640,7 @@ The client sends a resize first; the server starts the process on that first res
 - `questions(id, title, body_md, kind, multi, options_json, recommend, context_json, urgency, files_json, status, answer_value_json, answer_note, source_pane, created_at, expires_at, settled_at)`
 - `jobs(…)`: the record in section 6.1
 - `job_events(id, job_id, at, kind, summary, detail_json)`: state change, progress, nudge, hook, restart, question, message: the job's timeline
-- `questions.job_id`, `questions.wait` (was the asker blocking), `questions.delivered_at` (answer typed back)
+- `questions.job_id`, `questions.wait` (was the asker blocking), `questions.delivered_at` (answer typed back). As built (migration `0002_questions.sql`): `id` is an integer shown as `q_<id>`; `expires_at` is always set; delivery bookkeeping is `delivery` (`type`, `poll` or `none`, decided at settling), `delivery_claimed_at` (the write-ahead mark), `delivered_at` and `delivery_error` (8.4)
 - `journal(id, at, kind, summary, detail_json)`: poke, skip, send, answer, restart, alert
 - `kv(key, value)`: orchestrator session id, poke bookkeeping (per-agent last pushed state), settings
 
@@ -602,8 +682,8 @@ invalidates (`fleet` refetches the fleet and every agent's queries; `hello` refe
 `components/Markdown.tsx` is the one renderer for untrusted markdown (section 4.8), with mermaid
 loaded lazily. The Fleet view's Conversation and Terminal bodies are the exported slots
 `components/agent/AgentConversation.tsx` and `AgentTerminal.tsx`: later milestones replace their
-bodies and keep their names and props (`{agent}`). Until questions exist (M6), the Inbox badge
-and the tab-title count are the number of agents that need you (blocked, or a dialog on screen).
+bodies and keep their names and props (`{agent}`). The Inbox badge and the tab-title count are
+open questions plus agents that need you (blocked, or a dialog on screen) (M6; 8.4).
 
 **Chat (M4).** `routes/ChatView.tsx` is the orchestrator's conversation; the Fleet panel's
 `AgentConversation` slot shows any agent's with the same `components/chat/ConversationView`.
@@ -680,7 +760,7 @@ mise.toml  .goreleaser.yml  .github/workflows/{ci,release}.yml
 ```
 
 Go 1.27, `CGO_ENABLED=0`, `modernc.org/sqlite`, `github.com/coder/websocket`, `github.com/creack/pty`, `log/slog`.
-mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`; M5 adds the terminal bridges), `test:claude` (M4: real Claude, opt-in), `lint`, `fmt`, `check`, `e2e`, `e2e:real` (M5: Playwright against the built binary), `screenshots`, `screenshots:chat` (M4), `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
+mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`; M5 adds the terminal bridges), `test:claude` (M4: real Claude, opt-in), `lint`, `fmt`, `check`, `e2e`, `e2e:real` (M5: Playwright against the built binary), `screenshots`, `screenshots:chat` (M4), `screenshots:inbox` (M6), `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset`.
 
 ## 15. Test strategy
 
@@ -692,7 +772,7 @@ mise tasks: `setup`, `dev` (Vite + Go with reload, `--demo` by default), `build`
 | Web unit | Vitest + Testing Library for the composer, question cards (single, multi, note), dialog card, markdown/mermaid safety | `mise run test`, CI |
 | E2E hermetic | Playwright against `crowsnest --demo`: login and lockout, chat send and live update, inbox answer flows, fleet navigation, theme, 375 px and desktop projects, no horizontal scroll, basic axe checks | `mise run e2e`, CI |
 | E2E real herdr | Playwright against a real instance on a throwaway session, no Claude: terminal WebSocket types a command and sees its output, pane view, fleet reflects a created tab, cross-origin WebSocket and POST are rejected, unauthenticated WebSocket is rejected. Built in M5 (`web/e2e/real`, `playwright.real.config.ts`): each spec starts the built binary on a random port and stops it; the `--demo` Fleet with no fixtures; both terminals on `--demo`; on real herdr the Terminal view and the pane view each run a computed `echo` and find its output in the xterm buffer, a second browser takes a pane over, and screenshots go to `web/screenshots/terminal-*.png`. The real-herdr instance gets a throwaway `HOME` under `/tmp` (herdr's TUI would otherwise show the user's own machines; `/tmp` because a unix socket path is limited to 104 bytes on macOS) seeded with `onboarding = false` so herdr skips its first-run screen. The cross-origin and unauthenticated cases are covered by the httptest suite (`internal/httpd/term_test.go`) | `mise run e2e:real`, local |
-| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. **The stop test**: a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
+| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. M6 adds `ask_integration_test.go`: the orchestrator, started with crowsnest's `--mcp-config` and `--settings`, calls the `ask` MCP tool; the question appears through the browser API with the orchestrator's pane as its source and no permission dialog; it is answered through the API and the answer line arrives in the transcript. `CROWSNEST_E2E_PERMISSION_MODE` runs it under another mode. **The stop test**: a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
 
 Test-safety rules, enforced in the helpers rather than by convention: a test session name must
 match `^crowsnest-test-`; helpers scrub `HERDR_*` from the environment; teardown stops and deletes
@@ -761,6 +841,17 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
     terminal; the pane-control bridge needs no agent, and "a terminal in the browser" should not
     depend on herdr having recognised one.
 
+24. **An answer goes back one way, decided when the question settles** (M6): through the long-poll
+    if the asker is (or was within 10 s) waiting on it, else typed into its pane. Typing it as well
+    would hand a blocking asker its answer twice, once in the middle of whatever it does next.
+25. **Answer delivery is at most once** (M6). A write-ahead claim is released only when the attempt
+    provably typed nothing; anything else is recorded and never retried. A duplicated answer can
+    make an agent act twice; a missing one shows in the Inbox ("Not delivered: …") and the human
+    can say it again in Chat.
+26. **The MCP allow rule stays even though `auto` did not need it** (M6). The classifier allowed
+    the call in one probe; under `default` the rule was the difference between a dialog and none.
+    Declared tools should not depend on a classifier's mood.
+
 ## 18. Milestones
 
 Each is one builder (Opus) in a herdr worktree; at most two build at once; each ends green on `mise run check`.
@@ -805,6 +896,8 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - Web Push is the last milestone; until it lands a closed browser tab hears nothing unless `--notify-url` is set.
 - The never-stop guarantee is strongest for Claude agents crowsnest started (hooks). Codex agents and sessions started by hand get the herdr-side backstop only, which reacts in about a minute and cannot refuse a stop, only follow it with a nudge.
 - The supervisor depends on Claude Code hook behaviour (Stop, SessionStart, StopFailure, Notification) as documented and probed on 2.1.332.
+- Answers are typed back only to the pane the question came from. An agent restarted in another pane, or one whose `HERDR_PANE_ID` did not reach the asking process, gets the answer only through the Inbox (and, from M7, `job_get`). A held delivery (dialog or draft) waits up to a week.
+- The long-poll's waiter state is in memory: after a crowsnest restart, an asker blocked on `ask --wait` gets its answer from its next poll and also typed into its pane.
 - One controller per pane: two browsers on the same pane view take turns (the one that lost the pane says so and offers Reconnect).
 - The Terminal view is herdr's own TUI, which shows every machine the user's herdr config names, remote ones included; anyone who can open it reaches those machines as well (M5). The pane view is limited to the session's own panes.
 - Paste from the key bar needs the Clipboard API, which browsers give only to a secure context (localhost or HTTPS); over a plain-HTTP tailnet address it falls back to the system's long-press paste.

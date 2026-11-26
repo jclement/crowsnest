@@ -80,7 +80,7 @@ function UnifiedTable({ items, onExpand }: { items: Indexed[]; onExpand: (index:
             <tr key={index} className={rowTone[item.kind]} data-kind={item.kind}>
               <LineNo value={item.oldNo} />
               <LineNo value={item.newNo} />
-              <td aria-hidden className={cn("w-4 select-none pl-1 text-center", markerTone(item.kind))}>
+              <td aria-hidden className={cn("w-4 select-none pl-1 text-center align-top", markerTone(item.kind))}>
                 {marker[item.kind]}
               </td>
               <Code text={item.text} />
