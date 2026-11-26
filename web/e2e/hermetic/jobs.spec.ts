@@ -90,13 +90,19 @@ test("the board puts needs-you first, then stuck, then running, then finished to
   expect(attention.slice(2).sort()).toEqual(["Migrate the settings page to the new form kit", "Profile the fleet cache"]);
   const running = await sectionTitles(page, "In progress");
   expect(running).toEqual(expect.arrayContaining(["Add retry back-off to the webhook sender", "Tidy the README install section", "Upgrade the Postgres driver"]));
-  expect(await sectionTitles(page, "Finished today")).toEqual(["Fix the flaky SSE reconnect test"]);
-  // The failed job settled yesterday or earlier only when the demo started before 5 a.m.; it is
-  // either today's or behind the toggle, never lost.
+  // The demo's finished jobs settled 2 h and 5 h before it started, so which side of midnight they
+  // fall on depends on the time of day (and the timezone) the test runs in. Each one must be in
+  // exactly one of the two places, today's list or behind the toggle, never lost. Asserting an
+  // exact "Finished today" list made this test fail whenever it ran more than 5 h after midnight.
+  const finished = ["Fix the flaky SSE reconnect test", "Port the TUI to Bubble Tea v2"];
+  const today = (await page.getByRole("region", { name: "Finished today" }).count()) > 0 ? await sectionTitles(page, "Finished today") : [];
+  expect(today.every((title) => finished.includes(title))).toBe(true);
+  const behindToggle = finished.filter((title) => !today.includes(title));
   const older = page.getByRole("button", { name: /Show \d+ older/ });
-  if (await older.isVisible()) {
+  expect(await older.isVisible()).toBe(behindToggle.length > 0);
+  if (behindToggle.length > 0) {
     await older.click();
-    await expect(page.getByRole("region", { name: "Older" })).toContainText("Port the TUI to Bubble Tea v2");
+    for (const title of behindToggle) await expect(page.getByRole("region", { name: "Older" })).toContainText(title);
     await page.getByRole("button", { name: "Hide older" }).click();
     await expect(page.getByRole("region", { name: "Older" })).toHaveCount(0);
   }

@@ -1,6 +1,6 @@
 # Crowsnest: status
 
-Living record kept by the lead agent. Last updated: 2026-11-26 07:05 (America/Edmonton), end of the overnight build.
+Living record kept by the lead agent. Last updated: 2026-11-26 04:55 by the machine's clock (CST), end of the overnight build. Earlier revisions of this file carried times I estimated instead of reading; they ran about two hours fast.
 
 ## In one paragraph
 
@@ -34,7 +34,7 @@ For a phone on the tailnet: `--bind tailnet`, and `tailscale serve` in front if 
 | Hermetic browser suite | merged | Lead ran `mise run e2e`: 202 pass on desktop Chromium, mobile Chromium and mobile WebKit at 375 px, with accessibility checks |
 | Release pipeline (GoReleaser, workflow) | merged | `mise run snapshot` built four archives and the darwin one served the app (builder). **The release workflow has never run: it needs a tag, which I left to you** |
 | Devbox image | merged | Built locally (about 1 GB, arm64); container proof by the builder: health, login, refusals, non-root, mise installed Claude Code. **Nothing pushed to ghcr; amd64 build untried** |
-| CI on GitHub | see "CI" below | |
+| CI on GitHub | see "CI" below | The `check` job (lint, Go and web unit tests on Linux) is green. The new browser job failed its first complete run on one test of mine-to-fix kind: the Jobs board test asserted an exact "Finished today" list, true only in the first five hours after midnight. Fixed (it now passes under four timezones on three browsers locally); the result of the CI run with the fix is in the last line of this file |
 
 ## Reviews
 
@@ -82,3 +82,7 @@ Codex's closing judgement in R3, before the last fixes: the never-stop promise w
 ## In flight
 
 Nothing. All worktrees, branches, agents and review tabs I created are closed.
+
+## CI
+
+Last run on GitHub: see `gh run list --limit 1` in the repo. Recorded here when it finished: PENDING.
