@@ -2,7 +2,8 @@
 # this on a tag; `mise run snapshot` runs it locally without publishing. Never run
 # `goreleaser release` by hand without --snapshot: releases are `mise run release`, then CI.
 #
-# Structure copied from ~/Developer/drillbit/.goreleaser.yml. Windows is not built: PTYs and
+# Structure copied from ~/Developer/drillbit/.goreleaser.yml (signing) and the newer
+# repositories' homebrew_casks (herdr-web, herdrer). Windows is not built: PTYs and
 # unix sockets make it a different product (DESIGN.md section 19 item 6).
 version: 2
 
@@ -70,33 +71,46 @@ release:
   draft: false
   prerelease: auto
 
-# ---- Deferred while the repo is private ---------------------------------------------------
-# Cosign signing and the Homebrew tap are both off until Jeff makes the repo public: see
-# DESIGN.md section 19 item 4. Keyless cosign writes the repo and workflow identity to a public
-# transparency log (irreversible), and a tap formula cannot download from a private repo.
-# To switch on: uncomment both blocks, give the release job `id-token: write` and the
-# sigstore/cosign-installer step, and add the HOMEBREW_TAP_TOKEN repo secret (shipping skill).
-#
-# signs:
-#   - cmd: cosign
-#     signature: "${artifact}.sigstore.json"
-#     args:
-#       - "sign-blob"
-#       - "--bundle=${signature}"
-#       - "${artifact}"
-#       - "--yes"
-#     artifacts: checksum
-#     output: true
-#
-# brews:
-#   - directory: Formula
-#     repository:
-#       owner: jclement
-#       name: homebrew-tap
-#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-#     name: crowsnest
-#     homepage: "https://github.com/jclement/crowsnest"
-#     description: "Run a herdr session and its Claude Code orchestrator from a browser"
-#     license: "MIT"
-#     install: |
-#       bin.install "crowsnest"
+# ---- Signing ------------------------------------------------------------------------------
+# Cosign keyless over checksums.txt: the release job's GitHub OIDC identity is the signer, so
+# there is no key to keep. checksums.txt.sigstore.json is what `crowsnest update` verifies (TUF
+# root, Fulcio certificate for this repository's workflow, Rekor entry) before it trusts any
+# checksum, and what the README's `cosign verify-blob` example checks by hand. Needs
+# `id-token: write` on the release job and cosign on PATH (sigstore/cosign-installer).
+# `mise run snapshot` passes --skip=sign: a local keyless sign would open a browser login.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+# ---- Homebrew -------------------------------------------------------------------------------
+# `brew install jclement/tap/crowsnest`. GoReleaser 2.17 deprecated `brews:` for casks, as the
+# newer repositories use. The push needs HOMEBREW_TAP_TOKEN (a repository secret, Jeff's to
+# set); a snapshot only writes the cask into dist/homebrew. herdr is in homebrew-core, so the cask
+# depends on that formula: crowsnest cannot run without it.
+homebrew_casks:
+  - name: crowsnest
+    directory: Casks
+    repository:
+      owner: jclement
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/jclement/crowsnest"
+    description: "Run a herdr session and its Claude Code orchestrator from a browser"
+    license: "MIT"
+    dependencies:
+      - formula: herdr
+    hooks:
+      post:
+        # Strip the quarantine flag Gatekeeper puts on an unnotarised download, so the binary
+        # runs without the right-click-open dance.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/crowsnest"]
+          end

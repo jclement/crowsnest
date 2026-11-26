@@ -109,6 +109,9 @@ export interface Health {
   status: string;
   version: string;
   update_available: boolean;
+  /** Set with update_available: the newer release's tag and its GitHub page. */
+  latest_version?: string;
+  release_url?: string;
 }
 
 export interface Features {

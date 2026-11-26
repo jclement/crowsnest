@@ -91,6 +91,10 @@ type Deps struct {
 	Poker *orch.Poker
 	// Push serves the /push routes (Web Push, 8.5). Nil: they answer 503.
 	Push *push.Service
+	// Updater is self-update (16.1): /health reports what it found, POST /admin/update applies
+	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
+	// answers 409 with the reason.
+	Updater Updater
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -152,6 +156,7 @@ func (s *Server) Handler() http.Handler { return s.handler }
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	mux.Handle("POST /api/v1/admin/update", s.requireAuth(http.HandlerFunc(s.handleAdminUpdate)))
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))

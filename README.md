@@ -30,23 +30,42 @@ Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the security model.
 
 ## Install
 
-Releases are built by CI from `v*` tags: one tar.gz per platform (linux and darwin, amd64 and
-arm64; no Windows), each holding the `crowsnest` binary with the web app embedded, this README
-and the LICENSE, plus a `checksums.txt` (sha256). While the repository is private, download from
-the [releases page](https://github.com/jclement/crowsnest/releases) signed in, or with `gh`:
-
 ```sh
-gh release download --repo jclement/crowsnest --pattern "crowsnest_*_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" --pattern checksums.txt
-shasum -a 256 --ignore-missing -c checksums.txt
-tar xzf crowsnest_*.tar.gz crowsnest && mv crowsnest ~/.local/bin/
+brew install jclement/tap/crowsnest      # macOS and Linux; pulls in herdr from homebrew-core
 ```
 
-<!-- When the repository is public (DESIGN.md section 19 item 4):
-brew install jclement/tap/crowsnest
--->
+Or download a release by hand. CI builds one tar.gz per platform from each `v*` tag (linux and
+darwin, amd64 and arm64; no Windows), each holding the `crowsnest` binary with the web app
+embedded, this README and the LICENSE, plus `checksums.txt` (sha256) and
+`checksums.txt.sigstore.json`, a keyless [cosign](https://docs.sigstore.dev) signature over the
+checksums made by this repository's release workflow. Verify the signature, then the archive:
 
-Release archives are not signed yet: cosign and the Homebrew tap are switched on when the
-repository goes public (DESIGN.md section 19 item 4).
+```sh
+VERSION=1.2.3   # the release you want, without the v: https://github.com/jclement/crowsnest/releases
+OS=$(uname -s | tr A-Z a-z); ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+base=https://github.com/jclement/crowsnest/releases/download/v$VERSION
+curl -fsSLO "$base/crowsnest_${VERSION}_${OS}_${ARCH}.tar.gz" -O "$base/checksums.txt" -O "$base/checksums.txt.sigstore.json"
+
+cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/jclement/crowsnest/\.github/workflows/release\.yml@refs/tags/v'
+shasum -a 256 --ignore-missing -c checksums.txt
+tar xzf "crowsnest_${VERSION}_${OS}_${ARCH}.tar.gz" crowsnest && mv crowsnest ~/.local/bin/
+```
+
+crowsnest needs [herdr](https://herdr.dev) on `PATH` (`brew install herdr`).
+
+**Updating.** A release build checks GitHub for a newer release once at start and then daily
+(in the background, 10 s timeout, never blocking; not for a development build, `--demo` or a
+container). When it finds one, `/api/v1/health` reports `update_available` and the footer links
+to it. `crowsnest update` installs it over the running binary: it verifies the cosign signature
+on `checksums.txt` (Sigstore's TUF root, a Fulcio certificate for exactly this repository's
+release workflow on a `v*` tag, its Rekor entry) and the archive's sha256 before replacing
+anything, and refuses a release without a signature. `crowsnest update --check` only reports.
+Signed in to the web app, `POST /api/v1/admin/update` does the same and then exits, so run
+crowsnest under something that restarts it (launchd `KeepAlive`, systemd `Restart=always`), or
+start it again; herdr and every agent keep running across the restart. Installed with Homebrew:
+`brew upgrade crowsnest`. In a container: pull a new image.
 
 ## Quick start
 
@@ -215,6 +234,7 @@ workflow does the same on every `v*` tag.
 | `crowsnest version [--json]` | Version, commit, build date, Go version, platform, a tagline |
 | `crowsnest --version` | `crowsnest v1.2.3 (abc1234, 2026-01-15T10:30:00Z)` |
 | `crowsnest health [--json]` | GET `/api/v1/health` on the configured address; exit 0 healthy, 1 not (Docker `HEALTHCHECK`) |
+| `crowsnest update [--check]` | Install the latest release over this binary after verifying its signature and checksum (see Install, Updating); `--check` only reports. Refused for a development build, in a container and for a Homebrew install |
 
 Exit codes: `0` success, `1` runtime error, `2` usage error.
 
@@ -342,7 +362,8 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /health` | none | `{status, version, update_available}` |
+| `GET /health` | none | `{status, version, update_available}`, plus `latest_version` and `release_url` when a newer release was found |
+| `POST /admin/update` | session | Verify and install the newer release (as `crowsnest update`), answer `{updated, version, restarting}`, then exit for a supervisor to restart. `409 REFUSED` with the reason (container, development build, Homebrew install, already current), `409 UNSUPPORTED` when self-update is off (development build, `--demo`, container), `502 UPDATE_FAILED` when a download or check failed (nothing changed; the log says why) |
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
 | `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version}}` |
@@ -379,10 +400,13 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | Task | Does |
 |---|---|
 | `mise run setup` | Install tools, Go modules and web dependencies. Idempotent |
-| `mise run dev` | Go server (`--no-auth`, `--web-dev`, `--demo`) on :2769 and Vite on :5173. Long-running |
+| `mise run dev` | The real thing, locally (`scripts/dev.sh`): the Go server (`--no-auth`, `--web-dev`, localhost:2769) against its own herdr session `crowsnest-dev` (`CROWSNEST_DEV_SESSION` to change; `default` is refused), with a real Claude orchestrator in `.dev/orchestrator`, its database in `.dev/data` and an empty `.dev/config.yaml` so nothing of a real install is read; Vite on :5173 with hot reload. Every `HERDR_*` variable is removed first, so it is safe to run from inside a herdr pane. The orchestrator's directory is new, so the first start stops at Claude's folder-trust prompt: answer it once in the Terminal view. Long-running; Ctrl+C stops both (the herdr session keeps running) |
+| `mise run dev:demo` | The old `dev`: Go server (`--no-auth`, `--web-dev`, `--demo`) on :2769 and Vite on :5173. No herdr or Claude, throwaway state. Long-running |
+| `mise run dev:container` | Build the devbox image for this machine (`image`), then run it in the foreground (`scripts/dev-container.sh`): container `crowsnest-dev` (`--rm`), `127.0.0.1:2770` (`CROWSNEST_DEV_CONTAINER_PORT`), home in the volume `crowsnest-dev-home`, user `crow` with a fresh random password printed once. The password reaches the container only as a 0600 file owned by `crow` in a throwaway volume (`crowsnest-dev-secret`, removed on exit) named by `CROWSNEST_PASSWORD_FILE`: never argv, environment or image. Ctrl+C stops it |
+| `mise run dev:container:reset` | Remove the `crowsnest-dev` container and its volumes |
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
-| `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, the pane and TUI terminal bridges, and the fleet cache following herdr's events |
+| `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, the pane and TUI terminal bridges, and the fleet cache following herdr's events. Also self-update's real Sigstore check of a published release's bundle (needs the network) |
 | `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; a manual poke with one synthetic reason is delivered through `POST /orchestrator/poke` and answered; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript. Then **the stop test**: three haiku job agents in a scratch git repo, where an undeclared stop is refused by the Stop hook, `done` stops cleanly, and a non-blocking `ask` answered through the browser API reaches the agent, which finishes |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
@@ -396,11 +420,11 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run screenshots:jobs` | Builds, then Playwright against `./bin/crowsnest --demo`: the Jobs board (light and dark), the new-job form, a running, a stuck and a done job at 375×812 and 1440×900, the 375 px checks, and giving a job |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
 | `mise run e2e:voice` | Talk mode alone (also part of `e2e`). Builds, then Playwright against `./bin/crowsnest --demo` with talk mode on and a fake ElevenLabs (`web/e2e/support/fake-elevenlabs.mjs`, never the real API), Chromium's fake microphone: hold to talk, the transcript is sent, the SAY reply is fetched from `/voice/tts` and played; Cancel sends nothing; screenshots of Chat with talk mode at 375×812 and 1440×900 |
-| `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives and `checksums.txt`, nothing published |
+| `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives, `checksums.txt` and the Homebrew cask (`dist/homebrew/Casks/crowsnest.rb`); nothing signed, nothing published |
 | `mise run image` | Build the devbox image (`deploy/Dockerfile`) for this machine's architecture as `crowsnest:dev`. Needs Docker |
 | `mise run publish` | Build the devbox image for amd64 and arm64 and push `ghcr.io/jclement/crowsnest:<version>` and `:latest`. Jeff's step |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |
-| `mise run dev:reset` | Remove build output, web dist, Vite cache and the dev database |
+| `mise run dev:reset` | Remove build output, web dist, Vite cache and `.dev/`, and stop and delete the `crowsnest-dev` herdr session (only that one, by exact name) and its crowsnest state directory |
 
 ## Releasing
 
@@ -408,10 +432,14 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 it reads the latest tag, offers the next patch, minor or major version, creates an annotated tag
 and asks before pushing it. The pushed `v*` tag starts `.github/workflows/release.yml`, which runs
 `mise run setup` and `mise run check`, then GoReleaser (`.goreleaser.yml`) builds the archives and
-checksums and attaches them to a GitHub release (a `-rc.N` style tag becomes a prerelease). When
-that succeeds, its `image` job builds the devbox image for amd64 and arm64 and pushes
-`ghcr.io/jclement/crowsnest:<tag>` (and `:latest`, unless the tag is a prerelease). The
-workflow uses only `GITHUB_TOKEN` (`packages: write` for the image job). Never build release artifacts by hand or tag around a broken
+checksums, signs `checksums.txt` with keyless cosign (the release job's GitHub OIDC identity;
+`id-token: write` is granted to that job alone), attaches them to a GitHub release (a `-rc.N`
+style tag becomes a prerelease) and pushes the cask to
+[jclement/homebrew-tap](https://github.com/jclement/homebrew-tap). When that succeeds, its
+`image` job builds the devbox image for amd64 and arm64 and pushes
+`ghcr.io/jclement/crowsnest:<tag>` (and `:latest`, unless the tag is a prerelease). Secrets:
+`GITHUB_TOKEN`, and `HOMEBREW_TAP_TOKEN` (a token that can push to the tap; a repository secret
+Jeff sets) in the release job only. Never build release artifacts by hand or tag around a broken
 pipeline: fix the pipeline.
 
 `mise run snapshot` runs the same GoReleaser config locally with `--snapshot` (no tag, nothing

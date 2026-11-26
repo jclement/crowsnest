@@ -87,6 +87,7 @@ type harness struct {
 }
 
 type harnessOptions struct {
+	updater   Updater // nil: no self-update (update_available false, /admin/update 409)
 	noAuth    bool
 	heartbeat time.Duration
 	herdr     herdr.Client // nil: the herdr routes answer 503
@@ -181,6 +182,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Journal:       opts.journal,
 		Poker:         opts.poker,
 		Push:          opts.push,
+		Updater:       opts.updater,
 	})
 	if err != nil {
 		t.Fatal(err)
