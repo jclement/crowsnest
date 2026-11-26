@@ -22,7 +22,7 @@ export function ProjectSwitcher({ list, value, onChange }: { list: ProjectList; 
   ];
   const current = filterToParam(value);
   return (
-    <div role="radiogroup" aria-label="Project" className="flex gap-1 overflow-x-auto border-b border-border px-2 py-1 [scrollbar-width:thin]">
+    <div role="radiogroup" aria-label="Project" className="relative flex gap-1 overflow-x-auto border-b border-border px-2 py-1 [scrollbar-width:thin]">
       {options.map((option) => {
         const selected = filterToParam(option.filter) === current;
         return (

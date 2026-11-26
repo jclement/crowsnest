@@ -78,7 +78,7 @@ function JobHeader({ job }: { job: Detail }) {
         {job.restarts > 0 && <Chip tone="warning">{job.restarts} restarts</Chip>}
       </div>
       <p className="break-all font-mono text-2xs text-muted">
-        {job.work_dir || job.dir || "orchestrator"}
+        {job.work_dir || job.dir || (job.project_id ? "the project's lead" : "orchestrator")}
         {job.worktree_branch && ` · ${job.worktree_branch}`}
       </p>
       {!isFinished(job.state) && job.doing_now && (

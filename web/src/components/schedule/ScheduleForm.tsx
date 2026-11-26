@@ -165,7 +165,7 @@ export function ScheduleForm({ task, projects, defaultProjectId, pending, error,
         {target !== "orchestrator" && (
           <label className={labelClass}>
             Project
-            <select value={projectId} onChange={(event) => setProjectId(Number(event.target.value))} className={inputClass}>
+            <select aria-label="Project" value={projectId} onChange={(event) => setProjectId(Number(event.target.value))} className={inputClass}>
               {target === "job" && <option value={0}>None (use the directory)</option>}
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>

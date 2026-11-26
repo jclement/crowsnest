@@ -65,19 +65,22 @@ function Editor({ detail, scope, apiKey, maxBytes, hint }: { detail: LayerDetail
   const badge = sourceBadge(layer);
   const tabsId = `layer-${layer.scope}-${layer.key || "global"}`;
 
-  const done = (title: string) => ({
-    onSuccess: () => toast.show({ tone: "success" as const, title, description: "Agents get it from their next start." }),
-    onError: (error: Error) => toast.show({ tone: "danger" as const, title: "Not saved", description: error.message }),
-  });
+  // mutateAsync, not mutate's callbacks: a save changes the revision, which remounts this
+  // editor (the key above), and a callback of an unmounted mutate never runs.
+  const report = (title: string, promise: Promise<unknown>, after?: () => void) =>
+    promise.then(
+      () => toast.show({ tone: "success", title, description: "Agents get it from their next start." }),
+      (error: Error) => toast.show({ tone: "danger", title: "Not saved", description: error.message }),
+    ).finally(after);
   const save = () => {
     if (scope === "role" && !draft.trim()) {
       toast.show({ tone: "warning", title: "A role cannot be empty", description: "Use Reset to built-in to go back to crowsnest's text." });
       return;
     }
-    edit.mutate({ kind: "save", body: draft }, done(draft.trim() ? "Instructions saved" : "Instructions cleared"));
+    void report(draft.trim() ? "Instructions saved" : "Instructions cleared", edit.mutateAsync({ kind: "save", body: draft }));
   };
-  const reset = () => edit.mutate({ kind: "reset" }, { ...done("Back to the built-in role"), onSettled: () => setConfirmReset(false) });
-  const restore = (revision: LayerRevision) => edit.mutate({ kind: "restore", revision: revision.revision }, done(`Revision ${revision.revision} restored`));
+  const reset = () => void report("Back to the built-in role", edit.mutateAsync({ kind: "reset" }));
+  const restore = (revision: LayerRevision) => void report(`Revision ${revision.revision} restored`, edit.mutateAsync({ kind: "restore", revision: revision.revision }));
 
   const tabs: { value: EditorTab; label: string; icon?: typeof History }[] = [
     { value: "edit", label: readOnly ? "Text" : "Edit" },
