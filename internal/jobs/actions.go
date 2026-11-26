@@ -234,7 +234,10 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 		result, sendErr = orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: "[crowsnest nudge] " + decision.Reason, ExpectAgent: detail.AgentName})
 	}); err != nil {
 		s.finishQuietly(ctx, cl, spent.refund)
-		return false, nil
+		if errors.Is(err, errClaimLost) {
+			return false, nil // cancelled or finished meanwhile: nothing to nudge
+		}
+		return false, err
 	}
 	outcome := typedOutcome(result, sendErr)
 	if outcome == typedNo {

@@ -62,7 +62,7 @@ type Config struct {
 	// client's own CF-Connecting-IP through, so believing it would let a client pick its bucket).
 	TrustedProxyHeader string
 	TLSCert            string // path to a PEM certificate; empty means plain HTTP
-	TLSKey         string // path to the matching PEM key
+	TLSKey             string // path to the matching PEM key
 
 	// HostNames is every name the Host header may carry: loopback names, bound IPs, this
 	// machine's hostname and AllowedHosts. The host check in httpd reads it (DESIGN.md 4.3).
