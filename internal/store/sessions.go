@@ -160,3 +160,35 @@ func (s *Store) ListKV(ctx context.Context, prefix string) (map[string]string, e
 	}
 	return out, rows.Err()
 }
+
+// InstanceNameKey is the kv row holding the instance name chosen at setup or in the Account
+// sheet. --name and CROWSNEST_NAME win over it (DESIGN.md section 3).
+const InstanceNameKey = "instance.name"
+
+// InsertKVIfAbsent sets key to value only if key does not exist yet, and when it does set it,
+// writes every extra pair too, all in one transaction. It reports whether it inserted. First-run
+// setup stores the owner this way, so two racing submissions cannot both create one.
+func (s *Store) InsertKVIfAbsent(ctx context.Context, key, value string, extra map[string]string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("inserting kv %q: %w", key, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`, key, value)
+	if err != nil {
+		return false, fmt.Errorf("inserting kv %q: %w", key, err)
+	}
+	if inserted, err := result.RowsAffected(); err != nil || inserted == 0 {
+		return false, err
+	}
+	for extraKey, extraValue := range extra {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, extraKey, extraValue); err != nil {
+			return false, fmt.Errorf("inserting kv %q: writing %q: %w", key, extraKey, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("inserting kv %q: %w", key, err)
+	}
+	return true, nil
+}

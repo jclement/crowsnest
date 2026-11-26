@@ -2,7 +2,9 @@
 # Entrypoint of the crowsnest devbox image (deploy/Dockerfile, DESIGN.md section 16).
 #
 # Runs under tini as user crow, every start:
-#   1. refuses to start without credentials (or an explicit, doubly confirmed open mode);
+#   1. checks the login settings: credentials as given, or none at all, in which case crowsnest
+#      starts locked in first-run setup mode and prints a one-time setup link to `docker logs`;
+#      an open mode (no login at all) needs two explicit switches;
 #   2. on first start only, seeds a default mise config (node LTS, Claude Code) and a herdr
 #      config that skips herdr's first-run screen; an existing file is never touched;
 #   3. runs `mise install` so tools land in the /home/crow volume, waiting for it at most
@@ -36,8 +38,9 @@ log() { printf 'crowsnest-entrypoint: %s\n' "$*" >&2; }
 die() { log "$*"; exit 64; }
 
 # ---- 1. Credentials -------------------------------------------------------------------------
-# crowsnest refuses an unauthenticated start too, but this says it in container terms (which
-# env vars, which file) before anything is written to the volume.
+# Says in container terms (which env vars, which file) what is wrong before anything is written
+# to the volume. No credentials is not wrong: crowsnest then serves only its token-gated setup
+# page until someone with the link from the log chooses the login (DESIGN.md 4.14).
 check_credentials() {
   if [ "${CROWSNEST_NO_AUTH:-}" = "true" ]; then
     [ "${CROWSNEST_I_KNOW_THIS_IS_OPEN:-}" = "true" ] && {
@@ -46,8 +49,12 @@ check_credentials() {
     }
     die "CROWSNEST_NO_AUTH=true needs CROWSNEST_I_KNOW_THIS_IS_OPEN=true as well: without a login, anyone who reaches the port gets a shell. Set a username and password instead (CROWSNEST_USERNAME plus CROWSNEST_PASSWORD or CROWSNEST_PASSWORD_FILE)."
   fi
-  [ -n "${CROWSNEST_USERNAME:-}" ] ||
-    die "no credentials: set CROWSNEST_USERNAME plus CROWSNEST_PASSWORD or CROWSNEST_PASSWORD_FILE (see deploy/crowsnest.env.sample). A web terminal is a shell; it does not start open."
+  if [ -z "${CROWSNEST_USERNAME:-}" ]; then
+    [ -z "${CROWSNEST_PASSWORD:-}${CROWSNEST_PASSWORD_FILE:-}" ] ||
+      die "a password is set but CROWSNEST_USERNAME is not: set both, or neither to choose the login in the browser."
+    log "No CROWSNEST_USERNAME: crowsnest uses the login stored in its volume, or, on first start, serves only a setup page. The setup link (with a one-time token) is in this log: open it and choose a username and password."
+    return 0
+  fi
   if [ -n "${CROWSNEST_PASSWORD_FILE:-}" ]; then
     [ -r "$CROWSNEST_PASSWORD_FILE" ] ||
       die "CROWSNEST_PASSWORD_FILE=$CROWSNEST_PASSWORD_FILE is not a readable file (mount it, e.g. as a Docker secret)."

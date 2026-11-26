@@ -463,7 +463,11 @@ func TestStartupRefusals(t *testing.T) {
 		interfaces InterfaceLister
 		wantErr    string // empty means it must start
 	}{
-		{name: "no credentials and no --no-auth", wantErr: "--no-auth"},
+		// No login at all is no longer refused: serve decides between a stored owner and the
+		// locked setup mode (cmd/crowsnest/serve_setup_test.go has that table).
+		{name: "no credentials and no --no-auth starts (setup or stored owner)"},
+		{name: "no credentials on 0.0.0.0 starts (setup mode is token-gated)", args: []string{"--bind", "0.0.0.0"}},
+		{name: "no credentials with the default session still refuses", args: []string{"--session", "default"}, wantErr: "--allow-default-session"},
 		{name: "credentials start", env: creds},
 		{name: "--no-auth on localhost starts", args: []string{"--no-auth"}},
 		{name: "--no-auth on tailnet starts", args: []string{"--no-auth", "--bind", "tailnet"}},
@@ -501,7 +505,7 @@ func TestStartupRefusals(t *testing.T) {
 }
 
 func TestRefusalsAreMarked(t *testing.T) {
-	_, err := newHarness(t).serve()
+	_, err := newHarness(t, "--session", "default").serve()
 	if !errors.Is(err, ErrRefused) {
 		t.Fatalf("expected ErrRefused, got %v", err)
 	}
@@ -644,4 +648,19 @@ func TestTrustedProxyHeader(t *testing.T) {
 	}
 	_, err = newHarness(t, "--no-auth", "--trusted-proxy-header", "X-Real-IP").load()
 	assertErrorContains(t, err, "--trusted-proxy-header")
+}
+
+func TestNameExplicit(t *testing.T) {
+	if cfg := newHarness(t).mustLoad(); cfg.NameExplicit {
+		t.Fatal("the hostname default counts as explicit")
+	}
+	if cfg := newHarness(t, "--name", "devbox").mustLoad(); !cfg.NameExplicit || cfg.Name != "devbox" {
+		t.Fatalf("--name: %q explicit %v", cfg.Name, cfg.NameExplicit)
+	}
+	if cfg := newHarness(t).withEnv("CROWSNEST_NAME", "box").mustLoad(); !cfg.NameExplicit {
+		t.Fatal("CROWSNEST_NAME is not explicit")
+	}
+	if !ValidName("quark") || ValidName("no spaces") || ValidName("") {
+		t.Fatal("ValidName")
+	}
 }

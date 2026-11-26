@@ -109,6 +109,8 @@ async function readJSON(response: Response): Promise<unknown> {
 export interface Health {
   status: string;
   version: string;
+  /** True while crowsnest is locked waiting for first-run setup. */
+  setup_required?: boolean;
   update_available: boolean;
   /** Set with update_available: the newer release's tag and its GitHub page. */
   latest_version?: string;
@@ -129,12 +131,55 @@ export interface Me {
   features: Features;
 }
 
+/** GET /setup: whether first-run setup is waiting, and what the form starts with. */
+export interface SetupInfo {
+  required: boolean;
+  default_name?: string;
+  min_password_length: number;
+}
+
+export interface SetupRequest {
+  token: string;
+  username: string;
+  password: string;
+  name: string;
+}
+
+/** GET /account: the Account sheet. */
+export interface Account {
+  username: string;
+  /** "database": chosen at setup, changeable here; "config": set by flags or env, read-only; "none": --no-auth. */
+  source: "database" | "config" | "none";
+  name: string;
+  /** The name is set by --name or CROWSNEST_NAME: read-only here. */
+  name_managed: boolean;
+  min_password_length: number;
+}
+
+/** The API's answer while crowsnest is locked for first-run setup. */
+export const SETUP_REQUIRED = "SETUP_REQUIRED";
+
+/** True for the error every route but setup gives while crowsnest waits for first-run setup. */
+export function isSetupRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.code === SETUP_REQUIRED;
+}
+
 export const endpoints = {
   health: () => api<Health>("/health"),
   me: () => api<Me>("/auth/me"),
   login: (username: string, password: string) =>
     api<Me>("/auth/login", { method: "POST", body: { username, password }, skipAuthRedirect: true }),
   logout: () => api<{ signed_out: boolean }>("/auth/logout", { method: "POST" }),
+  // ---- First-run setup and the Account sheet ----
+  setupInfo: () => api<SetupInfo>("/setup"),
+  /** Completes setup; the response sets the session cookie. */
+  setup: (request: SetupRequest) =>
+    api<{ signed_in: boolean; username: string }>("/setup", { method: "POST", body: request, skipAuthRedirect: true }),
+  account: () => api<Account>("/account"),
+  /** 403 WRONG_PASSWORD when the current password is wrong; signs every other session out. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api<{ changed: boolean }>("/account/password", { method: "POST", body: { current_password: currentPassword, new_password: newPassword } }),
+  setName: (name: string) => api<{ name: string }>("/account/name", { method: "PUT", body: { name } }),
   fleet: () => api<Fleet>("/fleet"),
   agentScreen: (target: string) => api<AgentScreen>(`/agents/${encodeURIComponent(target)}/screen`),
   /** Sends keys to an agent, bound to the screen they answer: 409 CONFLICT if it changed. */
@@ -288,6 +333,7 @@ export const terminalPaths = {
 export const queryKeys = {
   health: ["health"] as const,
   me: ["me"] as const,
+  account: ["account"] as const,
   fleet: ["fleet"] as const,
   agents: ["agents"] as const,
   agent: (target: string) => ["agents", target] as const,

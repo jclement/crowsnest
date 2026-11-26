@@ -7,7 +7,11 @@ import { createRoot } from "react-dom/client";
 import { ToastProvider } from "./components/ui/Toast";
 import "./index.css";
 import { ApiError, onUnauthorized } from "./lib/api";
+import { captureSetupToken } from "./lib/setupToken";
 import { makeRouter } from "./router";
+
+// Take a setup token out of the address bar before anything renders (lib/setupToken.ts).
+captureSetupToken();
 
 const queryClient = new QueryClient({
   defaultOptions: {
