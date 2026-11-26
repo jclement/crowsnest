@@ -43,6 +43,10 @@ const (
 	// relaunchAfter is how long a queued job with a directory may sit unlaunched before the tick
 	// launches it (its launch was interrupted by a crowsnest restart).
 	relaunchAfter = 2 * time.Minute
+	// exitedGrace is how long an agent must be seen alive, after its last sign of life, before an
+	// "exited" cause nobody owns is taken back (R3-C01): long enough for a process that announced
+	// SessionEnd to actually leave its pane.
+	exitedGrace = 30 * time.Second
 	// continueText is what a retry sends after a limit or API error.
 	continueText = "continue"
 )
@@ -112,6 +116,11 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		return
 	}
 	agent, seen := s.observeAgent(ctx, r.PaneID)
+	if seen == livenessAlive && r.Stuck && Cause(r.Cause) == CauseExited {
+		if record, ok := s.agentIsBack(ctx, r, now); ok {
+			r = record
+		}
+	}
 	switch {
 	case seen == livenessUnknown:
 		// herdr could not be asked: look again next tick, change nothing (R2-C07).
@@ -136,6 +145,32 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 	default:
 		s.checkActivity(ctx, r, now)
 	}
+}
+
+// agentIsBack re-validates an exit against what herdr shows (R3-C01). Stuck/exited is written by
+// the SessionEnd hook and by a restart's claim, and the restart owns it while that claim lives. A
+// restart interrupted by a crowsnest crash leaves the cause behind with nobody owning it: the
+// stale claim is dropped, the replacement agent may be up and idle with its brief already sent,
+// and every other path (the Stop hook, the backstop, the idle check) defers to a recovery that is
+// not running. So once the agent has been seen alive for exitedGrace after the last sign of
+// life, the exit is over: the cause is cleared, and the agent is supervised like any other (an
+// idle one is nudged within the budget, then Jeff is told). It reports the row after the write.
+func (s *Service) agentIsBack(ctx context.Context, observed store.JobRecord, now time.Time) (store.JobRecord, bool) {
+	if now.Sub(observed.LastActivityAt) < exitedGrace {
+		return observed, false // the process may still be on its way out; look again next tick
+	}
+	var out store.JobRecord
+	_, err := s.mutate(ctx, FormatID(observed.ID), func(rec *store.JobRecord, c *change) error {
+		if !rec.Stuck || Cause(rec.Cause) != CauseExited || rec.PaneID != observed.PaneID || rec.LifecycleOp != "" {
+			return errSkip
+		}
+		rec.Stuck, rec.Cause, rec.CauseDetail = false, "", ""
+		c.event(EventRestart, "The agent is running, so it has not exited (a restart crowsnest lost track of, or an exit that never "+
+			"happened). It is supervised again: if it sits idle it is nudged, then you are told", nil)
+		out = *rec
+		return nil
+	})
+	return out, err == nil
 }
 
 // settleStale resolves a claim left by a dead crowsnest process (or abandoned by this one) and
