@@ -87,6 +87,7 @@ type Config struct {
 	// ---- Name, Remote Control and upkeep (upkeep.go) ----
 
 	Name             string // this instance's name: --name, else the short hostname
+	NameExplicit     bool   // Name came from --name, CROWSNEST_NAME or the config file, so it beats a stored name
 	NoRemoteControl  bool   // start the orchestrator without Remote Control
 	JobRemoteControl bool   // start job agents with Remote Control too
 	CompactAt        int    // compact the orchestrator past this many tokens; 0 off
