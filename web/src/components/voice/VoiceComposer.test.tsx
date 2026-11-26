@@ -100,7 +100,7 @@ async function holdMic(holdMs: number) {
   fireEvent.pointerUp(mic(), { button: 0, pointerId: 1 });
 }
 
-const space = (type: "keyDown" | "keyUp", target: EventTarget = document.body, init: KeyboardEventInit = {}) =>
+const space = (type: "keyDown" | "keyUp", target: Element | Window | Document = document.body, init: KeyboardEventInit = {}) =>
   fireEvent[type](target, { code: "Space", key: " ", bubbles: true, ...init });
 
 // ---- The microphone -------------------------------------------------------------------
