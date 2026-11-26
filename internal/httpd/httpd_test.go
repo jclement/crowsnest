@@ -22,7 +22,9 @@ import (
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/transcript"
 )
 
 const (
@@ -82,6 +84,9 @@ type harnessOptions struct {
 	heartbeat time.Duration
 	herdr     herdr.Client // nil: the herdr routes answer 503
 	fleet     *fleet.Cache
+	// M4: conversations and orchestrator (conversation_test.go)
+	conversations *transcript.Manager
+	orchestrator  *orch.Orchestrator
 }
 
 var testWeb = fstest.MapFS{
@@ -134,6 +139,9 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Herdr:        opts.herdr,
 		Fleet:        opts.fleet,
 		HerdrVersion: "0.9.5-test",
+
+		Conversations: opts.conversations,
+		Orchestrator:  opts.orchestrator,
 	})
 	if err != nil {
 		t.Fatal(err)

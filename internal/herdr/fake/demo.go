@@ -36,6 +36,7 @@ type Demo struct {
 	reblockAt int            // step at which the docs writer hits its next dialog; 0 = blocked now
 	busyUntil map[string]int // pane id → step at which a prompted agent goes idle again
 	panes     map[string]string
+	scribe    *scribe // writes Claude-shaped transcripts; nil until EnableTranscripts
 }
 
 // NewDemo builds the demo fleet.
@@ -187,6 +188,10 @@ func (d *Demo) scheduleReblock(steps int) {
 
 // startTurn is the demo's PromptHook: a prompted agent works for two steps, then goes idle.
 func (d *Demo) startTurn(_ *Fake, paneID, text string) {
+	if d.scribe != nil && paneID == d.panes[DemoOrchestrator] {
+		d.orchestratorTurn(paneID, text)
+		return
+	}
 	d.working(paneID, "Working on: "+firstLine(text), 0)
 	d.mu.Lock()
 	d.busyUntil[paneID] = d.step + 2

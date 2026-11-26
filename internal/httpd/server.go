@@ -22,6 +22,8 @@ import (
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/transcript"
 )
 
 const (
@@ -52,6 +54,11 @@ type Deps struct {
 	Herdr        herdr.Client
 	Fleet        *fleet.Cache
 	HerdrVersion string // reported by /auth/me
+
+	// Conversations serves /agents/{target}/messages and Orchestrator the /orchestrator routes
+	// (M4). Either may be nil; their routes then answer 503.
+	Conversations *transcript.Manager
+	Orchestrator  *orch.Orchestrator
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -101,6 +108,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/v1/fleet", s.requireAuth(http.HandlerFunc(s.handleFleet)))
 	mux.Handle("GET /api/v1/agents/{target}/screen", s.requireAuth(http.HandlerFunc(s.handleScreen)))
 	mux.Handle("POST /api/v1/agents/{target}/keys", s.requireAuth(http.HandlerFunc(s.handleKeys)))
+	s.registerConversationRoutes(mux)
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 	mux.Handle("/", s.spaHandler())
 	return mux

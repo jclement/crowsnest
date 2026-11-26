@@ -1,7 +1,8 @@
 // `crowsnest serve`: load and check the config, open the database, connect to (or start) the herdr
 // session, keep the fleet cache running, and run the HTTP server until SIGINT or SIGTERM. With
-// --demo the herdr session is the in-memory fake with its scripted demo fleet. The orchestrator,
-// questions and talk mode join here in later milestones.
+// --demo the herdr session is the in-memory fake with its scripted demo fleet. The orchestrator
+// and the conversation tailer start here too (orchestrator.go); questions and talk mode join in
+// later milestones.
 
 package main
 
@@ -82,10 +83,12 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	fleetCache := fleet.New(fleet.Options{Client: client, Hub: events, Session: cfg.Session, Logger: logger})
 	go fleetCache.Run(ctx)
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, events, logger)
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
+		Orchestrator: orchestrator, Conversations: conversations,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
@@ -103,6 +106,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 func connectHerdr(ctx context.Context, cfg config.Config, logger *slog.Logger) (herdr.Client, string, error) {
 	if cfg.Demo {
 		demo := fake.NewDemo()
+		if err := demo.EnableTranscripts(claudeConfigDir(cfg), 0); err != nil {
+			return nil, "", fmt.Errorf("writing the demo transcripts: %w", err)
+		}
 		go demo.Run(ctx, fake.DefaultDemoStep)
 		logger.Info("demo mode: using the in-memory herdr with a scripted fleet", "herdr_version", fake.Version)
 		return demo, fake.Version, nil
