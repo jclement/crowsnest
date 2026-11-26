@@ -1,8 +1,9 @@
 // The Inbox against `crowsnest --demo`: the list (blocking question, the demo's terminal dialog,
 // every other kind) and a question sheet with a mermaid diagram and a diff, at phone and desktop
 // sizes in both themes; then a real answer round trip through the API. Also checks the 375 px
-// rules: no sideways scroll, 44 px targets. Run with `mise run screenshots:inbox`.
-import { expect, test, type Page } from "@playwright/test";
+// rules: no sideways scroll, 44 px targets. Run with `mise run screenshots:inbox` (each test gets its own demo instance).
+import { type Page } from "@playwright/test";
+import { expect, test } from "../support/fixtures";
 
 const themes = ["light", "dark"] as const;
 const sizes = [

@@ -1,8 +1,9 @@
 // The Chat view against `crowsnest --demo`, photographed at phone and desktop sizes in both
 // themes, after a real prompt round trip through the scripted demo orchestrator (send, "working",
 // the reply arriving over SSE). Also checks the 375 px rules: no sideways scroll, 44 px targets.
-// Run with `mise run screenshots:chat`.
-import { expect, test, type Page } from "@playwright/test";
+// Run with `mise run screenshots:chat` (each test gets its own demo instance).
+import { type Page } from "@playwright/test";
+import { expect, test } from "../support/fixtures";
 
 const themes = ["light", "dark"] as const;
 const sizes = [

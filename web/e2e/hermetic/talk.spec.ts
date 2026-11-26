@@ -3,10 +3,42 @@
 // and sent to the orchestrator under the voice header; the demo orchestrator answers with a
 // SAY line, which the server turns into a `say` event; the browser fetches /voice/tts for it and
 // plays it through the speech <audio> element. Also photographs Chat with talk mode on at 375
-// and 1440 px. Run with `mise run e2e:voice`.
-import { expect, test, type Page } from "@playwright/test";
+// and 1440 px. Part of `mise run e2e` (desktop Chromium only: the fake microphone is a Chromium
+// switch); `mise run e2e:voice` runs it alone.
+//
+// Each test starts its own fake ElevenLabs on a free port and a demo instance pointed at it, so
+// no real ElevenLabs call is ever made.
+import { spawn, type ChildProcess } from "node:child_process";
+import type { Page } from "@playwright/test";
+import { expect, test as base } from "../support/fixtures";
+import { freePort } from "../support/instance";
 
-const FAKE_URL = `http://127.0.0.1:${process.env.FAKE_ELEVENLABS_PORT ?? 27699}`;
+/** The fake's key: not a secret, it only opens the fake. */
+const FAKE_KEY = "sk_fake_e2e_key";
+
+const test = base.extend<{ fakeURL: string }>({
+  fakeURL: async ({}, use) => {
+    const port = await freePort();
+    const child: ChildProcess = spawn(process.execPath, ["e2e/support/fake-elevenlabs.mjs"], {
+      env: { ...process.env, FAKE_ELEVENLABS_PORT: String(port), FAKE_ELEVENLABS_KEY: FAKE_KEY },
+      stdio: "ignore",
+    });
+    const url = `http://127.0.0.1:${port}`;
+    for (let i = 0; i < 100; i++) {
+      if (await fetch(`${url}/health`).then((r) => r.ok, () => false)) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await use(url);
+    child.kill();
+  },
+  appOptions: async ({ fakeURL }, use) => use({ demo: true, env: { ELEVENLABS_API_KEY: FAKE_KEY, CROWSNEST_ELEVENLABS_URL: fakeURL } }),
+});
+
+test.use({
+  permissions: ["microphone"],
+  launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=user-gesture-required"] },
+});
+test.skip(({ browserName, isMobile }) => browserName !== "chromium" || isMobile, "the fake microphone is a desktop Chromium switch");
 
 interface FakeRequest {
   method: string;
@@ -19,8 +51,8 @@ interface FakeRequest {
   json?: { text?: string; model_id?: string } | null;
 }
 
-async function fakeRequests(page: Page): Promise<FakeRequest[]> {
-  const response = await page.request.get(`${FAKE_URL}/__requests`);
+async function fakeRequests(page: Page, fakeURL: string): Promise<FakeRequest[]> {
+  const response = await page.request.get(`${fakeURL}/__requests`);
   return (await response.json()) as FakeRequest[];
 }
 
@@ -43,7 +75,7 @@ async function holdToTalk(page: Page, ms: number) {
   await page.mouse.up();
 }
 
-test("hold to talk → transcribed → sent → SAY reply fetched from /voice/tts and played", async ({ page }) => {
+test("hold to talk → transcribed → sent → SAY reply fetched from /voice/tts and played", async ({ page, fakeURL }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openChat(page);
   const me = await (await page.request.get("/api/v1/auth/me")).json();
@@ -90,7 +122,7 @@ test("hold to talk → transcribed → sent → SAY reply fetched from /voice/tt
     .toEqual({ played: true, error: 0 });
 
   // Upstream: the key was sent on every call, the recording went as webm, the TTS text is the SAY sentence.
-  const upstream = await fakeRequests(page);
+  const upstream = await fakeRequests(page, fakeURL);
   expect(upstream.length).toBeGreaterThanOrEqual(2);
   expect(upstream.every((request) => request.keyOk)).toBe(true);
   const sttCall = upstream.find((request) => request.path === "/v1/speech-to-text");
@@ -100,7 +132,7 @@ test("hold to talk → transcribed → sent → SAY reply fetched from /voice/tt
   expect(ttsCall?.json?.text).toBe(await caption.textContent());
 
   // The key never reached the browser: not in /auth/me, not in any page the test can read.
-  expect(JSON.stringify(me)).not.toContain("sk_fake_e2e_key");
+  expect(JSON.stringify(me)).not.toContain(FAKE_KEY);
 });
 
 test("the browser cannot make crowsnest speak arbitrary text", async ({ page }) => {

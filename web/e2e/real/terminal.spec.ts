@@ -15,7 +15,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { scrubbedEnv, startInstance, type Instance } from "./instance";
+import { scrubbedEnv, startInstance, type Instance } from "../support/instance";
 
 /** The visible text of the terminal's rows (xterm's DOM renderer draws one div per row). */
 async function terminalText(page: Page): Promise<string> {

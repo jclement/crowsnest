@@ -1,12 +1,13 @@
 // The Jobs view against `crowsnest --demo`: the board (needs-you and stuck first, then running,
 // then finished today), the new-job form open, and a job's detail (one running, one stuck on a
 // limit with its retry countdown) at phone and desktop sizes; plus the 375 px rules (no sideways
-// scroll, 44 px targets). Run with `mise run screenshots:jobs`.
+// scroll, 44 px targets). Run with `mise run screenshots:jobs` (each test gets its own demo instance).
 //
 // Demo job ids, in seed order: j_1 running (worktree), j_2 nudged, j_3 stuck on a limit, j_4
 // needs you (a question), j_5 needs you (a dialog), j_6 unresponsive, j_7 blocked, j_8 done,
 // j_9 failed (older), j_10 queued for the orchestrator.
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "../support/fixtures";
 
 const sizes = [
   { name: "375x812", width: 375, height: 812 },
