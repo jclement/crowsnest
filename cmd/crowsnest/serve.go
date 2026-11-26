@@ -44,6 +44,18 @@ func newServeCommand() *cobra.Command {
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {
+	restored, err := restoreHandedOverSecrets()
+	if err != nil {
+		return err
+	}
+	// The re-executed process (restored) never re-executes again. A failed re-exec is not
+	// fatal: the secrets stay in this process's initial environment, as they did before the
+	// re-exec existed, and children still never inherit them (UnsetSecretEnv).
+	if !restored {
+		if err := reexecWithoutSecrets(); err != nil {
+			fmt.Fprintln(cmd.ErrOrStderr(), "crowsnest: could not drop secrets from its own environment:", err)
+		}
+	}
 	cfg, err := config.LoadForServe(cmd.Flags(), config.Options{})
 	config.UnsetSecretEnv() // loaded or refused, nothing after this needs them (R1 H1)
 	if err != nil {
