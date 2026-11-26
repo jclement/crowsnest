@@ -1376,7 +1376,8 @@ The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identif
 | `crowsnest say "sentence"` | Speak now in talk mode (progress lines); no-op when off |
 | `crowsnest job update|done|fail|get|create|list` | The job protocol of section 6.2 for agents without MCP (Codex) and for scripts. The job is `CROWSNEST_JOB` unless `--job` is given; `done --attach file` attaches files to the result (8.6) |
 | `crowsnest hook <event> [--job j_<n>] [--socket PATH] [--token-file PATH]` | Claude Code hook entry point (section 6.3): stdin JSON to the server with a 5 s timeout, the server's decision to stdout; silent success when the server is unreachable, slow, or anything else fails |
-| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done`, `fail`, `job_create`, `job_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
+| `crowsnest project list\|get <slug>` | The projects with their leads and job counts, or one project with its defaults and live jobs (21.2): what the orchestrator reads before handing a project work |
+| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done`, `fail`, `job_create` (with `project` and `to` for the orchestrator, 21.2), `job_get`, `project_list`, `project_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
 
 ## 10. HTTP API
 
@@ -1408,6 +1409,10 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, isolate?}`; `budget?` with M12) → `201` and the queued job; detail with `timeline` and `questions` (6.8) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
+| `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}[?open=1]`, `PUT /projects/{ref}` | Projects (21.1): `{projects: [Project + {lead, counts: {needs_you, running, total}}], unfiled: counts}`; create `{name, dir, slug?, description?, default_role?, default_engine?, default_model?, default_isolate?: -1\|0\|1, permission_mode?, lead_start?}` (`400` with the reason: not a directory, too wide, overlapping); `{ref}` is the id or slug; `?open=1` applies `lead_start=open`; `PUT` edits or `{archived}` (archiving stops the lead). A `project` event `{id, change}` |
+| `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | Project leads (21.2): the running leads' statuses (the orchestrator's status shape plus `project_id`, `slug`, `running`; state `off` when not running, `stopped` after Stop); the lead's controls (`poke` answers as `POST /orchestrator/poke`). A `lead` event carries a lead's status |
+| `POST /jobs/{id}/restart-agent` | Restart the job's agent on the same conversation with its start-up files and instruction layers written afresh (21.3); refused for a job a standing agent holds (restart that agent) |
+| `GET /voice/agents`, `PUT /voice/agents/{agent}` | Each standing agent's voice (13.5): `{agents: [{agent, label, voice_id}], default_voice}`; `{voice_id}` (`""`: the instance's). 404 when talk mode is off |
 | `GET /instructions` | Instruction layers (21.3): `{global: Layer, roles: [Layer], projects: [Layer], max_bytes}`; a `Layer` is `{scope, key, name, source: none\|builtin\|db\|file, effective_md, saved_md, builtin_md, file_path, editable, revision, updated_at, size}` |
 | `GET /instructions/{scope}/{key}`, `PUT` the same `{body_md}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` `{revision}` | One layer with its revisions `{layer: Layer, revisions: [{revision, body_md, deleted, created_at, size}]}` (newest first), which every write also answers. Key `-` is the global layer. `400` bad scope, key, body (over 32 KB, an empty role), `404` unknown role, project or revision, `409` a role that comes from a file. An `instructions` event (`{at}`) says a layer changed |
 | `GET /agents-instructions/{subject}` | `{subject, started_at, hash, layers: [{layer, scope, key, revision, source, size, hash}], changed, changes: [{layer, scope, key, was_source, now_source, was_revision, now_revision}], loaded: [{path, memory_type, load_reason, size, at}], skills_note}` for `j_<n>`, `orchestrator` or `lead:<slug>` (21.3) |
@@ -1424,7 +1429,7 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `POST /voice/read` `{question_id}` → `{text_id}`; `POST /voice/reply` `{target, message_id}` → `{text_id, text}` | A question, or a reply's SAY line, made speakable (13.1, 13.2). 404 when disabled |
 | `GET`/`PUT /voice/settings`, `GET /voice/voices`, `POST /voice/preview` `{voice_id, speed, model}` → `{text_id, playback_rate}` | Voice, speed and model of spoken replies, the account's voices, and a preview (13.3). 404 when disabled |
-| `POST /attachments` (raw body + `X-Filename`, or multipart `file`) → `201` the pending attachment; `GET /attachments/{id}` (the bytes), `/thumb`, `/meta`; `GET /attachments?owner=job:j_3[&role=]` or `?answer=q_7`; `DELETE /attachments/{id}` (pending only) | Attachments (8.6). `POST /agents/{target}/prompt`, `POST /jobs`, `POST /jobs/{id}/message` and `POST /questions/{id}/answer` take `attachments: [ids]`; questions carry `attachments` and `answer_attachments`; `/auth/me` reports `features.attachments` `{max_bytes, max_files}`; an `attachment` event `{owner}` says an owner's files changed |
+| `POST /attachments` (raw body + `X-Filename`, or multipart `file`) → `201` the pending attachment; `GET /attachments/{id}` (the bytes), `/thumb`, `/meta`; `GET /attachments?owner=job:j_3[&role=]` or `?answer=q_7`; `DELETE /attachments/{id}` (pending only) | Attachments (8.6). `POST /agents/{target}/prompt`, `POST /jobs` (which also takes `project_id` and `to`, 21.1), `POST /jobs/{id}/message` and `POST /questions/{id}/answer` take `attachments: [ids]`; questions carry `attachments` and `answer_attachments`; `/auth/me` reports `features.attachments` `{max_bytes, max_files}`; an `attachment` event `{owner}` says an owner's files changed |
 | `GET /push/key`, `GET`/`PUT /push/settings`, `POST`/`DELETE /push/subscriptions`, `DELETE /push/subscriptions/{id}`, `POST /push/test` | Web Push (8.5) |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
 
@@ -1508,7 +1513,8 @@ The client sends a resize first; the server starts the process on that first res
 - `instruction_layers(scope, key, body_md, revision, updated_at)` and `instruction_revisions(id, scope, key, revision, body_md, deleted, created_at)` (migration `0012_projects.sql`, 21.3): the human's text per layer, scope `global` (key `''`), `role` (the role name) or `project` (the project id in decimal); a row exists only while the text is in effect, and a reset or clear is a revision with `deleted = 1`. The newest 20 revisions per layer are kept
 - `agent_layers(subject, started_at, hash, layers_json)` (0012, 21.3): what an agent was last started with, replaced at every start: the manifest of its layers (scope, key, revision, source, size, sha256) and the sha256 of the composed text; `subject` is `j_<n>`, `orchestrator` or `lead:<slug>`
 - `agent_instructions(id, subject, session_id, at, path, memory_type, load_reason, size)` (0012, 21.3): the instruction files Claude reported loading (the `InstructionsLoaded` hook), paths and a stat's size only, at most 200 rows per subject
-- `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
+- `projects(id, slug, name, dir, root_dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, archived_at, created_at, updated_at)` (migration `0012_projects.sql`, 21.1): archived, never deleted; a partial unique index keeps two live projects off one root; `jobs.project_id` (0 Unfiled) with an index on `(project_id, state)`
+- `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
 Paths are XDG: config `~/.config/crowsnest`, data `~/.local/share/crowsnest`, state and logs `~/.local/state/crowsnest/<session>/`, agent socket in `$XDG_RUNTIME_DIR/crowsnest/` or the state dir.
@@ -1840,6 +1846,28 @@ at speed 1.5 (API 1.2) 35 KB; the quality model first byte 0.62 s. The key appea
 and no log line. The key cannot list models (`GET /v1/models` answered 401, missing permission
 `models_read`), so the model ids are the reference's, confirmed only by those calls succeeding.
 
+**13.5 Every standing agent speaks, one at a time (wip/projects, 2026-11-26).** Jeff: "we need
+to queue up responses so two leads can't talk at once, but I think it's a per-agent voice
+opt-in and I'd tell them apart by their voice."
+
+- **Server**: every `say` event carries `agent` (`orchestrator`, `lead-<slug>`; `""` for a job
+  agent's `say` tool). A reply watcher runs per lead as for the orchestrator (`leadReplies` in
+  `cmd/crowsnest/orchestrator.go`), so a lead's SAY line becomes a `say` event too. A text keeps
+  the agent it came from (`Texts.AddFor`; the same sentence from two agents is two texts), and
+  `Speech` speaks it in that agent's voice when one is set: `kv` `voice.agents`
+  (`{"lead-alpha": "<voice id>"}`), `GET /voice/agents` (every standing agent with its voice and
+  the instance's default) and `PUT /voice/agents/{agent}` (`{voice_id}`, `""` back to the
+  instance's). The cache variant includes the voice, so a change never replays the old one.
+  `POST /voice/reply` (the play button) speaks any agent's reply in that agent's voice. Agents
+  are told apart **by voice**, never by a spoken name prefix.
+- **Browser** (section 12): speaking is a **per-agent opt-in**, off by default and remembered per
+  browser, switched in that agent's Chat header and in the Voice sheet's list of agents; the
+  header's speak toggle stays the master mute for the browser. All spoken lines go through **one
+  playback queue per browser**: first come first served, never two at once, a now-playing strip
+  names the agent with Skip and Stop, and a line older than about two minutes when its turn comes
+  is dropped rather than spoken late. The microphone talks to whichever standing agent Chat
+  targets.
+
 ## 14. Project layout
 
 ```
@@ -1855,6 +1883,8 @@ internal/jobs/               job service, launcher, supervisor (hooks, dispositi
 internal/agentcfg/           the --settings (hooks, allow rule) and --mcp-config files every Claude agent gets
 internal/orch/               lifecycle, send, poke precheck and gate, poker, herdr-side backstop
 internal/journal/            journal entries (pokes, skips, sends, answers, restarts, alerts)
+internal/projects/           projects: records, directory rules, the lead manager (21)
+internal/instructions/       instruction layers: layering, revisions, what agents loaded (21.3)
 internal/schedule/           scheduled tasks, files and app schedules: parse, due rules, stamps, targets, run history, job tasks (7.8)
 internal/transcript/         locate, tail, normalise Claude JSONL; usage records for spend
 internal/spend/              spend: price table, the meter over transcripts, summaries and reports (7.11)
@@ -2154,6 +2184,26 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
     re-made in a click, so on a clash the file runs and the row is shown shadowed, never both
     (a double run costs a turn or a job). A poke-type schedule's body is materialised as a file
     because the poke line's contract is "read this file", and agents already read files.
+69. **One lifecycle for every standing agent, not a copy** (21.2). The orchestrator's start-up,
+    recovery, Remote Control, poker and gate were hard-won (M4, R1, R2); a lead that forked them
+    would drift. Naming the agent, its workspace, its kv keys and its instructions as options,
+    with the orchestrator's values as the defaults, kept the orchestrator's tests unchanged and
+    gave leads every fix for free.
+70. **A project's directory is recorded resolved and never overlaps another's** (21.1). A job's
+    directory must name at most one project, and the delegation boundary must be crowsnest's
+    record, not something an agent can move (decision 47); `$HOME` and its ancestors are refused
+    because they would claim everything.
+71. **Crowsnest never edits the user's instruction files** (21.3). `AGENTS.md`, `CLAUDE.md`,
+    skills and the claude-agent repository have their own lifecycle (review, publishing, other
+    machines); crowsnest adds its own layers through the prompt file it already writes, and shows
+    the user's files by path only.
+72. **Leads hear their own project; the orchestrator hears everything** (21.2). The front door
+    keeps every reason it had; a lead's poker carries only its project's jobs, questions and
+    tasks, so a lead never spends a turn on another project's news.
+73. **Spoken replies are opted into per agent, told apart by voice, and queued** (13.5, Jeff's
+    words). A name prefix costs a second of every line and is noise once voices differ; a queue
+    in the browser (the only place that plays audio) is the one place overlap can be prevented;
+    a stale line is worse than none.
 
 ## 18. Milestones
 
@@ -2272,8 +2322,113 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
     or worries about jobs it did not start. It costs a turn each time.
   - The Jobs form has no model field; a job from the browser runs on Claude's default model
     (the API takes `model`). `e2e:claude` adds `haiku` to the browser's request.
+- **Projects and leads (21)**: a lead's own conversation is not metered for spend (jobs it holds
+  count on its conversation, which is not read). A lead has no compaction or daily new
+  conversation of crowsnest's (Claude's own auto-compact applies). Leads' pokers carry only their
+  project's jobs and tasks; there is no timer poke for a lead. Task files are not read from inside
+  project repositories. Archiving a project stops its lead but leaves its running jobs alone. A
+  `Run now` of a lead's poke task waits for that lead's next check (2 s), not an immediate kick.
+  Chat with a lead sends attachments to the lead's pane inbox (`<state>/panes/<pane>/
+  attachments`), which has no Read allow rule, so under `default` permission mode the lead asks
+  before reading a pasted file. The InstructionsLoaded hook was seen (Claude Code 2.1.332) to
+  report the project's `CLAUDE.md` at session start; whether it reports the user's
+  `~/.claude/CLAUDE.md` too was not seen in the two runs made (only the project file appeared).
+  Skills and slash commands available to an agent are not listed: no hook input or start-up
+  record carries them cheaply.
 
 ## 21. Projects, leads, instruction layers and app schedules
+
+Built on `wip/projects` (2026-11-26). Jeff asked "should we add first class scheduled jobs, per
+project agents, skill/command/AGENTS.md management / override?" and approved the proposal in
+full; later the same night he decided that Remote Control, scheduled tasks and voice are
+capabilities of **any standing agent** (the orchestrator and every project's lead), not the
+orchestrator's alone: "Let's keep both for now. Voice, we need to queue up responses so two
+leads can't talk at once, but I think it's a per-agent voice opt-in and I'd tell them apart by
+their voice." It fits his own way of working: one long-lived lead per project in that
+project's main checkout, workers in worktrees under it, and a front door above all the leads.
+
+### 21.1 Projects
+
+(`internal/projects/projects.go`, `internal/store/projects.go`, migration `0012_projects.sql`,
+`internal/httpd/projects.go`, `internal/jobs/projects.go`.)
+
+- **The record**: name, short name (`slug`, `[a-z0-9-]`, 1 to 32, from the name; it names the
+  lead agent, so it never changes), directory, description, defaults (role, engine, model,
+  isolate, permission mode for the lead), the lead's start policy (`lead_start`: `manual`,
+  `open`: when the project is opened in the app or given a job, `job`: when it is given a job for
+  its lead), archived. **Archived, never deleted**: a job's `project_id` always names a row; an
+  archived project claims no jobs, takes none, and its lead is stopped.
+- **The directory** is checked like a job's (absolute, `~` expanded, an existing directory) and
+  stored twice: as given (`dir`, what the human sees and the lead runs in) and resolved
+  (`root_dir`, what jobs are matched against, recorded once, never recomputed, as R3-H1's
+  roots). `/`, `$HOME` and any ancestor of `$HOME` are refused (they would claim every job).
+  **Two live projects never overlap**: a root inside another live project's root, or holding
+  one, is refused (a unique index backs the equal case), so a directory names at most one
+  project.
+- **Jobs** gain `project_id` (0 is "Unfiled"; existing jobs stay Unfiled). A job given with a
+  directory inside a project's root joins it by itself. Given "to the project" (`project_id`):
+  with no directory (`to: "lead"`, the default then) its lead holds it; `to: "job"` launches a
+  job agent in the project's directory (or a directory inside it; one outside is refused). The
+  project's defaults fill what the human left unset (a job for the lead keeps the lead's own
+  model, since it is typed into the lead's conversation). A child job stays in its parent's
+  project. The orchestrator may hand a job to a project (`job_create(project=…)`), validated as
+  the human's; a job agent or a lead cannot choose another project.
+- **Counts** for the board's switcher: per project, needs-you (needs you, or stuck) and running
+  (running, blocked, in review, queued and not stuck), plus Unfiled's.
+- **Opening a project** in the app asks `GET /projects/{ref}?open=1`, which applies
+  `lead_start=open`; a refetch without `open=1` never starts anything.
+
+### 21.2 Project leads: one lifecycle for every standing agent
+
+(`internal/orch` generalised, `internal/projects/leads.go`, `cmd/crowsnest/projects.go`.)
+
+- **A standing agent** is the orchestrator or a project's lead. `orch.Orchestrator` keeps either:
+  `Options.AgentName` (`lead-<slug>`), `Workspace` (`lead <slug>`), `KVPrefix` (`lead.<slug>`: its
+  session id and pane survive a restart under their own keys) and `Render` (its instructions file)
+  default to the orchestrator's values, so the orchestrator's code path and its tests are
+  unchanged (`orch_test.go` passes untouched); `standing_test.go` runs the same scenarios (create
+  and start, adopt, resume, restart and new conversation) for both kinds and proves the two never
+  share a pane, a name or a kv key. The lifecycle gained `Stop` (state `stopped`: the watch leaves
+  it alone until a start) and `Pane()` (the pane it is being launched in, so hooks that fire
+  during a launch, SessionStart and InstructionsLoaded, are matched to the lead; found by the
+  real-Claude test, where they were filed as the orchestrator's).
+- **What a lead gets**, exactly as the orchestrator: the same `CROWSNEST.md` template (one file;
+  with a project it says "you are the lead of project X", names the directory, the description,
+  and that work happens inside the project's directory), the hooks, the MCP tools and allow rule,
+  the SAY contract, compaction by Claude itself, recovery (`--resume` within 3 restarts an hour),
+  and **Remote Control named `"<instance> <project name>"`**, on by default (off with
+  `--no-remote-control` and under `--demo`). Its model is `--model` (a standing agent, like the
+  orchestrator); its permission mode the project's, else `--permission-mode`. Its files live in
+  `<state>/leads/<slug>/`. The human's instruction layers (21.3) follow the template: global and
+  the project's.
+- **Its poker** (`orch.Poker` with `StateKey: lead.<slug>.poke.state`, `Label`, and
+  `NoAgentReasons`): the lead hears about its own project's jobs settling or getting stuck (not
+  ones it holds), questions those jobs asked being settled, and its project's scheduled tasks
+  (21.4); "another agent settled" reasons stay the orchestrator's, the front door. The gate is the
+  orchestrator's: idle, empty input box, no dialog. "Poke now" per lead. The orchestrator is still
+  poked for every job, project jobs included, as before.
+- **Taking jobs**: `jobs.Service.DispatchStanding` gives each standing agent the oldest queued
+  job waiting for it (the orchestrator Unfiled ones, a lead its project's), one at a time, with
+  the R2 reservation and claim (`dispatchTo` is the old orchestrator dispatch with the agent as a
+  parameter). `IsStanding(name)` replaces "is it the orchestrator" wherever a job held in a
+  standing agent's conversation is treated differently (hooks' session tracking, restarts,
+  spend, Resume).
+- **Delegation from a lead** (6.10's rules): its children run inside the project's recorded root
+  without asking (a child with no directory gets the project's); anything wider (another
+  directory, another engine) is a blocking question to the human, as for any agent. Its origin
+  is its agent name, so its own live jobs are capped per lead (`MaxChildren`).
+- **Which leads run**: Start lead / Stop lead in the app, the start policy, and at boot every lead
+  whose kv flag `lead.<slug>.running` survived (it adopts a live Claude: herdr and its agents
+  outlive crowsnest). Stop clears the flag, so a stopped lead stays stopped.
+- **The front door**: the orchestrator lists projects and leads (`project_list`, `project_get`,
+  `crowsnest project list|get`) and hands work to a project. With `--no-orchestrator` everything
+  works with leads alone (the real-Claude lead test runs that way).
+- **Standing context** (7.9) is re-sent to a lead at every SessionStart too: its open questions
+  and the live jobs it holds or created (no hand-over file: leads have no daily new
+  conversation).
+- **Spend**: jobs a lead holds are counted on the lead's conversation, as the orchestrator's are;
+  the lead's own conversation is **not metered** in this round (the meter reads the orchestrator
+  and jobs only).
 
 ### 21.3 Instruction layers
 
@@ -2349,3 +2504,40 @@ size, and never served: their text is theirs and never leaves the machine throug
 **Skills and slash commands are not listed.** No hook input carries them (SessionStart has no such
 field) and Claude Code has no cheap way to ask; `GET /agents-instructions/{subject}` says so in
 `skills_note`.
+
+### 21.4 Schedules in the app
+
+Section 7.8 has the detail. In short: schedules can be made and edited in the app beside task
+files (`schedules` table); a schedule's target is the orchestrator (a poke), a project's lead (a
+poke to that lead, under the same due rules, stamps and gate), or a job; task files take an
+optional `project:` key (a slug) to target that project's lead. File and app schedules share one
+name space and **the file wins** (the app row is flagged and never run). Every run is recorded
+(`schedule_runs`, the newest 20 per task). Task files are not read from inside project
+repositories in this round.
+
+### 21.5 Demo
+
+`--demo` seeds three projects in throwaway directories under its state directory: Crowsnest
+(`lead_start=job`) and Website (`lead_start=open`), whose leads run on the fake herdr and answer
+prompts with the demo orchestrator's canned replies, and Infra (lead off). The demo's jobs are
+filed under them by directory; two app schedules (`evening-review` to the Crowsnest lead,
+`link-check` a job for Website); and edited instruction layers (global, the builder role, the
+Crowsnest project).
+
+### 21.6 Tests
+
+`internal/store` (migration, uniqueness, archive, revisions and pruning, agent records,
+schedules and runs), `internal/projects` (validation, `$HOME` and overlap refusals, links,
+`ForDir`, archive, the lead manager: start, adopt on resume, stop, policies), `internal/orch`
+(`standing_test.go`: the lifecycle table for both kinds, coexistence, the lead's instructions,
+a lead's poker delivering its scheduled task only when idle with an empty box), `internal/jobs`
+(`projects_test.go`: joining, defaults, lead vs job, dispatch to a lead and not to the
+orchestrator, a lead's delegation confined to its root, restart with new instructions),
+`internal/httpd` (project and lead routes: authz, CSRF, validation, lead actions, archive),
+`internal/agentapi` (project routes), `internal/voice` (per-agent voices), the instruction and
+schedule packages (21.3, 7.8), and the real-Claude lead test (`cmd/crowsnest/
+lead_integration_test.go`, in `mise run test:claude`): the built binary with `--no-orchestrator`
+on a throwaway session; the lead answers with a SAY line, knows a codeword only its project
+layer gives, holds and finishes a job given to the project through the MCP tools, reports Remote
+Control active, and has the repository's `CLAUDE.md` recorded by InstructionsLoaded. Vitest and
+Playwright cover the views (section 12).

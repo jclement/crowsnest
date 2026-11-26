@@ -379,6 +379,7 @@ withdraw questions. Without `CROWSNEST_SOCKET`, or with no server answering, the
 | `crowsnest notify "text" [--urgency low\|normal\|blocking]` | A notice (no answer needed); the first line is its title. Prints the id |
 | `crowsnest say "sentence"` | Speak one sentence in every browser with speak mode on; a no-op without an ElevenLabs key. Only an agent crowsnest started (with its `CROWSNEST_TOKEN`) may speak |
 | `crowsnest mcp` | A stdio MCP server exposing `ask`, `get_question`, `say`, `job_update`, `done`, `fail`, `job_create` and `job_get`, proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes. `ask` with `wait=true` returns the whole answer and note; `ask` with `job_id` (the orchestrator, for the job it holds) files the question under that job, and the socket refuses a job the caller does not hold |
+| `crowsnest project list`, `crowsnest project get <slug>` | The projects with their leads and job counts; one project with its defaults and live jobs |
 | `crowsnest job update "doing now" [--state blocked --reason "…"] [--waiting]` | The job protocol for agents without MCP (Codex) and scripts: a heartbeat with a progress line; `--state blocked` with a reason, or `running`; `--waiting` declares that nothing is left the open questions do not block (refused with no open question). The job is `--job j_<n>` or `CROWSNEST_JOB` |
 | `crowsnest job done --result "…" --verified "…" --not-verified "…" [--attach file]` | The job is finished, with evidence (repeat the list flags; `none` for an empty list; `--result-file` reads the result; `--attach`, repeatable, attaches a file from your working or job directory to the result) |
 | `crowsnest job fail "reason"` | It cannot be finished |
@@ -417,6 +418,27 @@ Each change is a revision (the newest 20 kept, any one restorable). Crowsnest ne
 `AGENTS.md`, `CLAUDE.md` or skills; it records which of those files Claude loaded (the
 `InstructionsLoaded` hook) by path only, and tells you when an agent's layers changed after it
 started (DESIGN.md 21.3).
+
+## Projects and leads
+
+A project is a repository's main checkout: a name, its directory, defaults for the jobs given in
+it (role, engine, model, worktree or not), its own instruction layer, and optionally a **lead**:
+a long-lived Claude agent in that checkout, kept exactly as the orchestrator is (same hooks, MCP
+tools, SAY line, recovery), with Remote Control named `<instance> <project>`. Make them in the
+**Projects** view ("New project" picks from directories you have used); archive, never delete.
+
+- A job given **to the project** with no directory goes to its lead, which plans it and may
+  delegate child jobs inside the project's directory (anything wider asks you first). Given
+  **as a job**, or with a directory inside the project, a job agent runs it directly, as before.
+  A job whose directory is inside a project joins it by itself; others are "Unfiled".
+- The lead starts when you press **Start lead**, or by itself when the project is opened or
+  given a job (the project's "lead starts" setting), and comes back after a crowsnest restart
+  until you stop it.
+- The orchestrator stays the front door: it sees every project (`project_list`, `project_get`,
+  `crowsnest project list|get`) and can hand one work. `--no-orchestrator` works with leads alone.
+- The Jobs board filters by project (remembered per browser); Chat can talk to the orchestrator
+  or any lead (`/chat?target=lead-<slug>`); each standing agent can speak in its own voice,
+  opted into per agent, with spoken replies queued so two never overlap.
 
 ## Scheduled work
 
@@ -642,6 +664,10 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /jobs/{id}` | session | The job with its `timeline` (state changes, progress, nudges, hooks, questions, restarts, retries, messages), `questions`, `spend` and `spend_turns` (its latest model calls, oldest first: `{at, model, tokens, output, cost_usd}`) |
 | `POST /jobs/{id}/message` | session | `{text, force_over_draft, attachments}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
 | `POST /jobs/{id}/cancel`, `/nudge`, `/resume` | session | Cancel (Esc to the agent, then `cancelled`; the pane stays), nudge by hand, or resume a stuck job (retry now after a limit, restart a gone agent, else nudge) |
+| `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}`, `PUT /projects/{ref}` | session | Projects with their lead and job counts; create `{name, dir, …}`; one by id or slug (`?open=1` when opened in the app); edit or `{archived}` |
+| `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | session | Running leads; a project's lead controls |
+| `POST /jobs/{id}/restart-agent` | session | Restart the job's agent on the same conversation with fresh instructions |
+| `GET /voice/agents`, `PUT /voice/agents/{agent}` | session | Each standing agent's voice (`{voice_id}`, empty for the instance's) |
 | `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
 | `GET /instructions`, `GET /instructions/{scope}/{key}` | session | Instruction layers: every layer with its source (`none`, `builtin`, `db`, `file`) and text; one layer with its revisions. The global layer's key is `-` |
 | `PUT /instructions/{scope}/{key}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` | session | `{body_md}` (at most 32 KB): a new revision; reset a role to its built-in; `{revision}`: that text again. `409` for a role that comes from a file |
