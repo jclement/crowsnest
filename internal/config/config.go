@@ -77,6 +77,14 @@ type Config struct {
 	PokeInterval   time.Duration // timer poke interval; 0 disables timer pokes
 	NoOrchestrator bool          // serve the UI over the session without starting Claude
 
+	// ---- Name, Remote Control and upkeep (upkeep.go) ----
+
+	Name             string // this instance's name: --name, else the short hostname
+	NoRemoteControl  bool   // start the orchestrator without Remote Control
+	JobRemoteControl bool   // start job agents with Remote Control too
+	CompactAt        int    // compact the orchestrator past this many tokens; 0 off
+	FreshAt          int    // daily new conversation, minutes after local midnight; -1 off
+
 	// ---- Talk mode and notices ----
 
 	ElevenLabsAPIKey string // enables talk mode when set
@@ -136,6 +144,7 @@ func (c Config) LogValue() slog.Value {
 		slog.Bool("password_set", c.Password != ""),
 		slog.Any("listen", addrs),
 		slog.Bool("tls", c.TLS()),
+		slog.String("name", c.Name),
 		slog.String("session", c.Session),
 		slog.String("dir", c.Dir),
 		slog.String("data_dir", c.DataDir),
