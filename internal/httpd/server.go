@@ -30,6 +30,7 @@ import (
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/ratelimit"
 	"github.com/jclement/crowsnest/internal/schedule"
+	"github.com/jclement/crowsnest/internal/setup"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
 	"github.com/jclement/crowsnest/internal/voice"
@@ -96,6 +97,11 @@ type Deps struct {
 	Schedule *schedule.Service
 	// Tender serves /orchestrator/context and /orchestrator/compact (7.9). Nil: 503.
 	Tender *orch.Tender
+	// Setup makes this the locked first-run server (setup.go): only /health, the setup
+	// endpoints and the web app's files, nothing else. Nil for the normal server.
+	Setup *setup.Service
+	// Names stores an instance name chosen in the Account sheet. Nil: it cannot be changed.
+	Names NameStore
 	// Updater is self-update (16.1): /health reports what it found, POST /admin/update applies
 	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
 	// answers 409 with the reason.
@@ -123,6 +129,12 @@ type Server struct {
 	// instead of holding Shutdown open until its grace period runs out.
 	stopping     chan struct{}
 	stoppingOnce sync.Once
+
+	// name is the instance name once the Account sheet has changed it (nil: Config.Name).
+	name atomic.Pointer[string]
+	// OnListening, when set, is called with each listener's URL once it is bound: serve prints
+	// the setup link from it, with the real port.
+	OnListening func(url string)
 }
 
 // New wires the routes and middleware.
@@ -159,12 +171,18 @@ func New(deps Deps) (*Server, error) {
 func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) routes() http.Handler {
+	if s.deps.Setup != nil {
+		return s.setupRoutes()
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	mux.Handle("POST /api/v1/admin/update", s.requireAuth(http.HandlerFunc(s.handleAdminUpdate)))
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
+	mux.HandleFunc("GET /api/v1/setup", s.handleSetupInfo)
+	mux.HandleFunc("POST /api/v1/setup", s.handleSetup)
+	s.registerAccountRoutes(mux)
 	mux.Handle("GET /api/v1/events", s.requireAuth(http.HandlerFunc(s.handleEvents)))
 	mux.Handle("GET /api/v1/fleet", s.requireAuth(http.HandlerFunc(s.handleFleet)))
 	mux.Handle("GET /api/v1/agents/{target}/screen", s.requireAuth(http.HandlerFunc(s.handleScreen)))
@@ -247,6 +265,9 @@ func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 		}
 		listeners = append(listeners, limiter.wrap(listener))
 		s.deps.Logger.Info("listening", "url", s.urlFor(listener.Addr()))
+		if s.OnListening != nil {
+			s.OnListening(s.urlFor(listener.Addr()))
+		}
 	}
 	if len(listeners) == 0 {
 		return nil, errors.New("no address could be bound; check --bind")

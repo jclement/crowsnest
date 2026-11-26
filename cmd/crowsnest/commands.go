@@ -89,8 +89,9 @@ func newHealthCommand() *cobra.Command {
 // healthResponse mirrors httpd.HealthResponse inside the envelope.
 type healthResponse struct {
 	Data struct {
-		Status  string `json:"status"`
-		Version string `json:"version"`
+		Status        string `json:"status"`
+		Version       string `json:"version"`
+		SetupRequired bool   `json:"setup_required"`
 	} `json:"data"`
 }
 
@@ -118,6 +119,11 @@ func checkHealth(ctx context.Context, out io.Writer, cfg config.Config, asJSON b
 	}
 	if asJSON {
 		_, err = out.Write(body)
+		return err
+	}
+	if health.Data.SetupRequired {
+		// Healthy (Docker should not restart it), but nobody can use it until setup is done.
+		_, err = fmt.Fprintf(out, "ok %s %s (setup required: open the setup link from crowsnest's log)\n", health.Data.Version, url)
 		return err
 	}
 	_, err = fmt.Fprintf(out, "ok %s %s\n", health.Data.Version, url)

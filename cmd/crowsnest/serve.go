@@ -87,8 +87,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return serve(ctx, cfg, logger)
+	return serve(ctx, cfg, logger, defaultServeHooks())
 }
+
+// serveHooks are the seams serve's tests use: how herdr is reached (a test passes a fake and
+// checks nothing reaches it before setup), and where the setup link goes besides the log.
+type serveHooks struct {
+	connect  func(ctx context.Context, cfg config.Config, logger *slog.Logger) (herdr.Client, string, error)
+	setupURL func(link, token string)
+}
+
+func defaultServeHooks() serveHooks { return serveHooks{connect: connectHerdr} }
 
 // noAuthWarning is the startup warning under --no-auth. On a tailnet bind it says who "anyone
 // who can reach this port" is: every tailnet peer the ACL lets through, including nodes shared
@@ -105,7 +114,11 @@ func noAuthWarning(cfg config.Config) string {
 
 // serve wires the services together and blocks until ctx ends, or until a self-update from the
 // browser has installed a new binary and asks for a restart.
-func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+//
+// With no login configured or stored it first runs the locked setup phase (setup.go) and only
+// continues once an owner exists: herdr, the orchestrator and the agent socket never start
+// before then.
+func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks serveHooks) error {
 	ctx, restart := context.WithCancel(ctx)
 	defer restart()
 	db, err := store.Open(ctx, cfg.DatabasePath())
@@ -113,6 +126,21 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("opening database %s: %w", cfg.DatabasePath(), err)
 	}
 	defer func() { _ = db.Close() }()
+
+	mode, err := decideLogin(ctx, cfg, db)
+	if err != nil {
+		return err
+	}
+	logLoginMode(logger, cfg, mode)
+	if mode == loginSetup {
+		if err := runSetupPhase(ctx, cfg, db, logger, hooks); err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+	}
+	cfg = storedName(ctx, cfg, db)
 
 	authService, err := auth.New(ctx, auth.Options{Username: cfg.Username, Password: cfg.Password, NoAuth: cfg.NoAuth}, db)
 	if err != nil {
@@ -122,7 +150,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	events := hub.New()
 	defer events.Close()
-	client, herdrVersion, err := connectHerdr(ctx, cfg, logger)
+	client, herdrVersion, err := hooks.connect(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -167,6 +195,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		Orchestrator: orchestrator, Conversations: conversations,
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
 		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
+		Names: db,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
