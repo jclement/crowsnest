@@ -17,7 +17,7 @@ import type { ChipTone } from "../components/ui/Chip";
 // ---- Commands -------------------------------------------------------------------------------
 
 export type ViewPath = "/" | "/chat" | "/inbox" | "/fleet" | "/terminal";
-export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice";
+export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule";
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
 export type PaletteCommand =
@@ -29,6 +29,7 @@ export type PaletteCommand =
   | { kind: "jobMessage"; id: string; text: string }
   | { kind: "answer"; questionId: string; value?: string; label: string }
   | { kind: "poke" }
+  | { kind: "compact" }
   | { kind: "relaunch"; action: "restart" | "new" }
   | { kind: "pushTest" }
   | { kind: "theme"; choice: ThemeChoice }
@@ -93,6 +94,8 @@ export type PaletteIcon =
   | "new"
   | "bell"
   | "journal"
+  | "schedule"
+  | "compact"
   | "keyboard"
   | "theme-system"
   | "theme-light"
@@ -329,6 +332,7 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
   });
   items.push(sheet("notifications", "Notifications", "bell", ["push", "devices", "settings"]));
   items.push(sheet("journal", "Journal", "journal", ["pokes", "history", "log"]));
+  items.push(sheet("schedule", "Schedule", "schedule", ["scheduled", "tasks", "cron", "periodic", "every"]));
   items.push(sheet("shortcuts", "Keyboard shortcuts", "keyboard", ["help", "keys", "?"]));
   if (sources.voiceSettings) items.push(sheet("voice", "Voice settings", "voice", ["talk", "speak", "elevenlabs", "microphone"]));
   for (const choice of ["system", "light", "dark"] as const) {
@@ -353,6 +357,7 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
 
   if (sources.orchestrator) {
     items.push({ id: "action:poke", group: "actions", title: "Poke now", subtitle: "Poke the orchestrator if anything is due", keywords: ["orchestrator", "wake"], icon: "poke", command: { kind: "poke" }, verb: "Poke" });
+    items.push({ id: "action:compact", group: "actions", title: "Compact now", subtitle: "Shorten the orchestrator's context, keeping open work", keywords: ["orchestrator", "context", "tokens", "summarise"], icon: "compact", command: { kind: "compact" }, verb: "Compact" });
     items.push({ id: "action:new", group: "actions", title: "New conversation", subtitle: "Start the orchestrator afresh", keywords: ["orchestrator", "reset", "clear"], icon: "new", command: relaunch("new"), verb: "Start" });
     items.push({ id: "action:restart", group: "actions", title: "Restart orchestrator", subtitle: "Same conversation, Claude started again", keywords: ["orchestrator", "reboot"], icon: "restart", command: relaunch("restart"), verb: "Restart" });
   }
