@@ -71,7 +71,7 @@ func newRootCommand() *cobra.Command {
 	config.RegisterFlags(root.PersistentFlags())
 	root.AddCommand(newServeCommand(), newVersionCommand(), newHealthCommand(),
 		newAskCommand(), newQuestionCommand(), newNotifyCommand(), newSayCommand(), newMCPCommand(), newJobCommand(), newHookCommand(), newUpdateCommand(),
-		newResetPasswordCommand(), newResetSetupCommand())
+		newResetPasswordCommand(), newResetSetupCommand(), newDoctorCommand())
 	return root
 }
 

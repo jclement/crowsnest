@@ -61,7 +61,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "crowsnest: could not drop secrets from its own environment:", err)
 		}
 	}
-	cfg, err := config.LoadForServe(cmd.Flags(), config.Options{})
+	cfg, err := loadConfig(cmd.Context(), cmd.Flags())
 	config.UnsetSecretEnv() // loaded or refused, nothing after this needs them (R1 H1)
 	if err != nil {
 		return err

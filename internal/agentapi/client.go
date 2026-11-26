@@ -102,6 +102,11 @@ func (c *Client) Health(ctx context.Context) (HealthResponse, error) {
 	return out, err
 }
 
+// Live fetches GET /api/v1/doctor into out: the running instance's own view.
+func (c *Client) Live(ctx context.Context, out any) error {
+	return c.do(ctx, http.MethodGet, "/api/v1/doctor", nil, out)
+}
+
 // Ask posts a question.
 func (c *Client) Ask(ctx context.Context, input questions.AskInput) (questions.Question, error) {
 	input.Attachments = AbsPaths(input.Attachments)
