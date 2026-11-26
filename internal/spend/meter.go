@@ -340,7 +340,7 @@ func (m *Meter) count(state *subjectState, batch *store.SpendBatch, entry transc
 func addDaily(batch *store.SpendBatch, day, key string, delta store.SpendCounts) {
 	for i := range batch.Daily {
 		if batch.Daily[i].Day == day && batch.Daily[i].Model == key {
-			batch.Daily[i].SpendCounts = batch.Daily[i].SpendCounts.Add(delta)
+			batch.Daily[i].SpendCounts = batch.Daily[i].Add(delta)
 			return
 		}
 	}

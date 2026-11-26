@@ -184,8 +184,9 @@ func (s *Store) ListSpendTotals(ctx context.Context, subjects []string) ([]Spend
 	if len(subjects) == 0 {
 		return nil, nil
 	}
-	query := "SELECT subject, " + spendCountColumns + ", first_at, last_at, updated_at, state_json FROM spend_totals WHERE subject IN (" + placeholders(len(subjects)) + ")"
-	rows, err := s.db.QueryContext(ctx, query, stringArgs(subjects)...) //nolint:gosec // placeholders only
+	// Only fixed column names and "?" placeholders are concatenated; every value is a parameter.
+	query := "SELECT subject, " + spendCountColumns + ", first_at, last_at, updated_at, state_json FROM spend_totals WHERE subject IN (" + placeholders(len(subjects)) + ")" //nolint:gosec // see above
+	rows, err := s.db.QueryContext(ctx, query, stringArgs(subjects)...)
 	if err != nil {
 		return nil, fmt.Errorf("listing spend totals: %w", err)
 	}

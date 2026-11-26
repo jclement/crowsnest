@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,7 +84,7 @@ func TestReadUsageCursor(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadUsage(&cursor, collect); err != ErrUsageFileGone {
+	if _, err := ReadUsage(&cursor, collect); !errors.Is(err, ErrUsageFileGone) {
 		t.Fatalf("gone: %v", err)
 	}
 }
