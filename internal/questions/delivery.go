@@ -18,10 +18,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
+	"unicode/utf8"
 
-	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 // ErrHold is what a Prompter returns when it typed nothing and a later attempt may succeed: the
@@ -41,8 +41,11 @@ type Prompter func(ctx context.Context, paneID, text string) error
 const (
 	// DefaultDeliveryInterval is how often pending deliveries are looked at without a kick.
 	DefaultDeliveryInterval = 3 * time.Second
-	// MaxLineRunes caps the typed line; the agent can read the rest with crowsnest's API (M7).
+	// MaxLineRunes caps the typed line. An answer longer than that is not cut: the line tells the
+	// agent to read it with the get_question tool or `crowsnest question` instead.
 	MaxLineRunes = 600
+	// maxQuotedTitleRunes bounds the title quoted at the end of the line (validation allows 200).
+	maxQuotedTitleRunes = 200
 	// holdBackoffMax caps the wait between attempts on a held delivery.
 	holdBackoffMax = time.Minute
 	// holdGiveUp is how long a held delivery keeps being retried.
@@ -224,36 +227,63 @@ func (d *Deliverer) finish(ctx context.Context, id int64, errText string) {
 
 // ---- The line ------------------------------------------------------------------------------
 
-// AnswerLine renders the one line typed into the asker: the question's id and title, then the
-// outcome. Every part is sanitised (no control characters, no line breaks) and the line capped,
-// because it lands in a terminal input box where a newline would submit early.
+// AnswerLine renders the one line typed into the asker: the question's id, the outcome (the
+// chosen labels and the human's note, in full), then the title the asker wrote, quoted. Every
+// part goes through termtext, because the line lands in a terminal input box where a newline
+// would submit early and an escape sequence would be keystrokes. When the full line would be
+// longer than MaxLineRunes it is replaced by OverflowLine: a shortened answer could drop the very
+// note that outranks the choice.
 func AnswerLine(q Question) string {
-	var outcome string
+	line := fmt.Sprintf("[crowsnest answer %s] %s; the question was %s", q.ID, outcome(q), quotedTitle(q))
+	if utf8.RuneCountInString(line) > MaxLineRunes {
+		return OverflowLine(q)
+	}
+	return line
+}
+
+// OverflowLine is typed instead of an answer too long for one line. It carries no part of the
+// answer, so nothing incomplete can be acted on, and says how to read the whole of it.
+func OverflowLine(q Question) string {
+	return fmt.Sprintf("[crowsnest answer %s] answered, but the answer is too long for one line. Read it in full before acting "+
+		"(the get_question tool, or run: crowsnest question %s); the human's note outranks the choice. The question was %s",
+		q.ID, q.ID, quotedTitle(q))
+}
+
+// outcome is the human's side of the line: the answer and the note, or why there is none.
+func outcome(q Question) string {
 	switch q.Status {
 	case StatusExpired:
-		outcome = "expired with no answer (expiry is not consent)"
+		return "expired with no answer (expiry is not consent)"
 	case StatusCancelled:
-		outcome = "cancelled by the human"
-	default:
-		outcome = answerLabels(q)
+		return "cancelled by the human (not consent)"
 	}
-	line := fmt.Sprintf("[crowsnest answer %s] %s → %s", q.ID, clean(q.Title), outcome)
-	if note := clean(q.AnswerNote); note != "" && q.Kind != KindManual {
-		line += " (note: " + note + ")"
+	text := termtext.Clean(answerLabels(q))
+	if note := termtext.Clean(q.AnswerNote); note != "" && q.Kind != KindManual {
+		text += " (note: " + note + ")"
 	}
-	return capRunes(line, MaxLineRunes)
+	return text
+}
+
+func quotedTitle(q Question) string {
+	return termtext.Quote(termtext.Cap(termtext.Clean(q.Title), maxQuotedTitleRunes))
 }
 
 // answerLabels turns the stored value into the options' labels ("Ship it", "A, C").
 func answerLabels(q Question) string {
 	switch q.Kind {
 	case KindManual:
-		return clean(q.AnswerNote)
+		return q.AnswerNote
 	case KindAck:
 		return "acknowledged"
 	case KindNotice:
 		return "dismissed"
 	}
+	return strings.Join(AnswerLabelList(q), ", ")
+}
+
+// AnswerLabelList returns the labels of the chosen options, in the order stored (a key with no
+// matching option is shown as the key).
+func AnswerLabelList(q Question) []string {
 	var keys []string
 	switch value := q.AnswerValue.(type) {
 	case string:
@@ -267,9 +297,9 @@ func answerLabels(q Question) string {
 	}
 	labels := make([]string, 0, len(keys))
 	for _, key := range keys {
-		labels = append(labels, clean(labelOf(q.Options, key)))
+		labels = append(labels, labelOf(q.Options, key))
 	}
-	return strings.Join(labels, ", ")
+	return labels
 }
 
 func labelOf(options []Option, key string) string {
@@ -279,37 +309,4 @@ func labelOf(options []Option, key string) string {
 		}
 	}
 	return key
-}
-
-// clean flattens text to one line of printable characters with single spaces, with any ANSI
-// escape sequences removed (they would be keystrokes in the asker's terminal).
-func clean(text string) string {
-	text = fleet.StripANSI(strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) {
-			return ' ' // before stripping, which drops tabs and line breaks rather than spacing them
-		}
-		return r
-	}, text))
-	var out strings.Builder
-	space := false
-	for _, r := range text {
-		if unicode.IsSpace(r) || unicode.IsControl(r) || r == 0x1b {
-			space = out.Len() > 0
-			continue
-		}
-		if space {
-			out.WriteByte(' ')
-			space = false
-		}
-		out.WriteRune(r)
-	}
-	return out.String()
-}
-
-func capRunes(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return string(runes[:limit-1]) + "…"
 }

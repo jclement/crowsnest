@@ -80,10 +80,34 @@ func askTool(ctx context.Context, client *Client, args AskArgs) *mcp.CallToolRes
 	if err != nil {
 		return errorResult(toolError(fmt.Sprintf("Waiting for %s failed; it may still be answered later, as a message", question.ID), err))
 	}
-	return textResult(SettledText(settled))
+	return answerResult(settled)
 }
 
-// SettledText describes a settled question for an agent: the answer, or that there is none.
+// AnswerResult is the structured content of a settled question's tool result: the whole answer,
+// never shortened (R1b-C01).
+type AnswerResult struct {
+	ID           string   `json:"id"`
+	Status       string   `json:"status"`
+	Title        string   `json:"title"`
+	AnswerValue  any      `json:"answer_value"`
+	AnswerLabels []string `json:"answer_labels,omitempty"`
+	AnswerNote   string   `json:"answer_note,omitempty"`
+}
+
+// answerResult is a tool result carrying the full answer, as text for the model and as
+// structured content.
+func answerResult(q questions.Question) *mcp.CallToolResult {
+	result := textResult(SettledText(q))
+	result.StructuredContent = AnswerResult{
+		ID: q.ID, Status: string(q.Status), Title: q.Title, AnswerValue: q.AnswerValue,
+		AnswerLabels: questions.AnswerLabelList(q), AnswerNote: q.AnswerNote,
+	}
+	return result
+}
+
+// SettledText describes a question for an agent: the whole answer and note, or that there is
+// none. Unlike the typed line it has no length limit, so it never drops the note that outranks
+// the choice (R1b-C01).
 func SettledText(q questions.Question) string {
 	switch q.Status {
 	case questions.StatusExpired:
@@ -91,10 +115,25 @@ func SettledText(q questions.Question) string {
 	case questions.StatusCancelled:
 		return fmt.Sprintf("%s was cancelled. That is not consent: do not take the step it asked about.", q.ID)
 	case questions.StatusOpen:
-		return fmt.Sprintf("%s is still open.", q.ID)
+		return fmt.Sprintf("%s is still open: no answer yet. Carry on with what it does not block.", q.ID)
 	}
-	line := strings.TrimPrefix(questions.AnswerLine(q), "[crowsnest answer "+q.ID+"] ")
-	return fmt.Sprintf("%s answered: %s", q.ID, line)
+	var text strings.Builder
+	fmt.Fprintf(&text, "%s answered.\n", q.ID)
+	switch q.Kind {
+	case questions.KindManual:
+		fmt.Fprintf(&text, "The human's answer, in their words:\n%s\n", q.AnswerNote)
+	case questions.KindAck:
+		text.WriteString("Acknowledged.\n")
+	case questions.KindNotice:
+		text.WriteString("Dismissed.\n")
+	default:
+		fmt.Fprintf(&text, "Choice: %s\n", strings.Join(questions.AnswerLabelList(q), ", "))
+	}
+	if q.Kind != questions.KindManual && q.AnswerNote != "" {
+		fmt.Fprintf(&text, "Note from the human (it outranks the choice; follow it where they differ):\n%s\n", q.AnswerNote)
+	}
+	fmt.Fprintf(&text, "The question was: %s", q.Title)
+	return text.String()
 }
 
 // toolError words a client error for the model.

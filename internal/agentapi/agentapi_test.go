@@ -398,7 +398,7 @@ func TestMCPToolList(t *testing.T) {
 			t.Errorf("tool %s has a thin description; it is the agent's instruction", tool.Name)
 		}
 	}
-	if strings.Join(names, ",") != "ask,say" {
+	if strings.Join(names, ",") != "ask,get_question,say" {
 		t.Fatalf("tools %v", names)
 	}
 	if !strings.Contains(session.InitializeResult().Instructions, "never consent") {
@@ -451,8 +451,45 @@ func TestMCPAskNonBlockingThenWait(t *testing.T) {
 	if err != nil || waited.IsError {
 		t.Fatalf("wait: %+v %v", waited, err)
 	}
-	if got := waited.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, "answered: Deploy? → No (note: not tonight)") {
+	if got := waited.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, "Choice: No") || !strings.Contains(got, "not tonight") {
 		t.Fatalf("blocking result %q", got)
+	}
+}
+
+// TestMCPWaitReturnsTheWholeAnswer is R1b-C01: a blocking ask hands the model every word of a
+// long note (and the structured answer), and get_question reads the same back later.
+func TestMCPWaitReturnsTheWholeAnswer(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	session := connectMCP(t, NewClient(f.socket, f.token(t, "w1:p1", "")))
+	note := strings.Repeat("Context the human wrote. ", 60) + "Do not deploy until I approve the backup."
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			list, _ := f.service.List(ctx, "open")
+			for _, q := range list {
+				_, _ = f.service.Answer(ctx, q.ID, questions.AnswerInput{Value: json.RawMessage(`"yes"`), Note: note})
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+	waited, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: map[string]any{
+		"title": "Deploy?", "kind": "confirm", "recommend": "yes", "wait": true,
+	}})
+	if err != nil || waited.IsError {
+		t.Fatalf("wait: %+v %v", waited, err)
+	}
+	if got := waited.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, note) || !strings.Contains(got, "outranks") {
+		t.Fatalf("the blocking result lost part of the note (%d characters)", len(got))
+	}
+	structured, _ := json.Marshal(waited.StructuredContent)
+	if !strings.Contains(string(structured), "Do not deploy until I approve the backup.") {
+		t.Fatalf("structured content %s", structured)
+	}
+	again, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_question", Arguments: map[string]any{"id": "q_1"}})
+	if err != nil || again.IsError || !strings.Contains(again.Content[0].(*mcp.TextContent).Text, note) {
+		t.Fatalf("get_question: %+v %v", again, err)
 	}
 }
 

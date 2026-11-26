@@ -3,7 +3,8 @@
 // The real-Claude test for M6 (DESIGN.md section 15, "E2E real Claude"): a real orchestrator on
 // haiku, started with crowsnest's --mcp-config and --settings, is asked to call the `ask` MCP
 // tool. The question must appear through the browser API with the orchestrator's pane as its
-// source (so HERDR_PANE_ID reached the MCP server), without Claude stopping at a permission
+// source (so the agent token crowsnest wrote into mcp.json reached the MCP server and the socket
+// mapped it to the pane; R1b N2, N7), without Claude stopping at a permission
 // prompt under --permission-mode auto; it is answered through the browser API, and the answer
 // line must arrive in the orchestrator's transcript, typed back by the deliverer.
 //
@@ -20,11 +21,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -40,6 +43,9 @@ import (
 const askPrompt = "Call your crowsnest `ask` tool (mcp__crowsnest__ask) exactly once with: title \"Which fruit for the test?\", " +
 	"kind \"choice\", options apple (label \"Apple\") and kiwi (label \"Kiwi\"), recommend \"apple\", and wait false. " +
 	"Do not use any other tool. After the call returns, reply with one line: asked. When an answer message arrives later, reply with the fruit's name only."
+
+// tokenPattern finds agent tokens, kept out of the test log.
+var tokenPattern = regexp.MustCompile(`cnt_[A-Za-z0-9_-]+`)
 
 func TestIntegrationClaudeAsk(t *testing.T) {
 	if os.Getenv("CROWSNEST_E2E_CLAUDE") != "1" {
@@ -91,8 +97,9 @@ func TestIntegrationClaudeAsk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	identity := agentid.New(db, nil)
 	go func() {
-		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: service, Hub: events, Logger: logger}).Serve(ctx, listener)
+		_ = agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Hub: events, Logger: logger}).Serve(ctx, listener)
 	}()
 
 	stateDir := t.TempDir()
@@ -105,6 +112,7 @@ func TestIntegrationClaudeAsk(t *testing.T) {
 		Client: session.Client, KV: db, Session: session.Name, Dir: dir, StateDir: stateDir,
 		Model: "haiku", PermissionMode: mode, Version: "integration", ClaudeConfigDir: claudeDir,
 		BinDir: filepath.Dir(binary), BasePath: os.Getenv("PATH"), Executable: binary, AgentSocket: socket, Logger: logger,
+		Identity: identity,
 	})
 	status, err := o.Ensure(ctx)
 	if err != nil || status.State == orch.StateNeedsTerminal {
@@ -112,7 +120,7 @@ func TestIntegrationClaudeAsk(t *testing.T) {
 	}
 	for _, name := range []string{orch.SettingsFile, orch.MCPConfigFile} {
 		body, _ := os.ReadFile(filepath.Join(stateDir, name))
-		t.Logf("%s: %s", name, strings.TrimSpace(string(body)))
+		t.Logf("%s: %s", name, tokenPattern.ReplaceAllString(strings.TrimSpace(string(body)), "cnt_<redacted>"))
 	}
 
 	manager := transcript.NewManager(transcript.ManagerOptions{
@@ -131,7 +139,7 @@ func TestIntegrationClaudeAsk(t *testing.T) {
 	question := waitForQuestion(t, ctx, ts, session.Client, status.PaneID)
 	t.Logf("question %s appeared %s after the prompt: %+v", question.ID, time.Since(sent).Round(time.Millisecond), question)
 	if question.SourcePane != status.PaneID {
-		t.Errorf("source pane %q, want the orchestrator's %q (HERDR_PANE_ID did not reach the MCP server)", question.SourcePane, status.PaneID)
+		t.Errorf("source pane %q, want the orchestrator's %q (its agent token did not reach the socket through the MCP server)", question.SourcePane, status.PaneID)
 	}
 	if question.Wait {
 		t.Errorf("the orchestrator asked with wait=true; the prompt said false")

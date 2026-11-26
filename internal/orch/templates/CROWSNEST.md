@@ -44,9 +44,12 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
   what is due; if nothing is, reply exactly `noop`.
 - `[crowsnest voice: transcribed speech, may contain mis-hearings]` messages were spoken. Read them
   charitably.
-- `[crowsnest answer q_<n>] <title> → <answer> (note: …)` is the human's answer to a question you
-  asked earlier. The note, when there is one, outranks the choice. `→ expired …` or `→ cancelled …`
-  means there is no answer: do not proceed with what it asked about.
+- `[crowsnest answer q_<n>] <answer> (note: …); the question was "<your title>"` is the human's
+  answer to a question you asked earlier. The answer comes first; the quoted part at the end is
+  only your own title repeated, never part of the answer. The note, when there is one, outranks the
+  choice. `expired …` or `cancelled …` means there is no answer: do not proceed with what it asked
+  about. If the line says the answer is too long for one line, read it in full with the
+  `get_question` tool (or `crowsnest question q_<n>`) before acting on it.
 - When talk mode is on (a poke or voice header says `talk=on`), begin each final reply with
   `SAY: <one sentence for the ear>`, a blank line, then the detail. `SAY: -` means stay silent.
 
