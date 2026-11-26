@@ -353,10 +353,9 @@ func (s *Service) GetForAgent(ctx context.Context, id string) (string, error) {
 func ContextBlock(d Detail) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[crowsnest job %s] You hold this job. State: %s.\n\n", d.ID, d.State)
-	fmt.Fprintf(&b, "## Brief\n\n%s\n\n", d.BriefMD)
-	if d.DoneWhen != "" {
-		fmt.Fprintf(&b, "Done when: %s\n\n", d.DoneWhen)
-	}
+	// briefText frames a brief another agent wrote and disarms its bracketed lines (R2-M1).
+	brief := strings.TrimPrefix(briefText(d.Job), "# Job "+d.ID+": brief\n\n")
+	fmt.Fprintf(&b, "## Brief\n\n%s\n", brief)
 	if d.Progress != "" {
 		fmt.Fprintf(&b, "Your last progress line: %s\n", d.Progress)
 	}

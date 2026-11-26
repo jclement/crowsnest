@@ -6,10 +6,11 @@
 //   - With any other directory: a tab in a workspace already open on that directory, or a new
 //     workspace for it.
 //   - Either way: wait for the shell, write prompt.md, settings.json and mcp.json under
-//     <state>/jobs/<id>/, agent.start (name job-<n>), then type the brief as the first prompt.
-//   - Without a directory: the orchestrator holds the job. It is sent the brief under a
-//     `[crowsnest job j_N]` header when it holds no other running job; otherwise the job waits
-//     queued and the supervisor tick dispatches it later.
+//     <state>/jobs/<id>/, agent.start (name job-<n>), then write brief.md there and type one
+//     line naming it (briefs.go: a brief is never typed, R2-M1).
+//   - Without a directory: the orchestrator holds the job. It is sent the line naming the brief
+//     under a `[crowsnest job j_N]` header when it holds no other running job; otherwise the job
+//     waits queued and the supervisor tick dispatches it later.
 //
 // An agent that stops at a start-up dialog (folder trust) puts the job in needs_you with cause
 // dialog; crowsnest never answers it. The tick sends the brief once someone has.
@@ -160,7 +161,7 @@ func (s *Service) startInPane(ctx context.Context, job Job, resume bool) error {
 		job.SessionID = session
 	}
 	if resume {
-		return s.sendText(ctx, job.PaneID, "[crowsnest restart] You were restarted. "+NudgeText(job.ID))
+		return s.sendText(ctx, job.PaneID, AgentName(job.ID), "[crowsnest restart] You were restarted. "+NudgeText(job.ID))
 	}
 	return s.sendBrief(ctx, job)
 }
@@ -178,13 +179,14 @@ func (s *Service) markDialog(ctx context.Context, id, detail string) {
 	})
 }
 
-// sendBrief types the job's first prompt and marks it running.
+// sendBrief writes the job's brief file, types the one line that names it, and marks the job
+// running.
 func (s *Service) sendBrief(ctx context.Context, job Job) error {
-	text, err := s.firstPrompt(job)
+	path, err := s.writeBrief(job)
 	if err != nil {
 		return err
 	}
-	result, err := orch.Prompt(ctx, s.opts.Herdr, job.PaneID, orch.PromptRequest{Text: text, ForceOverDraft: true})
+	result, err := orch.Prompt(ctx, s.opts.Herdr, job.PaneID, orch.PromptRequest{Text: briefLine(job, path), ForceOverDraft: true, ExpectAgent: AgentName(job.ID)})
 	var blocked *orch.BlockedError
 	if errors.As(err, &blocked) {
 		s.markDialog(ctx, job.ID, "A dialog is up in the agent's terminal, so the brief was not sent. Answer it in the terminal.")
@@ -210,28 +212,10 @@ func (s *Service) sendBrief(ctx context.Context, job Job) error {
 	return err
 }
 
-// sendText types a message into a job's agent.
-func (s *Service) sendText(ctx context.Context, paneID, text string) error {
-	_, err := orch.Prompt(ctx, s.opts.Herdr, paneID, orch.PromptRequest{Text: text, ForceOverDraft: true})
+// sendText types a message into a job's agent, provided its pane still holds agent.
+func (s *Service) sendText(ctx context.Context, paneID, agent, text string) error {
+	_, err := orch.Prompt(ctx, s.opts.Herdr, paneID, orch.PromptRequest{Text: text, ForceOverDraft: true, ExpectAgent: agent})
 	return err
-}
-
-// firstPrompt is what the agent reads first: the brief, under the job header. Claude has the
-// protocol in its system prompt; Codex gets it here.
-func (s *Service) firstPrompt(job Job) (string, error) {
-	var b strings.Builder
-	if job.Engine == EngineCodex {
-		protocol, err := s.opts.Roles.Prompt(job.Role, job.ID, false)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(protocol + "\n\n---\n\n")
-	}
-	fmt.Fprintf(&b, "[crowsnest job %s] %s", job.ID, job.BriefMD)
-	if job.DoneWhen != "" {
-		fmt.Fprintf(&b, "\n\nDone when: %s", job.DoneWhen)
-	}
-	return b.String(), nil
 }
 
 // ---- Panes ---------------------------------------------------------------------------------
@@ -392,9 +376,9 @@ type jobFiles struct {
 // writeJobFiles writes <state>/jobs/<id>/{prompt.md,settings.json,mcp.json,agent-token}, all
 // 0600. The token is minted for this start, bound to the job and its pane.
 func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) {
-	dir := filepath.Join(s.opts.Launch.StateDir, "jobs", job.ID)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return jobFiles{}, fmt.Errorf("creating %s: %w", dir, err)
+	dir, err := s.jobDir(job.ID)
+	if err != nil {
+		return jobFiles{}, err
 	}
 	files := jobFiles{prompt: filepath.Join(dir, "prompt.md"), settings: filepath.Join(dir, "settings.json")}
 	prompt, err := s.opts.Roles.Prompt(job.Role, job.ID, true)
@@ -506,12 +490,12 @@ func (s *Service) DispatchOrchestrator(ctx context.Context) {
 		return
 	}
 	job := s.toJob(*next, 0)
-	text := fmt.Sprintf("[crowsnest job %s] You hold job %s (role %s). Pass job_id %q to job_update, done, fail and job_get. "+
-		"The turn may only end once the job is declared (done, fail, blocked, or waiting on questions).\n\n%s", job.ID, job.ID, job.Role, job.ID, job.BriefMD)
-	if job.DoneWhen != "" {
-		text += "\n\nDone when: " + job.DoneWhen
+	path, err := s.writeBrief(job)
+	if err != nil {
+		s.opts.Logger.Warn("writing a brief for the orchestrator", "job", job.ID, "err", err)
+		return
 	}
-	if _, err := orch.Prompt(ctx, s.opts.Herdr, info.PaneID, orch.PromptRequest{Text: text}); err != nil {
+	if _, err := orch.Prompt(ctx, s.opts.Herdr, info.PaneID, orch.PromptRequest{Text: orchestratorLine(job, path), ExpectAgent: OrchestratorName}); err != nil {
 		s.opts.Logger.Info("the orchestrator could not take a job yet", "job", job.ID, "err", err)
 		return
 	}
