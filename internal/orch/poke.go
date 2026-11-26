@@ -44,6 +44,7 @@ const (
 	SourceJob      ReasonSource = "job"      // a job reached a terminal or stuck state
 	SourceTimer    ReasonSource = "timer"    // the standing picture changed since the last timer poke
 	SourceManual   ReasonSource = "manual"   // added by hand (tests, the opt-in Claude smoke)
+	SourceTask     ReasonSource = "task"     // a scheduled task file is due (7.8)
 )
 
 // Reason is one line of a poke. Key deduplicates: the same key pending twice is one line.
@@ -79,6 +80,10 @@ type PrecheckInput struct {
 	Pending []Reason
 	// Manual is a "Poke now": it skips the agent push interval (the holds still apply).
 	Manual bool
+	// Tasks are scheduled tasks due on their own (7.8): each makes a poke by itself.
+	Tasks []Reason
+	// RideAlong are `every: poke` tasks: they go only with a poke that has something else due.
+	RideAlong []Reason
 }
 
 // PrecheckResult is the reasons due now and the agent states they report, to be marked pushed
@@ -90,11 +95,22 @@ type PrecheckResult struct {
 	AgentsHeld int
 }
 
-// Precheck builds the reason list (pure). Pending event reasons are always due; another agent's
-// settled state is due once it has held long enough, unless that state was already pushed or an
-// agent push happened less than AgentPushInterval ago (a manual poke skips that last rule).
+// Precheck builds the reason list (pure). Pending event reasons and due scheduled tasks are
+// always due; another agent's settled state is due once it has held long enough, unless that
+// state was already pushed or an agent push happened less than AgentPushInterval ago (a manual
+// poke skips that last rule). `every: poke` tasks ride along with whatever else is due, and
+// never make a poke by themselves.
 func Precheck(input PrecheckInput) PrecheckResult {
-	result := PrecheckResult{Reasons: dedupe(input.Pending), Agents: map[string]string{}}
+	result := precheckOwn(input)
+	if len(result.Reasons) > 0 {
+		result.Reasons = dedupe(append(result.Reasons, input.RideAlong...))
+	}
+	return result
+}
+
+// precheckOwn is everything but the ride-along tasks.
+func precheckOwn(input PrecheckInput) PrecheckResult {
+	result := PrecheckResult{Reasons: dedupe(append(slices.Clone(input.Pending), input.Tasks...)), Agents: map[string]string{}}
 	var settled []Reason
 	for _, agent := range input.Agents {
 		reason, mark, ok := agentReason(input, agent)

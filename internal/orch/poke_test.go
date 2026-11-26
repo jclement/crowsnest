@@ -72,6 +72,22 @@ func TestPrecheck(t *testing.T) {
 			want:     []string{"question:q_7"},
 			wantHeld: 1,
 		},
+		{
+			name:  "a due task makes a poke by itself",
+			input: PrecheckInput{Tasks: []Reason{{Key: "task:check", Source: SourceTask}}},
+			want:  []string{"task:check"},
+		},
+		{name: "a ride-along task alone makes no poke", input: PrecheckInput{RideAlong: []Reason{{Key: "task:tidy", Source: SourceTask}}}},
+		{
+			name:  "a ride-along task goes with anything else",
+			input: PrecheckInput{Pending: []Reason{question}, RideAlong: []Reason{{Key: "task:tidy", Source: SourceTask}}},
+			want:  []string{"question:q_7", "task:tidy"},
+		},
+		{
+			name:     "agents held by the interval do not carry a ride-along",
+			input:    PrecheckInput{Agents: []AgentSeen{builder(herdr.StatusDone, time.Hour, 3)}, LastAgentPush: now.Add(-time.Second), RideAlong: []Reason{{Key: "task:tidy", Source: SourceTask}}},
+			wantHeld: 1,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -624,5 +640,83 @@ func TestPokerPendingReasonsSurviveRestart(t *testing.T) {
 	r.settleOrchestrator()
 	if got := again.Check(context.Background(), false); got.Outcome != OutcomeNothing || len(r.pokes()) != 1 {
 		t.Fatalf("a delivered reason came back: %+v", got)
+	}
+}
+
+// ---- Scheduled tasks -------------------------------------------------------------------
+
+type fakeTasks struct {
+	mu        sync.Mutex
+	due       []ScheduledTask
+	delivered []string
+}
+
+func (f *fakeTasks) DueTasks(context.Context, time.Time) []ScheduledTask {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []ScheduledTask
+	for _, task := range f.due {
+		if !slices.Contains(f.delivered, task.Name) {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+
+func (f *fakeTasks) Delivered(_ context.Context, _ time.Time, names []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delivered = append(f.delivered, names...)
+}
+
+// A due task waits through a working orchestrator, is carried by the next poke, and is stamped
+// only then; a ride-along task goes with it.
+func TestPokerCarriesScheduledTasks(t *testing.T) {
+	tasks := &fakeTasks{due: []ScheduledTask{
+		{Name: "check", Text: "scheduled task check is due (every 15m, never run): read /t/check.md and do what it says"},
+		{Name: "tidy", Text: "scheduled task tidy is due (with every poke, never run): read /t/tidy.md and do what it says", RideAlong: true},
+	}}
+	r := newPokeRig(t, func(o *PokerOptions) { o.Tasks = tasks })
+	r.set(r.orch, herdr.StatusWorking)
+	if got := r.check(); got.Outcome != OutcomeSkipped || len(tasks.delivered) != 0 {
+		t.Fatalf("held: %+v delivered %v", got, tasks.delivered)
+	}
+	r.settleOrchestrator()
+	got := r.check()
+	if got.Outcome != OutcomeSent || len(got.Reasons) != 2 {
+		t.Fatalf("sent: %+v", got)
+	}
+	if !slices.Equal(tasks.delivered, []string{"check", "tidy"}) {
+		t.Fatalf("stamped %v", tasks.delivered)
+	}
+	if poke := r.pokes()[0]; !strings.Contains(poke, "read /t/check.md") || !strings.Contains(poke, "read /t/tidy.md") {
+		t.Fatalf("poke %q", poke)
+	}
+	r.settleOrchestrator()
+	if got := r.check(); got.Outcome != OutcomeNothing {
+		t.Fatalf("nothing left: %+v", got)
+	}
+}
+
+type fakeTender struct{ acts int }
+
+func (f *fakeTender) Tend(context.Context, time.Time, Status) bool {
+	if f.acts > 0 {
+		f.acts--
+		return true
+	}
+	return false
+}
+
+// A check spent on upkeep holds the poke to the next check.
+func TestPokerTenderTakesTheCheckFirst(t *testing.T) {
+	tender := &fakeTender{acts: 1}
+	r := newPokeRig(t, func(o *PokerOptions) { o.Tender = tender })
+	r.poker.Add(context.Background(), Reason{Key: "job:j_3:done", Source: SourceJob, Text: "job j_3 is done"})
+	if got := r.check(); got.Outcome != OutcomeNothing || len(r.pokes()) != 0 {
+		t.Fatalf("upkeep check: %+v", got)
+	}
+	if got := r.check(); got.Outcome != OutcomeSent {
+		t.Fatalf("next check: %+v", got)
 	}
 }
