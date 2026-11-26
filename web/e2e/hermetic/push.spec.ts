@@ -88,9 +88,14 @@ test("turn on, test, receive a push and open its deep link", async ({ page, cont
   // Tapping it: the worker's notificationclick focuses this tab and the app routes to the item.
   await page.getByRole("button", { name: "Close" }).click();
   await worker.evaluate(async () => {
-    const scope = self as unknown as ServiceWorkerGlobalScope;
+    // The worker's globals, typed by hand: this project's TypeScript lib is the DOM, not WebWorker.
+    const scope = self as unknown as {
+      registration: ServiceWorkerRegistration;
+      dispatchEvent: (event: Event) => boolean;
+      NotificationEvent: new (type: string, init: { notification: Notification }) => Event;
+    };
     const [shown] = await scope.registration.getNotifications();
-    scope.dispatchEvent(new NotificationEvent("notificationclick", { notification: shown! }));
+    scope.dispatchEvent(new scope.NotificationEvent("notificationclick", { notification: shown! }));
   });
   await expect(page).toHaveURL(/\/inbox\?q=q_1$/);
   const question = (await (await page.request.get("/api/v1/questions/q_1")).json()) as { data: { title: string } };

@@ -139,7 +139,7 @@ func loadOrCreateKeys(ctx context.Context, db Store, logger *slog.Logger) (vapid
 		return vapidKeys{}, fmt.Errorf("making a Web Push key pair: %w", err)
 	}
 	keys := vapidKeys{Public: public, Private: private}
-	encoded, err := json.Marshal(keys)
+	encoded, err := json.Marshal(keys) //nolint:gosec // G117: the private key is stored in the 0600 database on purpose, never sent or logged
 	if err != nil {
 		return vapidKeys{}, fmt.Errorf("encoding the Web Push key pair: %w", err)
 	}
@@ -297,9 +297,10 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		return settings, fmt.Errorf("reading the notification settings: %w", err)
 	}
 	var stored Settings
-	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		s.opts.Logger.Warn("the stored notification settings are unreadable; using the defaults")
-		return settings, nil
+	if decodeErr := json.Unmarshal([]byte(raw), &stored); decodeErr != nil {
+		// A corrupt row must not silence every notice: fall back to the defaults (all on).
+		s.opts.Logger.Warn("the stored notification settings are unreadable; using the defaults", "err", decodeErr)
+		return settings, nil //nolint:nilerr // deliberate fallback, logged above
 	}
 	for kind, on := range stored.Kinds {
 		if _, known := settings.Kinds[kind]; known {

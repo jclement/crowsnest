@@ -43,8 +43,8 @@ func TestValidateEndpoint(t *testing.T) {
 		{"/relative", false, false},
 		{"", false, false},
 		{"https://push.example.com/" + strings.Repeat("a", 2100), false, false},
-		{"http://127.0.0.1:9999/push", true, true},  // --demo's fake push service
-		{"http://10.0.0.1:9999/push", true, false},  // only loopback, even in --demo
+		{"http://127.0.0.1:9999/push", true, true},   // --demo's fake push service
+		{"http://10.0.0.1:9999/push", true, false},   // only loopback, even in --demo
 		{"http://127.0.0.1:9999/push", false, false}, // never outside --demo
 	}
 	for _, c := range cases {

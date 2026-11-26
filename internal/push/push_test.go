@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -253,11 +254,14 @@ func verifyVAPID(t *testing.T, header, publicKey, origin string) {
 		t.Fatalf("claims %+v, want aud %q and sub %q", claims, origin, subscriber)
 	}
 	keyBytes, _ := base64.RawURLEncoding.DecodeString(key)
-	x, y := elliptic.Unmarshal(elliptic.P256(), keyBytes) //nolint:staticcheck // test-only check of a P-256 point
+	signer, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), keyBytes)
+	if err != nil {
+		t.Fatalf("VAPID key: %v", err)
+	}
 	signature, _ := base64.RawURLEncoding.DecodeString(parts[2])
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	r, s := new(big.Int).SetBytes(signature[:32]), new(big.Int).SetBytes(signature[32:])
-	if !ecdsa.Verify(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, digest[:], r, s) {
+	if !ecdsa.Verify(signer, digest[:], r, s) {
 		t.Fatal("the VAPID JWT is not signed by the served key")
 	}
 }
@@ -349,7 +353,7 @@ func TestSubscribeCapsDevicesAndUpdatesAKnownEndpoint(t *testing.T) {
 			t.Fatalf("device %d: %v", i, err)
 		}
 	}
-	if _, err := service.Subscribe(ctx, newBrowser(t).subscription("https://push.example.com/d/one-too-many"), ""); err != ErrTooMany {
+	if _, err := service.Subscribe(ctx, newBrowser(t).subscription("https://push.example.com/d/one-too-many"), ""); !errors.Is(err, ErrTooMany) {
 		t.Fatalf("past the cap: %v, want ErrTooMany", err)
 	}
 	// A browser resubscribing with the same endpoint (new keys) is not a new device.

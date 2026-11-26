@@ -99,7 +99,7 @@ func TestJobNotices(t *testing.T) {
 		{"running", "limit", true, KindJob, "stuck:limit"},
 		{"running", "unresponsive", true, KindJob, "stuck:unresponsive"},
 		{"needs_you", "auth", false, KindJob, "needs:auth"},
-		{"running", "exited", true, "", ""},     // restarting by itself
+		{"running", "exited", true, "", ""},       // restarting by itself
 		{"needs_you", "questions", false, "", ""}, // the question is pushed instead
 		{"needs_you", "dialog", false, "", ""},    // the dialog is pushed instead
 		{"running", "", false, "", ""},
