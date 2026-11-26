@@ -62,6 +62,8 @@ type Deps struct {
 	Terminals term.Launcher
 	// TermQueueBytes overrides DefaultTermQueueBytes; tests shrink it.
 	TermQueueBytes int
+	// MaxTerminals overrides DefaultMaxTerminals, the cap on open terminal sockets.
+	MaxTerminals int
 
 	// Conversations serves /agents/{target}/messages and Orchestrator the /orchestrator routes
 	// (M4). Either may be nil; their routes then answer 503.
@@ -81,6 +83,8 @@ type Server struct {
 	openStreams atomic.Int32
 	// loginBodyTimeout is loginBodyTimeout unless a test shortens it.
 	loginBodyTimeout time.Duration
+	// terminalSlots holds one token per open terminal socket (R1 I5).
+	terminalSlots chan struct{}
 
 	// stopping is closed when shutdown begins, so long-lived SSE handlers return promptly
 	// instead of holding Shutdown open until its grace period runs out.
@@ -108,6 +112,11 @@ func New(deps Deps) (*Server, error) {
 	if server.heartbeat <= 0 {
 		server.heartbeat = DefaultHeartbeat
 	}
+	maxTerminals := deps.MaxTerminals
+	if maxTerminals <= 0 {
+		maxTerminals = DefaultMaxTerminals
+	}
+	server.terminalSlots = make(chan struct{}, maxTerminals)
 	server.handler = server.middleware(server.routes())
 	return server, nil
 }

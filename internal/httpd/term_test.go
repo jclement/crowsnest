@@ -392,6 +392,35 @@ func TestTermBrowserLeavingClosesTheBridge(t *testing.T) {
 	waitClosedChan(t, bridge.closed, "bridge close after the browser left")
 }
 
+// TestTermSocketsAreCapped is R1 I5: past the cap a socket is closed with a policy code (the
+// browser does not reconnect by itself) and a reason saying what to do; closing one frees a slot.
+func TestTermSocketsAreCapped(t *testing.T) {
+	_, launcher, server := termHarness(t, harnessOptions{noAuth: true, maxTerminals: 2})
+	first := mustDial(t, server, "/api/v1/term/tui", dialOptions{})
+	second := mustDial(t, server, "/api/v1/term/tui", dialOptions{})
+	launcher.next(t)
+	launcher.next(t)
+	third := mustDial(t, server, "/api/v1/term/tui", dialOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := third.Read(ctx)
+	if status := websocket.CloseStatus(err); status != websocket.StatusPolicyViolation || !strings.Contains(err.Error(), "too many terminals open (2)") {
+		t.Fatalf("third socket: %v (status %d)", err, status)
+	}
+	_ = first.Close(websocket.StatusNormalClosure, "done")
+	waitFor(t, func() bool {
+		conn, _, err := dialTerm(t, server, "/api/v1/term/tui", dialOptions{})
+		if err != nil {
+			return false
+		}
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancelRead()
+		_, _, err = conn.Read(readCtx)
+		return websocket.CloseStatus(err) != websocket.StatusPolicyViolation
+	})
+	_ = second
+}
+
 func TestTermLogoutClosesOpenTerminals(t *testing.T) {
 	h, launcher, server := termHarness(t, harnessOptions{heartbeat: 50 * time.Millisecond})
 	cookie := h.loginAt(server.URL)

@@ -565,6 +565,9 @@ The client sends a resize first; the server starts the process on that first res
   with close code 1013 ("not keeping up") rather than buffered without limit, and its client
   reconnects to a fresh redraw. A process that ends sends `{"type":"exit","reason"}` and then a
   normal close (1000).
+- **How many**: at most 8 terminal sockets are open at once (each spawns a herdr process). One
+  more is upgraded and closed at once with 1008 and the reason "too many terminals open (8);
+  close one and reconnect", which the browser shows without reconnecting by itself (R1 I5).
 - **Keepalive**: a ping every heartbeat (20 s) that also re-checks the session cookie, as SSE
   does; a logout or password change closes open terminals with 1008 ("signed out") within one
   heartbeat. Server shutdown closes them with 1001.

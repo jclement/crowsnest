@@ -90,6 +90,7 @@ type harnessOptions struct {
 	orchestrator  *orch.Orchestrator
 	terminals     term.Launcher // nil: the terminal routes answer 503
 	termQueue     int
+	maxTerminals  int
 }
 
 var testWeb = fstest.MapFS{
@@ -144,6 +145,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		HerdrVersion:   "0.9.5-test",
 		Terminals:      opts.terminals,
 		TermQueueBytes: opts.termQueue,
+		MaxTerminals:   opts.maxTerminals,
 
 		Conversations: opts.conversations,
 		Orchestrator:  opts.orchestrator,
