@@ -220,3 +220,18 @@ func TestChangeTask(t *testing.T) {
 		t.Fatalf("changed picture: %v", got)
 	}
 }
+
+// The shipped examples (examples/tasks) parse, and are the cadences the README promises.
+func TestExamplesParse(t *testing.T) {
+	want := map[string]string{"check": "every 15m", "tidy": "every 60m", "digest": "every 1d after 17:00"}
+	for name, schedule := range want {
+		path := filepath.Join("..", "..", "examples", "tasks", name+".md")
+		task, err := readTask(path, OriginUser)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if task.Schedule() != schedule || task.As != RunAsPoke {
+			t.Errorf("%s: %s as %s", name, task.Schedule(), task.As)
+		}
+	}
+}
