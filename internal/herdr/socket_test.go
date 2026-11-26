@@ -207,7 +207,10 @@ func TestSocketClientTypedErrors(t *testing.T) {
 		want error
 	}{
 		{"blocked", func() error { _, err := client.AgentPrompt(ctx, "a", "hi", nil); return err }, ErrAgentBlocked},
-		{"not ready", func() error { _, err := client.AgentStart(ctx, AgentStartParams{Name: "a", Kind: "claude", PaneID: "w1:p1"}); return err }, ErrAgentNotReady},
+		{"not ready", func() error {
+			_, err := client.AgentStart(ctx, AgentStartParams{Name: "a", Kind: "claude", PaneID: "w1:p1"})
+			return err
+		}, ErrAgentNotReady},
 		{"timeout", func() error { _, err := client.AgentWait(ctx, "a", nil, 100); return err }, ErrTimeout},
 		{"invalid", func() error { _, err := client.TabList(ctx, ""); return err }, ErrInvalidRequest},
 		{"stalled", func() error { _, err := client.AgentRead(ctx, "a", ReadOptions{}); return err }, ErrAgentPromptStalled},
