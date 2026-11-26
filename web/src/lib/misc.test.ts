@@ -20,6 +20,8 @@ describe("formatVersion", () => {
     ["dev", "DEV"],
     ["v1.2.3", "v1.2.3"],
     ["1.2.3", "v1.2.3"],
+    ["194db89", "194db89"],
+    ["v0.1.0-3-g194db89-dirty", "v0.1.0-3-g194db89-dirty"],
   ])("%s → %s", (input, want) => expect(formatVersion(input)).toBe(want));
 });
 
