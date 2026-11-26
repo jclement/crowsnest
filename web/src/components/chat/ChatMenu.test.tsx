@@ -1,4 +1,5 @@
 import { screen, waitFor } from "@testing-library/react";
+import { makePeriod, makeReport } from "../../lib/spendFixtures";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { contextLine, contextPercent, formatTokens, nextDueText } from "../../lib/schedule";
@@ -79,5 +80,20 @@ describe("ChatMenu", () => {
     expect(screen.queryByRole("menuitem", { name: "Compact now" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("menuitem", { name: "Schedule" }));
     expect(await screen.findByRole("table", { name: "Scheduled tasks" })).toBeInTheDocument();
+  });
+
+  it("shows the orchestrator's own spend and opens the Spend sheet from it", async () => {
+    stubApi((call) => {
+      if (call.path === "/spend/summary") return { body: { data: makePeriod() } };
+      if (call.path.startsWith("/spend?")) return { body: { data: makeReport() } };
+      if (call.path === "/orchestrator/context") return { body: { data: fixtureContext } };
+      return undefined;
+    });
+    renderWithClient(<ChatMenu showThinking={false} onToggleThinking={() => {}} canRelaunch />);
+    await userEvent.click(screen.getByRole("button", { name: "Conversation menu" }));
+    const line = await screen.findByTestId("orchestrator-spend");
+    expect(line).toHaveTextContent("$0.12 est. today · $2.31 est. all");
+    await userEvent.click(line);
+    expect(await screen.findByRole("dialog", { name: "Spend (estimated)" })).toBeInTheDocument();
   });
 });

@@ -27,6 +27,7 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   journal: [queryKeys.journal, queryKeys.orchestratorContext],
   say: [],
   schedule: [queryKeys.schedule],
+  spend: [queryKeys.spend, queryKeys.jobs],
 };
 
 /**

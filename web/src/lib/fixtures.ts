@@ -6,6 +6,7 @@
 // whose dialog is a multi-question form, agents in every state, plain shell panes, a long cwd
 // and a long terminal title. fixtureApi() answers API calls from it in memory, so pressing a
 // dialog option in fixtures mode behaves like the real thing (the dialog goes away).
+import { spendFixtureApi } from "./spendFixtures";
 import { scheduleFixtureApi } from "./scheduleFixtures";
 import type { AnswerRequest, Question } from "./questions";
 import { fixtureQuestions } from "./questionFixtures";
@@ -425,6 +426,8 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
   if (jobsAnswer !== undefined) return jobsAnswer;
   const journalAnswer = journalFixtureApi(path, method);
   if (journalAnswer !== undefined) return journalAnswer;
+  const spendAnswer = spendFixtureApi(path);
+  if (spendAnswer !== undefined) return spendAnswer;
   const scheduleAnswer = scheduleFixtureApi(path, method);
   if (scheduleAnswer !== undefined) return scheduleAnswer;
   const match = /^\/agents\/([^/]+)\/(screen|keys)$/.exec(path);

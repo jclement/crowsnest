@@ -7,6 +7,7 @@
 // answered in memory from lib/fixtures.ts, so the UI can be worked on, and screenshotted,
 // without a server. `?fixtures=0` turns it off. The choice is kept for the tab's lifetime
 // (sessionStorage) because client-side navigation drops the query string.
+import type { SpendGroup, SpendPeriod, SpendReport } from "./spend";
 import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types";
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
@@ -186,6 +187,14 @@ export const endpoints = {
   scheduleRun: (name: string) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}/run`, { method: "POST" }),
   scheduleSet: (name: string, enabled: boolean) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}`, { method: "PUT", body: { enabled } }),
   orchestratorContext: () => api<ContextInfo>("/orchestrator/context"),
+  // ---- Spend (7.11) ----
+  spendSummary: () => api<SpendPeriod>("/spend/summary"),
+  spendReport: (group: SpendGroup, from?: string, to?: string) => {
+    const query = new URLSearchParams({ group });
+    if (from) query.set("from", from);
+    if (to) query.set("to", to);
+    return api<SpendReport>(`/spend?${query.toString()}`);
+  },
   /** Compact now: 409 CONFLICT when the orchestrator is busy or has a draft. */
   orchestratorCompact: () => api<ContextInfo>("/orchestrator/compact", { method: "POST" }),
   // ---- M11: talk mode (every route is 404 when voice is off) ----
@@ -311,4 +320,8 @@ export const queryKeys = {
   /** Everything about the journal sits under ["journal"]; a `journal` or `poke` event refreshes it. */
   journal: ["journal"] as const,
   journalPage: (kinds: string) => ["journal", kinds] as const,
+  /** Everything about spend sits under ["spend"]; a `spend` event refreshes it (and the jobs). */
+  spend: ["spend"] as const,
+  spendSummary: ["spend", "summary"] as const,
+  spendReport: (group: string, from: string, to: string) => ["spend", "report", group, from, to] as const,
 };

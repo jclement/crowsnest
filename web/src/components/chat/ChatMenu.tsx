@@ -1,18 +1,21 @@
 // ChatMenu: the Chat view's menu: the model the orchestrator runs on and its context size (tokens
-// and a bar against the compaction threshold, DESIGN.md 7.9), Poke now (the result comes back as
+// and a bar against the compaction threshold, DESIGN.md 7.9), its estimated spend today and in all
+// (7.11; opens the Spend sheet), Poke now (the result comes back as
 // a toast: sent, or skipped and why), Compact now, the Journal and the Schedule, show or hide
 // thinking, Restart (same conversation, --resume), and New conversation (fresh session). Both
 // relaunches ask for confirmation first, in a Sheet, because they interrupt whatever the
 // orchestrator is doing.
-import { BellRing, Brain, CalendarClock, Cpu, Minimize2, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
+import { BellRing, Brain, CalendarClock, Coins, Cpu, Minimize2, MessageSquarePlus, MoreVertical, NotebookText, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { relaunchConfirmations, type RelaunchAction } from "../../lib/conversation";
 import { useOrchestratorAction } from "../../lib/conversation-queries";
 import { pokeToast } from "../../lib/journal";
-import { useCompactNow, useOrchestratorContext, usePokeNow } from "../../lib/queries";
+import { useCompactNow, useOrchestratorContext, usePokeNow, useSpendSummary } from "../../lib/queries";
+import { costText, formatTokens } from "../../lib/spend";
 import { contextLine, contextPercent, type ContextInfo } from "../../lib/schedule";
 import { JournalSheet } from "../journal/JournalPanel";
 import { ScheduleSheet } from "../schedule/SchedulePanel";
+import { SpendSheet } from "../spend/SpendSheet";
 import { Button, IconButton } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
@@ -35,6 +38,7 @@ export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }:
   const rootRef = useRef<HTMLDivElement>(null);
   const [journalOpen, setJournalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [spendOpen, setSpendOpen] = useState(false);
   const action = useOrchestratorAction();
   const poke = usePokeNow();
   const compact = useCompactNow();
@@ -95,6 +99,7 @@ export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }:
             <span className="ml-auto font-mono text-heading">{model || "Claude's default"}</span>
           </div>
           {canRelaunch && context.data && <ContextUsage info={context.data} />}
+          <OrchestratorSpend onOpen={pick(() => setSpendOpen(true))} enabled={open} />
           {canRelaunch && (
             <MenuItem icon={<Minimize2 className="h-4 w-4 text-muted" aria-hidden />} onClick={pick(compactNow)} disabled={compact.isPending}>
               {compact.isPending ? "Compacting…" : "Compact now"}
@@ -128,6 +133,7 @@ export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch }:
       )}
       <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
       <ScheduleSheet open={scheduleOpen} onClose={() => setScheduleOpen(false)} />
+      <SpendSheet open={spendOpen} onClose={() => setSpendOpen(false)} />
       <Sheet open={confirming !== null} onClose={() => setConfirming(null)} title={confirming ? confirmations[confirming].title : ""} size="md">
         {confirming && (
           <div className="flex flex-col gap-4 p-4">
@@ -181,5 +187,30 @@ export function ContextUsage({ info }: { info: ContextInfo }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** The orchestrator conversation's own spend: today and since measuring began. Opens the sheet. */
+export function OrchestratorSpend({ onOpen, enabled }: { onOpen: () => void; enabled: boolean }) {
+  const summary = useSpendSummary(enabled);
+  const today = summary.data?.orchestrator_today;
+  const total = summary.data?.orchestrator_total;
+  if (!today || !total) return null; // not loaded, or a server without spend
+  const word = (spend: typeof total) => (spend.cost_usd === null && spend.total_tokens > 0 ? `${formatTokens(spend.total_tokens)} tok` : costText(spend));
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onOpen}
+      data-testid="orchestrator-spend"
+      title="Estimated API-equivalent cost of the orchestrator's own conversation; subscription plans are not billed per token"
+      className="flex min-h-11 w-full items-center gap-2 border-b border-border px-3 text-left text-xs hover:bg-hover md:min-h-9"
+    >
+      <Coins className="h-4 w-4 shrink-0 text-muted" aria-hidden />
+      <span className="text-muted">Spend</span>
+      <span className="ml-auto truncate font-mono text-heading">
+        {word(today)} <span className="text-muted">today</span> · {word(total)} <span className="text-muted">all</span>
+      </span>
+    </button>
   );
 }

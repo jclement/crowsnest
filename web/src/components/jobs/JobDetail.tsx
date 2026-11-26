@@ -1,7 +1,7 @@
 // JobDetail: one job in full (DESIGN.md 12): what it is and where it runs, why it is stuck and
 // the one action that fits, the result with what was verified and what was not, its questions
 // (answerable right here with the Inbox's components), a message box to its agent, the
-// timeline, and the agent's Conversation and Terminal (the Fleet view's slots).
+// timeline, its estimated spend, and the agent's Conversation and Terminal (the Fleet view's slots).
 import { useNavigate } from "@tanstack/react-router";
 import { Ban, CheckCircle2, CircleSlash, MessageSquare, RefreshCw, Send, SquareTerminal, Zap } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -13,6 +13,7 @@ import { AgentConversation } from "../agent/AgentConversation";
 import { AgentTerminal } from "../agent/AgentTerminal";
 import { QuestionDetail } from "../inbox/QuestionDetail";
 import { Markdown } from "../Markdown";
+import { SpendSection } from "../spend/SpendSection";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -115,6 +116,7 @@ function Overview({ job, openTerminal }: { job: Detail; openTerminal: () => void
         <Markdown className="text-sm">{job.brief_md}</Markdown>
         {job.done_when && <p className="mt-2 text-xs text-muted">Done when: {job.done_when}</p>}
       </Card>
+      <SpendSection spend={job.spend} turns={job.spend_turns} />
       {settled.length > 0 && (
         <Card title="Answered questions">
           <ul className="flex flex-col gap-1 text-xs">

@@ -2,6 +2,7 @@
 // in internal/jobs/types.go, and the pure helpers the Jobs view uses: board sections and their
 // order, state labels and tones, and which one action fits a stuck job.
 import type { ChipTone } from "../components/ui/Chip";
+import type { SpendSummary, SpendTurn } from "./spend";
 
 export type JobState = "queued" | "running" | "needs_you" | "blocked" | "in_review" | "done" | "failed" | "cancelled";
 
@@ -63,6 +64,8 @@ export interface Job {
   isolate: boolean;
   /** Who created it: "" the human, "agent" a job agent, "orchestrator" (R2-H1). Optional in fixtures. */
   origin?: "" | "agent" | "orchestrator";
+  /** What the job's agent has used (7.11); absent on a server that measures nothing. */
+  spend?: SpendSummary;
 }
 
 export interface JobEvent {
@@ -90,6 +93,8 @@ export interface JobQuestion {
 export interface JobDetail extends Job {
   timeline: JobEvent[];
   questions: JobQuestion[];
+  /** The latest model calls, oldest first, for the Spend chart. */
+  spend_turns?: SpendTurn[];
 }
 
 /** The `job` SSE event's data. */

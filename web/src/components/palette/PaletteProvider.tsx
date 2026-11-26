@@ -13,6 +13,7 @@ import { chordLabel, focusContext, hotkeyFor, initialSequence, isMacPlatform, ty
 import { loadRecents, pushRecent, saveRecents, type PaletteSheet } from "../../lib/palette";
 import { JournalSheet } from "../journal/JournalPanel";
 import { ScheduleSheet } from "../schedule/SchedulePanel";
+import { SpendSheet } from "../spend/SpendSheet";
 import { NotificationSettings } from "../push/NotificationSettings";
 import { VoiceSettingsSheet } from "../voice/VoiceSettings";
 import { useMe } from "../../lib/queries";
@@ -116,6 +117,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
       <ShortcutsSheet open={sheet === "shortcuts"} onClose={() => setSheet(null)} mac={mac} />
       <JournalSheet open={sheet === "journal"} onClose={() => setSheet(null)} />
       <ScheduleSheet open={sheet === "schedule"} onClose={() => setSheet(null)} />
+      <SpendSheet open={sheet === "spend"} onClose={() => setSheet(null)} />
       <NotificationSettings open={sheet === "notifications"} onClose={() => setSheet(null)} />
       {voice && <VoiceSettingsSheet open={sheet === "voice"} onClose={() => setSheet(null)} />}
     </PaletteContext.Provider>

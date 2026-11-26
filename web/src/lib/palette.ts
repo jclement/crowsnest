@@ -5,6 +5,7 @@
 //
 // Sources are the queries the app already keeps live through the event stream (jobs, open
 // questions, the fleet, the orchestrator's status), so the palette never asks the server to search.
+import { chipText } from "./spend";
 import { fuzzyMatch, PERFECT_CHAR_SCORE, queryTokens } from "./fuzzy";
 import { relaunchConfirmations } from "./conversation";
 import { cwdTail, cleanTitle } from "./fleet";
@@ -17,7 +18,7 @@ import type { ChipTone } from "../components/ui/Chip";
 // ---- Commands -------------------------------------------------------------------------------
 
 export type ViewPath = "/" | "/chat" | "/inbox" | "/fleet" | "/terminal";
-export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule";
+export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend";
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
 export type PaletteCommand =
@@ -95,6 +96,7 @@ export type PaletteIcon =
   | "bell"
   | "journal"
   | "schedule"
+  | "spend"
   | "compact"
   | "keyboard"
   | "theme-system"
@@ -199,7 +201,7 @@ function jobItem(job: Job): PaletteItem {
     id: `job:${job.id}`,
     group: "jobs",
     title: job.title || job.id,
-    subtitle: [job.id, cardLine(job)].filter(Boolean).join(" · "),
+    subtitle: [job.id, chipText(job.spend)?.text ?? "", cardLine(job)].filter(Boolean).join(" · "),
     keywords: [job.id, stateLabels[job.state], job.agent_name, job.dir, job.work_dir, job.role, job.engine, job.stuck ? "stuck" : ""].filter(Boolean),
     icon: "job",
     chip: stateChip(job),
@@ -333,6 +335,7 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
   items.push(sheet("notifications", "Notifications", "bell", ["push", "devices", "settings"]));
   items.push(sheet("journal", "Journal", "journal", ["pokes", "history", "log"]));
   items.push(sheet("schedule", "Schedule", "schedule", ["scheduled", "tasks", "cron", "periodic", "every"]));
+  items.push(sheet("spend", "Spend", "spend", ["cost", "tokens", "usage", "money", "budget", "price"]));
   items.push(sheet("shortcuts", "Keyboard shortcuts", "keyboard", ["help", "keys", "?"]));
   if (sources.voiceSettings) items.push(sheet("voice", "Voice settings", "voice", ["talk", "speak", "elevenlabs", "microphone"]));
   for (const choice of ["system", "light", "dark"] as const) {

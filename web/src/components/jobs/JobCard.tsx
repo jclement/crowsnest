@@ -1,10 +1,11 @@
 // JobCard: one row of the board (DESIGN.md 12): title, state chip, the progress line, "active 2m
-// ago", open questions, nudges when there were any, and the agent. A stuck job says why in words,
-// and a job waiting on a retry counts down to it.
+// ago", open questions, nudges when there were any, the estimated spend, and the agent. A stuck
+// job says why in words, and a job waiting on a retry counts down to it.
 import { Bot, MessageCircleQuestion, RotateCcw, Zap } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/format";
 import { cardLine, retryLabel, stateChip, type Job } from "../../lib/jobs";
+import { SpendChip } from "../spend/SpendChip";
 import { Chip } from "../ui/Chip";
 
 interface JobCardProps {
@@ -51,6 +52,7 @@ export function JobCard({ job, selected, onSelect }: JobCardProps) {
               {retry}
             </Chip>
           )}
+          <SpendChip spend={job.spend} />
           {job.agent_name && (
             <Chip mono>
               <Bot className="h-3 w-3" aria-hidden />

@@ -166,5 +166,5 @@ export interface KeysResponse {
 }
 
 /** The names of the events on /api/v1/events (DESIGN.md section 10). */
-export const eventNames = ["hello", "heartbeat", "job", "fleet", "message", "question", "orchestrator", "poke", "journal", "say", "schedule"] as const;
+export const eventNames = ["hello", "heartbeat", "job", "fleet", "message", "question", "orchestrator", "poke", "journal", "say", "schedule", "spend"] as const;
 export type EventName = (typeof eventNames)[number];

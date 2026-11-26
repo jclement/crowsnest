@@ -1,5 +1,6 @@
 // TanStack Query hooks: the one place components get server data from. Each hook names its key
 // from queryKeys so the event stream (lib/live.ts) can invalidate exactly what changed.
+import type { SpendGroup } from "./spend";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys } from "./api";
 import type { CreateJobRequest } from "./jobs";
@@ -136,6 +137,23 @@ export function useJobMessage(id: string) {
   return useMutation({
     mutationFn: ({ text, force }: { text: string; force?: boolean }) => endpoints.jobMessage(id, text, force),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+// ---- Spend (7.11) ----------------------------------------------------------------------------
+
+/** Today's and this week's totals, and the orchestrator's line. `spend` events refresh it. */
+export function useSpendSummary(enabled = true) {
+  return useQuery({ queryKey: queryKeys.spendSummary, queryFn: endpoints.spendSummary, refetchInterval: 60_000, enabled });
+}
+
+/** The breakdown for a range of the server's local days, grouped by job, model or day. */
+export function useSpendReport(group: SpendGroup, from: string | undefined, to: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.spendReport(group, from ?? "", to ?? ""),
+    queryFn: () => endpoints.spendReport(group, from, to),
+    enabled: enabled && !!from && !!to,
+    placeholderData: (previous) => previous,
   });
 }
 

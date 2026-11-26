@@ -2,8 +2,8 @@
 // (needs-you and stuck first, then running, then finished today; older finished jobs behind a
 // toggle), and the selected job: beside the board from md, a full-screen sheet on a phone. The
 // selection is in the URL (/?job=j_12) so a link or a reload lands on it. The Journal (pokes,
-// sends, answers, restarts, alerts) and the Schedule (scheduled tasks) open from the buttons
-// above the board.
+// sends, answers, restarts, alerts), the Schedule (scheduled tasks) and Spend (today's and this
+// week's estimated cost, with the breakdown sheet) open from the row above the board.
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CalendarClock, ListTodo, NotebookText, RefreshCw } from "lucide-react";
 import { useState } from "react";
@@ -12,6 +12,7 @@ import { JobDetail } from "../components/jobs/JobDetail";
 import { NewJobForm } from "../components/jobs/NewJobForm";
 import { JournalSheet } from "../components/journal/JournalPanel";
 import { ScheduleSheet } from "../components/schedule/SchedulePanel";
+import { SpendButton, SpendSheet } from "../components/spend/SpendSheet";
 import { Banner } from "../components/ui/Banner";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -28,12 +29,16 @@ export function JobsView() {
   const select = (id: string | undefined) => void navigate({ to: "/", search: { job: id } });
   const [journalOpen, setJournalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [spendOpen, setSpendOpen] = useState(false);
 
   return (
     <div className="flex h-full min-h-0 flex-col md:flex-row">
       <div className="flex min-h-0 flex-col border-border md:w-96 md:shrink-0 md:border-r lg:w-[28rem]">
         <NewJobForm onCreated={(job) => select(job.id)} />
-        <div className="flex justify-end gap-1 border-b border-border px-2 py-0.5">
+        <div className="flex flex-wrap items-center justify-end gap-1 border-b border-border px-2 py-0.5">
+          <span className="mr-auto">
+            <SpendButton onOpen={() => setSpendOpen(true)} />
+          </span>
           <Button compact variant="ghost" icon={CalendarClock} onClick={() => setScheduleOpen(true)}>
             Schedule
           </Button>
@@ -43,6 +48,7 @@ export function JobsView() {
         </div>
         <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
         <ScheduleSheet open={scheduleOpen} onClose={() => setScheduleOpen(false)} />
+        <SpendSheet open={spendOpen} onClose={() => setSpendOpen(false)} />
         <div className="min-h-0 flex-1 overflow-y-auto">
           <Board selected={selected} onSelect={select} />
         </div>
