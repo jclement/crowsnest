@@ -66,7 +66,7 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,
-			Identity: identity,
+			Identity: identity, RemoteControlPrefix: jobRemoteControlPrefix(cfg),
 		},
 		Orchestrator: func() jobs.OrchestratorInfo {
 			if refs.orchestrator == nil {

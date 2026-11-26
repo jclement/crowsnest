@@ -28,7 +28,7 @@ import (
 // and returns the service and a stop function. Everything stops when ctx ends or stop is called;
 // stop returns once the deliverer and the sweeper have finished, and serve calls it before the
 // database closes, so an attempt cut short by shutdown can still record its outcome (R1b-C08).
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, pusher *push.Watcher, socket string, logger *slog.Logger) (*questions.Service, func(), error) {
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, pusher *push.Watcher, socket string, sessionContext func(context.Context, string, string) string, logger *slog.Logger) (*questions.Service, func(), error) {
 	var deliverer *questions.Deliverer
 	var notifyAsked func(questions.Question)
 	if cfg.NotifyURL != "" {
@@ -74,7 +74,7 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	if err != nil {
 		return nil, stop, err
 	}
-	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version})
+	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version, SessionContext: sessionContext})
 	go func() {
 		if err := server.Serve(ctx, listener); err != nil {
 			logger.Error("agent socket stopped", "err", err)

@@ -201,6 +201,14 @@ func (p *Poker) Run(ctx context.Context) {
 	}
 }
 
+// Kick asks for a check now rather than at the next tick (a scheduled task's Run now).
+func (p *Poker) Kick() {
+	select {
+	case p.kick <- struct{}{}:
+	default:
+	}
+}
+
 // PokeNow is the "Poke now" button: a check that skips the agent push interval and journals a
 // skip even when nothing is due.
 func (p *Poker) PokeNow(ctx context.Context) PokeResult { return p.Check(ctx, true) }

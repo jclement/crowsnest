@@ -32,6 +32,8 @@ type pokeServices struct {
 	talk         *voice.Service
 	journal      *journal.Journal
 	alert        func(text string)
+	tasks        orch.TaskSource // scheduled tasks (7.8)
+	tender       orch.Upkeep     // compaction and the daily new conversation (7.9)
 }
 
 // startPoker builds the poker, feeds it from the hub, and runs it until ctx ends.
@@ -40,7 +42,10 @@ func startPoker(ctx context.Context, cfg config.Config, db *store.Store, events 
 		Client: client, KV: db, Journal: services.journal, Hub: events, Logger: logger,
 		Status:   services.orchestrator.Status,
 		Interval: cfg.PokeInterval, Standing: standingWork(services), Alert: services.alert,
-		ManualOnly: cfg.Demo,
+		ManualOnly: cfg.Demo, Tasks: services.tasks,
+	}
+	if services.tender != nil && !cfg.NoOrchestrator {
+		options.Tender = services.tender
 	}
 	if services.talk != nil {
 		options.Talk = services.talk.TalkOn

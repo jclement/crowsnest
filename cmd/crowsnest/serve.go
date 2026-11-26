@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/journal"
+	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/web"
@@ -72,7 +74,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer cleanupDemo()
 	logger := newLogger()
 	slog.SetDefault(logger)
-	logger.Info("starting crowsnest", "version", version, "config", cfg)
+	logger.Info("starting crowsnest", "name", cfg.Name, "version", version, "config", cfg)
 	for _, warning := range cfg.Warnings {
 		logger.Warn(warning)
 	}
@@ -140,7 +142,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket, logger)
+	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
+		standingContext(cfg, refs, refs.questions.Load, jobService), logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
@@ -149,16 +152,21 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	startJobs(ctx, jobService, client, logger)
+	var pokerRef atomic.Pointer[orch.Poker]
+	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
+	tender := newTender(cfg, client, db, journalLog, orchestrator, conversations, logger)
 	poker := startPoker(ctx, cfg, db, events, pokeServices{
 		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
+		tasks: scheduleTasks{service: scheduleService}, tender: tender,
 	}, client, logger)
+	pokerRef.Store(poker)
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
 		Orchestrator: orchestrator, Conversations: conversations,
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
-		Journal: journalLog, Poker: poker, Push: pushService,
+		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

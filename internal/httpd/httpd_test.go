@@ -27,6 +27,7 @@ import (
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/push"
+	"github.com/jclement/crowsnest/internal/schedule"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
@@ -109,6 +110,9 @@ type harnessOptions struct {
 	poker   *orch.Poker
 	// Web Push (push_test.go); nil: the /push routes answer 503
 	push *push.Service
+	// Scheduled tasks and upkeep (schedule_test.go); nil: those routes answer 503
+	schedule *schedule.Service
+	tender   *orch.Tender
 	// R2-L2: --trusted-proxy
 	trustedProxies     []netip.Prefix
 	trustedProxyHeader string // default x-forwarded-for
@@ -183,6 +187,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Poker:         opts.poker,
 		Push:          opts.push,
 		Updater:       opts.updater,
+		Schedule:      opts.schedule,
+		Tender:        opts.tender,
 	})
 	if err != nil {
 		t.Fatal(err)
