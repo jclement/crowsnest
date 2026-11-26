@@ -62,7 +62,8 @@ type pane struct {
 	ansi      string // visible screen with ANSI; falls back to screen when empty
 	recent    string // scrollback; falls back to screen
 	processes []herdr.Process
-	agent     *herdr.Agent // nil for a plain shell
+	agent     *herdr.Agent      // nil for a plain shell
+	env       map[string]string // env given at workspace/tab creation
 }
 
 // Fake is the in-memory herdr. The zero value is not usable; call New.
@@ -84,6 +85,9 @@ type Fake struct {
 
 	onKeys   KeysHook
 	onPrompt PromptHook
+
+	starts        []herdr.AgentStartParams // every agent.start accepted, in order
+	startNotReady bool                     // the next agent.start stops at a dialog
 }
 
 // New returns an empty fake session.

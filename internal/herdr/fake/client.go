@@ -60,6 +60,7 @@ func (f *Fake) WorkspaceCreate(_ context.Context, params herdr.WorkspaceCreatePa
 	f.workspaces[id] = ws
 	f.order = append(f.order, id)
 	t, p := f.newTabLocked(ws, "", params.Cwd)
+	p.env = params.Env
 	ws.info.ActiveTabID = t.info.ID
 	created := herdr.WorkspaceCreated{Workspace: ws.info, Tab: t.info, RootPane: p.info}
 	f.mu.Unlock()
@@ -109,6 +110,7 @@ func (f *Fake) TabCreate(_ context.Context, params herdr.TabCreateParams) (herdr
 		return herdr.TabCreated{}, &herdr.Error{Code: herdr.CodeWorkspaceNotFound, Message: "workspace not found"}
 	}
 	t, p := f.newTabLocked(ws, params.Label, params.Cwd)
+	p.env = params.Env
 	created := herdr.TabCreated{Tab: t.info, RootPane: p.info}
 	f.mu.Unlock()
 	f.emit(herdr.Event{Kind: "tab_created", WorkspaceID: ws.info.ID})
@@ -279,10 +281,24 @@ func (f *Fake) AgentStart(_ context.Context, params herdr.AgentStartParams) (her
 		f.mu.Unlock()
 		return herdr.Agent{}, &herdr.Error{Code: "pane_busy", Message: "pane is not at a shell prompt"}
 	}
-	f.attachAgentLocked(p, params.Name, params.Kind, herdr.StatusIdle, fmt.Sprintf("fake-session-%s", strings.ReplaceAll(p.info.ID, ":", "-")))
+	f.starts = append(f.starts, params)
+	session := sessionFromArgs(params.Args, fmt.Sprintf("fake-session-%s", strings.ReplaceAll(p.info.ID, ":", "-")))
+	notReady := f.startNotReady
+	f.startNotReady = false
+	status := herdr.StatusIdle
+	if notReady {
+		status = herdr.StatusBlocked // parked at a trust dialog, as real Claude would be
+	}
+	f.attachAgentLocked(p, params.Name, params.Kind, status, session)
+	if notReady {
+		p.agent.InteractiveReady = false
+	}
 	agent := *p.agent
 	f.mu.Unlock()
 	f.emit(herdr.Event{Kind: "pane_agent_detected", PaneID: agent.PaneID, WorkspaceID: agent.WorkspaceID})
+	if notReady {
+		return agent, &herdr.Error{Code: herdr.CodeAgentNotReady, Message: "agent did not become ready (trust dialog)", Method: "agent.start"}
+	}
 	return agent, nil
 }
 
@@ -327,6 +343,11 @@ func (f *Fake) AgentPrompt(_ context.Context, target, text string, _ *herdr.Prom
 		return herdr.Agent{}, &herdr.Error{Code: herdr.CodeAgentBlocked, Message: "agent is waiting at a dialog", Method: "agent.prompt"}
 	}
 	f.prompts = append(f.prompts, Prompt{Target: target, PaneID: p.info.ID, Text: text})
+	if strings.TrimSpace(text) == "/exit" {
+		exiting := *p.agent
+		f.mu.Unlock()
+		return exiting, f.ExitAgent(exiting.PaneID)
+	}
 	f.setStatusLocked(p, herdr.StatusWorking)
 	agent := *p.agent
 	hook := f.onPrompt

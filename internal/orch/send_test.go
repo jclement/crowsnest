@@ -1,0 +1,122 @@
+// Tests for the send path: a plain send, sending while working (queued), the draft check and
+// its override, a dialog on screen or reported by herdr, and a turn that never starts.
+
+package orch
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/jclement/crowsnest/internal/fleet"
+	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/herdr/fake"
+)
+
+const (
+	rule        = "\x1b[38;5;244m────────────────────────────────────────\x1b[39m"
+	emptyInput  = rule + "\n❯ \x1b[7m \x1b[27m\n" + rule + "\n"
+	ghostInput  = rule + "\n❯ \x1b[7m \x1b[27m\x1b[2mTry \"fix the tests\"\x1b[22m\n" + rule + "\n"
+	draftInput  = rule + "\n❯ half-typed thought\x1b[7m \x1b[27m\n" + rule + "\n"
+	dialogInput = "Bash command\n\n   rm -rf dist\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
+)
+
+func sendRig(t *testing.T, status herdr.AgentStatus, screen string) (*fake.Fake, string) {
+	t.Helper()
+	f := fake.New()
+	_, _, pane := f.AddWorkspace("w", "/x")
+	_ = f.AddAgent(pane, "builder", "claude", status, "s")
+	_ = f.SetScreen(pane, fleet.StripANSI(screen), screen)
+	return f, pane
+}
+
+func TestPromptSends(t *testing.T) {
+	for _, screen := range []string{emptyInput, ghostInput} {
+		f, pane := sendRig(t, herdr.StatusIdle, screen)
+		result, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "run the tests"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Started || result.Queued || result.Status != herdr.StatusWorking || result.PaneID != pane {
+			t.Fatalf("result = %+v", result)
+		}
+		if prompts := f.Prompts(); len(prompts) != 1 || prompts[0].Text != "run the tests" || prompts[0].PaneID != pane {
+			t.Fatalf("prompts = %+v", prompts)
+		}
+	}
+}
+
+func TestPromptWhileWorkingIsQueued(t *testing.T) {
+	f, _ := sendRig(t, herdr.StatusWorking, emptyInput)
+	result, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "also do this"})
+	if err != nil || !result.Queued || !result.Started {
+		t.Fatalf("result = %+v, %v", result, err)
+	}
+}
+
+func TestPromptRefusesOverADraft(t *testing.T) {
+	f, _ := sendRig(t, herdr.StatusIdle, draftInput)
+	_, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "hello"})
+	var draft *DraftError
+	if !errors.As(err, &draft) || draft.Draft.Text != "half-typed thought" {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.Prompts()) != 0 {
+		t.Fatal("typed over a draft")
+	}
+	if _, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "hello", ForceOverDraft: true}); err != nil {
+		t.Fatalf("forced send: %v", err)
+	}
+	if len(f.Prompts()) != 1 {
+		t.Fatal("forced send typed nothing")
+	}
+}
+
+func TestPromptRefusesIntoADialog(t *testing.T) {
+	// herdr says blocked.
+	f, pane := sendRig(t, herdr.StatusBlocked, dialogInput)
+	_, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "hello"})
+	var blocked *BlockedError
+	if !errors.As(err, &blocked) || blocked.PaneID != pane || !blocked.Dialog.Present || len(blocked.Dialog.Options) != 2 || blocked.ScreenHash == "" {
+		t.Fatalf("err = %#v", err)
+	}
+	// herdr says idle, but the screen shows a dialog.
+	f, _ = sendRig(t, herdr.StatusIdle, dialogInput)
+	if _, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "hello"}); !errors.As(err, &blocked) {
+		t.Fatalf("screen dialog: err = %v", err)
+	}
+	// A dialog arrives between the check and the send: herdr refuses with agent_blocked.
+	f, _ = sendRig(t, herdr.StatusIdle, emptyInput)
+	f.FailNext("agent.prompt", herdr.ErrAgentBlocked)
+	if _, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "hello"}); !errors.As(err, &blocked) {
+		t.Fatalf("late dialog: err = %v", err)
+	}
+	if len(f.Prompts()) != 0 {
+		t.Fatal("typed into a dialog")
+	}
+}
+
+func TestPromptStalled(t *testing.T) {
+	for _, failure := range []error{herdr.ErrAgentPromptStalled, herdr.ErrTimeout} {
+		f, _ := sendRig(t, herdr.StatusIdle, emptyInput)
+		f.FailNext("agent.prompt", failure)
+		result, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "hello"})
+		if err != nil || result.Started || result.Note == "" || result.Status != herdr.StatusIdle {
+			t.Fatalf("%v: result = %+v, %v", failure, result, err)
+		}
+	}
+}
+
+func TestPromptValidation(t *testing.T) {
+	f, _ := sendRig(t, herdr.StatusIdle, emptyInput)
+	if _, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: "  \n"}); !errors.Is(err, ErrEmptyPrompt) {
+		t.Fatalf("empty: %v", err)
+	}
+	if _, err := Prompt(context.Background(), f, "builder", PromptRequest{Text: strings.Repeat("x", MaxPromptBytes+1)}); !errors.Is(err, ErrPromptTooLong) {
+		t.Fatalf("long: %v", err)
+	}
+	if _, err := Prompt(context.Background(), f, "nobody", PromptRequest{Text: "hi"}); !herdr.IsNotFound(err) {
+		t.Fatalf("unknown agent: %v", err)
+	}
+}
