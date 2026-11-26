@@ -137,6 +137,8 @@ export function ScreenText({ text, className }: { text: string; className?: stri
     <pre
       ref={ref}
       aria-label="Screen text"
+      // Focusable so a keyboard can scroll it (axe: scrollable-region-focusable, M9).
+      tabIndex={0}
       className={cn(
         "max-h-72 overflow-auto rounded border border-border bg-surface-sunken p-2.5 font-mono text-2xs leading-tight text-heading",
         className,

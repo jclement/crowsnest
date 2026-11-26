@@ -53,9 +53,9 @@ export function AppFrame() {
             {me.data.features.session}
           </span>
         )}
-        {me.data?.features.demo && <span className="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning">demo</span>}
+        {me.data?.features.demo && <span className="rounded bg-chrome-warning/20 px-1.5 py-0.5 text-xs text-chrome-warning">demo</span>}
         {fixturesEnabled() && (
-          <span className="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning" title="Data comes from lib/fixtures.ts">
+          <span className="rounded bg-chrome-warning/20 px-1.5 py-0.5 text-xs text-chrome-warning" title="Data comes from lib/fixtures.ts">
             fixtures
           </span>
         )}

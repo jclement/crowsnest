@@ -24,17 +24,17 @@ describe("KeyBar", () => {
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"));
     expect(names).toEqual([
-      "Escape",
+      "Esc (Escape)",
       "Tab",
-      "Control (applies to the next key)",
+      "Ctrl (applies to the next key)",
       "Left",
       "Up",
       "Down",
       "Right",
       "Enter",
       "Paste",
-      "Smaller text",
-      "Larger text",
+      "A− (smaller text)",
+      "A+ (larger text)",
     ]);
   });
 
@@ -42,7 +42,7 @@ describe("KeyBar", () => {
     const user = userEvent.setup();
     const props = renderBar();
     for (const [name, key] of [
-      ["Escape", "esc"],
+      ["Esc (Escape)", "esc"],
       ["Tab", "tab"],
       ["Left", "left"],
       ["Up", "up"],
@@ -60,7 +60,7 @@ describe("KeyBar", () => {
   it("toggles the sticky Ctrl and shows its state", async () => {
     const user = userEvent.setup();
     const props = renderBar({ ctrl: true });
-    const ctrl = screen.getByRole("button", { name: /^Control/ });
+    const ctrl = screen.getByRole("button", { name: /^Ctrl/ });
     expect(ctrl).toHaveAttribute("aria-pressed", "true");
     await user.click(ctrl);
     expect(props.onCtrlChange).toHaveBeenCalledWith(false);
@@ -69,9 +69,9 @@ describe("KeyBar", () => {
   it("steps the font size", async () => {
     const user = userEvent.setup();
     const props = renderBar({ fontSize: 14 });
-    await user.click(screen.getByRole("button", { name: "Larger text" }));
+    await user.click(screen.getByRole("button", { name: "A+ (larger text)" }));
     expect(props.onFontSize).toHaveBeenLastCalledWith(15);
-    await user.click(screen.getByRole("button", { name: "Smaller text" }));
+    await user.click(screen.getByRole("button", { name: "A− (smaller text)" }));
     expect(props.onFontSize).toHaveBeenLastCalledWith(13);
   });
 

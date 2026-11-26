@@ -32,7 +32,7 @@ test("the tree shows every workspace, tab and agent, with the ones that need you
   await expect(docs).toHaveAttribute("data-needs-you", "true");
   await expect(docs).toContainText("needs you");
   // The shell pane is listed as a pane, not an agent.
-  await expect(tree.getByRole("button", { name: /^Shell w2:p3/ })).toBeVisible();
+  await expect(tree.getByRole("button", { name: /^shell w2:p3/i })).toBeVisible();
 
   // A workspace collapses and expands.
   const crowsnest = tree.getByRole("button", { name: /crowsnest\s*\d+ agents?/ });
@@ -50,7 +50,7 @@ test("the filter narrows the tree by agent, workspace or path, and clears", asyn
   const tree = page.getByRole("list", { name: "Workspaces" });
   await expect(tree.getByRole("button", { name: /linter/ })).toBeVisible();
   await expect(tree.getByRole("button", { name: /builder/ })).toHaveCount(0);
-  await expect(tree.getByRole("button", { name: /^Shell/ })).toHaveCount(0);
+  await expect(tree.getByRole("button", { name: /^shell/i })).toHaveCount(0);
   await filter.fill("no-such-agent-anywhere");
   await expect(tree.getByRole("button", { name: /linter|builder|reviewer/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Clear filter" }).click();
@@ -90,7 +90,7 @@ test("an agent at a dialog shows the dialog card in its detail", async ({ page }
 
 test("a plain shell pane opens a terminal on that pane", async ({ page }, testInfo) => {
   await openFleet(page);
-  await page.getByRole("button", { name: /^Shell w2:p3/ }).click();
+  await page.getByRole("button", { name: /^shell w2:p3/i }).click();
   const detail = detailRegion(page, testInfo, "unused").or(page.getByRole("article", { name: "Shell w2:p3" }));
   await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
   await page.locator("[data-terminal]").click();

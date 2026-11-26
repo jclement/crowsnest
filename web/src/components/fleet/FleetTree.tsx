@@ -248,7 +248,6 @@ function ShellRow({ pane, selected, onSelect }: { pane: Pane; selected: boolean;
       type="button"
       onClick={onSelect}
       aria-current={selected ? "true" : undefined}
-      aria-label={`Shell ${pane.id} in ${pane.cwd}`}
       className={cn(
         "relative flex min-h-11 w-full min-w-0 items-center gap-2 pl-8 pr-3 text-left text-2xs text-muted hover:bg-hover md:min-h-7",
         selected && "bg-selected hover:bg-selected",
@@ -256,8 +255,14 @@ function ShellRow({ pane, selected, onSelect }: { pane: Pane; selected: boolean;
     >
       <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-r", selected ? "bg-accent" : "bg-transparent")} />
       <TerminalIcon className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
+      {/* The name is the visible text plus the pane id and full path for a screen reader
+          (an aria-label that did not contain the visible words failed axe, M9). */}
       <span>shell</span>
-      <span className="ml-auto max-w-[60%] truncate font-mono" title={pane.cwd}>
+      <span className="sr-only">
+        {" "}
+        {pane.id} in {pane.cwd}
+      </span>
+      <span aria-hidden className="ml-auto max-w-[60%] truncate font-mono" title={pane.cwd}>
         {cwdTail(pane.cwd)}
       </span>
     </button>

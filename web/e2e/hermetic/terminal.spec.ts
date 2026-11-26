@@ -3,7 +3,7 @@
 // input reaches it and its output comes back, a resize reaches it, it reconnects after the server
 // goes away and comes back, the phone key bar sends the right bytes, and a ninth terminal is
 // refused with the cap's message. The real herdr TUI and pane bridges are `mise run e2e:real`.
-import type { Page, WebSocket } from "@playwright/test";
+import type { Page, WebSocket as PageSocket } from "@playwright/test";
 import { expect, isPhone, test } from "../support/fixtures";
 
 const rows = (page: Page) => page.locator("[data-terminal] .xterm-rows");
@@ -73,7 +73,7 @@ test("an exited terminal stays ended until Reconnect is pressed", async ({ page 
 test("the phone key bar sends Esc, Ctrl+C and the arrows as the right bytes", async ({ page }, testInfo) => {
   test.skip(!isPhone(testInfo), "the key bar is for phones and touch screens");
   const sent: string[] = [];
-  page.on("websocket", (ws: WebSocket) => {
+  page.on("websocket", (ws: PageSocket) => {
     ws.on("framesent", (frame) => {
       if (typeof frame.payload !== "string") sent.push(frame.payload.toString("latin1"));
       else if (!frame.payload.startsWith("{")) sent.push(frame.payload);
@@ -89,7 +89,7 @@ test("the phone key bar sends Esc, Ctrl+C and the arrows as the right bytes", as
     await bar.getByRole("button", { name: label, exact: true }).click();
     await expect.poll(() => sent.join("")).toMatch(expected instanceof RegExp ? expected : new RegExp(`^${expected.replace(/[[\]\\^$.|?*+()]/g, "\\$&")}$`));
   };
-  await press("Escape", "\x1b");
+  await press("Esc (Escape)", "\x1b");
   await press("Tab", "\t");
   await press("Up", /^\x1b[[O]A$/);
   await press("Down", /^\x1b[[O]B$/);
@@ -97,7 +97,7 @@ test("the phone key bar sends Esc, Ctrl+C and the arrows as the right bytes", as
   await press("Left", /^\x1b[[O]D$/);
   await press("Enter", "\r");
   // Sticky Ctrl: the next typed key goes out as its control code, then Ctrl lets go.
-  const ctrl = bar.getByRole("button", { name: "Control (applies to the next key)" });
+  const ctrl = bar.getByRole("button", { name: "Ctrl (applies to the next key)" });
   await ctrl.click();
   await expect(ctrl).toHaveAttribute("aria-pressed", "true");
   sent.length = 0;
@@ -135,7 +135,7 @@ test("a ninth terminal is refused with the cap's message and does not retry by i
   await expect(page.getByRole("status").filter({ hasText: /too many terminals open \(8\)/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reconnect" })).toBeVisible();
   // Closing one frees a slot; Reconnect then works.
-  await holder.evaluate(() => (window as unknown as { held: WebSocket[] }).held[0].close());
+  await holder.evaluate(() => (window as unknown as { held: WebSocket[] }).held[0]?.close());
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: "Reconnect" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();

@@ -24,16 +24,18 @@
   --color-surface-sunken: #f1f3f6;
   --color-heading: #0f172a;
   --color-body: #334155;
-  --color-muted: #64748b;
+  /* Muted, warning, accent and success are dark enough for 4.5:1 on every light surface they sit on,
+     including the selected row and a chip's own 10-20 % tint (axe, M9; they were 3.6 to 4.5). */
+  --color-muted: #556070;
   --color-border: #e3e7ed;
   --color-border-strong: #cbd3dd;
   --color-hover: #f1f4f8;
   --color-selected: #e4effa;
-  --color-accent: #0b63c1;
+  --color-accent: #0a56a8;
   --color-accent-fg: #ffffff;
-  --color-danger: #c22a2a;
-  --color-warning: #a8580a;
-  --color-success: #1a7f37;
+  --color-danger: #a81f1f;
+  --color-warning: #864405;
+  --color-success: #166a2e;
   --color-overlay: rgb(15 23 42 / 0.45);
 
   /* Agent states (StatusDot). Each also has its own shape, so colour is never the only cue. */
@@ -49,6 +51,8 @@
   --color-chrome-muted: #94a3b8;
   --color-chrome-hover: #1c2636;
   --color-chrome-border: #1e293b;
+  /* Warning on the dark header (the demo and fixtures chips): the light theme's warning is too dark there. */
+  --color-chrome-warning: #e3a43a;
 
   /* Syntax highlighting (rehype-highlight's hljs classes). */
   --color-code-keyword: #8b3fd1;

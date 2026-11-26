@@ -68,6 +68,9 @@ export async function smallTapTargets(page: Page, scope = "body"): Promise<strin
 
 /** No serious or critical axe violations on the page as it stands. */
 export async function expectAccessible(page: Page, testInfo: TestInfo, what: string) {
+  // A sheet sliding in or a toast fading is half-transparent: let animations finish first, or axe
+  // measures the contrast of a blend that no one reads.
+  await page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity));
   const results = await new AxeBuilder({ page })
     // xterm draws its own grid of spans and a hidden textarea; axe's rules do not fit a terminal
     // emulator (its accessibility comes from the screen-reader mode, not the visible rows).

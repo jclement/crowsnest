@@ -160,7 +160,7 @@ export async function startInstance(options: InstanceOptions): Promise<Instance>
       await waitForHealth(baseURL, proc);
     } catch (error) {
       proc.kill("SIGKILL");
-      throw new Error(`${(error as Error).message}\n--- crowsnest log ---\n${log.join("")}`);
+      throw new Error(`${(error as Error).message}\n--- crowsnest log ---\n${log.join("")}`, { cause: error });
     }
   };
   const kill = async () => {
