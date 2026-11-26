@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,5 +58,53 @@ func TestJobRoundTripAndTimeline(t *testing.T) {
 	}
 	if found, _ := db.HasJobEvent(ctx, id, "nudge", `"q_9"`); found {
 		t.Fatal("HasJobEvent false positive")
+	}
+}
+
+// R2-C12: what the supervisor reads about a job's questions never carries their attachments, and
+// the counts and the answer-incoming time come from one aggregate query.
+func TestJobQuestionsLeaveTheFilesBehind(t *testing.T) {
+	ctx := context.Background()
+	db, err := OpenMemory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	big := strings.Repeat("x", 256<<10)
+	files := json.RawMessage(`[{"filename":"a.go","original":"` + big + `","final":"y"}]`)
+	at := time.Unix(1_800_000_000, 0)
+	insert := func(wait bool) int64 {
+		id, err := db.InsertQuestion(ctx, QuestionRecord{Title: "t", Kind: "ack", Urgency: "normal", JobID: "j_1", Wait: wait,
+			Files: files, CreatedAt: at, ExpiresAt: at.Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	insert(true) // open, blocking
+	delivered, failed := insert(false), insert(false)
+	for _, id := range []int64{delivered, failed} {
+		if err := db.SettleQuestion(ctx, id, "answered", json.RawMessage(`"ack"`), "", "type", at.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.FinishDelivery(ctx, delivered, at.Add(2*time.Minute), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.FinishDelivery(ctx, failed, at.Add(3*time.Minute), "typing failed"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := db.ListQuestionsByJob(ctx, "j_1")
+	if err != nil || len(list) != 3 {
+		t.Fatalf("list %d %v", len(list), err)
+	}
+	for _, q := range list {
+		if string(q.Files) != "[]" || q.FileCount != 1 {
+			t.Fatalf("question %d came with %d bytes of files (count %d)", q.ID, len(q.Files), q.FileCount)
+		}
+	}
+	summary, err := db.SummarizeJobQuestions(ctx, "j_1")
+	if err != nil || summary.Open != 1 || summary.Blocking != 1 || !summary.AnswerIncomingAt.Equal(at.Add(2*time.Minute)) {
+		t.Fatalf("summary %+v %v (the failed delivery must not count)", summary, err)
 	}
 }

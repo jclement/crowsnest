@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/questions"
 )
 
 // startRunningJob creates a job over the socket and marks it running, as a launch would.
@@ -177,6 +178,40 @@ func TestMCPJobToolsUseTheEnvironmentsJob(t *testing.T) {
 	result, _ := bare.CallTool(ctx, &mcp.CallToolParams{Name: "job_update", Arguments: map[string]any{"progress": "x"}})
 	if !result.IsError || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "job_id") {
 		t.Fatalf("no job: %+v", result)
+	}
+}
+
+// R2-C06: the orchestrator's ask names the job it holds (its token names only its pane); the
+// question must be stored under that job, and nobody else may attach a question to it.
+func TestOrchestratorAsksAboutTheJobItHolds(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	id := startRunningJob(t, f)
+	numeric, _ := jobs.ParseID(id)
+	record, _ := f.db.GetJob(ctx, numeric)
+	record.PaneID = "w1:p1" // held by the orchestrator in w1:p1
+	if err := f.db.UpdateJob(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	session := connectMCP(t, NewClient(f.socket, f.token(t, "w1:p1", "")))
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: map[string]any{"title": "Which DB?", "kind": "manual", "job_id": id}})
+	if err != nil || result.IsError {
+		t.Fatalf("ask: %+v %v", result, err)
+	}
+	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "waiting=true") {
+		t.Fatalf("the reply should treat it as a job question: %q", text)
+	}
+	if open, _ := f.service.List(ctx, "open"); len(open) != 1 || open[0].JobID != id || open[0].SourcePane != "w1:p1" {
+		t.Fatalf("the question lost its job: %+v", open)
+	}
+	for name, client := range map[string]*Client{
+		"another pane":      NewClient(f.socket, f.token(t, "w7:p2", "")),
+		"another job agent": NewClient(f.socket, f.token(t, "w5:p1", "j_99")),
+		"unidentified":      NewClient(f.socket, ""),
+	} {
+		if _, err := client.Ask(ctx, questions.AskInput{Title: "Mine now?", Kind: questions.KindManual, JobID: id}); !isStatus(err, 403) {
+			t.Fatalf("%s attached a question to %s: %v", name, id, err)
+		}
 	}
 }
 
