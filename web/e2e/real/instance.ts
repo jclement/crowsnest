@@ -6,8 +6,15 @@
 // removed, so a test run from inside a herdr pane cannot reach that pane's session. A real-herdr
 // instance always uses a session named crowsnest-test-<random>; stopSession() stops and deletes
 // only that session, and refuses any other name.
+//
+// A real-herdr instance also gets its own throwaway HOME. herdr keeps its config and session
+// sockets under ~/.config/herdr, and its TUI shows every machine that config names (remote ones
+// too), so with the real HOME the Terminal view and its screenshots would show the user's own
+// machines and workspaces. The fresh HOME has only a minimal .zshrc (no new-user wizard, a short
+// prompt) and a herdr config that skips herdr's first-run screen. It lives under /tmp rather than os.tmpdir() because a unix socket path is limited to
+// 104 bytes on macOS, and herdr's socket sits four directories below HOME.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -21,7 +28,20 @@ const READY_TIMEOUT_MS = 30_000;
 export interface Instance {
   baseURL: string;
   session: string;
+  /** The environment for herdr commands aimed at this instance's session (its HOME). */
+  env: NodeJS.ProcessEnv;
   stop: () => Promise<void>;
+}
+
+/** A throwaway HOME for a real-herdr instance (see the file comment). */
+function throwawayHome(): string {
+  const home = mkdtempSync("/tmp/cn-");
+  writeFileSync(join(home, ".zshrc"), "PS1='%1~ %# '\n");
+  writeFileSync(join(home, ".bashrc"), "PS1='\\W \\$ '\n");
+  // Without this herdr's TUI opens on its first-run settings screen instead of the session.
+  mkdirSync(join(home, ".config", "herdr"), { recursive: true });
+  writeFileSync(join(home, ".config", "herdr", "config.toml"), "onboarding = false\n");
+  return home;
 }
 
 /** The environment for a child: ours minus every HERDR_* variable. */
@@ -61,8 +81,10 @@ export async function startInstance(options: { demo: boolean; session?: string }
   if (!options.demo && !TEST_SESSION_PATTERN.test(session)) throw new Error(`refusing to use session ${session}`);
   const args = ["serve", "--no-auth", "--bind", "127.0.0.1", "--port", String(port), "--session", session, "--no-orchestrator"];
   if (options.demo) args.push("--demo");
+  const home = options.demo ? undefined : throwawayHome();
+  const env = scrubbedEnv(home ? { HOME: home, XDG_CONFIG_HOME: join(home, ".config") } : {});
   const child = spawn(BINARY, args, {
-    env: scrubbedEnv({ CROWSNEST_DATA_DIR: dataDir }),
+    env: { ...env, CROWSNEST_DATA_DIR: dataDir },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const log: string[] = [];
@@ -78,10 +100,12 @@ export async function startInstance(options: { demo: boolean; session?: string }
   return {
     baseURL,
     session,
+    env,
     stop: async () => {
       await stopChild(child);
-      if (!options.demo) stopSession(session);
+      if (!options.demo) stopSession(session, env);
       rmSync(dataDir, { recursive: true, force: true });
+      if (home) rmSync(home, { recursive: true, force: true });
     },
   };
 }
@@ -111,9 +135,8 @@ async function stopChild(child: ChildProcess): Promise<void> {
 }
 
 /** Stops and deletes a throwaway herdr session. Refuses any name that is not crowsnest-test-*. */
-export function stopSession(session: string): void {
+export function stopSession(session: string, env: NodeJS.ProcessEnv): void {
   if (!TEST_SESSION_PATTERN.test(session)) throw new Error(`refusing to stop session ${session}`);
-  const env = scrubbedEnv();
   spawnSync("herdr", ["session", "stop", session, "--json"], { env, stdio: "ignore", timeout: 15_000 });
   spawnSync("herdr", ["session", "delete", session, "--json"], { env, stdio: "ignore", timeout: 15_000 });
 }

@@ -29,6 +29,14 @@ export function findAgent(fleet: Fleet | undefined, paneId: string): { agent: Ag
   return workspace && tab ? { agent, workspace, tab } : null;
 }
 
+/** Finds any pane (agent or plain shell) with the workspace and tab it sits in. */
+export function findPane(fleet: Fleet | undefined, paneId: string): { pane: Pane; workspace: Workspace; tab: Tab } | null {
+  for (const workspace of fleet?.workspaces ?? [])
+    for (const tab of workspace.tabs)
+      for (const pane of tab.panes) if (pane.id === paneId) return { pane, workspace, tab };
+  return null;
+}
+
 // ---- Sorting and filtering ---------------------------------------------------
 
 function paneNeedsYou(pane: Pane): boolean {

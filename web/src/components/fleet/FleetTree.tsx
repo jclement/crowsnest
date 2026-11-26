@@ -180,7 +180,7 @@ function TabGroup({ tab, selected, onSelect, hideShells }: GroupProps & { tab: T
             </li>
           ) : (
             <li key={pane.id}>
-              <ShellRow pane={pane} />
+              <ShellRow pane={pane} selected={selected === pane.id} onSelect={() => onSelect(pane.id)} />
             </li>
           ),
         )}
@@ -241,14 +241,25 @@ export function AgentRow({
   );
 }
 
-function ShellRow({ pane }: { pane: Pane }) {
+/** A plain shell pane: one quiet line. Selecting it opens a terminal on the pane. */
+function ShellRow({ pane, selected, onSelect }: { pane: Pane; selected: boolean; onSelect: () => void }) {
   return (
-    <div className="flex h-7 min-w-0 items-center gap-2 pl-8 pr-3 text-2xs text-muted">
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-current={selected ? "true" : undefined}
+      aria-label={`Shell ${pane.id} in ${pane.cwd}`}
+      className={cn(
+        "relative flex min-h-11 w-full min-w-0 items-center gap-2 pl-8 pr-3 text-left text-2xs text-muted hover:bg-hover md:min-h-7",
+        selected && "bg-selected hover:bg-selected",
+      )}
+    >
+      <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-r", selected ? "bg-accent" : "bg-transparent")} />
       <TerminalIcon className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
       <span>shell</span>
       <span className="ml-auto max-w-[60%] truncate font-mono" title={pane.cwd}>
         {cwdTail(pane.cwd)}
       </span>
-    </div>
+    </button>
   );
 }

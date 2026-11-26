@@ -128,6 +128,12 @@ export const endpoints = {
     api<KeysResponse>(`/agents/${encodeURIComponent(target)}/keys`, { method: "POST", body: request }),
 };
 
+/** The terminal WebSockets (lib/termSocket.ts opens them). */
+export const terminalPaths = {
+  tui: `${API_BASE}/term/tui`,
+  pane: (paneId: string) => `${API_BASE}/term/pane/${encodeURIComponent(paneId)}`,
+};
+
 /**
  * TanStack Query keys, in one place so invalidation never misses a spelling. Everything about
  * one agent sits under ["agents", target] so a single invalidation refreshes all of it.
