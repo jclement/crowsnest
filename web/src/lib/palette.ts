@@ -9,7 +9,7 @@ import { fuzzyMatch, PERFECT_CHAR_SCORE, queryTokens } from "./fuzzy";
 import { relaunchConfirmations } from "./conversation";
 import { cwdTail, cleanTitle } from "./fleet";
 import { cardLine, isFinished, stateChip, stateLabels, type Job } from "./jobs";
-import { kindLabels, type Question } from "./questions";
+import { compareQuestions, kindLabels, type Question } from "./questions";
 import type { ThemeChoice } from "./theme";
 import type { AgentStatus, Fleet } from "./types";
 import type { ChipTone } from "../components/ui/Chip";
@@ -301,8 +301,12 @@ function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
 /** Everything the palette can offer apart from the query's own Give job and Ask items. */
 export function buildItems(sources: PaletteSources): PaletteItem[] {
   const items: PaletteItem[] = [];
-  for (const question of sources.questions ?? []) if (question.status === "open") items.push(questionItem(question));
+  // Needs you, in the Inbox's order: blocking questions, then agents at a dialog, then the rest.
+  const open = (sources.questions ?? []).filter((question) => question.status === "open").sort(compareQuestions);
+  const blocking = open.filter((question) => question.urgency === "blocking" && question.kind !== "notice");
+  items.push(...blocking.map(questionItem));
   items.push(...fleetItems(sources.fleet).filter((item) => item.group === "needs"));
+  items.push(...open.filter((question) => !blocking.includes(question)).map(questionItem));
   for (const view of views) {
     items.push({
       id: `nav:${view.to}`,
@@ -459,6 +463,12 @@ const KEYWORD_WEIGHT = 0.8;
 export const STRONG_MATCH = 0.75;
 /** A longer query is more likely to be a sentence: it needs a better match to outrank Give job. */
 export const STRONG_MATCH_LONG = 0.9;
+/**
+ * The least a word of the query must score where it matched (field weight included). Below this
+ * it is letters scattered through a subtitle or keyword, which reads as noise rather than a hit;
+ * title abbreviations ("kbd" for Keyboard shortcuts) score 0.8 and up.
+ */
+export const MIN_TOKEN_QUALITY = 0.5;
 
 /** Scores one item: every token must hit the title, the subtitle or a keyword. */
 export function scoreItem(tokens: string[], item: PaletteItem): Omit<RankedItem, "item"> | null {
@@ -489,7 +499,7 @@ export function scoreItem(tokens: string[], item: PaletteItem): Omit<RankedItem,
         bestSubtitle = null;
       }
     }
-    if (best === -Infinity) return null;
+    if (best === -Infinity || matchQuality(best, [token]) < MIN_TOKEN_QUALITY) return null;
     score += best;
     for (const position of bestTitle ?? []) titlePositions.add(position);
     for (const position of bestSubtitle ?? []) subtitlePositions.add(position);

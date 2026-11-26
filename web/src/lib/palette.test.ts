@@ -114,6 +114,24 @@ describe("buildItems", () => {
     expect(items.find((item) => item.id === "q:q_9")?.actions?.map((action) => action.label)).toEqual(["Open in Inbox", "Acknowledge"]);
   });
 
+  it("orders what needs you as the Inbox does: blocking questions, dialogs, then the rest", () => {
+    const items = buildItems(
+      sources({
+        questions: [
+          makeQuestion({ id: "q_1", title: "A notice", kind: "notice", status: "open", urgency: "low" }),
+          makeQuestion({ id: "q_2", title: "Normal", kind: "manual", status: "open", urgency: "normal" }),
+          makeQuestion({ id: "q_3", title: "Blocking", kind: "confirm", status: "open", urgency: "blocking", options: [{ key: "y", label: "Yes" }] }),
+          makeQuestion({ id: "q_4", title: "Answered", kind: "confirm", status: "answered" }),
+        ],
+      }),
+    );
+    const needs = items.filter((item) => item.group === "needs").map((item) => item.id);
+    expect(needs[0]).toBe("q:q_3");
+    expect(needs[1]).toMatch(/^dialog:/);
+    expect(needs.slice(-2)).toEqual(["q:q_2", "q:q_1"]);
+    expect(needs).not.toContain("q:q_4");
+  });
+
   it("lists dialogs, agents and plain panes from the fleet", () => {
     const fleet = makeFleet();
     const items = buildItems(sources({ fleet }));
@@ -172,6 +190,13 @@ describe("scoreItem", () => {
     expect(scored.subtitlePositions).toEqual([]);
     expect(scoreItem(["tests"], item)?.subtitlePositions).toEqual([14, 15, 16, 17, 18]);
     expect(scoreItem(["web"], item)?.titlePositions).toEqual([]);
+  });
+
+  it("drops letters scattered through a subtitle", () => {
+    const noisy: PaletteItem = { ...item, title: "Fix the flaky test", subtitle: "Fixed the race in sse.test.tsx: the fake timer", keywords: [] };
+    expect(scoreItem(["cache"], noisy)).toBeNull();
+    // An abbreviation of the title still counts.
+    expect(scoreItem(["kbd"], { ...item, title: "Keyboard shortcuts", subtitle: undefined, keywords: [] })).not.toBeNull();
   });
 
   it("counts the title more than other fields", () => {

@@ -262,7 +262,7 @@ export function CommandPalette({ inputRef, onClose, run, recents, onRan, mac, sp
     level.kind === "root"
       ? "Search, go to, or type a job…"
       : level.kind === "actions"
-        ? `Actions for ${shortTitle(level.item)}`
+        ? "Filter actions…"
         : level.kind === "input"
           ? level.input.placeholder
           : "Confirm or go back";
@@ -335,6 +335,12 @@ export function CommandPalette({ inputRef, onClose, run, recents, onRan, mac, sp
           <kbd className="mr-2 hidden shrink-0 rounded border border-border px-1.5 font-mono text-2xs text-muted md:inline">esc</kbd>
         </div>
 
+        {level.kind === "actions" && (
+          <div className="border-b border-border px-3 py-2">
+            <p className="text-sm font-semibold text-heading">{level.item.title}</p>
+            {level.item.subtitle && <p className="mt-0.5 truncate text-xs text-muted">{level.item.subtitle}</p>}
+          </div>
+        )}
         {level.kind === "confirm" && (
           <div className="border-b border-border px-3 py-2">
             <p className="text-sm font-semibold text-heading">{level.confirm.title}</p>

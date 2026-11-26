@@ -1210,6 +1210,68 @@ fetched for it, it matches pixel for pixel the glyph of a probe face made from t
 with the immutable header, Material Design chunks (not on screen) are not fetched, and no CSP
 violation; screenshots `web/screenshots/terminal-glyphs-{375,1440}.png`.
 
+**Command palette.** ⌘K on a Mac, Ctrl K elsewhere, or the header's "Search or run…" field (an
+icon on a phone, where the palette is a full-screen sheet; from `md` it is a panel anchored at
+12 % of the height). It is the keyboard user's fast path to everything the views do, and it adds
+no server endpoint: it reads the queries the app already keeps live over the event stream
+(`useJobs`, `useQuestions("open")`, `useFleet`, `useOrchestrator`, `useMe`) and acts through
+`lib/api.ts`, refreshing the same query keys the views' own mutations do. Built in
+`components/palette/` with the model in `lib/palette.ts`, the matcher in `lib/fuzzy.ts` and the
+key rules in `lib/hotkeys.ts`; all three are pure and unit-tested.
+
+- **Matching** is fzf-style (no dependency; the whole palette, its icons included, grew the main
+  bundle by 36 kB, 11 kB gzipped): a dynamic programme over (query, text) that scores each matched character, gives word
+  starts, camel humps and letter-to-digit steps a bonus, keeps a consecutive run's bonus going, and
+  charges a small cost to open a gap and less to extend it, so the best alignment wins rather than
+  the first. Words of the query match independently, each against the title (full weight), the
+  subtitle (0.6) or a hidden keyword (0.8: job id, state, agent, directory, role; pane id, status,
+  cwd); every word must match, and a word scoring under half a perfect word-start run there is
+  dropped as scattered noise. Matched title and subtitle characters are highlighted.
+- **Order.** With no query: recent items (localStorage `crowsnest-palette-recent`, the last 12,
+  not Give job texts or answers), Needs you (blocking questions, agents at a dialog, then the other
+  open questions, as the Inbox orders them), the five views, live jobs (needs attention first),
+  actions. With a query: matching items grouped, groups ordered by their best match, at most 8 a
+  group (10 jobs). **Give job: <text>** and **Send to orchestrator: <text>** are always offered
+  for free text; they come first unless the best match is strong (at least 0.75 of a perfect
+  word-start run per query character, 0.9 for three words or more), in which case they come
+  second, so Enter does the obvious thing either way. `>` or `job ` at the start offers only Give
+  job.
+- **Levels.** Enter runs an item; ⌘/Ctrl Enter runs its `alt` (Give job: the full new-job form
+  prefilled through `lib/jobDraft.ts`; Send: send and open Chat; an agent: the other of
+  conversation and terminal) or else opens its actions, never anything risky; → or Tab (or the
+  row's chevron) opens its actions (a job: open, get it moving when stuck, nudge, message its
+  agent, cancel; a confirm or single-choice question: one "Answer: <label>" per option, the
+  recommended one marked, so it can be answered from the palette; ack and notice: acknowledge or
+  dismiss; a dialog: the Inbox or its terminal). Cancel, Restart orchestrator and New conversation
+  ask in a confirmation level worded as the views word it (`relaunchConfirmations` in
+  `lib/conversation.ts` is shared with the Chat menu). Messaging a job's agent is a one-line text
+  level. Esc, Backspace in an empty box or ← at the start goes back a level; Esc at the top closes
+  and returns focus to where it was (when that element still exists). Effects close the palette at
+  once and report as a toast, with a link where it landed ("Open j_12", "Open Chat"); toasts gained
+  an optional action for this.
+- **Live rows.** The selection is an item id plus the row it was last on: rows change as jobs and
+  questions do, and the highlight stays on the same item (or the same row, clamped, if the item
+  went), so nothing arriving above it changes what Enter does.
+- **Keys** (`lib/hotkeys.ts`, a capture-phase window listener in `PaletteProvider`): the chord
+  works from any field. In a terminal only ⌘K opens it: xterm is told to ignore ⌘K
+  (`attachCustomKeyEventHandler`) so it never reaches the shell, and Ctrl K is left to the shell
+  (kill-line), as is a plain k anywhere. `?` opens the keyboard shortcuts sheet, and `g` then
+  `j`/`c`/`i`/`f`/`t` (within 1.5 s) goes to Jobs, Chat, Inbox, Fleet or Terminal; neither fires
+  while typing in a field or a terminal, with a modifier, or on auto-repeat. `/` stays the Fleet
+  filter's.
+- **Phones.** The header icon opens the palette and focuses its input inside the tap
+  (`flushSync`), so the keyboard comes up; rows are 44 px under a coarse pointer, 36 px with a
+  mouse; Cancel replaces Esc.
+- **Accessibility.** The input is a combobox (`aria-controls`, `aria-activedescendant`,
+  `aria-autocomplete="list"`) over a listbox of groups (`role="group"`, labelled by their
+  heading); focus never leaves the input; a polite status line announces the result count. Row
+  chevrons are not focusable, so options hold nothing interactive. The header button's name is its
+  visible text ("Search or run…"; axe's label-in-name rule).
+- **Not done:** speak mode (the voice build's header toggle) is wired into the model as `speak`
+  and `voiceSettings` sources but left off until that build lands; a dialog's own options (a
+  terminal permission prompt) are not offered as answers, since answering one needs the current
+  screen hash; Enter opens it in the Inbox.
+
 **Fixtures mode.** On the Vite dev server, `?fixtures=1` answers every API call in memory from
 `lib/fixtures.ts` and skips the event stream; it is kept for the tab in sessionStorage and turned
 off with `?fixtures=0`. The same fixtures back the unit tests and the Playwright screenshots
@@ -1324,7 +1386,7 @@ mise.toml  .goreleaser.yml  .github/workflows/{ci,release}.yml
 ```
 
 Go 1.27, `CGO_ENABLED=0`, `modernc.org/sqlite`, `github.com/coder/websocket`, `github.com/creack/pty`, `log/slog`.
-mise tasks: `setup`, `dev` (the real binary on its own herdr session `crowsnest-dev` with a real orchestrator, plus Vite with reload; `dev:demo` is the fake-herdr variant, `dev:container` the devbox image on 127.0.0.1:2770), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`; M5 adds the terminal bridges), `test:claude` (M4: real Claude, opt-in), `lint`, `fmt`, `check`, `e2e`, `e2e:real` (M5: Playwright against the built binary), `screenshots`, `screenshots:chat` (M4), `screenshots:inbox` (M6), `e2e:voice` (M11), `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset` (also stops and deletes the `crowsnest-dev` session), `dev:container:reset`.
+mise tasks: `setup`, `dev` (the real binary on its own herdr session `crowsnest-dev` with a real orchestrator, plus Vite with reload; `dev:demo` is the fake-herdr variant, `dev:container` the devbox image on 127.0.0.1:2770), `build`, `test`, `test:integration` (M2: real herdr, `-tags integration`; M5 adds the terminal bridges), `test:claude` (M4: real Claude, opt-in), `lint`, `fmt`, `check`, `e2e`, `e2e:real` (M5: Playwright against the built binary), `screenshots`, `screenshots:chat` (M4), `screenshots:inbox` (M6), `screenshots:palette`, `e2e:voice` (M11), `snapshot`, `release`, `publish` (build and push the devbox image), `dev:reset` (also stops and deletes the `crowsnest-dev` session), `dev:container:reset`.
 
 ## 15. Test strategy
 
