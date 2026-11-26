@@ -26,7 +26,9 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
+	"github.com/jclement/crowsnest/internal/ratelimit"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
 	"github.com/jclement/crowsnest/internal/voice"
@@ -87,6 +89,8 @@ type Deps struct {
 	Journal *journal.Journal
 	// Poker serves POST /orchestrator/poke (M8). Nil: it answers 503.
 	Poker *orch.Poker
+	// Push serves the /push routes (Web Push, 8.5). Nil: they answer 503.
+	Push *push.Service
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -103,6 +107,8 @@ type Server struct {
 	loginBodyTimeout time.Duration
 	// terminalSlots holds one token per open terminal socket (R1 I5).
 	terminalSlots chan struct{}
+	// pushTests limits POST /push/test (internal/httpd/push.go).
+	pushTests *ratelimit.Limiter
 
 	// stopping is closed when shutdown begins, so long-lived SSE handlers return promptly
 	// instead of holding Shutdown open until its grace period runs out.
@@ -135,6 +141,7 @@ func New(deps Deps) (*Server, error) {
 		maxTerminals = DefaultMaxTerminals
 	}
 	server.terminalSlots = make(chan struct{}, maxTerminals)
+	server.pushTests = ratelimit.New(testBurst, testRefill, nil)
 	server.handler = server.middleware(server.routes())
 	return server, nil
 }
@@ -157,6 +164,7 @@ func (s *Server) routes() http.Handler {
 	s.registerJobRoutes(mux)
 	s.registerJournalRoutes(mux)
 	s.registerVoiceRoutes(mux)
+	s.registerPushRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)

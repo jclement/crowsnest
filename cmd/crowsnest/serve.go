@@ -133,7 +133,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	journalLog := journal.New(db, events, logger, nil)
 	refs := &jobRefs{}
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, logger)
-	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), agentSocket, logger)
+	pushService, pusher, err := startPush(ctx, cfg, db, events, logger)
+	if err != nil {
+		return err
+	}
+	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
@@ -151,7 +155,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
 		Orchestrator: orchestrator, Conversations: conversations,
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
-		Journal: journalLog, Poker: poker,
+		Journal: journalLog, Poker: poker, Push: pushService,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

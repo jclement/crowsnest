@@ -19,6 +19,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -27,7 +28,7 @@ import (
 // and returns the service and a stop function. Everything stops when ctx ends or stop is called;
 // stop returns once the deliverer and the sweeper have finished, and serve calls it before the
 // database closes, so an attempt cut short by shutdown can still record its outcome (R1b-C08).
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, socket string, logger *slog.Logger) (*questions.Service, func(), error) {
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, pusher *push.Watcher, socket string, logger *slog.Logger) (*questions.Service, func(), error) {
 	var deliverer *questions.Deliverer
 	var notifyAsked func(questions.Question)
 	if cfg.NotifyURL != "" {
@@ -45,6 +46,9 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 		OnAsked: func(question questions.Question) {
 			if notifyAsked != nil {
 				notifyAsked(question)
+			}
+			if pusher != nil {
+				pusher.QuestionAsked(question) // Web Push, the second sink (DESIGN.md 8.5)
 			}
 			jobQuestionChanged(ctx, jobService, question, "asked")
 		},
