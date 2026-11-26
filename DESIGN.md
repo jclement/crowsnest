@@ -32,7 +32,7 @@ Goals, in priority order:
 8. Safe by default: a web terminal is remote code execution, so it fails closed.
 
 Non-goals for v1: multiple users or roles; managing more than one herdr session per process;
-remote machines (`herdr --machine`); Web Push; editing files; a public-internet threat model
+remote machines (`herdr --machine`); editing files; a public-internet threat model
 (the target is localhost, a tailnet, or a container behind a tunnel with auth on).
 
 ## 2. Architecture
@@ -132,7 +132,7 @@ rebinding against `--no-auth` on localhost); secrets leaking into logs; agent ou
 6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions decide who may connect (this user's processes); it serves only the agent API (ask, say, notify, job, hook), never terminals. **Who is calling** comes from a token, never from what the caller says (R1b N2, N7): crowsnest mints a random token (`cnt_…`, 32 bytes) for each agent it starts, puts it in that agent's pane environment (`CROWSNEST_TOKEN`), in its MCP server's environment (`mcp.json`) and in a 0600 `agent-token` file its hook command lines name (`--token-file`), and keeps only the token's SHA-256 in `kv`, mapped to the pane and job (`internal/agentid`). A caller with no known token is unidentified: it may ask (the answer reaches it only through `--wait`), nothing is ever typed into a pane on its behalf, and it may not withdraw questions, create jobs or act on one. Job verbs work only on the token's job or the job held in the token's pane (the orchestrator's tokens name no job). Quotas per caller cap the rate of asks, says and job creations, open questions (10 for a job agent, 30 for the orchestrator and for the shared bucket of callers without a token; 200 in all, the orchestrator not counted against it, R2-L5) and concurrent long-polls (8), and an expiry is at least five minutes. `say` needs a token (R2-I4). Tokens end with the work (R2-L1): a job's tokens are revoked when it reaches done, failed or cancelled, and a sweeper revokes, once a minute, the tokens of panes herdr no longer lists (bindings younger than two minutes are spared, and nothing is revoked while herdr cannot be read). Replacing a pane's tokens is one locked, transactional step, and a start token for a pane now held by another job is refused (R2-C15). Token files are 0600 in a 0700 per-job directory, and tokens are never logged. Since R3-L4 every file crowsnest writes there (`brief.md`, `prompt.md`, `settings.json`, `mcp.json`, `agent-token`) is removed and created afresh, exclusively and without following a link, read-only (0400), and a job directory that is a link is refused; that stops a planted link from redirecting crowsnest's write and an accidental overwrite, not a same-uid agent, which can chmod or recreate the file.
 
     **What the token is, plainly (R2-M2).** Agents in one session run as one uid, and processes of one uid are not isolated from each other. Any agent can read another agent's environment (`/proc/<pid>/environ`, `ps eww`) or its 0600 files under the state directory (`<state>/jobs/j_N/agent-token`, `<state>/agent-token`, `mcp.json`) with an ordinary file read, and then act as that agent on the socket: update, finish or fail its job, forge its hooks (and so silence its supervision), ask or `say` as it, the orchestrator included. The token stops accidents and forged environment variables (a process that merely sets `CROWSNEST_TOKEN` or names a pane gets nothing); it does not stop a hostile same-uid process. Only running crowsnest as its own uid would make the socket a hard boundary. That is a deployment change, not a code change, and is not done.
-7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'`. (`unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
+7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'`. (`worker-src` and `manifest-src` repeat what `default-src` allows, so loosening `default-src` later cannot widen where the service worker comes from. `unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
 8. **Rendering untrusted text**: transcripts, pane text and question bodies are data. Markdown renders without raw HTML; mermaid runs with `securityLevel: 'strict'`; links open with `rel="noopener noreferrer"`; no `dangerouslySetInnerHTML` outside the sanitised mermaid SVG.
 9. **Secrets**: the password, session ids and the ElevenLabs key are never logged, never returned by any endpoint, never placed in argv or the environment of a child process. Once the config is loaded, `serve` removes `CROWSNEST_PASSWORD`, `CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY`, `CROWSNEST_NOTIFY_URL`, `CROWSNEST_NO_AUTH`, `SUPPRESS_AUTH` and `CROWSNEST_I_KNOW_THIS_IS_OPEN` from its own environment (R1 H1). That only changes the process's in-memory copy: the kernel keeps the environment a process was exec'd with, readable by the same user. So when `serve` finds any of the secret variables it re-executes itself once, with them removed from the new environment and handed over through an inherited pipe (`CROWSNEST_SECRETS_FD`); the environment the OS reports for crowsnest then holds no secret (R1b H1 residual; `cmd/crowsnest/secretenv.go`). The process that started crowsnest (a shell, tini in the devbox) keeps its own environment: pass the password as a file to keep it out of that too. Request logs record method, path, status, duration and client IP only. Error responses, the orchestrator's status detail and a terminal's start failure carry a sentence that says what to do, never herdr's or the orchestrator's own error text (which can hold paths and internals); that goes to the server log (R1 I2). A terminal's exit reason is still herdr's (`detached`, `terminal attach taken over`), because the browser acts on it. A `redact` helper scrubs token-shaped strings from anything echoed from panes into logs or notices.
 10. **Child processes** get a scrubbed environment: every `HERDR_*` variable is removed and the session is always addressed by its explicit socket path, so crowsnest started from inside a herdr pane cannot drive the pane's session. Every `CROWSNEST_*` variable except the pane variables (`CROWSNEST`, `CROWSNEST_SESSION`, `CROWSNEST_SOCKET`, `CROWSNEST_JOB`) and every `ELEVENLABS_*` one is removed too. That covers the herdr server crowsnest starts (which spawns every pane and agent, so a prompt-injected `env` in any pane finds no secret), the TUI client and each pane-control process (R1 H1). **A herdr session crowsnest did not start keeps whatever environment its server was started with**: if that shell exported the password or the ElevenLabs key, every pane in it can read them. Start the session through crowsnest, or from a shell without them.
@@ -823,8 +823,8 @@ box while a dialog is up. The options are the last run numbered 1, 2, 3…; the 
 SHA-256 over the ANSI-stripped visible screen with trailing spaces and blank lines removed.
 
 **8.3 Telling Jeff.** The tab title and nav badge show the open count; the page uses the browser
-Notification API when permitted; `--notify-url` gets a one-line POST for `blocking` items. Web Push
-comes in M12.
+Notification API when permitted; `--notify-url` gets a one-line POST for `blocking` items; Web
+Push (8.5) reaches subscribed devices with no tab open.
 
 **8.4 As built in M6** (`internal/questions`, `internal/agentapi`, `routes/InboxView.tsx`):
 
@@ -928,6 +928,52 @@ comes in M12.
   one answered one into an empty inbox, and asks another from a rotation every 90 s, from the demo
   fleet's panes, so answers are typed into the fake agents.
 
+**8.5 Web Push** (built on `wip/webpush`; `internal/push`, `internal/httpd/push.go`,
+`cmd/crowsnest/push.go`, `web/public/sw.js`, `web/src/lib/push.ts`,
+`web/src/components/push/NotificationSettings.tsx`):
+
+- **Keys.** A VAPID P-256 pair is made on first start (`webpush-go` v1.4.0) and kept in `kv`
+  `push.vapid`; only the public half leaves the server (`GET /push/key`), and neither is logged.
+  The JWT `sub` is the project URL, not anyone's address.
+- **Subscriptions** (`push_subscriptions`, migration `0009_push.sql`): endpoint, `p256dh`, `auth`,
+  user agent, created, last success and failure, failure streak; upserted by endpoint; at most 20.
+  The endpoint is a capability (anyone holding it can push to the device), so it is never logged
+  and never returned: a device is shown by id, user agent, push-service host and a hash of the
+  endpoint the browser computes for itself to find "this device".
+- **SSRF guard.** The server POSTs to a URL the browser chose. At subscribe: `https` only, no
+  credentials or fragment, at most 2 KB, not `localhost` and not an IP literal outside public
+  unicast. At send: the client's dialer refuses any resolved address that is loopback, private,
+  link-local, CGNAT/tailnet (100.64/10), NAT64, multicast or unspecified, so DNS (or rebinding)
+  cannot point a public name inside; redirects are not followed and no environment proxy is used.
+  Not an allowlist of push services (self-hosted autopush and UnifiedPush are legitimate).
+  `--demo` alone also accepts `http://` to loopback, for the hermetic suite's fake push service.
+- **Sending.** RFC 8291 `aes128gcm` and RFC 8292 VAPID by the library. Urgency `high` (TTL 24 h)
+  for blocking questions, dialogs, stuck or failed jobs and the orchestrator; `normal` (12 h) for
+  normal questions, jobs done and tests. `Topic` is a hash of the notice's tag, so the push service
+  also collapses a pending notice about the same thing. 404/410 deletes the subscription; other
+  failures count a streak. Logs name the device id, the service host and the status only.
+- **What is pushed** (`push.Watcher`, kinds switchable in `kv` `push.settings`, all on by default):
+  `question` (asked, blocking or normal; from the same `OnAsked` hook as `--notify-url`), `dialog`
+  (a fleet agent `needs_you` for 10 s, once until it clears), `job` (stuck once per cause except
+  `exited`, failed, needs you for auth/config/launch), `done`, `orchestrator` (`needs_terminal`,
+  `failed`). The payload is `{title, body, tag, url, kind}`: text through `termtext.Clean` and
+  `redact`, title at most 60 and body 160 characters, `url` forced to a path in the app. Rate
+  limits as `--notify-url`: 3 then one a minute per source (asking pane, job, dialog pane), 10
+  then one a minute in all. A question's body, options and files are never pushed.
+- **Service worker** `/sw.js`, served from the root with `no-cache`, scope `/`. It has **no fetch
+  handler and caches nothing** (no offline mode, so no stale UI). `push` shows the notification
+  (an unreadable payload still shows a generic one); `notificationclick` focuses an open tab and
+  posts it `{type: "crowsnest:navigate", url}` (the SPA routes without a reload), else opens a
+  window; `pushsubscriptionchange` subscribes again and swaps the stored subscription (it needs a
+  live session cookie).
+- **Browser.** Permission is asked only from the "Turn on" click, before any await. The sheet
+  names what is missing instead of offering a dead button: not a secure context, iOS not installed
+  to the Home Screen (iPadOS counts as iOS), no service worker/Push API/Notification, or
+  notifications blocked. The manifest has 192 and 512 PNG icons, a maskable 512 and
+  `apple-touch-icon`; `web/scripts/make-icons.mjs` renders them from the SVG.
+- **A secure context is required**: localhost for development; on a tailnet `tailscale serve`
+  (HTTPS on the MagicDNS name) or `--tls-cert`/`--tls-key`.
+
 ## 9. Agent-side CLI
 
 The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identified by
@@ -979,6 +1025,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated; `limit` 50 by default, at most 200 |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
 | `POST /voice/talk` `{client_id, on}` → `{talk, heartbeat_seconds, max_recording_seconds}`; `POST /voice/read` `{question_id}` → `{text_id}` | Talk-mode heartbeat; a question made speakable (M11, 13.1). 404 when disabled |
+| `GET /push/key`, `GET`/`PUT /push/settings`, `POST`/`DELETE /push/subscriptions`, `DELETE /push/subscriptions/{id}`, `POST /push/test` | Web Push (8.5) |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
 
 **Addressing and the TypeScript mirror.** The table rows above are the authority for every shape.
@@ -1053,6 +1100,7 @@ The client sends a resize first; the server starts the process on that first res
 - `jobs.origin` (migration `0007_job_origin.sql`, R2-H1): who created the job, `''` the human, `agent`, `orchestrator`; the migration also indexes `jobs(parent_id)` for the fan-out count
 - `jobs.root_dir` (migration `0008_job_root.sql`, R3-H1): the resolved directory a job's children may use without asking, recorded when crowsnest opens its pane; `''` grants nothing
 - `jobs.lifecycle_op`, `lifecycle_owner`, `lifecycle_at`, `lifecycle_gen` (migration `0006_job_lifecycle.sql`): the lifecycle claim (6.9); the same migration indexes `jobs(agent_name, state)`, `jobs(pane_id, state)` and `questions(job_id, status)`
+- `push_subscriptions(id, endpoint, p256dh, auth, user_agent, created_at, last_success_at, last_failure_at, failures)` (migration `0009_push.sql`, 8.5); `kv` keys `push.vapid` and `push.settings`
 - `kv(key, value)`: orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), settings
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -1226,6 +1274,7 @@ internal/transcript/         locate, tail, normalise Claude JSONL
 internal/questions/          store, long-poll, expiry
 internal/term/               PTY bridge, pane-control bridge
 internal/voice/              ElevenLabs client
+internal/push/               Web Push: VAPID keys, subscriptions, SSRF-guarded sender, notice watcher
 internal/agentapi/           unix-socket server, the CLI client, the stdio MCP proxy
 internal/update/             self-update: GitHub release check, Sigstore + checksum verification, install
 internal/store/              SQLite, migrations/
@@ -1454,7 +1503,7 @@ Each is one builder (Opus) in a herdr worktree; at most two build at once; each 
 | M9 | Playwright suites: hermetic, real herdr, Claude smoke including the stop test; fixes | M7 |
 | M10 | Release workflow, GoReleaser, devbox image, compose, README complete | M1 onward; image after M7 |
 | M11 | Talk mode | M6 (parallel with M9) |
-| M12 | Budgets, review gates, Web Push | M7 |
+| M12 | Budgets, review gates, Web Push (Web Push built: 8.5) | M7 |
 | R2 | Final review round and full-suite run on the merged tip | all |
 
 Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and its tests are not negotiable.
@@ -1477,7 +1526,14 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - After "New conversation", and before the first prompt in a fresh directory, the conversation shows the pane text: Claude has not written a transcript yet (7.6).
 - The transcript format and herdr's screen heuristics are not stable contracts; an upgrade of either can degrade the conversation view or dialog cards (never the terminal).
 - The agent API is local-socket only, so agents on other machines cannot ask through crowsnest yet.
-- Web Push is the last milestone; until it lands a closed browser tab hears nothing unless `--notify-url` is set.
+- **Web Push (8.5)** needs a secure context and, on iOS, the Home Screen app; a plain-HTTP tailnet
+  address gets none. Settings are one set for the install, not per device. Delivery through a real
+  push service was seen working once from Chrome on macOS via FCM; Firefox (Mozilla autopush),
+  Safari and iOS (Apple) were not exercised, and in later runs FCM accepted pushes that headless
+  Chrome did not show within 90 s. The hermetic suite proves the encryption (it decrypts the POST),
+  the service worker's push and click handlers (CDP), and the sheet; not the operating system's
+  notification UI. `pushsubscriptionchange` is untested (browsers cannot be made to fire it).
+  Dialog notices are deduplicated by pane in memory, so a restart re-pushes a dialog still up.
 - The never-stop guarantee is strongest for Claude agents crowsnest started (hooks). Codex agents and sessions started by hand get the herdr-side backstop only, which reacts in about a minute and cannot refuse a stop, only follow it with a nudge.
 - The supervisor depends on Claude Code hook behaviour (Stop, SessionStart, StopFailure, Notification) as documented and probed on 2.1.332. Stop, SessionStart and PostToolUse are exercised by the stop test; StopFailure, Notification, PermissionDenied and SessionEnd follow the hooks reference and are covered by unit tests only.
 - A job agent in a folder Claude has not been told to trust stops at the trust prompt; the job shows `needs_you` and waits for someone to answer it in the terminal. A new worktree is a new folder.

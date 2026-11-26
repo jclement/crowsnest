@@ -121,6 +121,19 @@ which also gives the HTTPS secure context the microphone needs for talk mode:
 ./bin/crowsnest --bind tailnet --username jeff --password-file ~/.config/crowsnest/password
 ```
 
+**Notifications on your phone (Web Push).** Account menu → **Notifications** → *Turn on for this
+device*. From then on the phone (or laptop) gets a notification when an agent asks a question
+(blocking or normal), waits at a terminal dialog, a job gets stuck, fails or finishes, or the
+orchestrator needs the terminal, with no crowsnest tab open; tapping it opens the item. The sheet
+switches each kind on or off, sends a test, and lists and removes devices (at most 20). Push needs
+a **secure context**: `localhost` works as is; on a tailnet use `tailscale serve` (HTTPS on your
+MagicDNS name) or `--tls-cert`/`--tls-key`, since a plain `http://100.x.y.z` page cannot subscribe.
+On **iPhone and iPad** Web Push works only for the app added to the Home Screen (Safari, Share,
+Add to Home Screen; iOS 16.4 or later), opened from there. When something is missing the sheet
+says which. The server makes its VAPID key pair on first start and keeps it in the database; it
+POSTs only to public `https://` push-service addresses, and notices carry a title, one line and a
+link, nothing more (the same scrubbing and rate limits as `--notify-url`).
+
 **Talk mode.** Start crowsnest with an ElevenLabs API key (`ELEVENLABS_API_KEY`; prefer the
 environment to the flag, which `ps` shows) and Chat gets a **Talk** toggle. While it is on in a
 tab, a large push-to-talk button sits above the composer: hold it (or hold Space on a desktop)
@@ -392,6 +405,11 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /voice/tts?text_id=` | session | The speech of a server-held text (a `say`, a SAY line, a read-aloud), streamed (`audio/mpeg`). `404` for an unknown or expired id (texts live an hour). 30 a minute per session; a replay comes from a cache |
 | `POST /voice/talk` | session | `{client_id, on}`: this tab's talk-mode heartbeat (every 15 s; gone after 45 s) → `{talk, heartbeat_seconds, max_recording_seconds}`. Talk mode is on for the orchestrator while any tab beats |
 | `POST /voice/read` | session | `{question_id}` → `{text_id}`: the question's title and options, to play through `/voice/tts` |
+| `GET /push/key` | session | `{public_key}`: the VAPID key for `pushManager.subscribe` |
+| `GET /push/settings`, `PUT /push/settings` | session | `{kinds, order, devices, max_devices}`; PUT `{kinds: {question, dialog, job, done, orchestrator: bool}}`. A device is `{id, user_agent, service, created_at, last_success_at, last_failure_at, failures, endpoint_hash}`, never its endpoint |
+| `POST /push/subscriptions` | session | The browser's `PushSubscription` JSON → `201` and the device. `400` for a non-https or non-public endpoint or malformed keys; `409` past 20 devices |
+| `DELETE /push/subscriptions`, `DELETE /push/subscriptions/{id}` | session | `{endpoint}`: this browser turning push off; or remove a device by id |
+| `POST /push/test` | session | `{endpoint?}`: a test notification to this browser, or every device → `{sent, failed, pruned}`. 5 a minute |
 | `GET /term/tui` (WebSocket) | session | The herdr TUI in a PTY. Binary frames are terminal bytes both ways; text frames are JSON control: the browser sends `{"type":"resize","cols","rows"}` first (the process starts on it), the server ends with `{"type":"exit","reason"}` |
 | `GET /term/pane/{pane_id}` (WebSocket) | session | One pane through `herdr terminal session control --takeover`, same protocol. `404` unless the pane is in the fleet |
 
