@@ -70,6 +70,12 @@ type Config struct {
 	TLSCert            string // path to a PEM certificate; empty means plain HTTP
 	TLSKey             string // path to the matching PEM key
 
+	// TailnetName is this machine's Tailscale MagicDNS name when it was detected at start (it is
+	// in HostNames, so `tailscale serve` works without --allowed-host); empty otherwise.
+	TailnetName string
+	// NoTailscaleDetect turns that detection off (--no-tailscale-detect).
+	NoTailscaleDetect bool
+
 	// HostNames is every name the Host header may carry: loopback names, bound IPs, this
 	// machine's hostname and AllowedHosts. The host check in httpd reads it (DESIGN.md 4.3).
 	HostNames []string

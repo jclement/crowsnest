@@ -23,8 +23,9 @@ import (
 
 // Option names added with the guided first run.
 const (
-	optEngine = "engine"
-	optOpen   = "open"
+	optEngine            = "engine"
+	optOpen              = "open"
+	optNoTailscaleDetect = "no-tailscale-detect"
 )
 
 // Engines crowsnest can run agents with. EngineAuto picks claude when it is installed and signed
@@ -46,6 +47,7 @@ func init() {
 	options = append(options,
 		option{name: optEngine, env: []string{"CROWSNEST_ENGINE"}, def: EngineAuto, usage: "agent engine for the orchestrator and for jobs that name none: auto, claude or codex"},
 		option{name: optOpen, env: []string{"CROWSNEST_OPEN"}, def: OpenAuto, usage: "open a browser at start (the setup link, else the app): auto (only from a desktop terminal), always or never"},
+		option{name: optNoTailscaleDetect, env: []string{"CROWSNEST_NO_TAILSCALE_DETECT"}, kind: kindBool, def: "false", usage: "do not add this machine's Tailscale MagicDNS name to the allowed hosts at start"},
 	)
 }
 

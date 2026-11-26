@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -22,6 +23,7 @@ import (
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/doctor"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/tailscale"
 )
 
 // settingsPrefix is the kv prefix of settings saved in the app: settings.<option name>.
@@ -86,7 +88,13 @@ func runDoctor(cmd *cobra.Command, asJSON, deep bool) error {
 // settings are read read-only and the config is loaded again with them. The startup refusals
 // are applied last.
 func loadConfig(ctx context.Context, flags *pflag.FlagSet) (config.Config, error) {
-	cfg, err := config.Load(flags, config.Options{})
+	var once sync.Once
+	var tailnetName string
+	detect := func() string { // at most once per start: Load runs twice when settings are saved
+		once.Do(func() { tailnetName = tailscale.Status(ctx, tailscale.CLI).DNSName })
+		return tailnetName
+	}
+	cfg, err := config.Load(flags, config.Options{TailnetName: detect})
 	if err != nil {
 		return config.Config{}, err
 	}
@@ -96,7 +104,7 @@ func loadConfig(ctx context.Context, flags *pflag.FlagSet) (config.Config, error
 			return config.Config{}, fmt.Errorf("reading the settings saved in the app: %w", err)
 		}
 		if len(stored) > 0 {
-			if cfg, err = config.Load(flags, config.Options{Stored: stored}); err != nil {
+			if cfg, err = config.Load(flags, config.Options{Stored: stored, TailnetName: detect}); err != nil {
 				return config.Config{}, fmt.Errorf("%w (a value saved in the app's Settings; clear it there or override it with its flag or variable)", err)
 			}
 		}

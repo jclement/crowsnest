@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/tailscale"
 )
 
 // commandTimeout bounds every `--version`, `auth status` or `--help` call: a hung agent CLI
@@ -53,6 +54,10 @@ type Env struct {
 	Stat        func(path string) (os.FileInfo, error)
 	ReadFile    func(path string) ([]byte, error)
 	InContainer func() bool
+	// Tailscale reads `tailscale status --json`; TailscaleServes reads `tailscale serve status`
+	// for proxies to a port. Both read-only.
+	Tailscale       func(ctx context.Context) tailscale.Info
+	TailscaleServes func(ctx context.Context, port int) ([]tailscale.Serve, error)
 }
 
 func (e Env) withDefaults() Env {
@@ -113,6 +118,14 @@ func (e Env) withDefaults() Env {
 	if e.InContainer == nil {
 		e.InContainer = InContainer
 	}
+	if e.Tailscale == nil {
+		e.Tailscale = func(ctx context.Context) tailscale.Info { return tailscale.Status(ctx, tailscale.CLI) }
+	}
+	if e.TailscaleServes == nil {
+		e.TailscaleServes = func(ctx context.Context, port int) ([]tailscale.Serve, error) {
+			return tailscale.ServesPort(ctx, tailscale.CLI, port)
+		}
+	}
 	return e
 }
 
@@ -125,6 +138,7 @@ func runCommand(ctx context.Context, timeout time.Duration, name string, args ..
 	cmd.Stdin = nil
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
+	cmd.WaitDelay = time.Second // a grandchild holding the pipe must not outlive the timeout
 	err := cmd.Run()
 	if ctx.Err() != nil {
 		return output.String(), fmt.Errorf("%s did not answer within %s", name, timeout)

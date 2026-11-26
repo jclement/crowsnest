@@ -87,6 +87,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	for _, warning := range cfg.Warnings {
 		logger.Warn(warning)
 	}
+	if cfg.TailnetName != "" {
+		logger.Info("Tailscale name allowed as a host, so `tailscale serve` reaches this crowsnest", "name", cfg.TailnetName, "turn_off", "--no-tailscale-detect")
+	}
 	if err := privateDir(cfg.StateDir); err != nil {
 		return err
 	}

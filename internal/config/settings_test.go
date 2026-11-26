@@ -4,6 +4,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -97,5 +98,24 @@ func TestSourceKind(t *testing.T) {
 		if got := SourceKind(where); got != want {
 			t.Errorf("SourceKind(%q) = %s, want %s", where, got, want)
 		}
+	}
+}
+
+func TestTailnetNameJoinsTheAllowedHosts(t *testing.T) {
+	h := newHarness(t)
+	opts := h.options()
+	opts.TailnetName = func() string { return "Quark-2.tail1234.ts.net." }
+	cfg, err := Load(h.flags(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TailnetName != "quark-2.tail1234.ts.net" || !slices.Contains(cfg.HostNames, "quark-2.tail1234.ts.net") {
+		t.Fatalf("name %q hosts %v", cfg.TailnetName, cfg.HostNames)
+	}
+	off := newHarness(t, "--no-tailscale-detect")
+	opts = off.options()
+	opts.TailnetName = func() string { t.Fatal("detected despite --no-tailscale-detect"); return "" }
+	if cfg, err := Load(off.flags(), opts); err != nil || cfg.TailnetName != "" {
+		t.Fatalf("%v %q", err, cfg.TailnetName)
 	}
 }

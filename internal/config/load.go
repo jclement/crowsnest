@@ -38,6 +38,10 @@ type Options struct {
 	// whoever starts the process with a flag or a variable wins, then the app, then the file
 	// (DESIGN.md 3). Only options in EditableOptions are read from here; anything else is ignored.
 	Stored map[string]string
+	// TailnetName returns this machine's Tailscale MagicDNS name ("" for none), for the host
+	// allowlist: requests through `tailscale serve` carry it as Host. Nil: no detection (tests,
+	// and every caller but serve and doctor). --no-tailscale-detect skips it.
+	TailnetName func() string
 }
 
 func (o *Options) fillDefaults() {
@@ -445,7 +449,17 @@ func (l *loader) loadNetwork(cfg *Config) error {
 	if err := l.loadTLS(cfg); err != nil {
 		return err
 	}
-	cfg.HostNames = hostNames(cfg.Listeners, interfaces, l.hostname(), cfg.AllowedHosts)
+	if cfg.NoTailscaleDetect, err = l.boolean(optNoTailscaleDetect); err != nil {
+		return err
+	}
+	extra := cfg.AllowedHosts
+	if !cfg.NoTailscaleDetect && l.opts.TailnetName != nil {
+		if name := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(l.opts.TailnetName()), ".")); name != "" {
+			cfg.TailnetName = name
+			extra = append(slices.Clone(extra), name)
+		}
+	}
+	cfg.HostNames = hostNames(cfg.Listeners, interfaces, l.hostname(), extra)
 	return nil
 }
 

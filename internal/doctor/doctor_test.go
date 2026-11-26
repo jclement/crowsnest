@@ -17,6 +17,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/tailscale"
 )
 
 // fakeMachine describes the machine a test wants.
@@ -31,6 +32,8 @@ type fakeMachine struct {
 	ours       bool // the taken port answers as crowsnest
 	herdrUp    bool
 	protocol   int
+	tailscale  tailscale.Info
+	serves     []tailscale.Serve
 }
 
 func healthyMachine() *fakeMachine {
@@ -116,6 +119,10 @@ func (m *fakeMachine) envFor() Env {
 			return nil, fs.ErrNotExist
 		},
 		InContainer: func() bool { return false },
+		Tailscale:   func(context.Context) tailscale.Info { return m.tailscale },
+		TailscaleServes: func(context.Context, int) ([]tailscale.Serve, error) {
+			return m.serves, nil
+		},
 	}
 }
 
@@ -435,4 +442,50 @@ func TestWritePlainHasNoEscapes(t *testing.T) {
 	if strings.Contains(out.String(), "\x1b[") || !strings.Contains(out.String(), "FAIL") || !strings.Contains(out.String(), "→ Install herdr") {
 		t.Errorf("plain output:\n%s", out.String())
 	}
+}
+
+func TestTailscaleAbsentIsInformation(t *testing.T) {
+	report := run(t, healthyMachine())
+	requireCheck(t, report, "tailscale.installed", StatusInfo)
+	if _, ok := report.Find("tailscale.serve"); ok {
+		t.Error("serve checked without tailscale")
+	}
+}
+
+func TestTailscaleLoggedOut(t *testing.T) {
+	machine := healthyMachine()
+	machine.tailscale = tailscale.Info{Installed: true, State: "NeedsLogin"}
+	check := requireCheck(t, run(t, machine), "tailscale.installed", StatusWarn)
+	if check.Command != "tailscale up" {
+		t.Errorf("%+v", check)
+	}
+}
+
+func TestTailscaleNotServedPrintsTheCommand(t *testing.T) {
+	machine := healthyMachine()
+	machine.tailscale = tailscale.Info{Installed: true, Running: true, DNSName: "quark.tail1.ts.net", HTTPS: true}
+	report := run(t, machine, func(in *Inputs) { in.Config.TailnetName = "quark.tail1.ts.net" })
+	requireCheck(t, report, "tailscale.name", StatusOK)
+	requireCheck(t, report, "tailscale.https", StatusOK)
+	check := requireCheck(t, report, "tailscale.serve", StatusInfo)
+	if check.Command != "tailscale serve --bg 2769" || !strings.Contains(check.Detail, "https://quark.tail1.ts.net") {
+		t.Errorf("%+v", check)
+	}
+}
+
+func TestTailscaleServedWithoutTrustedProxyWarns(t *testing.T) {
+	machine := healthyMachine()
+	machine.tailscale = tailscale.Info{Installed: true, Running: true, DNSName: "quark.tail1.ts.net", HTTPS: false}
+	machine.serves = []tailscale.Serve{{URL: "https://quark.tail1.ts.net", Target: "http://127.0.0.1:2769"}}
+	report := run(t, machine)
+	requireCheck(t, report, "tailscale.name", StatusWarn) // detection was off: not an allowed host
+	requireCheck(t, report, "tailscale.https", StatusWarn)
+	check := requireCheck(t, report, "tailscale.serve", StatusWarn)
+	if !strings.Contains(check.Fix, "CROWSNEST_TRUSTED_PROXY=loopback") {
+		t.Errorf("%+v", check)
+	}
+	trusted := run(t, machine, func(in *Inputs) {
+		in.Config.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}
+	})
+	requireCheck(t, trusted, "tailscale.serve", StatusOK)
 }

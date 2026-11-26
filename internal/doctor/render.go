@@ -50,7 +50,7 @@ func mark(status Status) string {
 // groupTitles name the report's sections.
 var groupTitles = []struct{ id, title string }{
 	{GroupConfig, "Configuration"}, {GroupHerdr, "herdr"}, {GroupAgents, "Agents"}, {GroupClaude, "Claude Code"},
-	{GroupMachine, "Machine"}, {GroupOptional, "Optional"}, {GroupLive, "Running instance"},
+	{GroupMachine, "Machine"}, {GroupTailscale, "Tailscale"}, {GroupOptional, "Optional"}, {GroupLive, "Running instance"},
 }
 
 // Style is how Write draws: colour on a terminal.

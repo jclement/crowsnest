@@ -169,6 +169,7 @@ func Run(ctx context.Context, in Inputs) Report {
 	r.claudeChecks(ctx)
 	r.machineChecks(ctx)
 	r.optionalChecks(ctx)
+	r.tailscaleChecks(ctx)
 	r.report.Verdict = Verdict(r.report.Checks)
 	r.report.Summary = Summary(r.report)
 	return r.report
