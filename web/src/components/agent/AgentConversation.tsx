@@ -1,9 +1,10 @@
-// AgentConversation: the slot for an agent's conversation (Claude's transcript rendered as
-// messages). M3 ships the placeholder; M4/M8 replace the body with the real view, keeping this
-// component's name and props so the Fleet and Jobs views need no change.
-import { MessagesSquare } from "lucide-react";
+// AgentConversation: an agent's conversation in the Fleet panel (and later the Jobs view):
+// Claude's transcript rendered as messages, with a composer to message the agent. Agents with no
+// transcript (Codex, or a Claude whose session herdr has not detected) show their pane text
+// instead. The name and props are the slot M3 left; the body is the shared ConversationView.
+import { chatStateOf } from "../../lib/conversation";
 import type { Agent } from "../../lib/types";
-import { EmptyState } from "../ui/EmptyState";
+import { ConversationView } from "../chat/ConversationView";
 
 export interface AgentConversationProps {
   /** The agent whose conversation to show (its pane id is the API target). */
@@ -12,10 +13,11 @@ export interface AgentConversationProps {
 
 export function AgentConversation({ agent }: AgentConversationProps) {
   return (
-    <EmptyState icon={MessagesSquare} title="Conversation" className="h-auto py-8">
-      {agent.has_transcript
-        ? `${agent.name}'s conversation will appear here, read from its Claude transcript.`
-        : `No transcript was found for ${agent.name}, so only its terminal can be shown.`}
-    </EmptyState>
+    <ConversationView
+      target={agent.pane_id}
+      agentName={agent.name || agent.pane_id}
+      state={chatStateOf(agent.agent_status)}
+      variant="embedded"
+    />
   );
 }

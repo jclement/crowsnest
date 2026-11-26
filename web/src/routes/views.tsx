@@ -1,6 +1,6 @@
-// The views that are still empty states. Each later milestone replaces one: Jobs (M7), Chat
-// (M4), Inbox (M6), Terminal (M5). Fleet is real (routes/FleetView.tsx).
-import { Inbox, ListTodo, MessageSquare, SquareTerminal } from "lucide-react";
+// The views that are still empty states. Each later milestone replaces one: Jobs (M7), Inbox (M6),
+// Terminal (M5). Fleet (routes/FleetView.tsx) and Chat (routes/ChatView.tsx) are real.
+import { Inbox, ListTodo, SquareTerminal } from "lucide-react";
 import { EmptyState } from "../components/ui/EmptyState";
 
 export function JobsView() {
@@ -8,14 +8,6 @@ export function JobsView() {
     <EmptyState icon={ListTodo} title="No jobs yet">
       Give an agent a job and watch it here: what it is doing now, what it needs from you, and what it finished. Jobs
       arrive in a later build.
-    </EmptyState>
-  );
-}
-
-export function ChatView() {
-  return (
-    <EmptyState icon={MessageSquare} title="No conversation yet">
-      The orchestrator's conversation appears here once crowsnest starts it in your herdr session.
     </EmptyState>
   );
 }

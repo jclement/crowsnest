@@ -8,17 +8,21 @@
 // without a server. `?fixtures=0` turns it off. The choice is kept for the tab's lifetime
 // (sessionStorage) because client-side navigation drops the query string.
 import type { AgentScreen, Fleet, SendKeysRequest } from "./types";
+import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** Machine-readable detail some errors carry (the dialog or draft that refused a prompt). */
+  readonly detail: unknown;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, detail?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -81,8 +85,8 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const payload = await readJSON(response);
   if (!response.ok) {
     if (response.status === 401 && !options.skipAuthRedirect) unauthorizedHandler?.();
-    const error = (payload as { error?: { code?: string; message?: string } } | null)?.error;
-    throw new ApiError(response.status, error?.code ?? "HTTP_" + response.status, error?.message ?? response.statusText);
+    const error = (payload as { error?: { code?: string; message?: string; detail?: unknown } } | null)?.error;
+    throw new ApiError(response.status, error?.code ?? "HTTP_" + response.status, error?.message ?? response.statusText, error?.detail);
   }
   return (payload as { data: T }).data;
 }
@@ -126,6 +130,16 @@ export const endpoints = {
   /** Sends keys to an agent, bound to the screen they answer: 409 CONFLICT if it changed. */
   sendKeys: (target: string, request: SendKeysRequest) =>
     api<{ sent: boolean }>(`/agents/${encodeURIComponent(target)}/keys`, { method: "POST", body: request }),
+  // ---- M4: conversations and the orchestrator ----
+  /** A page of the agent's conversation: changes after `after`, or the newest messages. */
+  messages: (target: string, after?: string) =>
+    api<MessagePage>(`/agents/${encodeURIComponent(target)}/messages${after ? `?after=${encodeURIComponent(after)}` : ""}`),
+  /** Types a prompt into the agent. 409 BLOCKED (a dialog) or DRAFT (text at the terminal). */
+  prompt: (target: string, request: PromptRequest) =>
+    api<PromptResult>(`/agents/${encodeURIComponent(target)}/prompt`, { method: "POST", body: request }),
+  orchestrator: () => api<OrchestratorStatus>("/orchestrator"),
+  orchestratorRestart: () => api<OrchestratorStatus>("/orchestrator/restart", { method: "POST" }),
+  orchestratorNew: () => api<OrchestratorStatus>("/orchestrator/new", { method: "POST" }),
 };
 
 /**
@@ -139,6 +153,8 @@ export const queryKeys = {
   agents: ["agents"] as const,
   agent: (target: string) => ["agents", target] as const,
   agentScreen: (target: string) => ["agents", target, "screen"] as const,
+  agentMessages: (target: string) => ["agents", target, "messages"] as const,
+  orchestrator: ["orchestrator"] as const,
   jobs: ["jobs"] as const,
   questions: ["questions"] as const,
 };

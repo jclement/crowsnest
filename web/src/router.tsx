@@ -8,7 +8,8 @@ import { ApiError, endpoints, queryKeys } from "./lib/api";
 import { LoginPage } from "./routes/LoginPage";
 import { NotFound } from "./routes/NotFound";
 import { FleetView } from "./routes/FleetView";
-import { ChatView, InboxView, JobsView, TerminalView } from "./routes/views";
+import { ChatView } from "./routes/ChatView";
+import { InboxView, JobsView, TerminalView } from "./routes/views";
 
 interface RouterContext {
   queryClient: QueryClient;
