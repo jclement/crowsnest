@@ -44,6 +44,7 @@ type AskArgs struct {
 	ExpiresInHours float64            `json:"expires_in_hours,omitempty" jsonschema:"hours until the question expires unanswered (default 24, at most 168)"`
 	Files          []questions.File   `json:"files,omitempty" jsonschema:"files to show as a diff: filename, original content and final content"`
 	Wait           bool               `json:"wait,omitempty" jsonschema:"block until the question is answered, expired or cancelled. Default false: return the id at once and keep working"`
+	JobID          string             `json:"job_id,omitempty" jsonschema:"the job this question is about (j_<n>); empty in a job's own session. The orchestrator passes the id of the job it holds"`
 }
 
 func init() {
@@ -60,6 +61,9 @@ func init() {
 }
 
 func askTool(ctx context.Context, client *Client, args AskArgs) *mcp.CallToolResult {
+	if args.JobID != "" {
+		client = client.WithJob(args.JobID)
+	}
 	question, err := client.Ask(ctx, questions.AskInput{
 		Title: args.Title, BodyMD: args.BodyMD, Kind: questions.Kind(args.Kind), Multi: args.Multi, Options: args.Options,
 		Recommend: args.Recommend, Context: args.Context, Urgency: questions.Urgency(args.Urgency),
@@ -72,9 +76,14 @@ func askTool(ctx context.Context, client *Client, args AskArgs) *mcp.CallToolRes
 		return textResult(fmt.Sprintf("Notice %s posted. Nothing comes back from a notice; carry on.", question.ID))
 	}
 	if !args.Wait {
-		return textResult(fmt.Sprintf("Question %s posted. Do not wait for it: carry on with everything the answer does not block. "+
-			"The answer will arrive later as a message starting \"[crowsnest answer %s]\". If nothing else is left, say so and end your turn; the answer will wake you.",
-			question.ID, question.ID))
+		text := fmt.Sprintf("Recorded as %s. Keep working on whatever this does not block; the answer will arrive as a message starting \"[crowsnest answer %s]\".",
+			question.ID, question.ID)
+		if question.JobID != "" {
+			text += " If truly nothing is left that it does not block, call job_update with waiting=true and end your turn; the answer will wake you."
+		} else {
+			text += " If nothing else is left, say so and end your turn; the answer will wake you."
+		}
+		return textResult(text)
 	}
 	settled, err := client.WaitSettled(ctx, question.ID)
 	if err != nil {

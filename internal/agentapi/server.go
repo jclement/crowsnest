@@ -15,6 +15,7 @@
 //	DELETE /api/v1/questions/{id}         withdraw
 //	POST   /api/v1/say                    speak a sentence in talk mode (M11 voices it)
 //	GET    /api/v1/health                 liveness, for the CLI's "is crowsnest running" check
+//	…/api/v1/jobs…, /api/v1/hooks/{event}  the job protocol and the hooks (jobs.go, M7)
 //
 // Each request may carry the caller's identity, set by the CLI from its environment:
 // X-Crowsnest-Pane (HERDR_PANE_ID, where answers are typed back) and X-Crowsnest-Job
@@ -33,6 +34,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 )
 
@@ -74,6 +76,7 @@ type SayRequest struct {
 // Server is the agent API's handler. Build with NewServer and serve it with Serve.
 type Server struct {
 	questions *questions.Service
+	jobs      *jobs.Service
 	hub       *hub.Hub
 	logger    *slog.Logger
 	version   string
@@ -83,7 +86,8 @@ type Server struct {
 // ServerOptions configure a Server. Questions is required.
 type ServerOptions struct {
 	Questions *questions.Service
-	Hub       *hub.Hub // nil: say is accepted and dropped
+	Jobs      *jobs.Service // nil: the job routes answer 503
+	Hub       *hub.Hub      // nil: say is accepted and dropped
 	Logger    *slog.Logger
 	Version   string
 }
@@ -93,7 +97,7 @@ func NewServer(opts ServerOptions) *Server {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	server := &Server{questions: opts.Questions, hub: opts.Hub, logger: opts.Logger, version: opts.Version}
+	server := &Server{questions: opts.Questions, jobs: opts.Jobs, hub: opts.Hub, logger: opts.Logger, version: opts.Version}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", server.handleHealth)
 	mux.HandleFunc("POST /api/v1/questions", server.handleAsk)
@@ -101,6 +105,7 @@ func NewServer(opts ServerOptions) *Server {
 	mux.HandleFunc("GET /api/v1/questions/{id}", server.handleGet)
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", server.handleCancel)
 	mux.HandleFunc("POST /api/v1/say", server.handleSay)
+	server.registerJobRoutes(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "No such endpoint on the crowsnest agent socket.")
 	})

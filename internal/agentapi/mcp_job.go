@@ -1,0 +1,144 @@
+// The job MCP tools (DESIGN.md 6.2): job_update, done, fail, job_create and job_get, proxied to
+// the socket. A job agent's MCP server has CROWSNEST_JOB in its environment (mcp.json); the
+// orchestrator's does not, so every tool also takes job_id. The descriptions are the agent's
+// instructions: short and imperative.
+
+package agentapi
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/jclement/crowsnest/internal/jobs"
+)
+
+// JobUpdateArgs are job_update's arguments.
+type JobUpdateArgs struct {
+	JobID    string `json:"job_id,omitempty" jsonschema:"your job id (j_<n>). Leave empty in a job's own session; the orchestrator passes the id from the [crowsnest job j_<n>] header"`
+	Progress string `json:"progress" jsonschema:"one line: what you are doing now"`
+	State    string `json:"state,omitempty" jsonschema:"blocked (waiting on something other than the human; give reason) or running (it cleared). Omit otherwise"`
+	Reason   string `json:"reason,omitempty" jsonschema:"with state blocked: what you are waiting on"`
+	Waiting  *bool  `json:"waiting,omitempty" jsonschema:"true: nothing is left that your open questions do not block, so you may end your turn until an answer arrives"`
+}
+
+// DoneArgs are done's arguments.
+type DoneArgs struct {
+	JobID       string   `json:"job_id,omitempty" jsonschema:"your job id (j_<n>). Leave empty in a job's own session; the orchestrator passes the id from the [crowsnest job j_<n>] header"`
+	ResultMD    string   `json:"result_md" jsonschema:"Markdown: what was done, where (files, branch, commits), and anything the human must know"`
+	Verified    []string `json:"verified" jsonschema:"what you checked and saw, each with the command or evidence. [] if nothing"`
+	NotVerified []string `json:"not_verified" jsonschema:"what you did not check or could not run. [] if nothing"`
+}
+
+// FailArgs are fail's arguments.
+type FailArgs struct {
+	JobID  string `json:"job_id,omitempty" jsonschema:"your job id (j_<n>). Leave empty in a job's own session; the orchestrator passes the id from the [crowsnest job j_<n>] header"`
+	Reason string `json:"reason" jsonschema:"why the job cannot be finished, and what was tried"`
+}
+
+// JobCreateArgs are job_create's arguments.
+type JobCreateArgs struct {
+	Brief    string `json:"brief" jsonschema:"what needs doing: the first line is the title; include context, constraints and where to look"`
+	Role     string `json:"role,omitempty" jsonschema:"builder (default with a dir), reviewer, tester, lead, or a custom role"`
+	Dir      string `json:"dir,omitempty" jsonschema:"absolute path of the directory or git repo to work in. A builder in a git repo gets its own worktree. Required for code work"`
+	DoneWhen string `json:"done_when,omitempty" jsonschema:"how the child knows it is finished"`
+	Engine   string `json:"engine,omitempty" jsonschema:"claude (default) or codex"`
+	Model    string `json:"model,omitempty" jsonschema:"model name, when not the default"`
+	Isolate  *bool  `json:"isolate,omitempty" jsonschema:"force a git worktree on or off (default: builders isolate)"`
+}
+
+// JobGetArgs are job_get's arguments.
+type JobGetArgs struct {
+	JobID string `json:"job_id,omitempty" jsonschema:"the job to read; empty for your own. A lead reads its children by id"`
+}
+
+const (
+	jobUpdateDescription = "Report what you are doing now, in one line. Call it at the start of each step and at least every few minutes; the human watches this line on their phone.\n\n" +
+		"state=blocked with a reason: you are waiting on something other than the human (an outage, another job). state=running: it cleared.\n" +
+		"waiting=true: you asked questions and truly nothing is left that they do not block; you may then end your turn and the answer will wake you."
+	doneDescription = "Declare your job finished. Call it once, when the work is complete and checked. result_md says what was done. " +
+		"verified lists what you checked and saw pass, with commands. not_verified lists what you skipped or could not run. Both lists are required (use [] for none). " +
+		"Never call done over failing tests; say so in not_verified or call fail."
+	failDescription      = "Declare that your job cannot be finished, with the reason and what you tried. Use it only when no path forward is left; if you need a decision, call ask instead."
+	jobCreateDescription = "Delegate a unit of work as a child job (leads). crowsnest starts a new agent for it with the role's instructions; a builder given a git repo works in its own worktree. " +
+		"Returns the child's id. Follow it with job_get(job_id), and check its evidence when it is done before relying on it."
+	jobGetDescription = "Read a job: its brief, state, progress, and your questions with their answers. Read your own after a restart or compaction, or when you lose track. A lead reads a child's by id."
+)
+
+func init() {
+	registerTool("job_update", func(server *mcp.Server, client *Client) {
+		mcp.AddTool(server, &mcp.Tool{Name: "job_update", Title: "Report progress", Description: jobUpdateDescription},
+			func(ctx context.Context, _ *mcp.CallToolRequest, args JobUpdateArgs) (*mcp.CallToolResult, any, error) {
+				return jobCall(client, args.JobID, func(id string) (string, error) {
+					job, err := client.UpdateJob(ctx, id, jobs.UpdateInput{Progress: args.Progress, State: args.State, Reason: args.Reason, Waiting: args.Waiting})
+					if err != nil {
+						return "", err
+					}
+					text := fmt.Sprintf("Recorded. Job %s is %s.", job.ID, job.State)
+					if job.State == jobs.StateNeedsYou {
+						text += " It waits on the human; you may end your turn, and the answer will arrive as a message."
+					} else if job.State == jobs.StateRunning {
+						text += " Keep going."
+					}
+					return text, nil
+				}), nil, nil
+			})
+	})
+	registerTool("done", func(server *mcp.Server, client *Client) {
+		mcp.AddTool(server, &mcp.Tool{Name: "done", Title: "Finish the job", Description: doneDescription},
+			func(ctx context.Context, _ *mcp.CallToolRequest, args DoneArgs) (*mcp.CallToolResult, any, error) {
+				return jobCall(client, args.JobID, func(id string) (string, error) {
+					job, err := client.DoneJob(ctx, id, jobs.DoneInput{ResultMD: args.ResultMD, Verified: args.Verified, NotVerified: args.NotVerified})
+					if err != nil {
+						return "", err
+					}
+					return fmt.Sprintf("Job %s is done. You may end your turn.", job.ID), nil
+				}), nil, nil
+			})
+	})
+	registerTool("fail", func(server *mcp.Server, client *Client) {
+		mcp.AddTool(server, &mcp.Tool{Name: "fail", Title: "Give up on the job", Description: failDescription},
+			func(ctx context.Context, _ *mcp.CallToolRequest, args FailArgs) (*mcp.CallToolResult, any, error) {
+				return jobCall(client, args.JobID, func(id string) (string, error) {
+					job, err := client.FailJob(ctx, id, args.Reason)
+					if err != nil {
+						return "", err
+					}
+					return fmt.Sprintf("Job %s is marked failed; the human has been told. You may end your turn.", job.ID), nil
+				}), nil, nil
+			})
+	})
+	registerTool("job_create", func(server *mcp.Server, client *Client) {
+		mcp.AddTool(server, &mcp.Tool{Name: "job_create", Title: "Delegate a child job", Description: jobCreateDescription},
+			func(ctx context.Context, _ *mcp.CallToolRequest, args JobCreateArgs) (*mcp.CallToolResult, any, error) {
+				job, err := client.CreateJob(ctx, jobs.CreateInput{Brief: args.Brief, Role: args.Role, Dir: args.Dir, DoneWhen: args.DoneWhen, Engine: args.Engine, Model: args.Model, Isolate: args.Isolate})
+				if err != nil {
+					return errorResult(toolError("The job was not created", err)), nil, nil
+				}
+				return textResult(fmt.Sprintf("Created %s (%s, role %s). It is starting now. Check on it with job_get(job_id=%q).", job.ID, job.Title, job.Role, job.ID)), nil, nil
+			})
+	})
+	registerTool("job_get", func(server *mcp.Server, client *Client) {
+		mcp.AddTool(server, &mcp.Tool{Name: "job_get", Title: "Read a job", Description: jobGetDescription, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+			func(ctx context.Context, _ *mcp.CallToolRequest, args JobGetArgs) (*mcp.CallToolResult, any, error) {
+				return jobCall(client, args.JobID, func(id string) (string, error) {
+					return client.JobContext(ctx, id)
+				}), nil, nil
+			})
+	})
+}
+
+// jobCall resolves the job id and turns errors into results the model can act on.
+func jobCall(client *Client, explicit string, call func(id string) (string, error)) *mcp.CallToolResult {
+	id, err := client.JobID(strings.TrimSpace(explicit))
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	text, err := call(id)
+	if err != nil {
+		return errorResult(toolError("The call failed", err))
+	}
+	return textResult(text)
+}

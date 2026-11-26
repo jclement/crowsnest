@@ -283,7 +283,7 @@ func TestMCPToolList(t *testing.T) {
 			t.Errorf("tool %s has a thin description; it is the agent's instruction", tool.Name)
 		}
 	}
-	if strings.Join(names, ",") != "ask,say" {
+	if strings.Join(names, ",") != "ask,done,fail,job_create,job_get,job_update,say" {
 		t.Fatalf("tools %v", names)
 	}
 	if !strings.Contains(session.InitializeResult().Instructions, "never consent") {
@@ -303,7 +303,7 @@ func TestMCPAskNonBlockingThenWait(t *testing.T) {
 		t.Fatalf("ask: %+v %v", result, err)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, "q_1 posted") || !strings.Contains(text, "[crowsnest answer q_1]") {
+	if !strings.Contains(text, "Recorded as q_1") || !strings.Contains(text, "[crowsnest answer q_1]") {
 		t.Fatalf("non-blocking result %q", text)
 	}
 	open, _ := f.service.List(ctx, "open")

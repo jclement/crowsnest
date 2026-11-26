@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jclement/crowsnest/internal/agentapi"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -109,17 +110,22 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	fleetCache := fleet.New(fleet.Options{Client: client, Hub: events, Session: cfg.Session, Logger: logger})
 	go fleetCache.Run(ctx)
-	questionService, agentSocket, err := startQuestions(ctx, cfg, client, db, events, logger)
+	agentSocket := agentapi.SocketPath(os.Getenv("XDG_RUNTIME_DIR"), cfg.StateDir, cfg.Session)
+	refs := &jobRefs{}
+	jobService := newJobService(cfg, client, db, events, agentSocket, refs, logger)
+	questionService, err := startQuestions(ctx, cfg, client, db, events, jobService, agentSocket, logger)
 	if err != nil {
 		return err
 	}
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, events, agentSocket, logger)
+	refs.orchestrator, refs.conversations = orchestrator, conversations
+	startJobs(ctx, jobService, client, logger)
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
 		Orchestrator: orchestrator, Conversations: conversations,
-		Terminals: terminals(cfg), Questions: questionService,
+		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

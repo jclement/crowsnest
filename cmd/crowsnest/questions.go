@@ -9,27 +9,37 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
 // startQuestions builds the question service, starts its background work and the agent socket,
 // and returns the service and the socket path. Everything stops when ctx ends.
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, logger *slog.Logger) (*questions.Service, string, error) {
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, jobService *jobs.Service, socket string, logger *slog.Logger) (*questions.Service, error) {
 	var deliverer *questions.Deliverer
+	var notifyAsked func(questions.Question)
+	if cfg.NotifyURL != "" {
+		notifyAsked = questions.NewURLNotifier(cfg.NotifyURL, nil, logger)
+	}
 	options := questions.Options{
 		Store: db, Hub: events, Logger: logger,
-		OnSettled: func(questions.Question) { deliverer.Kick() },
-	}
-	if cfg.NotifyURL != "" {
-		options.OnAsked = questions.NewURLNotifier(cfg.NotifyURL, nil, logger)
+		OnSettled: func(question questions.Question) {
+			deliverer.Kick()
+			jobQuestionChanged(ctx, jobService, question, string(question.Status))
+		},
+		OnAsked: func(question questions.Question) {
+			if notifyAsked != nil {
+				notifyAsked(question)
+			}
+			jobQuestionChanged(ctx, jobService, question, "asked")
+		},
 	}
 	service := questions.New(options)
 	deliverer = questions.NewDeliverer(questions.DelivererOptions{
@@ -45,12 +55,11 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	go deliverer.Run(ctx)
 	go service.RunSweeper(ctx, 0)
 
-	socket := agentapi.SocketPath(os.Getenv("XDG_RUNTIME_DIR"), cfg.StateDir, cfg.Session)
 	listener, err := agentapi.Listen(ctx, socket)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Hub: events, Logger: logger, Version: version})
+	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Jobs: jobService, Hub: events, Logger: logger, Version: version})
 	go func() {
 		if err := server.Serve(ctx, listener); err != nil {
 			logger.Error("agent socket stopped", "err", err)
@@ -60,10 +69,19 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 
 	if demo, ok := client.(*fake.Demo); ok {
 		if err := startDemoQuestions(ctx, service, demo, logger); err != nil {
-			return nil, "", err
+			return nil, err
 		}
 	}
-	return service, socket, nil
+	return service, nil
+}
+
+// jobQuestionChanged tells the job a question was asked or settled under it. It runs in the
+// background: the questions service calls its hooks inline and they must not block.
+func jobQuestionChanged(ctx context.Context, jobService *jobs.Service, question questions.Question, change string) {
+	if jobService == nil || question.JobID == "" {
+		return
+	}
+	go jobService.QuestionChanged(context.WithoutCancel(ctx), question.JobID, question.ID, question.Title, change, question.Wait)
 }
 
 // startDemoQuestions seeds the demo inbox and keeps asking.

@@ -23,6 +23,7 @@ import (
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/term"
@@ -73,6 +74,9 @@ type Deps struct {
 
 	// Questions serves the Inbox's /questions routes (M6). Nil: they answer 503.
 	Questions *questions.Service
+
+	// Jobs serves /jobs, /roles and /dirs (M7). Nil: they answer 503.
+	Jobs *jobs.Service
 }
 
 // Server is the HTTP server. Build it with New, then call Run.
@@ -140,6 +144,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /api/v1/agents/{target}/keys", s.requireAuth(http.HandlerFunc(s.handleKeys)))
 	s.registerConversationRoutes(mux)
 	s.registerQuestionRoutes(mux)
+	s.registerJobRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)

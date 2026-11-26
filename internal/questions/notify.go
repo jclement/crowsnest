@@ -67,3 +67,27 @@ func postNotice(ctx context.Context, client *http.Client, url, line string) erro
 	}
 	return nil
 }
+
+// NewTextNotifier posts arbitrary one-line notices (the job supervisor's "tell Jeff") to url,
+// redacted and capped like question notices, in the background.
+func NewTextNotifier(url string, client *http.Client, logger *slog.Logger) func(string) {
+	if client == nil {
+		client = &http.Client{Timeout: notifyTimeout}
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return func(text string) {
+		line := redact.String(strings.Join(strings.Fields(text), " "))
+		if runes := []rune(line); len(runes) > 200 {
+			line = string(runes[:199]) + "…"
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
+			defer cancel()
+			if err := postNotice(ctx, client, url, line); err != nil {
+				logger.Warn("posting to --notify-url failed", "err", redact.String(err.Error()))
+			}
+		}()
+	}
+}
