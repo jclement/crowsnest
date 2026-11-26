@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeBoard, makeJob } from "./jobFixtures";
-import { actionFor, boardSections, cardLine, retryLabel, sectionOf, stateChip } from "./jobs";
+import { actionFor, boardSections, cardLine, jobAnswerText, retryLabel, sectionOf, stateChip } from "./jobs";
 
 describe("the board", () => {
   const now = new Date("2026-11-26T12:00:00Z");
@@ -54,5 +54,20 @@ describe("card states", () => {
     expect(retryLabel({ stuck: true, retry_at: "2026-11-26T12:04:00Z" }, now)).toBe("Retry in 4 min");
     expect(retryLabel({ stuck: true, retry_at: "2026-11-26T11:59:00Z" }, now)).toBe("Retrying now");
     expect(retryLabel({ stuck: false, retry_at: "2026-11-26T12:04:00Z" }, now)).toBe("");
+  });
+});
+
+describe("jobAnswerText", () => {
+  const base = { id: "q_8", title: "Ship v0.2 on Friday?", urgency: "normal", wait: false, answer_note: "", created_at: "2026-11-26T00:00:00Z" };
+  it("shows a choice by its label, not its key (found by the M9 e2e suite)", () => {
+    const options = [{ key: "fri", label: "Friday" }, { key: "mon", label: "Next Monday" }];
+    expect(jobAnswerText({ ...base, kind: "choice", status: "answered", answer_value: "fri", options })).toBe("Friday");
+    expect(jobAnswerText({ ...base, kind: "choice", status: "answered", answer_value: ["fri", "mon"], answer_note: "either", options })).toBe("Friday, Next Monday (note: either)");
+  });
+  it("words the other kinds as the Inbox does", () => {
+    expect(jobAnswerText({ ...base, kind: "manual", status: "answered", answer_value: "Use SQLite", answer_note: "Use SQLite", options: [] })).toBe("Use SQLite");
+    expect(jobAnswerText({ ...base, kind: "ack", status: "answered", answer_value: "ack", options: [] })).toBe("Acknowledged");
+    expect(jobAnswerText({ ...base, kind: "choice", status: "expired", answer_value: null, options: [] })).toBe("expired with no answer");
+    expect(jobAnswerText({ ...base, kind: "choice", status: "cancelled", answer_value: null, options: [] })).toBe("cancelled");
   });
 });

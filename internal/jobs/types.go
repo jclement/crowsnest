@@ -221,6 +221,15 @@ type Question struct {
 	AnswerValue any       `json:"answer_value"`
 	AnswerNote  string    `json:"answer_note"`
 	CreatedAt   time.Time `json:"created_at"`
+	// Options are the question's choices (key and label), so the job view can show an answer by
+	// its label ("Friday") rather than its key ("fri"). Empty for kinds that take none.
+	Options []QuestionOption `json:"options"`
+}
+
+// QuestionOption is one choice of a job's question: what was stored (key) and what was shown.
+type QuestionOption struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
 }
 
 // HubEvent is the data of a `job` hub event.

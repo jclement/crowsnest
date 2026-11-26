@@ -80,6 +80,8 @@ export interface JobQuestion {
   answer_value: unknown;
   answer_note: string;
   created_at: string;
+  /** The choices (key and label), so an answer shows by its label. Empty for ack, manual, notice. */
+  options: Array<{ key: string; label: string }>;
 }
 
 export interface JobDetail extends Job {
@@ -243,9 +245,23 @@ export function retryLabel(job: Pick<Job, "retry_at" | "stuck">, now: number = D
 }
 
 /** The answer of a job question in words. */
+/**
+ * A settled question of a job in a few words, worded as the Inbox words it (lib/questions.ts):
+ * the chosen options by label, the note after them; a manual answer is its note.
+ */
 export function jobAnswerText(question: JobQuestion): string {
-  if (question.status !== "answered") return question.status;
-  const value = Array.isArray(question.answer_value) ? question.answer_value.join(", ") : String(question.answer_value ?? "");
+  switch (question.status) {
+    case "answered":
+      break;
+    case "expired":
+      return "expired with no answer";
+    default:
+      return question.status;
+  }
+  if (question.kind === "manual") return question.answer_note;
+  const keys = Array.isArray(question.answer_value) ? question.answer_value.map(String) : question.answer_value ? [String(question.answer_value)] : [];
+  const fixed: Record<string, string> = { ack: "Acknowledged", notice: "Dismissed" };
+  const value = fixed[question.kind] ?? keys.map((key) => question.options?.find((option) => option.key === key)?.label ?? key).join(", ");
   return question.answer_note ? `${value} (note: ${question.answer_note})` : value;
 }
 
