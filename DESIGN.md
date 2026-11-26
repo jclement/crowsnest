@@ -638,6 +638,10 @@ A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects
 
 - **GitHub**: private repo `jclement/crowsnest`. CI on push and PR: `jdx/mise-action`, `mise run check`, hermetic E2E.
 - **Release** on `v*` tags: GoReleaser builds linux and darwin, amd64 and arm64 (windows is skipped: PTYs and unix sockets make it a different product), tar.gz archives, sha256 checksums, attached to the GitHub release. `mise run release` is the interactive tag bump and is Jeff's to run. `mise run snapshot` proves the packaging locally.
+  - As built (M10a): `.github/workflows/release.yml` runs on `v*` tags with `contents: write` and only `GITHUB_TOKEN`: `jdx/mise-action`, `mise run setup`, `mise run check`, then `goreleaser/goreleaser-action` pinned to the same GoReleaser version as `mise.toml`. A tag with a prerelease suffix (`v0.1.0-rc.1`) becomes a GitHub prerelease.
+  - `.goreleaser.yml`: a before-hook runs `npm --prefix web run build` so the binary embeds the real web app (decision 15); `CGO_ENABLED=0`, `-trimpath`, and the ldflags `mise run build` stamps (`main.version`, `main.commit`, `main.buildDate`). The version is stamped as `v{{.Version}}` so a release binary prints `v1.2.3` like a local `git describe` build. Archives are `crowsnest_<version>_<os>_<arch>.tar.gz` with README and LICENSE; the changelog comes from commits.
+  - Snapshots are versioned `<next patch>-snapshot-<commit>` (no `+`, which is awkward in file names and URLs).
+  - Cosign signing and the Homebrew tap are in `.goreleaser.yml` commented out, per section 19 item 4; switching them on also needs `id-token: write`, the cosign installer step and the `HOMEBREW_TAP_TOKEN` secret.
 - **Devbox image** `ghcr.io/jclement/crowsnest`, amd64 and arm64, built in the release workflow and by `mise run publish`:
   - Debian slim; `tini` as init (PTY children get reaped); non-root user `crow` (uid 1000).
   - Baked in: crowsnest, herdr, mise, git, gh, openssh-client, curl, build-essential, ripgrep, jq, less, a UTF-8 locale.

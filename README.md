@@ -15,6 +15,26 @@ A web terminal is remote code execution, so crowsnest fails closed: it binds to 
 default, refuses to start without a login (or an explicit `--no-auth`), and checks Host and
 Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the security model.
 
+## Install
+
+Releases are built by CI from `v*` tags: one tar.gz per platform (linux and darwin, amd64 and
+arm64; no Windows), each holding the `crowsnest` binary with the web app embedded, this README
+and the LICENSE, plus a `checksums.txt` (sha256). While the repository is private, download from
+the [releases page](https://github.com/jclement/crowsnest/releases) signed in, or with `gh`:
+
+```sh
+gh release download --repo jclement/crowsnest --pattern "crowsnest_*_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" --pattern checksums.txt
+shasum -a 256 --ignore-missing -c checksums.txt
+tar xzf crowsnest_*.tar.gz crowsnest && mv crowsnest ~/.local/bin/
+```
+
+<!-- When the repository is public (DESIGN.md section 19 item 4):
+brew install jclement/tap/crowsnest
+-->
+
+Release archives are not signed yet: cosign and the Homebrew tap are switched on when the
+repository goes public (DESIGN.md section 19 item 4).
+
 ## Quick start
 
 ```sh
@@ -156,9 +176,22 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run e2e` | Playwright suite (not built until M9; fails with a message) |
 | `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures, and the terminals on a throwaway `crowsnest-test-*` herdr session. Each spec starts and stops its own instance on a random localhost port |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
-| `mise run snapshot` | GoReleaser snapshot (needs `.goreleaser.yml`, written in M10) |
+| `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives and `checksums.txt`, nothing published |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |
 | `mise run dev:reset` | Remove build output, web dist, Vite cache and the dev database |
+
+## Releasing
+
+`mise run release` is the only way to cut a release, and it is Jeff's to run. It is interactive:
+it reads the latest tag, offers the next patch, minor or major version, creates an annotated tag
+and asks before pushing it. The pushed `v*` tag starts `.github/workflows/release.yml`, which runs
+`mise run setup` and `mise run check`, then GoReleaser (`.goreleaser.yml`) builds the archives and
+checksums and attaches them to a GitHub release (a `-rc.N` style tag becomes a prerelease). The
+workflow uses only `GITHUB_TOKEN`. Never build release artifacts by hand or tag around a broken
+pipeline: fix the pipeline.
+
+`mise run snapshot` runs the same GoReleaser config locally with `--snapshot` (no tag, nothing
+published) to prove the packaging; the archives land in `dist/`, which is gitignored.
 
 ## Files
 

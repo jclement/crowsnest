@@ -107,17 +107,9 @@ run = "npm --prefix web run screenshots"
 # ---- Ship --------------------------------------------------------------------
 
 [tasks.snapshot]
-description = "Prove the release packaging locally (GoReleaser snapshot, no publish)"
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-if [ ! -f .goreleaser.yml ]; then
-  echo 'snapshot: .goreleaser.yml is not written until M10 (DESIGN.md section 17)' >&2
-  exit 1
-fi
-npm --prefix web run build
-goreleaser release --snapshot --clean
-"""
+description = "Prove the release packaging locally: GoReleaser snapshot into dist/ (four archives, checksums), nothing published"
+# .goreleaser.yml's before-hook builds the web app, so this is the whole job.
+run = "goreleaser release --snapshot --clean"
 
 [tasks.release]
 description = "Interactive release: bump version, tag, and push. Jeff's step"
