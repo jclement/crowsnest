@@ -2,8 +2,8 @@
 // namespace, so every internet client arrives from 127.0.0.1: one login bucket for the owner and
 // every attacker, and no per-client connection cap (loopback is exempt from it, limits.go).
 // With --trusted-proxy, a request whose TCP peer is a trusted proxy is attributed to the client
-// the proxy names: CF-Connecting-IP when it holds an IP, else the last X-Forwarded-For hop (the
-// one the proxy itself appended). That address keys the login limiter, voice's per-client
+// the proxy names in --trusted-proxy-header: the last X-Forwarded-For hop (the one the proxy
+// itself appended; the default), or CF-Connecting-IP for cloudflared (R3-L1). That address keys the login limiter, voice's per-client
 // limits and the request log, and requests through the proxy are capped per client at
 // maxConnectionsPerPeer in flight (the TCP cap cannot see past the proxy). X-Forwarded-Proto is
 // believed from a trusted proxy as well as from loopback, still only to add Secure to the
@@ -23,6 +23,8 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+
+	"github.com/jclement/crowsnest/internal/config"
 )
 
 // clientKey carries the attributed client in a request's context.
@@ -47,10 +49,16 @@ func peerAddr(r *http.Request) netip.Addr {
 	return addr.Unmap()
 }
 
-// forwardedClient is the client a trusted proxy names, or the zero Addr.
-func forwardedClient(r *http.Request) netip.Addr {
-	if addr, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get("CF-Connecting-IP"))); err == nil {
-		return addr.Unmap()
+// forwardedClient is the client a trusted proxy names in header (config.TrustedProxyHeader), or
+// the zero Addr. Only that one header is read (R3-L1): CF-Connecting-IP is cloudflared's, which
+// overwrites it at Cloudflare's edge; tailscale serve and other proxies pass a client's own copy
+// through, so behind them it would let every request pick its own login bucket.
+func forwardedClient(r *http.Request, header string) netip.Addr {
+	if header == config.HeaderCFConnectingIP {
+		if addr, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get("CF-Connecting-IP"))); err == nil {
+			return addr.Unmap()
+		}
+		return netip.Addr{}
 	}
 	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
 	if addr, err := netip.ParseAddr(strings.TrimSpace(hops[len(hops)-1])); err == nil {
@@ -83,7 +91,7 @@ func (s *Server) trustProxies(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		client := forwardedClient(r)
+		client := forwardedClient(r, s.deps.Config.TrustedProxyHeader)
 		if !client.IsValid() {
 			client = peer // the proxy named nobody: it is its own client
 		}

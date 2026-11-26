@@ -404,6 +404,12 @@ func (l *loader) loadNetwork(cfg *Config) error {
 	if cfg.TrustedProxies, err = parseTrustedProxies(l.list(optTrustedProxy)); err != nil {
 		return err
 	}
+	switch header := strings.ToLower(strings.TrimSpace(l.str(optTrustedProxyHeader))); header {
+	case HeaderXForwardedFor, HeaderCFConnectingIP:
+		cfg.TrustedProxyHeader = header
+	default:
+		return fmt.Errorf("--trusted-proxy-header %q is not x-forwarded-for or cf-connecting-ip", header)
+	}
 	if err := l.loadTLS(cfg); err != nil {
 		return err
 	}

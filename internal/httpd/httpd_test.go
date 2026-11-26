@@ -106,7 +106,8 @@ type harnessOptions struct {
 	journal *journal.Journal
 	poker   *orch.Poker
 	// R2-L2: --trusted-proxy
-	trustedProxies []netip.Prefix
+	trustedProxies     []netip.Prefix
+	trustedProxyHeader string // default x-forwarded-for
 }
 
 var testWeb = fstest.MapFS{
@@ -143,6 +144,10 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	c := &clock{now: time.Now()}
 	cfg := testConfig(opts.noAuth)
 	cfg.TrustedProxies = opts.trustedProxies
+	cfg.TrustedProxyHeader = opts.trustedProxyHeader
+	if cfg.TrustedProxyHeader == "" {
+		cfg.TrustedProxyHeader = config.HeaderXForwardedFor
+	}
 	service, err := auth.New(ctx, auth.Options{Username: cfg.Username, Password: cfg.Password, NoAuth: cfg.NoAuth, Now: c.Now}, db)
 	if err != nil {
 		t.Fatal(err)

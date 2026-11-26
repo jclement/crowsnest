@@ -44,6 +44,7 @@ services:
   # crowsnest that hostname is allowed and that the tunnel on loopback is a trusted proxy:
   #   CROWSNEST_ALLOWED_HOSTS=crowsnest.example.com
   #   CROWSNEST_TRUSTED_PROXY=loopback
+  #   CROWSNEST_TRUSTED_PROXY_HEADER=cf-connecting-ip
   # The tunnel shares crowsnest's network namespace, so every internet client reaches crowsnest
   # from 127.0.0.1. Without CROWSNEST_TRUSTED_PROXY they would share one login rate-limit bucket
   # (five bad passwords a minute from anyone would lock you out) and escape the per-client cap;
@@ -64,7 +65,8 @@ services:
   # paste need). Remove `ports:` above and add to the crowsnest service:
   #   network_mode: service:tailscale
   # set CROWSNEST_ALLOWED_HOSTS=crowsnest.<your-tailnet>.ts.net and CROWSNEST_TRUSTED_PROXY=loopback
-  # in crowsnest.env (tailscale serve names the client in X-Forwarded-For), and put
+  # in crowsnest.env (tailscale serve names the client in X-Forwarded-For, the default
+  # CROWSNEST_TRUSTED_PROXY_HEADER; never cf-connecting-ip here, which a client could forge), and put
   # TS_AUTHKEY=... in deploy/tailscale.env (never in crowsnest.env).
   #
   # tailscale:

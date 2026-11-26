@@ -1,9 +1,12 @@
 package httpd
 
 import (
+	"fmt"
 	"net/http"
 	"net/netip"
 	"testing"
+
+	"github.com/jclement/crowsnest/internal/config"
 )
 
 var loopbackProxy = []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128")}
@@ -16,7 +19,7 @@ func TestTrustedProxyGivesEachClientItsOwnLoginBucket(t *testing.T) {
 		r.Header.Set("CF-Connecting-IP", client)
 		return h.do(r).Code
 	}
-	h := newHarness(t, harnessOptions{trustedProxies: loopbackProxy})
+	h := newHarness(t, harnessOptions{trustedProxies: loopbackProxy, trustedProxyHeader: config.HeaderCFConnectingIP})
 	for range 6 {
 		loginAs(h, "203.0.113.9", "wrong")
 	}
@@ -37,11 +40,12 @@ func TestTrustedProxyGivesEachClientItsOwnLoginBucket(t *testing.T) {
 }
 
 func TestForwardedClient(t *testing.T) {
-	for _, tc := range []struct{ cf, xff, want string }{
-		{cf: "203.0.113.9", want: "203.0.113.9"},
-		{xff: "10.0.0.1, 203.0.113.7", want: "203.0.113.7"},
-		{cf: "not an ip", xff: "198.51.100.1", want: "198.51.100.1"},
-		{xff: "garbage", want: "invalid IP"},
+	for _, tc := range []struct{ header, cf, xff, want string }{
+		{header: config.HeaderCFConnectingIP, cf: "203.0.113.9", want: "203.0.113.9"},
+		{header: config.HeaderCFConnectingIP, cf: "not an ip", xff: "198.51.100.1", want: "invalid IP"},
+		{header: config.HeaderXForwardedFor, xff: "10.0.0.1, 203.0.113.7", want: "203.0.113.7"},
+		{header: config.HeaderXForwardedFor, cf: "203.0.113.9", xff: "198.51.100.1", want: "198.51.100.1"},
+		{header: config.HeaderXForwardedFor, xff: "garbage", want: "invalid IP"},
 	} {
 		r := request(http.MethodGet, "/", "")
 		if tc.cf != "" {
@@ -50,9 +54,27 @@ func TestForwardedClient(t *testing.T) {
 		if tc.xff != "" {
 			r.Header.Set("X-Forwarded-For", tc.xff)
 		}
-		if got := forwardedClient(r).String(); got != tc.want {
-			t.Errorf("cf %q xff %q: %s, want %s", tc.cf, tc.xff, got, tc.want)
+		if got := forwardedClient(r, tc.header).String(); got != tc.want {
+			t.Errorf("%s: cf %q xff %q: %s, want %s", tc.header, tc.cf, tc.xff, got, tc.want)
 		}
+	}
+}
+
+// R3-L1: behind a proxy that passes headers through (tailscale serve), a client's own
+// CF-Connecting-IP must not buy it a fresh login bucket on every attempt.
+func TestSpoofedCFConnectingIPIsIgnoredBehindAnXFFProxy(t *testing.T) {
+	h := newHarness(t, harnessOptions{trustedProxies: loopbackProxy})
+	attempt := func(spoof, password string) int {
+		r := request(http.MethodPost, "/api/v1/auth/login", loginBody(testUser, password))
+		r.Header.Set("CF-Connecting-IP", spoof)
+		r.Header.Set("X-Forwarded-For", "100.64.0.9") // what tailscale serve appends: the real peer
+		return h.do(r).Code
+	}
+	for i := range 6 {
+		attempt(fmt.Sprintf("203.0.113.%d", i+1), "wrong")
+	}
+	if code := attempt("203.0.113.99", "wrong"); code != http.StatusTooManyRequests {
+		t.Fatalf("a fresh CF-Connecting-IP on every attempt escaped the per-client limit: %d", code)
 	}
 }
 

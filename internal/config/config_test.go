@@ -616,3 +616,18 @@ func TestTrustedProxy(t *testing.T) {
 	_, err = newHarness(t, "--no-auth", "--trusted-proxy", "everyone").load()
 	assertErrorContains(t, err, "--trusted-proxy")
 }
+
+// R3-L1: the client-IP header is chosen, X-Forwarded-For by default; CF-Connecting-IP only when
+// asked for.
+func TestTrustedProxyHeader(t *testing.T) {
+	cfg, err := newHarness(t, "--no-auth").load()
+	if err != nil || cfg.TrustedProxyHeader != HeaderXForwardedFor {
+		t.Fatalf("default %q %v", cfg.TrustedProxyHeader, err)
+	}
+	cfg, err = newHarness(t, "--no-auth", "--trusted-proxy-header", "CF-Connecting-IP").load()
+	if err != nil || cfg.TrustedProxyHeader != HeaderCFConnectingIP {
+		t.Fatalf("cf %q %v", cfg.TrustedProxyHeader, err)
+	}
+	_, err = newHarness(t, "--no-auth", "--trusted-proxy-header", "X-Real-IP").load()
+	assertErrorContains(t, err, "--trusted-proxy-header")
+}

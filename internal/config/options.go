@@ -57,6 +57,7 @@ const (
 	optNotifyURL           = "notify-url"
 	optNotifyURLFile       = "notify-url-file"
 	optTrustedProxy        = "trusted-proxy"
+	optTrustedProxyHeader  = "trusted-proxy-header"
 	optDemo                = "demo"
 	optIKnowThisIsOpen     = "i-know-this-is-open"
 	optAllowDefaultSession = "allow-default-session"
@@ -84,7 +85,8 @@ var options = []option{
 	{name: optPokeInterval, env: []string{"CROWSNEST_POKE_INTERVAL"}, kind: kindDuration, def: "15m", usage: "timer poke interval; 0 disables timer pokes"},
 	{name: optNoOrchestrator, env: []string{"CROWSNEST_NO_ORCHESTRATOR"}, kind: kindBool, def: "false", usage: "serve the UI over the session without starting Claude"},
 	{name: optAllowedHost, env: []string{"CROWSNEST_ALLOWED_HOSTS"}, kind: kindList, usage: "extra Host/Origin name, e.g. a reverse proxy or MagicDNS name (repeatable)"},
-	{name: optTrustedProxy, env: []string{"CROWSNEST_TRUSTED_PROXY"}, kind: kindList, usage: "loopback, or an IP or CIDR: a reverse proxy whose client-IP header (CF-Connecting-IP, X-Forwarded-For) is believed (repeatable)"},
+	{name: optTrustedProxy, env: []string{"CROWSNEST_TRUSTED_PROXY"}, kind: kindList, usage: "loopback, or an IP or CIDR: a reverse proxy whose client-IP header (--trusted-proxy-header) is believed (repeatable)"},
+	{name: optTrustedProxyHeader, env: []string{"CROWSNEST_TRUSTED_PROXY_HEADER"}, def: "x-forwarded-for", usage: "the header a trusted proxy names its client in: x-forwarded-for (its last hop) or cf-connecting-ip (cloudflared only)"},
 	{name: optTLSCert, env: []string{"CROWSNEST_TLS_CERT"}, usage: "PEM certificate: serve HTTPS directly"},
 	{name: optTLSKey, env: []string{"CROWSNEST_TLS_KEY"}, usage: "PEM key for --tls-cert"},
 	{name: optElevenLabsAPIKey, env: []string{"ELEVENLABS_API_KEY"}, usage: "ElevenLabs API key: enables talk mode (prefer the env var or --elevenlabs-api-key-file)"},

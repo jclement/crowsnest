@@ -34,6 +34,12 @@ const DefaultElevenLabsURL = "https://api.elevenlabs.io"
 
 // Config is the fully resolved configuration. Every field has been parsed and validated by Load;
 // secrets (Password, ElevenLabsAPIKey) must never be logged, which is why LogValue omits them.
+// Client-IP headers a trusted proxy may name its client in (--trusted-proxy-header).
+const (
+	HeaderXForwardedFor  = "x-forwarded-for"
+	HeaderCFConnectingIP = "cf-connecting-ip"
+)
+
 type Config struct {
 	// ---- Authentication ----
 
@@ -50,7 +56,12 @@ type Config struct {
 	// TrustedProxies are the peers whose client-IP header is believed (--trusted-proxy, R2-L2):
 	// a tunnel or proxy on loopback makes every internet client one peer otherwise.
 	TrustedProxies []netip.Prefix
-	TLSCert        string // path to a PEM certificate; empty means plain HTTP
+	// TrustedProxyHeader is the one header a trusted proxy's client is read from
+	// (--trusted-proxy-header, R3-L1): HeaderXForwardedFor (its last hop, the default) or
+	// HeaderCFConnectingIP (only for cloudflared, which overwrites it; any other proxy passes a
+	// client's own CF-Connecting-IP through, so believing it would let a client pick its bucket).
+	TrustedProxyHeader string
+	TLSCert            string // path to a PEM certificate; empty means plain HTTP
 	TLSKey         string // path to the matching PEM key
 
 	// HostNames is every name the Host header may carry: loopback names, bound IPs, this
