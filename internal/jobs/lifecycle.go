@@ -214,7 +214,8 @@ func clearClaim(r *store.JobRecord) {
 // this one that never finished), by what the step was:
 //   - a brief or a dispatch may have been typed: it counts as sent and is not typed again;
 //   - a launch or a start leaves the pane as it is; the tick looks at the agent next;
-//   - a retry or a nudge is dropped (the tick or the backstop decides afresh).
+//   - a retry or a nudge is dropped: it was counted against its budget when it was claimed
+//     (R3-C06), so one that may have been typed is never handed out again for free.
 func (s *Service) resolveStaleLocked(r *store.JobRecord, c *change) {
 	op := r.LifecycleOp
 	clearClaim(r)
@@ -236,9 +237,82 @@ func (s *Service) resolveStaleLocked(r *store.JobRecord, c *change) {
 		}
 		c.event(EventLaunch, "crowsnest stopped while typing the brief; it may or may not have arrived, so it is not typed again. "+
 			"The agent reads it at session start; if it sits idle it is nudged", map[string]any{"step": op})
+	case opRetry, opNudge:
+		c.event(EventLaunch, "A "+op+" interrupted by a crowsnest restart may or may not have been typed; it stays counted", map[string]any{"step": op})
 	default:
 		c.event(EventLaunch, "A step interrupted by a crowsnest restart was dropped: "+op, map[string]any{"step": op})
 	}
+}
+
+// ---- In-flight effects (R2-C08 residual) ---------------------------------------------------
+
+// A claim check is not an execution fence: between a step's last holds and herdr typing, orch.Prompt
+// still looks up the agent and reads its screen, and a Cancel landing there used to commit, send
+// Esc, and then have the text typed after the Esc, starting unsupervised work on a cancelled job.
+// So each external effect registers itself first, then checks the claim, then runs under a
+// context Cancel can end. Cancel, after committing, cancels a registered effect and leaves the Esc
+// to it: the effect sends Esc when it returns, so the interrupt always follows anything the
+// effect managed to type. Registration comes before the claim check, so either the check sees the
+// cancel, or Cancel (which commits before it looks) sees the effect.
+
+// inflightEffect is one step's external effect while it runs.
+type inflightEffect struct {
+	cancel   context.CancelFunc
+	escAfter bool // a Cancel came in: interrupt the agent once the effect is over
+}
+
+// effect runs fn, the external effect of the held claim cl on the agent in paneID. It returns
+// errClaimLost, without running fn, when the claim no longer holds.
+func (s *Service) effect(ctx context.Context, cl claim, paneID string, fn func(context.Context)) error {
+	effectCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	e := &inflightEffect{cancel: cancel}
+	s.effectsMu.Lock()
+	if s.effects == nil {
+		s.effects = map[string]*inflightEffect{}
+	}
+	s.effects[cl.id] = e
+	s.effectsMu.Unlock()
+	defer func() {
+		s.effectsMu.Lock()
+		if s.effects[cl.id] == e {
+			delete(s.effects, cl.id)
+		}
+		esc := e.escAfter
+		s.effectsMu.Unlock()
+		if esc {
+			s.interrupt(context.WithoutCancel(ctx), paneID)
+		}
+	}()
+	if err := s.holds(effectCtx, cl); err != nil {
+		return err
+	}
+	fn(effectCtx)
+	return nil
+}
+
+// cancelEffect ends the effect running for job id, if any, and reports whether one was: that
+// effect then sends the Esc when it returns.
+func (s *Service) cancelEffect(id string) bool {
+	s.effectsMu.Lock()
+	defer s.effectsMu.Unlock()
+	e := s.effects[id]
+	if e == nil {
+		return false
+	}
+	e.cancel()
+	e.escAfter = true
+	return true
+}
+
+// interrupt sends Esc to the agent in paneID, ending its turn.
+func (s *Service) interrupt(ctx context.Context, paneID string) {
+	if paneID == "" || s.opts.Herdr == nil {
+		return
+	}
+	callCtx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
+	defer cancel()
+	_ = s.opts.Herdr.AgentSendKeys(callCtx, paneID, []string{"esc"})
 }
 
 // ---- Typing outcomes -----------------------------------------------------------------------

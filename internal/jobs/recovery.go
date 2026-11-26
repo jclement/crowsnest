@@ -380,14 +380,21 @@ func (s *Service) RetryNow(ctx context.Context, id string) {
 }
 
 // retryStep claims a retry (the job must still be stuck on a limit or API error, and, for the
-// tick, the retry still due), types "continue", and records it. A send that provably typed
-// nothing is not counted.
+// tick, the retry still due), types "continue", and records it. The attempt is counted and the
+// next one scheduled when the retry is claimed, before anything is typed (R3-C06): a crash between
+// typing and recording must not leave the old count and the old, already-due time, or crash after
+// crash would bypass the back-off and the API-error cap. A send that provably typed nothing gives
+// the attempt back; a stale retry claim found after a crash stays counted.
 func (s *Service) retryStep(ctx context.Context, id string, onlyIfDue bool) {
-	cl, err := s.claimStep(ctx, id, opRetry, func(rec *store.JobRecord, _ *change) error {
+	var spent retrySpent
+	cl, err := s.claimStep(ctx, id, opRetry, func(rec *store.JobRecord, c *change) error {
 		recovering := rec.Stuck && (Cause(rec.Cause) == CauseLimit || Cause(rec.Cause) == CauseServerError)
 		if !recovering || rec.PaneID == "" || (onlyIfDue && (rec.RetryAt.IsZero() || s.opts.Now().Before(rec.RetryAt))) {
 			return errSkip
 		}
+		spent = retrySpent{count: rec.RetryCount, at: rec.RetryAt}
+		s.scheduleNextRetryLocked(rec, c)
+		spent.next = rec.RetryAt
 		return nil
 	})
 	if err != nil {
@@ -395,36 +402,62 @@ func (s *Service) retryStep(ctx context.Context, id string, onlyIfDue bool) {
 	}
 	detail, err := s.Get(ctx, id)
 	if err != nil {
-		s.finishQuietly(ctx, cl, nil)
+		s.finishQuietly(ctx, cl, spent.refund)
 		return
 	}
-	if err := s.holds(ctx, cl); err != nil {
+	var result orch.PromptResult
+	var sendErr error
+	if err := s.effect(ctx, cl, detail.PaneID, func(ctx context.Context) {
+		result, sendErr = orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: continueText, ExpectAgent: detail.AgentName})
+	}); err != nil {
 		return
 	}
-	result, sendErr := orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: continueText})
 	outcome := typedOutcome(result, sendErr)
 	s.finishQuietly(ctx, cl, func(rec *store.JobRecord, c *change) {
-		if outcome == typedNo {
+		switch outcome {
+		case typedNo:
 			c.event(EventRetry, "Retry could not type yet: "+oneLine(sendErr.Error(), 160), nil)
-			return
-		}
-		now := s.opts.Now()
-		rec.RetryCount++
-		c.event(EventRetry, fmt.Sprintf("Retry %d: typed \"continue\"", rec.RetryCount), nil)
-		switch Cause(rec.Cause) {
-		case CauseLimit:
-			rec.RetryAt = now.Add(retryDelay(limitRetries, limitEvery, rec.RetryCount))
-		case CauseServerError:
-			if rec.RetryCount < len(serverRetries) {
-				rec.RetryAt = now.Add(serverRetries[rec.RetryCount])
-			} else {
-				rec.RetryAt = zeroTime
-				c.notify = fmt.Sprintf("crowsnest: job %s still hits API errors after %d retries", FormatID(rec.ID), rec.RetryCount)
-			}
-		default:
-			rec.RetryAt = zeroTime
+			spent.refund(rec, c)
+		case typedMaybe:
+			c.event(EventRetry, "crowsnest lost track of that retry's send; counted as given", nil)
 		}
 	})
+}
+
+// scheduleNextRetryLocked counts a retry attempt and schedules the next one; an API error out of
+// retries tells Jeff and stops.
+func (s *Service) scheduleNextRetryLocked(rec *store.JobRecord, c *change) {
+	now := s.opts.Now()
+	rec.RetryCount++
+	c.event(EventRetry, fmt.Sprintf("Retry %d: typing \"continue\"", rec.RetryCount), nil)
+	switch Cause(rec.Cause) {
+	case CauseLimit:
+		rec.RetryAt = now.Add(retryDelay(limitRetries, limitEvery, rec.RetryCount))
+	case CauseServerError:
+		if rec.RetryCount < len(serverRetries) {
+			rec.RetryAt = now.Add(serverRetries[rec.RetryCount])
+		} else {
+			rec.RetryAt = zeroTime
+			c.notify = fmt.Sprintf("crowsnest: job %s still hits API errors after %d retries", FormatID(rec.ID), rec.RetryCount)
+		}
+	default:
+		rec.RetryAt = zeroTime
+	}
+}
+
+// retrySpent is the retry bookkeeping before an attempt was counted, so a send that provably
+// typed nothing can give the attempt back.
+type retrySpent struct {
+	count    int
+	at, next time.Time // RetryAt before the attempt, and the one the attempt scheduled
+}
+
+// refund restores the attempt, unless a hook has changed the schedule since (then it stands).
+func (b retrySpent) refund(rec *store.JobRecord, _ *change) {
+	if rec.RetryCount != b.count+1 || rec.RetryAt.Unix() != b.next.Unix() {
+		return
+	}
+	rec.RetryCount, rec.RetryAt = b.count, b.at
 }
 
 // ---- Heartbeat -----------------------------------------------------------------------------

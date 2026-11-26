@@ -166,7 +166,10 @@ func (s *Service) startInPane(ctx context.Context, cl claim, job Job, resume boo
 		return err
 	}
 	params := herdr.AgentStartParams{Name: AgentName(job.ID), Kind: job.Engine, PaneID: job.PaneID, Args: s.agentArgs(job, files, resume), TimeoutMS: startTimeoutMS}
-	agent, err := s.startAgent(ctx, params)
+	var agent herdr.Agent
+	if claimErr := s.effect(ctx, cl, job.PaneID, func(ctx context.Context) { agent, err = s.startAgent(ctx, params) }); claimErr != nil {
+		return claimErr
+	}
 	if errors.Is(err, herdr.ErrAgentNotReady) {
 		s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
 			markDialogLocked(r, c, "The agent stopped at a start-up prompt (folder trust or login). Open its terminal and answer it; crowsnest sends the brief after that.")
@@ -180,10 +183,12 @@ func (s *Service) startInPane(ctx context.Context, cl claim, job Job, resume boo
 		job.SessionID = session
 	}
 	if resume && job.briefSent {
-		if err := s.holds(ctx, cl); err != nil {
+		var sendErr error
+		if err := s.effect(ctx, cl, job.PaneID, func(ctx context.Context) {
+			sendErr = s.sendText(ctx, job.PaneID, AgentName(job.ID), "[crowsnest restart] You were restarted. "+NudgeText(job.ID))
+		}); err != nil {
 			return err
 		}
-		sendErr := s.sendText(ctx, job.PaneID, AgentName(job.ID), "[crowsnest restart] You were restarted. "+NudgeText(job.ID))
 		s.finishQuietly(ctx, cl, func(r *store.JobRecord, c *change) {
 			if sendErr != nil {
 				c.event(EventRestart, "Restarted; the restart note could not be typed: "+oneLine(sendErr.Error(), 160), nil)
@@ -222,10 +227,12 @@ func (s *Service) sendBrief(ctx context.Context, cl claim, job Job) error {
 			return err
 		}
 	}
-	if err := s.holds(ctx, cl); err != nil {
-		return err
+	var result orch.PromptResult
+	if claimErr := s.effect(ctx, cl, job.PaneID, func(ctx context.Context) {
+		result, err = orch.Prompt(ctx, s.opts.Herdr, job.PaneID, orch.PromptRequest{Text: text, ForceOverDraft: true, ExpectAgent: AgentName(job.ID)})
+	}); claimErr != nil {
+		return claimErr
 	}
-	result, err := orch.Prompt(ctx, s.opts.Herdr, job.PaneID, orch.PromptRequest{Text: text, ForceOverDraft: true, ExpectAgent: AgentName(job.ID)})
 	outcome := typedOutcome(result, err)
 	var blocked *orch.BlockedError
 	switch {
@@ -549,10 +556,12 @@ func (s *Service) DispatchOrchestrator(ctx context.Context) {
 		})
 		return
 	}
-	if err := s.holds(ctx, cl); err != nil {
+	var result orch.PromptResult
+	if claimErr := s.effect(ctx, cl, info.PaneID, func(ctx context.Context) {
+		result, err = orch.Prompt(ctx, s.opts.Herdr, info.PaneID, orch.PromptRequest{Text: orchestratorLine(job, path), ExpectAgent: OrchestratorName})
+	}); claimErr != nil {
 		return
 	}
-	result, err := orch.Prompt(ctx, s.opts.Herdr, info.PaneID, orch.PromptRequest{Text: orchestratorLine(job, path), ExpectAgent: OrchestratorName})
 	outcome := typedOutcome(result, err)
 	if outcome == typedNo {
 		s.opts.Logger.Info("the orchestrator could not take a job yet", "job", job.ID, "err", err)

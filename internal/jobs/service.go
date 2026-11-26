@@ -106,6 +106,9 @@ type Service struct {
 
 	busyMu sync.Mutex
 	busy   map[string]bool // jobs with a launch or restart running in the background
+
+	effectsMu sync.Mutex
+	effects   map[string]*inflightEffect // a step's herdr effect while it runs (lifecycle.go)
 }
 
 // New returns a Service.

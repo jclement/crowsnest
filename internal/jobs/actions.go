@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
@@ -40,6 +41,7 @@ func (s *Service) Message(ctx context.Context, id string, input MessageInput) (o
 	}
 	result, err := orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{
 		Text: fmt.Sprintf("[crowsnest message %s] %s", detail.ID, text), ForceOverDraft: input.ForceOverDraft,
+		ExpectAgent: detail.AgentName, // a reused pane id holding another agent is left alone (R2-I5)
 	})
 	if err != nil {
 		return result, err
@@ -71,10 +73,10 @@ func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
-	if job.PaneID != "" && s.opts.Herdr != nil {
-		callCtx, cancel := context.WithTimeout(ctx, herdrCallTimeout)
-		_ = s.opts.Herdr.AgentSendKeys(callCtx, job.PaneID, []string{"esc"})
-		cancel()
+	// A step typing into the agent right now is stopped, and sends the Esc itself once it has
+	// returned, so the interrupt comes after anything it typed (R2-C08 residual).
+	if !s.cancelEffect(job.ID) {
+		s.interrupt(ctx, job.PaneID)
 	}
 	return job, nil
 }
@@ -104,16 +106,20 @@ func (s *Service) Nudge(ctx context.Context, id string) (Job, error) {
 		return Job{}, err
 	}
 	detail, err := s.Get(ctx, id)
-	if err == nil {
-		err = s.holds(ctx, cl)
-	}
 	if err != nil {
 		s.finishQuietly(ctx, cl, nil)
 		return Job{}, err
 	}
-	if _, err := orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: "[crowsnest nudge] " + NudgeText(detail.ID)}); err != nil && typedOutcome(orch.PromptResult{}, err) == typedNo {
+	var sendErr error
+	if err := s.effect(ctx, cl, detail.PaneID, func(ctx context.Context) {
+		_, sendErr = orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: "[crowsnest nudge] " + NudgeText(detail.ID), ExpectAgent: detail.AgentName})
+	}); err != nil {
 		s.finishQuietly(ctx, cl, nil)
 		return Job{}, err
+	}
+	if sendErr != nil && typedOutcome(orch.PromptResult{}, sendErr) == typedNo {
+		s.finishQuietly(ctx, cl, nil)
+		return Job{}, sendErr
 	}
 	return s.finish(ctx, cl, func(r *store.JobRecord, c *change) {
 		r.Nudges++
@@ -169,15 +175,19 @@ func mustParse(id string) int64 {
 // session crowsnest did not start). The caller has seen the agent idle with an empty input box
 // long enough, with job.LastStopAt as the Stop hook's mark at the time it looked. Under the lock
 // this checks that no Stop hook has run since (one that did handled the stop, R2-C10), applies
-// the same disposition rule and budget as the Stop hook, and claims the nudge. The nudge counts
-// against the budget only once it is typed (or its typing is uncertain); a send that provably
-// typed nothing (a dialog or a draft appeared) spends nothing. It reports whether it nudged.
+// the same disposition rule and budget as the Stop hook, and claims the nudge.
+//
+// The budget is spent when the nudge is claimed, before anything is typed (R3-C06): a crash
+// between typing and recording must not hand out the same nudge again, or crash after crash could
+// nudge without end. A send that provably typed nothing (a dialog or a draft appeared) is
+// refunded; a stale nudge claim found after a crash stays counted. It reports whether it nudged.
 func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, error) {
 	if s.opts.Herdr == nil {
 		return false, nil
 	}
 	var decision Decision
 	var cl claim
+	var spent budgetSpent
 	_, err := s.mutate(ctx, job.ID, func(r *store.JobRecord, c *change) error {
 		if r.PaneID == "" || !r.LastStopAt.Equal(job.LastStopAt) {
 			return errSkip
@@ -191,7 +201,13 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 		case decision.Allow:
 			return errSkip
 		}
-		return s.claimLocked(r, c, opNudge, nil, &cl)
+		if err := s.claimLocked(r, c, opNudge, nil, &cl); err != nil {
+			return err
+		}
+		spent = budgetSpent{streak: r.NudgeStreak, nudges: r.Nudges, lastNudgeAt: r.LastNudgeAt}
+		s.applyDecisionLocked(r, c, decision, HookInput{})
+		spent.at = r.LastNudgeAt
+		return nil
 	})
 	switch {
 	case errors.Is(err, errSkip), errors.Is(err, errBusy), errors.Is(err, errClaimLost):
@@ -206,23 +222,26 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 		err = s.holds(ctx, cl)
 	}
 	if err != nil {
-		s.finishQuietly(ctx, cl, nil)
+		s.finishQuietly(ctx, cl, spent.refund)
 		if errors.Is(err, errClaimLost) {
 			return false, nil
 		}
 		return false, err
 	}
-	result, sendErr := orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: "[crowsnest nudge] " + decision.Reason})
-	outcome := typedOutcome(result, sendErr)
-	if outcome == typedNo {
-		s.finishQuietly(ctx, cl, nil) // nothing typed: no budget spent
+	var result orch.PromptResult
+	var sendErr error
+	if err := s.effect(ctx, cl, detail.PaneID, func(ctx context.Context) {
+		result, sendErr = orch.Prompt(ctx, s.opts.Herdr, detail.PaneID, orch.PromptRequest{Text: "[crowsnest nudge] " + decision.Reason, ExpectAgent: detail.AgentName})
+	}); err != nil {
+		s.finishQuietly(ctx, cl, spent.refund)
 		return false, nil
 	}
-	if _, err := s.finish(ctx, cl, func(r *store.JobRecord, c *change) {
-		if r.LastProgressAt.After(cl.at) {
-			decision.Streak = 1 // progress came while the nudge was typed: a fresh streak
-		}
-		s.applyDecisionLocked(r, c, decision, HookInput{})
+	outcome := typedOutcome(result, sendErr)
+	if outcome == typedNo {
+		s.finishQuietly(ctx, cl, spent.refund) // nothing typed: the budget is given back
+		return false, nil
+	}
+	if _, err := s.finish(ctx, cl, func(_ *store.JobRecord, c *change) {
 		if outcome == typedMaybe {
 			c.event(EventNudge, "crowsnest lost track of that nudge's send; counted as given", nil)
 		}
@@ -230,6 +249,23 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 		return true, err
 	}
 	return true, nil
+}
+
+// budgetSpent is what a nudge took from the budget when it was claimed, so a send that provably
+// typed nothing can give it back.
+type budgetSpent struct {
+	streak, nudges int
+	lastNudgeAt    time.Time // before the nudge
+	at             time.Time // the nudge's own mark
+}
+
+// refund gives the nudge back, unless something else has nudged since (then it stays spent).
+func (b budgetSpent) refund(r *store.JobRecord, c *change) {
+	if r.Nudges != b.nudges+1 || r.LastNudgeAt.Unix() != b.at.Unix() {
+		return
+	}
+	r.Nudges, r.NudgeStreak, r.LastNudgeAt = b.nudges, b.streak, b.lastNudgeAt
+	c.event(EventNudge, "That nudge could not be typed (a dialog or a draft); it is not counted", nil)
 }
 
 // ---- Questions -----------------------------------------------------------------------------

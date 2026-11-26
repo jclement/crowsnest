@@ -28,6 +28,7 @@ type seams struct {
 	onAgentStart  func()
 	onAgentGet    func()
 	onProcessInfo func()
+	onPaneRead    func()
 }
 
 func once(mu *sync.Mutex, hook *func()) {
@@ -53,6 +54,11 @@ func (s *seams) AgentGet(ctx context.Context, target string) (herdr.Agent, error
 func (s *seams) PaneProcessInfo(ctx context.Context, paneID string) (herdr.ProcessInfo, error) {
 	once(&s.mu, &s.onProcessInfo)
 	return s.Fake.PaneProcessInfo(ctx, paneID)
+}
+
+func (s *seams) PaneRead(ctx context.Context, paneID string, opts herdr.ReadOptions) (herdr.ReadResult, error) {
+	once(&s.mu, &s.onPaneRead)
+	return s.Fake.PaneRead(ctx, paneID, opts)
 }
 
 func (s *seams) set(hook *func(), fn func()) {

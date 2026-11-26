@@ -115,6 +115,10 @@ func Prompt(ctx context.Context, client herdr.Client, target string, request Pro
 	if err := checkInput(ctx, client, agent, request.ForceOverDraft); err != nil {
 		return PromptResult{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		// The caller gave up during the checks (a job cancelled meanwhile): nothing is typed.
+		return PromptResult{}, notTyped(err)
+	}
 	sendCtx, cancel := context.WithTimeout(ctx, promptWaitMS*time.Millisecond+5*time.Second)
 	defer cancel()
 	wait := &herdr.PromptWait{Until: []herdr.AgentStatus{herdr.StatusWorking, herdr.StatusBlocked}, TimeoutMS: promptWaitMS}

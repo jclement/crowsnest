@@ -134,3 +134,101 @@ func TestDispatchKeepsWhatTheOrchestratorDeclaredMeanwhile(t *testing.T) {
 		t.Fatalf("the dispatch's completion overwrote the orchestrator's blocked: %+v", d.Job)
 	}
 }
+
+// ---- R3-C06: a nudge or retry interrupted by a crash stays counted ----------------------------
+
+// dieAfterTyping makes the process "crash" right after herdr accepts a prompt starting with
+// prefix: the claim now belongs to a dead process, so this one cannot record the outcome, and the
+// next pass finds a stale claim.
+func dieAfterTyping(r *rig, prefix string) {
+	r.fake.OnPrompt(func(_ *fake.Fake, _, text string) {
+		if !strings.HasPrefix(text, prefix) {
+			return
+		}
+		record, err := r.db.GetJob(context.Background(), 1)
+		if err != nil {
+			r.t.Error(err)
+			return
+		}
+		record.LifecycleOwner, record.LifecycleGen = "a-crowsnest-that-died", record.LifecycleGen+100
+		if err := r.db.UpdateJob(context.Background(), record); err != nil {
+			r.t.Error(err)
+		}
+	})
+}
+
+func promptsStarting(r *rig, prefix string) int {
+	count := 0
+	for _, prompt := range r.fake.Prompts() {
+		if strings.HasPrefix(prompt.Text, prefix) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestNudgesInterruptedByCrashesStillRunOut(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	job := r.create(CreateInput{Engine: EngineCodex, Brief: "Do it", Dir: t.TempDir()})
+	_ = r.fake.SetStatus(job.PaneID, herdr.StatusIdle)
+	dieAfterTyping(r, "[crowsnest nudge]")
+	for range 2 * MaxNudges {
+		r.clock.Advance(time.Minute)
+		_, _ = r.svc.NudgeIfDue(ctx, r.backstopJob(job.ID))
+	}
+	if typed := promptsStarting(r, "[crowsnest nudge]"); typed > MaxNudges {
+		t.Fatalf("%d nudges typed across crashes, the budget is %d", typed, MaxNudges)
+	}
+	if d := r.get(job.ID); !d.Stuck || d.Cause != CauseUnresponsive || !anyContains(r.Notices(), "stuck") {
+		t.Fatalf("the budget never ran out, so Jeff was never told: %+v %q", d.Job, r.Notices())
+	}
+}
+
+func TestRetriesInterruptedByCrashesKeepTheBackoffAndTheCap(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+	_, _ = r.svc.HandleHook(ctx, HookStopFailure, job.ID, "", HookInput{Error: "server_error"})
+	_ = r.fake.SetStatus(job.PaneID, herdr.StatusIdle)
+	dieAfterTyping(r, continueText)
+	for range 8 {
+		r.clock.Advance(16 * time.Minute) // past every API-error back-off
+		_ = r.fake.SetStatus(job.PaneID, herdr.StatusIdle)
+		r.svc.Tick(ctx)
+	}
+	if typed := promptsStarting(r, continueText); typed > 3 {
+		t.Fatalf("%d retries typed across crashes; API errors are retried 3 times", typed)
+	}
+	if !anyContains(r.Notices(), "API errors") {
+		t.Fatalf("the retry cap was never reached, so Jeff was never told: %q", r.Notices())
+	}
+}
+
+// ---- R2-C08 residual: a cancel during the send's own checks wins ------------------------------
+
+func TestCancelDuringTheSendsChecksTypesNothingAndInterruptsLast(t *testing.T) {
+	r, hooks := newSeamRig(t)
+	ctx := context.Background()
+	job := r.create(CreateInput{Engine: EngineCodex, Brief: "Do it", Dir: t.TempDir()})
+	_ = r.fake.SetStatus(job.PaneID, herdr.StatusIdle)
+	nudges := promptsStarting(r, "[crowsnest nudge]")
+	// The nudge's claim held; orch.Prompt is reading the screen when the human cancels.
+	hooks.set(&hooks.onPaneRead, func() {
+		if _, err := r.svc.Cancel(ctx, job.ID); err != nil {
+			t.Error(err)
+		}
+	})
+	r.clock.Advance(time.Minute)
+	_, _ = r.svc.NudgeIfDue(ctx, r.backstopJob(job.ID))
+	if typed := promptsStarting(r, "[crowsnest nudge]") - nudges; typed != 0 {
+		t.Fatalf("a nudge was typed into a cancelled job (%d)", typed)
+	}
+	keys := r.fake.SentKeys()
+	if len(keys) == 0 || keys[len(keys)-1].Keys[0] != "esc" {
+		t.Fatalf("the cancel's Esc was not sent: %+v", keys)
+	}
+	if d := r.get(job.ID); d.State != StateCancelled {
+		t.Fatalf("state %s", d.State)
+	}
+}
