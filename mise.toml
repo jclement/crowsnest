@@ -46,12 +46,13 @@ depends = ["image"]
 run = "bash scripts/dev-container.sh"
 
 [tasks."dev:container:reset"]
-description = "Remove the crowsnest-dev container (if running) and the crowsnest-dev-home volume"
+description = "Remove the crowsnest-dev container (if running) and its volumes (crowsnest-dev-home, and crowsnest-dev-secret if a run was killed before cleaning up)"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
 docker rm -f crowsnest-dev >/dev/null 2>&1 && echo "removed container crowsnest-dev" || true
 docker volume rm crowsnest-dev-home >/dev/null 2>&1 && echo "removed volume crowsnest-dev-home" || true
+docker volume rm crowsnest-dev-secret >/dev/null 2>&1 && echo "removed volume crowsnest-dev-secret" || true
 """
 
 [tasks.build]
@@ -172,9 +173,11 @@ run = "npm --prefix web run e2e:voice"
 # ---- Ship --------------------------------------------------------------------
 
 [tasks.snapshot]
-description = "Prove the release packaging locally: GoReleaser snapshot into dist/ (four archives, checksums), nothing published"
-# .goreleaser.yml's before-hook builds the web app, so this is the whole job.
-run = "goreleaser release --snapshot --clean"
+description = "Prove the release packaging locally: GoReleaser snapshot into dist/ (four archives, checksums, the Homebrew cask), nothing signed or published"
+# .goreleaser.yml's before-hook builds the web app, so this is the whole job. A snapshot never
+# publishes (so the tap is not pushed); signing is skipped explicitly, because keyless cosign
+# outside CI would start a browser login and write this machine's identity to the public log.
+run = "goreleaser release --snapshot --clean --skip=sign"
 
 [tasks.image]
 description = "Build the devbox image (deploy/Dockerfile) for this machine's arch as crowsnest:dev. Needs Docker"

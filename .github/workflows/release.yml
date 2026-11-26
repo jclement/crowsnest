@@ -1,16 +1,20 @@
 # Release: a `v*` tag (pushed by `mise run release`, Jeff's step) runs the same gate as CI, then
-# GoReleaser builds the linux and darwin archives and checksums and attaches them to a GitHub
-# release (DESIGN.md section 16, .goreleaser.yml). Only GITHUB_TOKEN is used: cosign and the
-# Homebrew tap are deferred while the repo is private (DESIGN.md section 19 item 4).
+# GoReleaser builds the linux and darwin archives and checksums, signs checksums.txt with keyless
+# cosign, attaches them to a GitHub release and pushes the cask to jclement/homebrew-tap
+# (DESIGN.md section 16, .goreleaser.yml). Secrets: GITHUB_TOKEN, and HOMEBREW_TAP_TOKEN (a PAT
+# that can write the tap repository) in the release job only.
 #
 # Two jobs, so the write-scoped token never meets third-party code (R1 M3):
 #
 #   - check (contents: read) installs everything, runs the gate, builds the web app and hands
 #     web/dist on as an artifact. npm install scripts and the test suite run here, where the
 #     token can only read.
-#   - release (contents: write) checks out without persisting credentials, installs only Go,
-#     takes the built web app, and runs GoReleaser with its before-hook (the web build) skipped.
-#     No npm install, no tests, no restored cache that another ref could have written.
+#   - release (contents: write, id-token: write) checks out without persisting credentials,
+#     installs only Go and cosign, takes the built web app, and runs GoReleaser with its
+#     before-hook (the web build) skipped. No npm install, no tests, no restored cache that
+#     another ref could have written. id-token is what keyless cosign signs with: the OIDC token
+#     names this repository and workflow, and that identity is what `crowsnest update` and
+#     `cosign verify-blob` check. It is granted to this job alone.
 #
 # Every action is pinned to a full commit SHA with its tag in a comment; a tag can be moved by
 # whoever controls the action's repository, a SHA cannot. To update one, look up the new tag's
@@ -63,6 +67,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+      id-token: write # keyless cosign: sign checksums.txt with this workflow's OIDC identity
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -77,6 +82,7 @@ jobs:
         with:
           name: web-dist
           path: web/dist
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
       - name: Release
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
@@ -87,6 +93,7 @@ jobs:
           args: release --clean --skip=before
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
   # The devbox image (deploy/Dockerfile, DESIGN.md section 16), only once the binaries released:
   # a tag whose gate failed must not leave an image behind. Both architectures from one runner:
