@@ -153,7 +153,7 @@ export function CommandPalette({ inputRef, onClose, run, recents, onRan, mac, sp
   // Keep the selected row in view, whether the keys or the data moved it.
   useEffect(() => {
     if (index < 0) return;
-    document.getElementById(optionId(index))?.scrollIntoView({ block: "nearest" });
+    document.getElementById(optionId(index))?.scrollIntoView?.({ block: "nearest" });
     // optionId is derived from a stable id.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, selected?.item.id]);
@@ -517,7 +517,7 @@ function Row({ id, row, selected, danger, onHover, onRun, onActions }: RowProps)
         <Icon className={cn("h-4 w-4 shrink-0", danger ? "text-danger" : "text-muted")} aria-hidden />
       )}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn("truncate text-sm", danger ? "text-danger" : "text-heading")}>
+        <span data-part="title" className={cn("truncate text-sm", danger ? "text-danger" : "text-heading")}>
           <Highlighted text={item.title} positions={row.titlePositions} />
         </span>
         {item.subtitle && (
@@ -532,7 +532,7 @@ function Row({ id, row, selected, danger, onHover, onRun, onActions }: RowProps)
         </Chip>
       )}
       {selected && (
-        <span className="hidden shrink-0 items-center gap-1 text-2xs text-muted pointer-fine:inline-flex">
+        <span aria-hidden className="hidden shrink-0 items-center gap-1 text-2xs text-muted pointer-fine:inline-flex">
           {item.verb}
           <CornerDownLeft className="h-3 w-3" aria-hidden />
         </span>
