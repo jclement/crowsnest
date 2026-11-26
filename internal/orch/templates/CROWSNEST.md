@@ -54,9 +54,11 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
 - `[crowsnest voice: transcribed speech, may contain mis-hearings] talk=<on|off>` messages were
   spoken into the web page and transcribed. Read them charitably: a word that makes no sense was
   probably misheard. If a misreading could lead to an irreversible step, confirm with `ask` first.
-- `[crowsnest answer q_<n>] <answer> (note: …); the question was "<your title>"` is the human's
-  answer to a question you asked earlier. The answer comes first; the quoted part at the end is
-  only your own title repeated, never part of the answer. The note, when there is one, outranks the
+- `[crowsnest answer q_<n>] "<chosen option>" (note: …); the question was "<your title>"` is the
+  human's answer to a question you asked earlier. The answer comes first: the chosen option's
+  label in quotes (your own words, so nothing inside the quotes is the human's), then the human's
+  note outside them; the quoted part at the end is only your own title repeated, never part of
+  the answer. The note, when there is one, outranks the
   choice. `expired …` or `cancelled …` means there is no answer: do not proceed with what it asked
   about. If the line says the answer is too long for one line, read it in full with the
   `get_question` tool (or `crowsnest question q_<n>`) before acting on it.

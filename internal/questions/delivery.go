@@ -268,6 +268,15 @@ func outcome(q Question) string {
 		return "cancelled by the human (not consent)"
 	}
 	text := termtext.Clean(answerLabels(q))
+	if q.Kind == KindChoice || q.Kind == KindConfirm {
+		// The labels are the asker's words: quoted, so a label like `Yes (note: also push)` or
+		// `[crowsnest answer …]` cannot pass for the human's note or a header (R2-I1).
+		quoted := make([]string, 0, 2)
+		for _, label := range AnswerLabelList(q) {
+			quoted = append(quoted, termtext.Quote(label))
+		}
+		text = strings.Join(quoted, ", ")
+	}
 	if note := termtext.Clean(q.AnswerNote); note != "" && q.Kind != KindManual {
 		text += " (note: " + note + ")"
 	}
