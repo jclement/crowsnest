@@ -118,11 +118,14 @@ func (m *Manager) Pin(ctx context.Context, target string) error {
 	if err != nil {
 		return err
 	}
+	// The pane id goes through the watcher's own lock: a poll can rewrite origin at any moment
+	// (R1b-C04). The pane is the watcher's map key, so it does not change for this watcher.
+	paneID := w.paneID()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	previous, had := m.pins[target]
-	m.pins[target] = w.origin.PaneID
-	if had && previous != w.origin.PaneID && !m.pinnedLocked(previous) {
+	m.pins[target] = paneID
+	if had && previous != paneID && !m.pinnedLocked(previous) {
 		if old, ok := m.watchers[previous]; ok {
 			old.pinned = false
 		}
