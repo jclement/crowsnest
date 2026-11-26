@@ -23,6 +23,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
 )
 
@@ -54,6 +55,12 @@ type Deps struct {
 	Herdr        herdr.Client
 	Fleet        *fleet.Cache
 	HerdrVersion string // reported by /auth/me
+
+	// Terminals builds the bridges behind /term/tui and /term/pane/{id}: herdr's, or the demo's
+	// toy. Nil: both routes answer 503.
+	Terminals term.Launcher
+	// TermQueueBytes overrides DefaultTermQueueBytes; tests shrink it.
+	TermQueueBytes int
 
 	// Conversations serves /agents/{target}/messages and Orchestrator the /orchestrator routes
 	// (M4). Either may be nil; their routes then answer 503.
@@ -109,6 +116,8 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/v1/agents/{target}/screen", s.requireAuth(http.HandlerFunc(s.handleScreen)))
 	mux.Handle("POST /api/v1/agents/{target}/keys", s.requireAuth(http.HandlerFunc(s.handleKeys)))
 	s.registerConversationRoutes(mux)
+	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
+	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 	mux.Handle("/", s.spaHandler())
 	return mux

@@ -18,14 +18,14 @@ export function ScreenPreview({ query }: { query: UseQueryResult<AgentScreen> })
       bodyClassName="p-2"
       actions={
         <>
-          {screen?.draft === "draft" && (
+          {screen?.draft.present && (
             <Chip tone="warning" title="Text typed at the terminal is waiting in the input box">
               draft in input
             </Chip>
           )}
           {screen && (
-            <Chip mono title={`Screen hash ${screen.hash}`}>
-              {screen.hash.slice(0, 8)}
+            <Chip mono title={`Screen hash ${screen.screen_hash}`}>
+              {screen.screen_hash.slice(0, 8)}
             </Chip>
           )}
           <IconButton

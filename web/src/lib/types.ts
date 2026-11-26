@@ -1,107 +1,167 @@
-// Types for the data crowsnest's API returns (DESIGN.md section 10). The fleet shapes mirror
-// herdr 0.9.5's own JSON (snake_case, as herdr sends it) because the server passes them through
-// with only a little added: `has_dialog` and `has_transcript` on each agent, and the nesting of
-// workspaces → tabs → panes → agent. Keep this file a plain mirror of the wire format; anything
-// derived for display belongs in lib/fleet.ts.
+// Types for the data crowsnest's API returns (DESIGN.md section 10). The server is the authority:
+// these mirror the Go structs in internal/fleet (view.go, screen.go) and internal/httpd
+// (agents.go) field for field, in their JSON spelling. Keep this file a plain mirror of the wire
+// format; anything derived for display belongs in lib/fleet.ts.
 
 /** herdr's agent states. `idle` and `done` both mean ready for input; `blocked` is a dialog. */
 export type AgentStatus = "idle" | "done" | "working" | "blocked" | "unknown";
 
 export const agentStatuses: readonly AgentStatus[] = ["blocked", "working", "done", "idle", "unknown"];
 
-/** An agent detected in a pane. `agent` is the kind herdr recognised ("claude", "codex", …). */
-export interface Agent {
+/** The agent in a pane, as it sits in the workspace tree (fleet.Agent). */
+export interface PaneAgent {
+  /** herdr agent name; empty for an unnamed agent. */
   name: string;
-  agent: string;
-  agent_status: AgentStatus;
-  pane_id: string;
-  tab_id: string;
-  workspace_id: string;
-  cwd: string;
-  /** The terminal title with escape sequences removed; Claude puts its current task here. */
-  terminal_title_stripped: string;
+  /** How the server addresses this agent in /agents/{target}: its name, or its pane id. */
+  target: string;
+  /** The kind herdr recognised: "claude", "codex", … */
+  kind: string;
+  status: AgentStatus;
   /** Claude's session id (the transcript file name), when herdr knows it. */
-  agent_session: { value: string } | null;
-  /** Increments on every status change; useful to tell a fresh "done" from an old one. */
-  state_change_seq: number;
-  /** Added by crowsnest: the screen currently shows a dialog (section 8.2). */
+  session_id?: string;
+  /** The terminal title; Claude puts its current task here. */
+  title: string;
+  /** The screen currently shows a dialog (DESIGN.md section 8.2). */
   has_dialog: boolean;
-  /** Added by crowsnest: a Claude transcript was found, so a conversation view is possible. */
+  /** A Claude session id is known, so a conversation view is possible. */
   has_transcript: boolean;
+  interactive_ready: boolean;
 }
 
-export interface Pane {
+/** An agent with where it lives: one entry of the fleet's flat `agents` list (fleet.AgentEntry). */
+export interface Agent extends PaneAgent {
   pane_id: string;
   tab_id: string;
   workspace_id: string;
-  terminal_id: string;
+  /** The workspace's label. */
+  workspace: string;
   cwd: string;
-  /** The cwd of the foreground process, which differs from `cwd` after a `cd` in a subshell. */
-  foreground_cwd: string;
-  agent_status: AgentStatus;
+  /** Blocked, or showing a dialog. */
+  needs_you: boolean;
+}
+
+/** One terminal; `agent` is null for a plain shell. */
+export interface Pane {
+  id: string;
+  cwd: string;
+  title: string;
   focused: boolean;
-  revision: number;
-  /** The agent running in this pane, or null for a plain shell. */
-  agent: Agent | null;
+  agent_status: AgentStatus;
+  agent: PaneAgent | null;
 }
 
 export interface Tab {
-  tab_id: string;
-  workspace_id: string;
-  label: string;
+  id: string;
   number: number;
-  agent_status: AgentStatus;
+  label: string;
   focused: boolean;
-  pane_count: number;
+  agent_status: AgentStatus;
   panes: Pane[];
 }
 
+/** A git worktree behind a workspace, as herdr reports it. */
+export interface Worktree {
+  repo_name: string;
+  repo_root: string;
+  checkout_path: string;
+  is_linked_worktree: boolean;
+  repo_key: string;
+}
+
 export interface Workspace {
-  workspace_id: string;
-  label: string;
+  id: string;
   number: number;
-  active_tab_id: string;
-  agent_status: AgentStatus;
+  label: string;
   focused: boolean;
-  pane_count: number;
-  tab_count: number;
+  agent_status: AgentStatus;
+  worktree?: Worktree;
   tabs: Tab[];
 }
 
-/** GET /api/v1/fleet */
+/** Agent states summed for badges. `blocked` includes agents showing a dialog. */
+export interface FleetCounts {
+  agents: number;
+  working: number;
+  blocked: number;
+  ready: number;
+  unknown: number;
+  dialogs: number;
+  settled: number;
+  panes: number;
+  workspaces: number;
+}
+
+/** GET /api/v1/fleet, and the data of every `fleet` event. */
 export interface Fleet {
   session: string;
   herdr_version: string;
+  /** Increases on every change the server sees. */
+  revision: number;
+  updated_at: string;
   workspaces: Workspace[];
+  /** Every agent, flat, in tree order. */
+  agents: Agent[];
+  counts: FleetCounts;
+  /** Set while herdr is not answering; the rest is then the last good picture. */
+  error?: string;
 }
 
-/** One numbered option of a terminal dialog: pressing `digit` chooses it. */
+/** One numbered option of a terminal dialog: pressing `key` (a digit) chooses it. */
 export interface DialogOption {
-  digit: string;
-  text: string;
+  key: string;
+  label: string;
+  /** The highlighted (cursor) option. */
+  selected: boolean;
+  /** Set by the server when the label itself is risky ("stops asking", "rm -rf", …). */
+  warning?: string;
 }
 
 export interface ScreenDialog {
+  present: boolean;
   options: DialogOption[];
-  /** A multi-question form: the UI offers "open terminal" only (section 8.2). */
-  multi_form: boolean;
+  /** A multi-question form or multi-select list: the UI offers "open terminal" only (8.2). */
+  form: boolean;
+  /** Risky phrases found anywhere in the dialog. */
+  warnings: string[];
+}
+
+/** Text typed at the terminal and waiting in the agent's input box (section 7.3). */
+export interface Draft {
+  input_found: boolean;
+  present: boolean;
+  text: string;
 }
 
 /** GET /api/v1/agents/{target}/screen */
 export interface AgentScreen {
+  target: string;
+  pane_id: string;
+  /** Agent name; empty for an unnamed agent or a plain pane. */
+  name: string;
+  /** Agent kind; empty for a plain pane. */
+  kind: string;
+  status: AgentStatus;
   /** The visible screen as plain text, verbatim. */
   text: string;
+  /** The visible screen with colours. */
+  ansi: string;
   /** Identifies this exact screen; a key press must quote it (409 CONFLICT if it changed). */
-  hash: string;
-  status: AgentStatus;
-  dialog: ScreenDialog | null;
-  /** Whether the agent's input box holds text typed at the terminal (section 7.3). */
-  draft: "empty" | "draft" | "unknown";
+  screen_hash: string;
+  revision: number;
+  dialog: ScreenDialog;
+  draft: Draft;
 }
 
 /** POST /api/v1/agents/{target}/keys */
 export interface SendKeysRequest {
   keys: string[];
+  screen_hash: string;
+}
+
+/** What POST /keys confirms: the keys sent, and the screen hash they were checked against. */
+export interface KeysResponse {
+  sent: string[];
+  pane_id: string;
   screen_hash: string;
 }
 

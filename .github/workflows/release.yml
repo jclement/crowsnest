@@ -1,0 +1,42 @@
+# Release: a `v*` tag (pushed by `mise run release`, Jeff's step) runs the same gate as CI, then
+# GoReleaser builds the linux and darwin archives and checksums and attaches them to a GitHub
+# release (DESIGN.md section 16, .goreleaser.yml). Only GITHUB_TOKEN is used: cosign and the
+# Homebrew tap are deferred while the repo is private (DESIGN.md section 19 item 4).
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the changelog and version come from tags and history
+      - uses: jdx/mise-action@v3
+        with:
+          install: true
+          cache: true
+      - name: Setup
+        run: mise run setup
+      - name: Check
+        run: mise run check
+      - name: Release
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: v2.18.0 # keep in step with goreleaser in mise.toml, which `mise run snapshot` uses
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

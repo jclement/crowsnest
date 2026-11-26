@@ -4,16 +4,38 @@ One Go binary that starts a [herdr](https://herdr.dev) session and a Claude Code
 it, and serves a mobile-friendly web app for running that session from a browser: chat with the
 orchestrator, answer questions from agents, drive a terminal, and see every agent in the fleet.
 
-> **Status: M2 (herdr and the fleet).** crowsnest serves the login, the API health and auth
-> endpoints, the event stream and the web app shell; it connects to (or starts) its herdr
-> session and serves the fleet, agent screens and dialog key presses. M4 adds the orchestrator
-> (started, adopted, watched and restarted in the session) and the Chat view, read live from
-> Claude's transcript. Questions, terminals and talk mode arrive in later milestones; see
-> [DESIGN.md](DESIGN.md) section 18 and [STATUS.md](STATUS.md).
+> **Status: M5 (terminals) and M4 (orchestrator and Chat).** crowsnest serves the login, the API
+> health and auth endpoints, the event stream and the web app; it connects to (or starts) its
+> herdr session and serves the fleet, agent screens, dialog key presses, and live terminals: the
+> whole herdr session (its TUI) in the Terminal view, and any one pane from the Fleet view. It
+> keeps the session's orchestrator (started, adopted, watched and restarted) and serves the Chat
+> view and every Claude agent's conversation, read live from Claude's transcripts. Questions and
+> talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
+> [STATUS.md](STATUS.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
 default, refuses to start without a login (or an explicit `--no-auth`), and checks Host and
 Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the security model.
+
+## Install
+
+Releases are built by CI from `v*` tags: one tar.gz per platform (linux and darwin, amd64 and
+arm64; no Windows), each holding the `crowsnest` binary with the web app embedded, this README
+and the LICENSE, plus a `checksums.txt` (sha256). While the repository is private, download from
+the [releases page](https://github.com/jclement/crowsnest/releases) signed in, or with `gh`:
+
+```sh
+gh release download --repo jclement/crowsnest --pattern "crowsnest_*_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" --pattern checksums.txt
+shasum -a 256 --ignore-missing -c checksums.txt
+tar xzf crowsnest_*.tar.gz crowsnest && mv crowsnest ~/.local/bin/
+```
+
+<!-- When the repository is public (DESIGN.md section 19 item 4):
+brew install jclement/tap/crowsnest
+-->
+
+Release archives are not signed yet: cosign and the Homebrew tap are switched on when the
+repository goes public (DESIGN.md section 19 item 4).
 
 ## Quick start
 
@@ -31,7 +53,8 @@ named by `--session` (default `crowsnest`) and, if nothing answers, starts
 `herdr --session <name> server` detached, logging to
 `~/.local/state/crowsnest/<session>/herdr-server.log`. It never stops that server: herdr and its
 agents outlive crowsnest. `--demo` needs no herdr at all; it serves an in-memory fake fleet that
-changes every few seconds, and a scripted orchestrator that answers in Chat after a short
+changes every few seconds; its terminals are a built-in toy that echoes what you type (no
+shell ever runs in demo mode), and a scripted orchestrator answers in Chat after a short
 "working" period (its transcripts are written under the state directory, never `~/.claude`).
 
 Unless `--no-orchestrator` is given, crowsnest then makes sure a Claude agent named
@@ -40,6 +63,15 @@ labelled `orchestrator` (cwd `--dir`), resuming the stored conversation when its
 exists. The first start in a new directory usually stops at Claude's folder-trust prompt; Chat
 then shows "Needs terminal" until it is answered in the pane. Conversations are read from
 Claude's JSONL transcripts in `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
+
+**Terminals.** The Terminal view is the herdr TUI for the whole session (`herdr --session
+<name>` in a PTY; closing the tab kills only that client, never the server or an agent). In the
+Fleet view, an agent's Terminal tab, or any plain shell pane, opens just that pane through
+herdr's pane-control stream, which fits a phone. One browser controls a pane at a time: opening
+it elsewhere takes it over and the first browser says so and offers Reconnect. On phones a key
+bar under the terminal supplies Esc, Tab, a sticky Ctrl, arrows, Enter, Paste and the font size.
+Note that herdr's TUI shows every machine your herdr config names, remote ones included, so the
+Terminal view reaches those too.
 
 For development, `mise run dev` runs the Go server with `--no-auth --demo` on :2769 and Vite on
 :5173 (open http://localhost:5173; Vite proxies `/api` to Go).
@@ -140,6 +172,8 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /agents/{target}/prompt` | session | `{text, force_over_draft}` → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
 | `GET /orchestrator` | session | `{state, pane_id, session_id, dir, detail, restarts}`; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed` or `disabled` |
 | `POST /orchestrator/restart`, `POST /orchestrator/new` | session | Restart Claude on the same conversation (`--resume`), or with a fresh one |
+| `GET /term/tui` (WebSocket) | session | The herdr TUI in a PTY. Binary frames are terminal bytes both ways; text frames are JSON control: the browser sends `{"type":"resize","cols","rows"}` first (the process starts on it), the server ends with `{"type":"exit","reason"}` |
+| `GET /term/pane/{pane_id}` (WebSocket) | session | One pane through `herdr terminal session control --takeover`, same protocol. `404` unless the pane is in the fleet |
 
 ## Tasks
 
@@ -149,17 +183,31 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run dev` | Go server (`--no-auth`, `--web-dev`, `--demo`) on :2769 and Vite on :5173. Long-running |
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
-| `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests) |
+| `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, and the pane and TUI terminal bridges |
 | `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
 | `mise run e2e` | Playwright suite (not built until M9; fails with a message) |
+| `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures, and the terminals on a throwaway `crowsnest-test-*` herdr session. Each spec starts and stops its own instance on a random localhost port |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
-| `mise run snapshot` | GoReleaser snapshot (needs `.goreleaser.yml`, written in M10) |
+| `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives and `checksums.txt`, nothing published |
 | `mise run release` | Interactive tag bump and push (Jeff's step) |
 | `mise run dev:reset` | Remove build output, web dist, Vite cache and the dev database |
+
+## Releasing
+
+`mise run release` is the only way to cut a release, and it is Jeff's to run. It is interactive:
+it reads the latest tag, offers the next patch, minor or major version, creates an annotated tag
+and asks before pushing it. The pushed `v*` tag starts `.github/workflows/release.yml`, which runs
+`mise run setup` and `mise run check`, then GoReleaser (`.goreleaser.yml`) builds the archives and
+checksums and attaches them to a GitHub release (a `-rc.N` style tag becomes a prerelease). The
+workflow uses only `GITHUB_TOKEN`. Never build release artifacts by hand or tag around a broken
+pipeline: fix the pipeline.
+
+`mise run snapshot` runs the same GoReleaser config locally with `--snapshot` (no tag, nothing
+published) to prove the packaging; the archives land in `dist/`, which is gitignored.
 
 ## Files
 

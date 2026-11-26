@@ -1,0 +1,102 @@
+# GoReleaser v2: what a `v*` tag turns into (DESIGN.md section 16). The release workflow runs
+# this on a tag; `mise run snapshot` runs it locally without publishing. Never run
+# `goreleaser release` by hand without --snapshot: releases are `mise run release`, then CI.
+#
+# Structure copied from ~/Developer/drillbit/.goreleaser.yml. Windows is not built: PTYs and
+# unix sockets make it a different product (DESIGN.md section 19 item 6).
+version: 2
+
+project_name: crowsnest
+
+before:
+  hooks:
+    # The binary embeds web/dist (web/embed.go). Without this the build would carry only the
+    # placeholder and `serve` would refuse to start. Needs web/node_modules (`mise run setup`).
+    - npm --prefix web run build
+
+builds:
+  - id: crowsnest
+    main: ./cmd/crowsnest
+    binary: crowsnest
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # The same variables `mise run build` stamps. The "v" keeps the version reading like
+    # `git describe` output (v1.2.3), which is what the local build prints.
+    ldflags:
+      - -s -w
+      - -X main.version=v{{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.buildDate={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^Merge branch"
+
+release:
+  github:
+    owner: jclement
+    name: crowsnest
+  draft: false
+  prerelease: auto
+
+# ---- Deferred while the repo is private ---------------------------------------------------
+# Cosign signing and the Homebrew tap are both off until Jeff makes the repo public: see
+# DESIGN.md section 19 item 4. Keyless cosign writes the repo and workflow identity to a public
+# transparency log (irreversible), and a tap formula cannot download from a private repo.
+# To switch on: uncomment both blocks, give the release job `id-token: write` and the
+# sigstore/cosign-installer step, and add the HOMEBREW_TAP_TOKEN repo secret (shipping skill).
+#
+# signs:
+#   - cmd: cosign
+#     signature: "${artifact}.sigstore.json"
+#     args:
+#       - "sign-blob"
+#       - "--bundle=${signature}"
+#       - "${artifact}"
+#       - "--yes"
+#     artifacts: checksum
+#     output: true
+#
+# brews:
+#   - directory: Formula
+#     repository:
+#       owner: jclement
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+#     name: crowsnest
+#     homepage: "https://github.com/jclement/crowsnest"
+#     description: "Run a herdr session and its Claude Code orchestrator from a browser"
+#     license: "MIT"
+#     install: |
+#       bin.install "crowsnest"

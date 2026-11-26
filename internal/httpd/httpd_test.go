@@ -24,6 +24,7 @@ import (
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/transcript"
 )
 
@@ -87,6 +88,8 @@ type harnessOptions struct {
 	// M4: conversations and orchestrator (conversation_test.go)
 	conversations *transcript.Manager
 	orchestrator  *orch.Orchestrator
+	terminals     term.Launcher // nil: the terminal routes answer 503
+	termQueue     int
 }
 
 var testWeb = fstest.MapFS{
@@ -129,16 +132,18 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	logs := &syncBuffer{}
 	events := hub.New()
 	server, err := New(Deps{
-		Config:       cfg,
-		Auth:         service,
-		Hub:          events,
-		Logger:       slog.New(slog.NewTextHandler(logs, nil)),
-		Version:      "v9.9.9-test",
-		Web:          testWeb,
-		Heartbeat:    opts.heartbeat,
-		Herdr:        opts.herdr,
-		Fleet:        opts.fleet,
-		HerdrVersion: "0.9.5-test",
+		Config:         cfg,
+		Auth:           service,
+		Hub:            events,
+		Logger:         slog.New(slog.NewTextHandler(logs, nil)),
+		Version:        "v9.9.9-test",
+		Web:            testWeb,
+		Heartbeat:      opts.heartbeat,
+		Herdr:          opts.herdr,
+		Fleet:          opts.fleet,
+		HerdrVersion:   "0.9.5-test",
+		Terminals:      opts.terminals,
+		TermQueueBytes: opts.termQueue,
 
 		Conversations: opts.conversations,
 		Orchestrator:  opts.orchestrator,

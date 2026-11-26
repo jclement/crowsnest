@@ -92,6 +92,21 @@ type AgentEntry struct {
 	NeedsYou    bool   `json:"needs_you"` // blocked or showing a dialog
 }
 
+// HasPane reports whether paneID names a pane in this fleet. The terminal routes use it to refuse
+// a pane id before anything is spawned with it.
+func (f Fleet) HasPane(paneID string) bool {
+	for _, workspace := range f.Workspaces {
+		for _, tab := range workspace.Tabs {
+			for _, pane := range tab.Panes {
+				if pane.ID == paneID {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // buildFleet reshapes a snapshot. dialogs says which panes show a dialog on screen.
 func buildFleet(session string, snapshot herdr.Snapshot, dialogs map[string]bool) Fleet {
 	agentsByPane := make(map[string]herdr.Agent, len(snapshot.Agents))

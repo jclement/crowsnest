@@ -3,7 +3,9 @@
 // option; a press sends that digit bound to the hash of the screen it was rendered from. If the
 // screen changed meanwhile the server answers 409 CONFLICT, nothing is sent, and the card shows
 // the new screen with a note to check it again. Options that widen permissions or destroy work
-// carry a warning badge (lib/dialog.ts). A multi-question form gets "open terminal" only.
+// carry a warning badge: the server's own `warning` on the option, or a match in lib/dialog.ts
+// (whichever fires); risky phrases elsewhere in the dialog are shown above the options. A form
+// (several questions, or a multi-select list) gets "open terminal" only.
 import { AlertTriangle, MessageSquareWarning, RefreshCw, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../../lib/api";
@@ -34,9 +36,9 @@ export function DialogCard({ target, agentName, screen, onOpenTerminal }: Dialog
   const press = (option: DialogOption) => {
     setConflict(false);
     sendKeys.mutate(
-      { keys: [option.digit], screen_hash: screen.hash },
+      { keys: [option.key], screen_hash: screen.screen_hash },
       {
-        onSuccess: () => toast.show({ tone: "success", title: `Sent “${option.digit}” to ${agentName}`, description: option.text }),
+        onSuccess: () => toast.show({ tone: "success", title: `Sent “${option.key}” to ${agentName}`, description: option.label }),
         onError: (error) => {
           if (error instanceof ApiError && error.status === 409) {
             setConflict(true);
@@ -72,18 +74,23 @@ export function DialogCard({ target, agentName, screen, onOpenTerminal }: Dialog
         </Banner>
       )}
       <ScreenText text={screen.text} />
-      {!dialog ? (
+      {dialog.present && dialog.warnings.length > 0 && (
+        <Banner tone="warning" icon={AlertTriangle} className="rounded">
+          This dialog mentions something risky: {dialog.warnings.join(", ")}.
+        </Banner>
+      )}
+      {!dialog.present ? (
         <p className="text-xs text-muted">
           The agent is blocked, but no numbered options were recognised on its screen. Answer it in the terminal.
         </p>
-      ) : dialog.multi_form ? (
+      ) : dialog.form ? (
         <Banner tone="info" className="rounded">
           This is a form with several questions. Answer it in the terminal.
         </Banner>
       ) : (
         <ul aria-label="Options" className="flex flex-col gap-1.5">
           {dialog.options.map((option) => (
-            <li key={option.digit}>
+            <li key={option.key}>
               <OptionButton option={option} disabled={sendKeys.isPending} onPress={() => press(option)} />
             </li>
           ))}
@@ -94,7 +101,7 @@ export function DialogCard({ target, agentName, screen, onOpenTerminal }: Dialog
 }
 
 function OptionButton({ option, disabled, onPress }: { option: DialogOption; disabled: boolean; onPress: () => void }) {
-  const risk = riskReason(option.text);
+  const risk = riskReason(option.label) ?? option.warning ?? null;
   return (
     <button
       type="button"
@@ -106,9 +113,9 @@ function OptionButton({ option, disabled, onPress }: { option: DialogOption; dis
       )}
     >
       <kbd className="mt-px inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border-strong bg-surface-sunken font-mono text-2xs font-semibold text-heading">
-        {option.digit}
+        {option.key}
       </kbd>
-      <span className="min-w-0 flex-1 break-words text-heading">{option.text}</span>
+      <span className="min-w-0 flex-1 break-words text-heading">{option.label}</span>
       {risk && (
         <Chip tone="warning" title={risk} className="mt-px">
           <AlertTriangle className="h-3 w-3" aria-hidden />

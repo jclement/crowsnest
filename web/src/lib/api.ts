@@ -7,7 +7,7 @@
 // answered in memory from lib/fixtures.ts, so the UI can be worked on, and screenshotted,
 // without a server. `?fixtures=0` turns it off. The choice is kept for the tab's lifetime
 // (sessionStorage) because client-side navigation drops the query string.
-import type { AgentScreen, Fleet, SendKeysRequest } from "./types";
+import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types";
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
@@ -129,7 +129,7 @@ export const endpoints = {
   agentScreen: (target: string) => api<AgentScreen>(`/agents/${encodeURIComponent(target)}/screen`),
   /** Sends keys to an agent, bound to the screen they answer: 409 CONFLICT if it changed. */
   sendKeys: (target: string, request: SendKeysRequest) =>
-    api<{ sent: boolean }>(`/agents/${encodeURIComponent(target)}/keys`, { method: "POST", body: request }),
+    api<KeysResponse>(`/agents/${encodeURIComponent(target)}/keys`, { method: "POST", body: request }),
   // ---- M4: conversations and the orchestrator ----
   /** A page of the agent's conversation: changes after `after`, or the newest messages. */
   messages: (target: string, after?: string) =>
@@ -140,6 +140,12 @@ export const endpoints = {
   orchestrator: () => api<OrchestratorStatus>("/orchestrator"),
   orchestratorRestart: () => api<OrchestratorStatus>("/orchestrator/restart", { method: "POST" }),
   orchestratorNew: () => api<OrchestratorStatus>("/orchestrator/new", { method: "POST" }),
+};
+
+/** The terminal WebSockets (lib/termSocket.ts opens them). */
+export const terminalPaths = {
+  tui: `${API_BASE}/term/tui`,
+  pane: (paneId: string) => `${API_BASE}/term/pane/${encodeURIComponent(paneId)}`,
 };
 
 /**

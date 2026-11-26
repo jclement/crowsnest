@@ -1,32 +1,39 @@
 // Pure derivations over the fleet snapshot for the Fleet view: which agents need Jeff, the
 // sort order (needs-you first), the filter, and small display helpers. Kept free of React so
 // the rules are tested directly (fleet.test.ts) rather than through the DOM.
-import type { Agent, Fleet, Pane, Tab, Workspace } from "./types";
+import type { Agent, Fleet, Pane, PaneAgent, Tab, Workspace } from "./types";
 
 /** An agent needs Jeff when it is blocked or its screen shows a dialog (herdr sometimes calls a
- * dialog idle, so the screen check is the second signal; DESIGN.md section 8.2). */
-export function needsYou(agent: Agent | null | undefined): boolean {
-  return !!agent && (agent.agent_status === "blocked" || agent.has_dialog);
+ * dialog idle, so the screen check is the second signal; DESIGN.md section 8.2). The server sends
+ * the same rule as `needs_you` on the flat list; the tree's agents are judged here. */
+export function needsYou(agent: PaneAgent | null | undefined): boolean {
+  return !!agent && (agent.status === "blocked" || agent.has_dialog);
 }
 
-/** Every agent in the fleet, in snapshot order. */
+/** Every agent in the fleet, flat, in tree order (the server's `agents` list). */
 export function allAgents(fleet: Fleet | undefined): Agent[] {
-  if (!fleet) return [];
-  return fleet.workspaces.flatMap((workspace) =>
-    workspace.tabs.flatMap((tab) => tab.panes.flatMap((pane) => (pane.agent ? [pane.agent] : []))),
-  );
+  return fleet?.agents ?? [];
 }
 
 /** How many agents are waiting on Jeff: the Inbox badge until questions arrive in M6. */
 export function needsYouCount(fleet: Fleet | undefined): number {
-  return allAgents(fleet).filter(needsYou).length;
+  return allAgents(fleet).filter((agent) => agent.needs_you).length;
 }
 
 /** Finds the agent in a pane, with the workspace and tab it sits in. */
 export function findAgent(fleet: Fleet | undefined, paneId: string): { agent: Agent; workspace: Workspace; tab: Tab } | null {
+  const agent = fleet?.agents.find((entry) => entry.pane_id === paneId);
+  if (!fleet || !agent) return null;
+  const workspace = fleet.workspaces.find((candidate) => candidate.id === agent.workspace_id);
+  const tab = workspace?.tabs.find((candidate) => candidate.id === agent.tab_id);
+  return workspace && tab ? { agent, workspace, tab } : null;
+}
+
+/** Finds any pane (agent or plain shell) with the workspace and tab it sits in. */
+export function findPane(fleet: Fleet | undefined, paneId: string): { pane: Pane; workspace: Workspace; tab: Tab } | null {
   for (const workspace of fleet?.workspaces ?? [])
     for (const tab of workspace.tabs)
-      for (const pane of tab.panes) if (pane.pane_id === paneId && pane.agent) return { agent: pane.agent, workspace, tab };
+      for (const pane of tab.panes) if (pane.id === paneId) return { pane, workspace, tab };
   return null;
 }
 
@@ -69,8 +76,8 @@ function matches(query: string, ...fields: (string | undefined)[]): boolean {
 
 function paneMatches(pane: Pane, query: string): boolean {
   const agent = pane.agent;
-  if (!agent) return matches(query, pane.cwd, pane.pane_id);
-  return matches(query, agent.name, agent.agent, agent.agent_status, agent.cwd, agent.terminal_title_stripped, pane.pane_id);
+  if (!agent) return matches(query, pane.cwd, pane.id);
+  return matches(query, agent.name, agent.kind, agent.status, pane.cwd, agent.title, pane.id);
 }
 
 /**

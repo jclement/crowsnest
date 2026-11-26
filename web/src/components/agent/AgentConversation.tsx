@@ -16,7 +16,7 @@ export function AgentConversation({ agent }: AgentConversationProps) {
     <ConversationView
       target={agent.pane_id}
       agentName={agent.name || agent.pane_id}
-      state={chatStateOf(agent.agent_status)}
+      state={chatStateOf(agent.status)}
       variant="embedded"
     />
   );
