@@ -20,7 +20,7 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   fleet: [queryKeys.fleet, queryKeys.agents],
   job: [queryKeys.jobs],
   message: [queryKeys.agents],
-  question: [queryKeys.questions, queryKeys.fleet],
+  question: [queryKeys.questions, queryKeys.fleet, queryKeys.jobs],
   orchestrator: [queryKeys.orchestrator, queryKeys.fleet, queryKeys.agents],
   poke: [],
   say: [],

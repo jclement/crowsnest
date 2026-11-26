@@ -2,6 +2,7 @@
 // from queryKeys so the event stream (lib/live.ts) can invalidate exactly what changed.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys } from "./api";
+import type { CreateJobRequest } from "./jobs";
 import type { AnswerRequest } from "./questions";
 import type { SendKeysRequest } from "./types";
 
@@ -82,5 +83,56 @@ export function useCancelQuestion(id: string) {
   return useMutation({
     mutationFn: () => endpoints.cancelQuestion(id),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.questions }),
+  });
+}
+
+// ---- Jobs (M7) -------------------------------------------------------------------------------
+
+/** A safety poll: `job` events are the update path. It also keeps "active 2m ago" fresh. */
+const JOBS_SAFETY_POLL_MS = 30_000;
+
+/** The board. Refetched on every `job` event. */
+export function useJobs() {
+  return useQuery({ queryKey: queryKeys.jobList, queryFn: endpoints.jobs, refetchInterval: JOBS_SAFETY_POLL_MS });
+}
+
+/** One job with its timeline and questions. */
+export function useJob(id: string | undefined) {
+  return useQuery({ queryKey: queryKeys.job(id ?? ""), queryFn: () => endpoints.job(id ?? ""), enabled: !!id, refetchInterval: JOBS_SAFETY_POLL_MS });
+}
+
+export function useRoles() {
+  return useQuery({ queryKey: queryKeys.roles, queryFn: endpoints.roles, staleTime: 5 * 60_000 });
+}
+
+export function useDirs() {
+  return useQuery({ queryKey: queryKeys.dirs, queryFn: endpoints.dirs });
+}
+
+/** Creates a job from the text box; the board and the directory list refresh afterwards. */
+export function useCreateJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: CreateJobRequest) => endpoints.createJob(request),
+    onSettled: () =>
+      Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.jobs }), queryClient.invalidateQueries({ queryKey: queryKeys.dirs })]),
+  });
+}
+
+/** Cancel, nudge or resume a job. */
+export function useJobAction(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: "cancel" | "nudge" | "resume") => endpoints.jobAction(id, action),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+/** Messages a job's agent. */
+export function useJobMessage(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ text, force }: { text: string; force?: boolean }) => endpoints.jobMessage(id, text, force),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
   });
 }

@@ -7,7 +7,7 @@
 // it. From md the list and the selected item sit side by side; on a phone the item opens in a
 // full-screen sheet.
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Bell, BellOff, BellRing, FileDiff, Inbox, MessageSquareWarning, RefreshCw } from "lucide-react";
+import { Bell, BellOff, BellRing, FileDiff, Inbox, ListTodo, MessageSquareWarning, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { DialogCard } from "../components/fleet/DialogCard";
 import { QuestionDetail } from "../components/inbox/QuestionDetail";
@@ -22,7 +22,8 @@ import { cn } from "../lib/cn";
 import { relativeTime } from "../lib/format";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { notificationState, requestNotifications, type NotificationState } from "../lib/notifications";
-import { useAgentScreen, useFleet, useQuestions } from "../lib/queries";
+import { isFinished, type Job } from "../lib/jobs";
+import { useAgentScreen, useFleet, useJobs, useQuestions } from "../lib/queries";
 import { answerSummary, compareQuestions, kindLabels, type Question } from "../lib/questions";
 import type { Agent } from "../lib/types";
 
@@ -81,7 +82,11 @@ export function InboxView() {
 function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: string) => void }) {
   const questions = useQuestions("open");
   const fleet = useFleet();
+  const jobs = useJobs();
   const dialogs = (fleet.data?.agents ?? []).filter((agent) => agent.needs_you);
+  // Stuck jobs appear here too (DESIGN.md 12); a job waiting on questions is already represented
+  // by its questions, and one at a dialog by the dialog row.
+  const stuck = (jobs.data ?? []).filter((job) => job.stuck && !isFinished(job.state));
 
   if (questions.isPending) return <SkeletonRows rows={5} label="Loading questions" />;
   if (questions.isError) return <LoadError message={questions.error.message} retry={() => void questions.refetch()} />;
@@ -89,7 +94,7 @@ function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: st
   const sorted = [...questions.data].sort(compareQuestions);
   const blocking = sorted.filter((question) => question.urgency === "blocking" && question.kind !== "notice");
   const rest = sorted.filter((question) => !blocking.includes(question));
-  if (sorted.length === 0 && dialogs.length === 0) {
+  if (sorted.length === 0 && dialogs.length === 0 && stuck.length === 0) {
     return (
       <EmptyState icon={Inbox} title="Nothing needs you">
         When an agent asks a question or stops at a terminal dialog, it lands here.
@@ -103,6 +108,9 @@ function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: st
       ))}
       {dialogs.map((agent) => (
         <DialogRow key={agent.pane_id} agent={agent} selected={selected === DIALOG_PREFIX + agent.pane_id} onSelect={onSelect} />
+      ))}
+      {stuck.map((job) => (
+        <StuckJobRow key={job.id} job={job} />
       ))}
       {rest.map((question) => (
         <QuestionRow key={question.id} question={question} selected={selected === question.id} onSelect={onSelect} />
@@ -184,6 +192,25 @@ function DialogRow({ agent, selected, onSelect }: { agent: Agent; selected: bool
           <Chip tone="danger">Terminal dialog</Chip>
           <Chip mono>{agent.workspace}</Chip>
           {agent.title && <span className="min-w-0 truncate text-xs text-muted">{agent.title}</span>}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function StuckJobRow({ job }: { job: Job }) {
+  const navigate = useNavigate();
+  return (
+    <li>
+      <button type="button" onClick={() => void navigate({ to: "/", search: { job: job.id } })} className={rowClass}>
+        <span className="flex w-full items-start gap-2">
+          <ListTodo className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+          <span className="min-w-0 flex-1 break-words text-sm font-medium text-heading">{job.title}</span>
+        </span>
+        <span className="flex flex-wrap items-center gap-1">
+          <Chip tone="warning">Stuck job</Chip>
+          <Chip mono>{job.id}</Chip>
+          <span className="min-w-0 truncate text-xs text-muted">{job.cause_text}</span>
         </span>
       </button>
     </li>

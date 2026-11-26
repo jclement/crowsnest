@@ -10,6 +10,7 @@
 import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types";
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
+import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
 export class ApiError extends Error {
@@ -150,6 +151,16 @@ export const endpoints = {
     api<Question>(`/questions/${encodeURIComponent(id)}/answer`, { method: "POST", body: answer }),
   cancelQuestion: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}`, { method: "DELETE" }),
   inboxSummary: () => api<InboxSummary>("/inbox/summary"),
+  // ---- M7: jobs ----
+  jobs: () => api<Job[]>("/jobs"),
+  job: (id: string) => api<JobDetail>(`/jobs/${encodeURIComponent(id)}`),
+  createJob: (request: CreateJobRequest) => api<Job>("/jobs", { method: "POST", body: request }),
+  /** Types the human's message into the job's agent; errors like a Chat send (409 BLOCKED, DRAFT). */
+  jobMessage: (id: string, text: string, forceOverDraft = false) =>
+    api<PromptResult>(`/jobs/${encodeURIComponent(id)}/message`, { method: "POST", body: { text, force_over_draft: forceOverDraft } }),
+  jobAction: (id: string, action: "cancel" | "nudge" | "resume") => api<Job>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
+  roles: () => api<RoleInfo[]>("/roles"),
+  dirs: () => api<DirEntry[]>("/dirs"),
 };
 
 /** The terminal WebSockets (lib/termSocket.ts opens them). */
@@ -171,7 +182,12 @@ export const queryKeys = {
   agentScreen: (target: string) => ["agents", target, "screen"] as const,
   agentMessages: (target: string) => ["agents", target, "messages"] as const,
   orchestrator: ["orchestrator"] as const,
+  /** Everything about jobs sits under ["jobs"], so one `job` event refreshes the board and the detail. */
   jobs: ["jobs"] as const,
+  jobList: ["jobs", "list"] as const,
+  job: (id: string) => ["jobs", "one", id] as const,
+  roles: ["roles"] as const,
+  dirs: ["dirs"] as const,
   /** Everything about questions sits under ["questions"], so one `question` event refreshes it all. */
   questions: ["questions"] as const,
   questionList: (status: string) => ["questions", "list", status] as const,
