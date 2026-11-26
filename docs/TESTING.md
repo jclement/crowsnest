@@ -53,6 +53,7 @@ layout checks).
 | `fleet.spec.ts` | the tree, needs-you first; collapse; filter and clear; an agent's Conversation then Terminal; reload lands on it; a dialog card in the detail; a Codex agent opens on its terminal; a shell pane's terminal; an unknown agent in the URL |
 | `terminal.spec.ts` | connect, type, output; a resize reaches the process (`size`); reconnect by itself after the server is killed and restarted on the same port; an exited terminal waits for Reconnect; the phone key bar sends `\x1b`, `\t`, arrows (either cursor mode), `\r`, and sticky Ctrl+C as `\x03` (bytes read from the WebSocket frames), without taking focus from the terminal; a ninth terminal gets the cap's message, and Reconnect works once one closes |
 | `terminal-fonts.spec.ts` | the demo terminal's glyph test line, with the installed Nerd Font switched off: each fallback character (powerline, devicons, box drawing, braille, a sextant, maths) makes the browser fetch its face's chunk, matches pixel for pixel that chunk's glyph drawn by a probe face, and passes `document.fonts.check`; the `|` after them (and a two-cell emoji) sits in its Unicode 11 column within a pixel; fonts come from `/assets/` with the immutable header; no Material Design chunk is fetched; no CSP violation. Screenshots `terminal-glyphs-1440.png` (desktop Chromium) and `terminal-glyphs-375.png` (phone WebKit) |
+| `projects.spec.ts` | projects (DESIGN.md 21) against the demo's projects: the list shows each lead's state and counts and a project's page its lead, jobs, schedules and instructions; a project made from a directory (the name follows the directory); a lead started from the page takes a job given "to the lead" (filed in the project, no directory, held by `lead-<slug>`); Chat with a lead (the target in the URL, a reply); the board filtered by project, remembered; a role's instructions edited with the diff against the built-in; a schedule made in the app and Run now. Screenshots `projects-*` at 375 and 1440 |
 | `talk.spec.ts` | talk mode against a fake ElevenLabs per test: hold to talk, transcript sent with the voice flag, the SAY reply fetched from `/voice/tts` and played; the browser cannot make crowsnest speak arbitrary text; Cancel sends nothing |
 | `layout.spec.ts` | at 375 px on nine views (board, a job, chat, inbox, a question, a dialog, fleet, an agent, terminal): no sideways scroll, every tap target ≥ 44 px; the bottom nav never covers the last row or the composer; theme cycles system → light → dark, and a reload is dark at its first frame; the offline banner when the server dies, gone when it returns; axe on every view and the login page with no serious or critical violations (light everywhere, dark on desktop) |
 
@@ -91,6 +92,13 @@ job told to stop without declaring gets a nudge on its timeline (then cancelled 
 ("the agent was waiting and got the answer at once"), and the orchestrator reports the answer.
 Real screens it captured are Go fixtures: `internal/fleet/testdata/screens/real_claude_2.1.332_*`
 (the idle prompt, a typed draft, the folder-trust prompt).
+
+The project lead (`cmd/crowsnest/lead_integration_test.go`) runs the built binary with
+`--no-orchestrator` on a throwaway session: the lead knows a codeword only its project's
+instruction layer gives, holds and finishes a job given to the project, reports Remote Control
+active, and has the repository's `CLAUDE.md` recorded through InstructionsLoaded. The SAY line is
+checked to be in the lead's prompt file; haiku's obeying it is logged, not asserted (it skipped
+it once in three runs).
 
 ### First-run setup (Go)
 

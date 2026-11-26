@@ -1710,8 +1710,9 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 | **Fleet** | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal | Tree at left, selected agent at right with Conversation/Terminal toggle |
 | **Terminal** | Full-screen xterm on the herdr TUI, with a key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Full-height xterm, font size in the status line |
 
-Bottom nav on mobile, left rail from `md`, in the order Jobs, Chat, Inbox, Fleet, Terminal. Jobs
-is the default route (`/`); the others are `/chat`, `/inbox`, `/fleet` (`?agent=<pane id>`
+Bottom nav on mobile, left rail from `md`, in the order Jobs, Projects, Chat, Inbox, Fleet, Terminal
+(Projects since wip/projects, `g p`). Jobs is the default route (`/`); the others are `/projects`
+(`/projects/<slug>` a project), `/chat` (`?target=lead-<slug>` a project's lead), `/inbox`, `/fleet` (`?agent=<pane id>`
 selects an agent, so links and reloads land on it) and `/terminal`. A web app manifest and icons
 make it installable to a home screen.
 
@@ -1859,6 +1860,46 @@ key rules in `lib/hotkeys.ts`; all three are pure and unit-tested.
   and `voiceSettings` sources but left off until that build lands; a dialog's own options (a
   terminal permission prompt) are not offered as answers, since answering one needs the current
   screen hash; Enter opens it in the Inbox.
+
+**Projects in the web app (wip/projects, 21).** `routes/ProjectsView.tsx`, `components/projects/`,
+`lib/projects.ts`:
+
+- **Projects view**: the list (each lead's state with Start/Stop, needs-you and running counts,
+  an archived toggle) and a project's page: edit and archive, the lead's controls (start, stop,
+  restart, new conversation, poke; the Remote Control note; Chat with the lead; its terminal in
+  Fleet), its jobs, its schedules (Run now, manage), its own instruction layer edited in place, and
+  the Instructions card of its lead. Opening the page asks `?open=1` once (the `open` start
+  policy). **New project** is a sheet: remembered directories as buttons and free text; the name
+  follows the directory's basename until typed over.
+- **Jobs by project**: a switcher row above the board (All, each project, Unfiled, with counts),
+  from `?project=<slug>` or remembered in `localStorage` (`crowsnest-jobs-project`); project chips
+  on cards under All; with a project chosen the job box offers **To the lead** (the default) or
+  **As a job** (directory and defaults prefilled). The Schedule and Spend sheets filter by
+  project (Spend narrows its by-job rows in the browser and hides the by-model and by-day tabs
+  while a project is chosen: `/spend` has no project filter yet).
+- **Palette**: projects (open, a job for its lead, chat with its lead, start/stop its lead, its
+  board), the Projects view and the Instructions sheet.
+- **Chat targets**: a select in Chat's header, carried as `?target=`; a lead's conversation works
+  as the orchestrator's (composer, attachments, mic, play buttons), its menu using the lead's
+  routes (no compaction or context); a lead that is off offers Start lead; under
+  `--no-orchestrator` Chat opens on the first running lead.
+- **Settings → Instructions** (account menu, palette): Global, each role (built-in, edited, or from
+  file and read-only with its path), each project; a monospace editor with preview, the diff
+  against the built-in (`DiffView`), history with a diff per revision and Restore, reset to
+  built-in. The **Instructions card** (`components/instructions/AgentInstructionsCard.tsx`) on a
+  job, a project's lead and in Chat's menu: the layers (with a viewer), the files Claude loaded
+  (path only), the skills note, and when the layers changed since start a confirmed "Restart with
+  new instructions".
+- **Schedule**: New schedule, edit and delete for app schedules (`ScheduleForm.tsx`: cadence picker
+  onto every/after, target orchestrator / a lead / a job, Markdown preview, enabled), file tasks
+  "from file" and read-only, shadowed ones flagged, each task's runs with links to their jobs.
+- **Voice** (13.5): `lib/voice/queue.ts` is the pure queue (first come first served, at most 8
+  waiting, lines older than 2 minutes dropped, skip, stop, per-agent filter, master mute); each
+  agent's Speak switch in its Chat header and the Voice sheet (with a voice select per agent);
+  job agents' `say` lines share one "Job agents" switch; turning an agent on turns the master on;
+  the now-playing strip names the speaker with Skip and Stop.
+- Tests: Vitest for the pure modules and components; `e2e/hermetic/projects.spec.ts` in all three
+  projects; screenshots `web/screenshots/projects-*`.
 
 **Fixtures mode.** On the Vite dev server, `?fixtures=1` answers every API call in memory from
 `lib/fixtures.ts` and skips the event stream; it is kept for the tab in sessionStorage and turned
