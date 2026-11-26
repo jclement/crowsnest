@@ -201,8 +201,22 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Job
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s; there is nothing to update", FormatID(r.ID), r.State)
 		}
-		s.markProgressLocked(r)
-		if progress != "" {
+		if input.Waiting != nil && *input.Waiting {
+			open, _, err := s.questionState(ctx, r.ID)
+			if err != nil {
+				return err
+			}
+			if open == 0 {
+				// Found by the stop test: an agent told to wait answered every nudge with
+				// waiting=true, which reset the budget forever. Waiting needs a question.
+				return invalid("you have no open questions, so there is nothing to wait on. If you need the human, call ask (it does not block) and then declare waiting; if you are finished, call done; if something else blocks you, set state blocked with the reason")
+			}
+		}
+		// A repeated, unchanged line is not progress: it must not reset the nudge budget.
+		if progress != r.Progress || input.State != "" || input.Waiting != nil {
+			s.markProgressLocked(r)
+		}
+		if progress != "" && progress != r.Progress {
 			r.Progress = progress
 			c.event(EventProgress, progress, nil)
 		}

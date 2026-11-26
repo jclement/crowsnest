@@ -64,13 +64,13 @@ run = [
 [tasks."test:integration"]
 description = "Go integration tests against real herdr, in throwaway crowsnest-test-* sessions. Needs herdr installed"
 run = [
-  "go vet -tags integration ./internal/herdr/... ./internal/term/... ./internal/orch/...",
+  "go vet -tags integration ./internal/herdr/... ./internal/term/... ./internal/orch/... ./internal/jobs/...",
   "CGO_ENABLED=1 go test -race -count=1 -tags integration -run Integration -v ./internal/herdr/... ./internal/term/...",
 ]
 
 [tasks."test:claude"]
-description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API, and calls the ask MCP tool whose answer is typed back"
-run = "CROWSNEST_E2E_CLAUDE=1 CGO_ENABLED=1 go test -count=1 -tags integration -run IntegrationClaude -v -timeout 6m ./internal/orch/..."
+description = "Real-Claude smoke (costs a few cents): a real orchestrator on haiku in a throwaway crowsnest-test-* session answers one prompt through the HTTP API and calls the ask MCP tool; and the stop test: three haiku job agents (an undeclared stop is refused, done stops cleanly, a non-blocking ask is answered and the job finishes)"
+run = "CROWSNEST_E2E_CLAUDE=1 CGO_ENABLED=1 go test -count=1 -tags integration -run IntegrationClaude -v -timeout 15m ./internal/orch/... ./internal/jobs/..."
 
 [tasks.lint]
 description = "go vet, golangci-lint, gofmt check, tsc, eslint. Read-only"

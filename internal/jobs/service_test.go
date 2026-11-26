@@ -372,6 +372,43 @@ func TestStopHookNudgesUntilDeclaredAndProgressResetsTheBudget(t *testing.T) {
 	}
 }
 
+func TestWaitingWithoutQuestionsIsRefusedAndRepeatsAreNotProgress(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+	waiting := true
+	if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "waiting", Waiting: &waiting}); !IsValidation(err) || !strings.Contains(err.Error(), "call ask") {
+		t.Fatalf("waiting with no questions: %v", err)
+	}
+	if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "same line"}); err != nil {
+		t.Fatal(err)
+	}
+	r.clock.Advance(time.Second)
+	_, _ = r.svc.HandleHook(ctx, HookStop, job.ID, "", HookInput{})
+	r.clock.Advance(time.Second)
+	_, _ = r.svc.Update(ctx, job.ID, UpdateInput{Progress: "same line"})
+	r.clock.Advance(time.Second)
+	reply, _ := r.svc.HandleHook(ctx, HookStop, job.ID, "", HookInput{StopHookActive: true})
+	if d := r.get(job.ID); !strings.Contains(reply.Stdout, "block") || d.Nudges != 2 || !hasEvent(d, EventNudge, "(2 of 3)") {
+		t.Fatalf("a repeated line reset the budget: %+v", d.Job)
+	}
+}
+
+func TestAnswerTypedBackLetsTheTurnEnd(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+	id := insertQuestion(t, r.db, job.ID, false)
+	r.clock.Advance(time.Minute)
+	if err := r.db.SettleQuestion(ctx, id, "answered", json.RawMessage(`"ack"`), "", "type", r.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	r.clock.Advance(time.Second)
+	if reply, _ := r.svc.HandleHook(ctx, HookStop, job.ID, "", HookInput{}); reply.Stdout != "" {
+		t.Fatalf("stop right after an answer was typed back: %q", reply.Stdout)
+	}
+}
+
 func TestStopAllowedWhenWaitingOnQuestions(t *testing.T) {
 	r := newRig(t, nil)
 	ctx := context.Background()

@@ -147,12 +147,12 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 	var reply HookReply
 	_, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		s.touchLocked(r, c, input)
-		open, err := s.openQuestionCount(ctx, r.ID)
+		open, answeredAt, err := s.questionState(ctx, r.ID)
 		if err != nil {
 			return err
 		}
 		job := s.toJob(*r, open)
-		history := NudgeHistory{Streak: r.NudgeStreak, LastNudgeAt: r.LastNudgeAt, LastProgressAt: r.LastProgressAt}
+		history := NudgeHistory{Streak: r.NudgeStreak, LastNudgeAt: r.LastNudgeAt, LastProgressAt: r.LastProgressAt, AnswerSettledAt: answeredAt}
 		decision := Decide(&job, open, StopInput{SessionID: input.SessionID, StopHookActive: input.StopHookActive}, history, s.opts.Now())
 		reply = s.applyDecisionLocked(r, c, decision, input)
 		return nil
@@ -183,12 +183,23 @@ func (s *Service) applyDecisionLocked(r *store.JobRecord, c *change, decision De
 	return HookReply{Stdout: string(body)}
 }
 
-func (s *Service) openQuestionCount(ctx context.Context, id int64) (int, error) {
-	list, err := s.questionsOf(ctx, id)
+// questionState returns the job's open question count and when one of its questions last
+// settled with the outcome typed back into the agent.
+func (s *Service) questionState(ctx context.Context, id int64) (int, time.Time, error) {
+	records, err := s.opts.Store.ListQuestionsByJob(ctx, FormatID(id))
 	if err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
-	return countOpen(list), nil
+	open, settled := 0, time.Time{}
+	for _, q := range records {
+		switch {
+		case q.Status == "open":
+			open++
+		case q.Delivery == "type" && q.SettledAt.After(settled):
+			settled = q.SettledAt
+		}
+	}
+	return open, settled, nil
 }
 
 // ---- SessionStart --------------------------------------------------------------------------

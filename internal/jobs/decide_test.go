@@ -56,6 +56,14 @@ func TestDecide(t *testing.T) {
 		{name: "unresponsive but progressed: nudge again", job: running(func(j *Job) { j.Stuck, j.Cause = true, CauseUnresponsive }),
 			history: NudgeHistory{Streak: 3, LastNudgeAt: earlier, LastProgressAt: later}, rule: RuleNudge, streak: 1},
 
+		// An answer typed back after the agent's last progress starts the next turn.
+		{name: "answer just typed back", job: running(nil),
+			history: NudgeHistory{LastProgressAt: earlier, AnswerSettledAt: later}, allow: true, rule: RuleAnswerIncoming},
+		{name: "answer already acted on", job: running(nil),
+			history: NudgeHistory{LastProgressAt: later, AnswerSettledAt: earlier}, rule: RuleNudge, streak: 1},
+		{name: "answer too long ago", job: running(nil),
+			history: NudgeHistory{LastProgressAt: now.Add(-time.Hour), AnswerSettledAt: now.Add(-10 * time.Minute)}, rule: RuleNudge, streak: 1},
+
 		// The rows of DESIGN 6.4, as the supervisor leaves the job when a Stop arrives.
 		{name: "6.4 dialog: needs_you", job: running(func(j *Job) { j.State, j.Cause = StateNeedsYou, CauseDialog }), allow: true, rule: RuleDeclared},
 		{name: "6.4 permissions: still running, nudged", job: running(func(j *Job) { j.Stuck, j.Cause = true, CausePermissions }), rule: RuleNudge, streak: 1},

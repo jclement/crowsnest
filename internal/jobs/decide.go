@@ -4,7 +4,9 @@
 //
 // The rule: the turn may end only if the job is done, failed, cancelled, blocked or needs_you;
 // or there are open questions and the agent has declared (job_update waiting=true) that nothing
-// is left that they do not block; or the session holds no job. Otherwise the stop is refused
+// is left that they do not block; or the session holds no job. One addition found by the stop
+// test: an answer typed back in the last two minutes, after the agent's last progress, also lets
+// the turn end, because Claude queues it and it starts the next turn. Otherwise the stop is refused
 // with a reason that tells the agent exactly which call ends the refusal.
 //
 // Loop control: a nudge counts against the budget only when nothing happened since the previous
@@ -37,7 +39,14 @@ type NudgeHistory struct {
 	Streak         int       // consecutive nudges with no progress between them
 	LastNudgeAt    time.Time // zero: never nudged
 	LastProgressAt time.Time // last tool call or job_update
+	// AnswerSettledAt is when one of the job's questions last settled with its outcome typed
+	// back into the agent (zero: never). An answer typed while the turn is ending is queued by
+	// Claude and starts the next turn, so a stop just after it is not an undeclared stop.
+	AnswerSettledAt time.Time
 }
+
+// answerGrace is how long after an answer was settled a stop is let through for it.
+const answerGrace = 2 * time.Minute
 
 // Rule names which branch of the check decided; it is journalled and asserted in tests.
 type Rule string
@@ -48,6 +57,7 @@ const (
 	RuleTerminal       Rule = "terminal"        // done, failed or cancelled
 	RuleDeclared       Rule = "declared"        // blocked, needs_you, in_review or queued
 	RuleWaiting        Rule = "waiting"         // open questions, and nothing else workable
+	RuleAnswerIncoming Rule = "answer_incoming" // an answer is being typed in; it starts the next turn
 	RuleAlreadyStuck   Rule = "already_stuck"   // already marked unresponsive; no new progress
 	RuleBudgetSpent    Rule = "budget_spent"    // MaxNudges with no progress: allow, escalate
 	RuleNudge          Rule = "nudge"           // refused: nothing declared
@@ -65,10 +75,8 @@ type Decision struct {
 }
 
 // Decide applies the disposition rule. job is nil when the session holds no job; openQuestions
-// counts the job's open questions; now is unused by the current rules but kept so time-based
-// rules (a minimum gap between nudges) stay pure.
+// counts the job's open questions.
 func Decide(job *Job, openQuestions int, input StopInput, history NudgeHistory, now time.Time) Decision {
-	_ = now
 	if job == nil {
 		return Decision{Allow: true, Rule: RuleNoJob}
 	}
@@ -81,6 +89,9 @@ func Decide(job *Job, openQuestions int, input StopInput, history NudgeHistory, 
 	}
 	if openQuestions > 0 && job.Waiting {
 		return Decision{Allow: true, Rule: RuleWaiting, Streak: history.Streak}
+	}
+	if !history.AnswerSettledAt.IsZero() && now.Sub(history.AnswerSettledAt) < answerGrace && history.AnswerSettledAt.After(history.LastProgressAt) {
+		return Decision{Allow: true, Rule: RuleAnswerIncoming, Streak: history.Streak}
 	}
 	progress := !history.LastProgressAt.IsZero() && history.LastProgressAt.After(history.LastNudgeAt)
 	streak := history.Streak
