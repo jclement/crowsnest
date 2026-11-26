@@ -1,17 +1,22 @@
 # crowsnest
 
 One Go binary that starts a [herdr](https://herdr.dev) session and a Claude Code orchestrator in
-it, and serves a mobile-friendly web app for running that session from a browser: chat with the
-orchestrator, answer questions from agents, drive a terminal, and see every agent in the fleet.
+it, and serves a mobile-friendly web app for running that session from a browser: give an agent a
+job and watch it, chat with the orchestrator, answer questions from agents, drive a terminal, and
+see every agent in the fleet.
 
-> **Status: M6 (questions and the agent API), M5 (terminals) and M4 (orchestrator and Chat).**
+> **Status: M7 (jobs), M6 (questions and the agent API), M5 (terminals) and M4 (orchestrator and
+> Chat).** Jobs are the default view: one text box gives a job to a new agent (in a git worktree
+> for a builder) or to the orchestrator; every job has a declared state, a heartbeat and a
+> progress line, and Claude Code hooks refuse a turn that ends with nothing declared (DESIGN.md
+> section 6).
 > crowsnest serves the login, the API, the event stream and the web app; it connects to (or
 > starts) its herdr session and serves the fleet, agent screens, dialog key presses, and live
 > terminals. It keeps the session's orchestrator running and serves the Chat view and every Claude
 > agent's conversation, read live from Claude's transcripts. Agents ask the human questions over a
 > unix socket (`crowsnest ask`, or the `ask` MCP tool the orchestrator is started with); the Inbox
-> shows them beside terminal dialogs, and an answer is typed back into the asker's pane. Jobs,
-> pokes and talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
+> shows them beside terminal dialogs, and an answer is typed back into the asker's pane. Pokes,
+> budgets, review gates and talk mode arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
 > [STATUS.md](STATUS.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
@@ -185,15 +190,28 @@ they fail with exit 1 and say so.
 | `crowsnest ask --file q.json\|- [--wait] [--timeout 12h]` | Post a question (DESIGN.md 8.1 shape: `title`, `body_md`, `kind` confirm/choice/ack/manual/notice, `multi`, `options`, `recommend`, `context`, `urgency`, `expires_in_hours`, `files`). Without `--wait` it prints the id (`q_7`) and returns; the answer is typed into the pane later as `[crowsnest answer q_7] <title> → <answer> (note: …)`. With `--wait` it blocks and prints `{id, status, answer_value, answer_note}`: exit `0` answered, `3` expired or cancelled, `1` error |
 | `crowsnest notify "text" [--urgency low\|normal\|blocking]` | A notice (no answer needed); the first line is its title. Prints the id |
 | `crowsnest say "sentence"` | Ask for one sentence to be spoken in talk mode (M11 speaks it; now it is published as a `say` event) |
-| `crowsnest mcp` | A stdio MCP server exposing `ask` and `say` (M7 adds the job tools), proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes |
+| `crowsnest mcp` | A stdio MCP server exposing `ask`, `say`, `job_update`, `done`, `fail`, `job_create` and `job_get`, proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes |
+| `crowsnest job update "doing now" [--state blocked --reason "…"] [--waiting]` | The job protocol for agents without MCP (Codex) and scripts: a heartbeat with a progress line; `--state blocked` with a reason, or `running`; `--waiting` declares that nothing is left the open questions do not block (refused with no open question). The job is `--job j_<n>` or `CROWSNEST_JOB` |
+| `crowsnest job done --result "…" --verified "…" --not-verified "…"` | The job is finished, with evidence (repeat the list flags; `none` for an empty list; `--result-file` reads the result) |
+| `crowsnest job fail "reason"` | It cannot be finished |
+| `crowsnest job get [j_<n>] [--json]` | The job as text for an agent (brief, state, progress, questions and answers), or the full record with its timeline |
+| `crowsnest job create "brief" [--dir] [--role] [--done-when] [--engine] [--model] [--isolate]` | Delegate a child job; the caller's job is its parent |
+| `crowsnest job list [--state …]` | Jobs, newest first |
+| `crowsnest hook <event> [--job j_<n>] [--socket PATH]` | The Claude Code hook entry point crowsnest writes into each agent's `--settings` (`stop`, `session-start`, `notification`, `stop-failure`, `permission-denied`, `session-end`, `post-tool-use`): stdin JSON to the server, its reply on stdout. Fails open: any failure prints nothing and exits 0 |
 
 The socket is `$XDG_RUNTIME_DIR/crowsnest/<session>.sock` when `XDG_RUNTIME_DIR` is set, else
 `~/.local/state/crowsnest/<session>/agent.sock` (or, when that path is too long for a unix socket,
 `crowsnest-<uid>/<hash>.sock` under the OS temporary directory); `serve` logs it at start. Its
 directory is `0700` and must belong to you; the socket is `0600`.
 Its routes are Meat Prompt's (`POST /api/v1/questions`, `GET /api/v1/questions/{id}?wait=90`,
-`GET /api/v1/questions?status=`, `DELETE /api/v1/questions/{id}`) plus `POST /api/v1/say` and
-`GET /api/v1/health`.
+`GET /api/v1/questions?status=`, `DELETE /api/v1/questions/{id}`) plus `POST /api/v1/say`,
+`GET /api/v1/health`, the job protocol (`POST /api/v1/jobs`, `GET /api/v1/jobs`,
+`GET /api/v1/jobs/{id}`, `GET /api/v1/jobs/{id}/context`, `POST /api/v1/jobs/{id}/update|done|fail`)
+and the hooks (`POST /api/v1/hooks/{event}`).
+
+Roles are prompts: `lead`, `builder`, `reviewer` and `tester` are built in; a file
+`~/.config/crowsnest/roles/<name>.md` adds a role or replaces a built-in one. The job protocol is
+appended to every role's prompt.
 
 ## Configuration
 
@@ -263,7 +281,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
 | `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version}}` |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (`{text, pane_id, at}`); later `job`, … |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `job` (`{id, state, stuck, cause, title, change}`) when a job changes, `say` (`{text, pane_id, at}`); later `poke` |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
@@ -276,6 +294,12 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /questions/{id}/answer` | session | `{answer_value, answer_note}`: a key, an array of keys for a multi-select, nothing for ack/notice; a `manual` answer is the note. `409 CONFLICT` once settled |
 | `DELETE /questions/{id}` | session | Cancel an open question; the asker is told |
 | `GET /inbox/summary` | session | `{open, blocking}` for the Inbox badge |
+| `GET /jobs?state=` | session | The board: every job, newest first (`state` filters, comma-separated) |
+| `POST /jobs` | session | `{brief, dir?, role?, done_when?, engine?, model?, isolate?}` → the queued job (`201`); the agent starts in the background. No `dir`: the orchestrator takes it |
+| `GET /jobs/{id}` | session | The job with its `timeline` (state changes, progress, nudges, hooks, questions, restarts, retries, messages) and `questions` |
+| `POST /jobs/{id}/message` | session | `{text, force_over_draft}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
+| `POST /jobs/{id}/cancel`, `/nudge`, `/resume` | session | Cancel (Esc to the agent, then `cancelled`; the pane stays), nudge by hand, or resume a stuck job (retry now after a limit, restart a gone agent, else nudge) |
+| `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
 | `GET /term/tui` (WebSocket) | session | The herdr TUI in a PTY. Binary frames are terminal bytes both ways; text frames are JSON control: the browser sends `{"type":"resize","cols","rows"}` first (the process starts on it), the server ends with `{"type":"exit","reason"}` |
 | `GET /term/pane/{pane_id}` (WebSocket) | session | One pane through `herdr terminal session control --takeover`, same protocol. `404` unless the pane is in the fleet |
 
@@ -288,7 +312,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
 | `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, and the pane and TUI terminal bridges |
-| `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript |
+| `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript. Then **the stop test**: three haiku job agents in a scratch git repo, where an undeclared stop is refused by the Stop hook, `done` stops cleanly, and a non-blocking `ask` answered through the browser API reaches the agent, which finishes |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |
 | `mise run check` | lint + test: the gate before calling anything done |
@@ -296,6 +320,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures, and the terminals on a throwaway `crowsnest-test-*` herdr session. Each spec starts and stops its own instance on a random localhost port |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run screenshots:inbox` | Builds, then Playwright against `./bin/crowsnest --demo`: the Inbox list and a question (mermaid and a diff) at 375×812 and 1440×900, light and dark, a multi-select, the 375 px checks, and an answer round trip |
+| `mise run screenshots:jobs` | Builds, then Playwright against `./bin/crowsnest --demo`: the Jobs board (light and dark), the new-job form, a running, a stuck and a done job at 375×812 and 1440×900, the 375 px checks, and giving a job |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives and `checksums.txt`, nothing published |
 | `mise run image` | Build the devbox image (`deploy/Dockerfile`) for this machine's architecture as `crowsnest:dev`. Needs Docker |
@@ -323,10 +348,12 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | Path | Holds |
 |---|---|
 | `~/.config/crowsnest/config.yaml` | Optional config file |
-| `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed), settings and questions |
+| `~/.local/share/crowsnest/<session>.db` | SQLite: login sessions (hashed), settings, questions, jobs and their timelines |
 | `~/.local/state/crowsnest/<session>/herdr-server.log` | Output of a herdr server crowsnest started |
 | `~/.local/state/crowsnest/<session>/CROWSNEST.md` | The orchestrator's instructions (`--append-system-prompt-file`), rewritten from the embedded template on every start |
-| `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` (M7 adds hooks) |
+| `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` and the supervisor's hooks |
+| `~/.local/state/crowsnest/<session>/jobs/j_<n>/` | A job agent's `prompt.md` (role prompt and job protocol), `settings.json` (hooks with `--job j_<n>`, the allow rule) and `mcp.json` |
+| `~/.config/crowsnest/roles/*.md` | Optional role prompts that add to or replace the built-in ones |
 | `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server and its `CROWSNEST_SOCKET` |
 | `~/.local/state/crowsnest/<session>/agent.sock` | The agent API socket (when `XDG_RUNTIME_DIR` is unset) |
 | `$TMPDIR/crowsnest-demo-*/` | `--demo` only: the demo's database, state (the demo agents' transcripts, its agent socket) and orchestrator directory, removed on exit |
