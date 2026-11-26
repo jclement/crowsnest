@@ -26,6 +26,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/web"
@@ -115,21 +116,26 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	agentSocket := agentapi.SocketPath(os.Getenv("XDG_RUNTIME_DIR"), cfg.StateDir, cfg.Session)
+	journalLog := journal.New(db, events, logger, nil)
 	refs := &jobRefs{}
-	jobService := newJobService(cfg, client, db, events, agentSocket, refs, logger)
+	jobService := newJobService(cfg, client, db, events, agentSocket, refs, journalLog, logger)
 	questionService, err := startQuestions(ctx, cfg, client, db, events, jobService, speakerOf(talk), agentSocket, logger)
 	if err != nil {
 		return err
 	}
-	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, events, agentSocket, talk, logger)
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, events, agentSocket, talk, journalLog, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	startJobs(ctx, jobService, client, logger)
+	poker := startPoker(ctx, cfg, db, events, pokeServices{
+		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
+	}, client, logger)
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
 		Orchestrator: orchestrator, Conversations: conversations,
 		Terminals: terminals(cfg), Questions: questionService, Jobs: jobService, Voice: talk,
+		Journal: journalLog, Poker: poker,
 	}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()

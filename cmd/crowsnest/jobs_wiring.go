@@ -16,6 +16,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
@@ -26,11 +27,14 @@ import (
 type jobRefs struct {
 	orchestrator  *orch.Orchestrator
 	conversations *transcript.Manager
+	// notify tells Jeff something (the log, and the --notify-url POST when set); the poker's
+	// draft alert goes through it too.
+	notify func(text string)
 }
 
 // newJobService builds the jobs service. refs is filled in by serve once the orchestrator and
 // the transcript manager exist.
-func newJobService(cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, socket string, refs *jobRefs, logger *slog.Logger) *jobs.Service {
+func newJobService(cfg config.Config, client herdr.Client, db *store.Store, events *hub.Hub, socket string, refs *jobRefs, journalLog *journal.Journal, logger *slog.Logger) *jobs.Service {
 	binDir, executable := executablePaths()
 	roles, problems := jobs.LoadRoles(rolesDir(cfg))
 	for _, problem := range problems {
@@ -44,9 +48,15 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 			post(text)
 		}
 	}
+	refs.notify = notify
+	alert := func(text string) {
+		// A supervisor alert is journalled as well as sent, so the Journal shows what Jeff was told.
+		journalLog.Add(context.Background(), journal.KindAlert, text, nil)
+		notify(text)
+	}
 	claudeDir := claudeConfigDir(cfg)
 	return jobs.New(jobs.Options{
-		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: notify,
+		Store: db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert,
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,

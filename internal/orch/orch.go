@@ -19,6 +19,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/journal"
 )
 
 // Name is the herdr agent name of the orchestrator; the API also accepts it as a target.
@@ -90,6 +91,8 @@ type Options struct {
 	Client         herdr.Client
 	KV             KV
 	Hub            *hub.Hub // nil: no events (tests)
+	// Journal records restarts (automatic and manual); nil records nothing.
+	Journal *journal.Journal
 	Logger         *slog.Logger
 	Session        string // herdr session name, for the pane env and the instructions
 	Dir            string // working directory (--dir), created if missing

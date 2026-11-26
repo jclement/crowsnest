@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/journal"
 )
 
 // Watch checks the orchestrator once. Run calls it on a timer; tests call it directly. A tick
@@ -49,17 +50,20 @@ func (o *Orchestrator) recover(ctx context.Context) {
 	}
 	o.mu.Unlock()
 	if tooMany {
-		o.update(func(s *Status) {
+		status := o.update(func(s *Status) {
 			s.State = StateFailed
 			s.Detail = fmt.Sprintf("Claude exited %d times within an hour, so crowsnest stopped restarting it. Check its terminal, then use Restart.", maxRestartsPerHour)
 		})
+		o.opts.Journal.Add(ctx, journal.KindAlert, status.Detail, nil)
 		return
 	}
 	o.opts.Logger.Info("orchestrator is gone; restarting it with --resume")
 	o.update(func(s *Status) { s.State, s.Detail = StateRestarting, "" })
-	if _, err := o.ensureLocked(ctx, true); err != nil {
+	status, err := o.ensureLocked(ctx, true)
+	if err != nil {
 		o.opts.Logger.Warn("restarting the orchestrator", "err", err)
 	}
+	o.journalRestart(ctx, "Restarted the orchestrator automatically (Claude had exited)", true, status, err)
 }
 
 // Restart stops the orchestrator's Claude and starts it again on the same conversation
@@ -82,6 +86,25 @@ func (o *Orchestrator) relaunch(ctx context.Context, resume bool) (Status, error
 	if o.opts.Disabled {
 		return o.Status(), ErrDisabled
 	}
+	summary := "Restarted the orchestrator (Restart, same conversation)"
+	if !resume {
+		summary = "Started a new orchestrator conversation (New conversation)"
+	}
+	status, err := o.relaunchLocked(ctx, resume)
+	o.journalRestart(ctx, summary, false, status, err)
+	return status, err
+}
+
+// journalRestart records a restart and how it ended.
+func (o *Orchestrator) journalRestart(ctx context.Context, summary string, automatic bool, status Status, err error) {
+	detail := map[string]any{"automatic": automatic, "state": status.State, "session_id": status.SessionID}
+	if err != nil {
+		summary += "; it did not come back: " + status.Detail
+	}
+	o.opts.Journal.Add(ctx, journal.KindRestart, summary, detail)
+}
+
+func (o *Orchestrator) relaunchLocked(ctx context.Context, resume bool) (Status, error) {
 	o.lifecycle.Lock()
 	defer o.lifecycle.Unlock()
 	o.mu.Lock()

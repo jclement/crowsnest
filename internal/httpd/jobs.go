@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/journal"
 )
 
 // maxJobBody caps a create or message body.
@@ -117,6 +118,8 @@ func (s *Server) handleJobMessage(w http.ResponseWriter, r *http.Request) {
 		s.writeJobError(w, r, err)
 		return
 	}
+	s.deps.Journal.Add(r.Context(), journal.KindSend, "You sent job "+r.PathValue("id")+": "+input.Text,
+		map[string]any{"job": r.PathValue("id"), "pane_id": result.PaneID, "started": result.Started, "queued": result.Queued})
 	writeData(w, http.StatusOK, result)
 }
 

@@ -147,6 +147,9 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 	var reply HookReply
 	_, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		s.touchLocked(r, c, input)
+		// The stop is handled here, whatever the decision: the herdr-side backstop leaves a
+		// stop whose hook ran alone, so it is never nudged twice (internal/orch/backstop.go).
+		r.LastStopAt = s.opts.Now()
 		open, answeredAt, err := s.questionState(ctx, r.ID)
 		if err != nil {
 			return err

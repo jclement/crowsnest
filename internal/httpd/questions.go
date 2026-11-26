@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/questions"
 )
 
@@ -73,6 +74,8 @@ func (s *Server) handleQuestionAnswer(w http.ResponseWriter, r *http.Request) {
 		s.writeQuestionError(w, r, err)
 		return
 	}
+	s.deps.Journal.Add(r.Context(), journal.KindAnswer, "You answered "+question.ID+": "+question.Title,
+		map[string]any{"question": question.ID, "answer_value": answer.Value, "has_note": answer.Note != ""})
 	writeData(w, http.StatusOK, question)
 }
 
@@ -86,6 +89,7 @@ func (s *Server) handleQuestionCancel(w http.ResponseWriter, r *http.Request) {
 		s.writeQuestionError(w, r, err)
 		return
 	}
+	s.deps.Journal.Add(r.Context(), journal.KindAnswer, "You cancelled "+question.ID+": "+question.Title, map[string]any{"question": question.ID, "cancelled": true})
 	writeData(w, http.StatusOK, question)
 }
 

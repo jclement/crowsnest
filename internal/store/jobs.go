@@ -59,6 +59,8 @@ type JobRecord struct {
 	RestartTimes    string
 	RetryAt         time.Time
 	RetryCount      int
+	// LastStopAt is when the agent's Stop hook last ran (migration 0005); the backstop reads it.
+	LastStopAt time.Time
 }
 
 // JobEventRecord is one row of job_events.
@@ -98,6 +100,7 @@ func jobColumns(r *JobRecord) []column {
 		intCol("nudges", &r.Nudges), intCol("nudge_streak", &r.NudgeStreak), timeCol("last_nudge_at", &r.LastNudgeAt),
 		intCol("denials", &r.Denials), intCol("restarts", &r.Restarts), textCol("restart_times", &r.RestartTimes),
 		timeCol("retry_at", &r.RetryAt), intCol("retry_count", &r.RetryCount),
+		timeCol("last_stop_at", &r.LastStopAt),
 	}
 	return cols
 }

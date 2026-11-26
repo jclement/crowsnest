@@ -21,6 +21,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/transcript"
 	"github.com/jclement/crowsnest/internal/voice"
@@ -155,6 +156,8 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Logger.Info("sent prompt", "target", target, "pane", result.PaneID, "bytes", len(body.Text), "started", result.Started, "queued", result.Queued)
+	s.deps.Journal.Add(r.Context(), journal.KindSend, "You sent "+target+": "+body.Text,
+		map[string]any{"target": target, "pane_id": result.PaneID, "started": result.Started, "queued": result.Queued, "voice": request.Voice, "note": result.Note})
 	if s.deps.Fleet != nil {
 		s.deps.Fleet.Invalidate()
 	}
