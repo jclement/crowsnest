@@ -23,6 +23,11 @@ const sseRetryMillis = 3000
 // socket buffer and would otherwise block the handler in Flush for as long as the TCP
 // connection lives, where it can notice neither a hub overflow nor logout nor shutdown
 // (R1-C04). Expiry counts as a disconnect; EventSource reconnects and refetches.
+//
+// The deadline is armed only while a frame is being written and cleared once it is flushed
+// (R1b-C03). Over HTTP/2 a write deadline is a timer on the stream that resets it when it fires,
+// whether or not a write is pending, so a deadline left armed between events would reset a
+// healthy, idle stream before the next heartbeat.
 const sseWriteTimeout = 10 * time.Second
 
 // HelloEvent is the first event on every stream.
@@ -52,6 +57,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	subscription := s.deps.Hub.Subscribe(hub.DefaultBuffer)
 	defer subscription.Close()
 
+	// The opening frame is flushed together with hello, which then clears the deadline.
 	if _, err := fmt.Fprintf(w, "retry: %d\n\n", sseRetryMillis); err != nil {
 		return
 	}
@@ -119,13 +125,25 @@ func (s *Server) writeEvent(w http.ResponseWriter, controller *http.ResponseCont
 	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, payload); err != nil {
 		return err
 	}
-	return controller.Flush()
+	if err := controller.Flush(); err != nil {
+		return err
+	}
+	return s.clearWriteDeadline(controller)
 }
 
 // extendWriteDeadline gives the next write sseWriteTimeout to complete. A writer that cannot
 // take a deadline (httptest's recorder) is fine: it cannot block either.
 func (s *Server) extendWriteDeadline(controller *http.ResponseController) error {
-	err := controller.SetWriteDeadline(time.Now().Add(s.sseWriteTimeout))
+	return ignoreUnsupported(controller.SetWriteDeadline(time.Now().Add(s.sseWriteTimeout)))
+}
+
+// clearWriteDeadline disarms the deadline once a frame is out, so an idle stream lives until
+// the next frame however long that takes (R1b-C03).
+func (s *Server) clearWriteDeadline(controller *http.ResponseController) error {
+	return ignoreUnsupported(controller.SetWriteDeadline(time.Time{}))
+}
+
+func ignoreUnsupported(err error) error {
 	if errors.Is(err, http.ErrNotSupported) {
 		return nil
 	}
