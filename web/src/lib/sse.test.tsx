@@ -138,4 +138,49 @@ describe("useEventStream and the reconnect banner", () => {
     await user.click(screen.getByRole("button", { name: "Retry now" }));
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
   });
+
+  it("runs one session probe at a time however often Retry now is pressed (R1-C08)", async () => {
+    let resolveProbe: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveProbe = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<RetryHarness />);
+    act(() => FakeEventSource.latest.fail());
+    act(() => screen.getByRole("button", { name: "force retry" }).click());
+    act(() => screen.getByRole("button", { name: "force retry" }).click());
+    act(() => screen.getByRole("button", { name: "force retry" }).click());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => resolveProbe(new Response(JSON.stringify({ data: { username: "jeff", features: {} } }), { status: 200 })));
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[0].readyState).toBe(FakeEventSource.CLOSED);
+  });
+
+  it("ignores a late error from a stream that was already replaced (R1-C08)", async () => {
+    vi.useFakeTimers();
+    render(<Harness handlers={{}} />);
+    const first = FakeEventSource.latest;
+    act(() => first.fail());
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    const second = FakeEventSource.latest;
+    expect(second).not.toBe(first);
+    act(() => second.emit("hello", {}));
+    act(() => first.fail()); // the old stream's error arrives late
+    expect(second.readyState).toBe(FakeEventSource.OPEN);
+    expect(screen.getByTestId("status")).toHaveTextContent("open");
+  });
 });
+
+/** Calls retryNow directly, whatever the banner shows: the hook must serialise on its own. */
+function RetryHarness() {
+  const stream = useEventStream({});
+  return (
+    <button type="button" onClick={stream.retryNow}>
+      force retry
+    </button>
+  );
+}
+

@@ -58,8 +58,16 @@ export function useEventStream(handlers: EventHandlers): StreamState {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let stopped = false;
+    // A session probe in flight. Reconnects are serialised on it: a second attempt while one is
+    // pending (the timer firing as Retry now is pressed, say) would open a second EventSource
+    // that nothing tracks or closes (R1-C08).
+    let probing = false;
 
-    const dispatch = (name: string) => (event: MessageEvent) => {
+    // Every handler is bound to the EventSource it was registered on, and does nothing once that
+    // source is no longer the current one, so a late error from an old stream cannot close the
+    // new one.
+    const dispatch = (own: EventSource, name: string) => (event: MessageEvent) => {
+      if (stopped || source !== own) return;
       if (name === "hello") {
         attempt = 0;
         setState({ status: "open", attempt: 0, retryAt: null });
@@ -69,13 +77,15 @@ export function useEventStream(handlers: EventHandlers): StreamState {
 
     const connect = () => {
       if (stopped) return;
-      source = new EventSource(EVENTS_URL);
+      source?.close();
+      const own = new EventSource(EVENTS_URL);
+      source = own;
       for (const name of new Set<string>([...eventNames, ...Object.keys(handlersRef.current)])) {
-        source.addEventListener(name, dispatch(name) as EventListener);
+        own.addEventListener(name, dispatch(own, name) as EventListener);
       }
-      source.onerror = () => {
-        if (stopped) return;
-        source?.close();
+      own.onerror = () => {
+        own.close();
+        if (stopped || source !== own) return;
         source = null;
         scheduleReconnect();
       };
@@ -90,16 +100,23 @@ export function useEventStream(handlers: EventHandlers): StreamState {
     };
 
     const attemptReconnect = () => {
-      if (stopped) return;
+      if (stopped || probing || source) return;
+      probing = true;
+      clearTimeout(retryTimer);
       setState((previous) => ({ ...previous, retryAt: null }));
-      endpoints.me().then(connect, () => !stopped && scheduleReconnect());
+      endpoints.me().then(
+        () => {
+          probing = false;
+          connect();
+        },
+        () => {
+          probing = false;
+          if (!stopped) scheduleReconnect();
+        },
+      );
     };
 
-    retryNowRef.current = () => {
-      if (stopped || source) return;
-      clearTimeout(retryTimer);
-      attemptReconnect();
-    };
+    retryNowRef.current = attemptReconnect;
 
     connect();
     return () => {
