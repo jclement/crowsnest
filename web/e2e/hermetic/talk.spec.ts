@@ -19,7 +19,7 @@
 // no real ElevenLabs call is ever made. `mise run e2e:voice` runs this file alone.
 import { spawn, type ChildProcess } from "node:child_process";
 import type { Page } from "@playwright/test";
-import { expect, test as base } from "../support/fixtures";
+import { expect, test as base, waitForOrchestratorSettled } from "../support/fixtures";
 import { freePort } from "../support/instance";
 
 /** The fake's key: not a secret, it only opens the fake. */
@@ -75,6 +75,7 @@ async function openChat(page: Page) {
   await page.goto("/chat");
   await expect(page.getByRole("list", { name: "Conversation" })).toBeVisible();
   await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
+  await waitForOrchestratorSettled(page);
 }
 
 /** Holds the push-to-talk button for ms with the mouse, as a person would. */
@@ -185,8 +186,12 @@ test("speak mode off: replies are captioned and nothing is synthesised; the play
   await openChat(page);
   await holdToTalk(page, 900);
   await page.getByRole("button", { name: "Send now" }).click();
-  // The demo's seeded replies and the new one all carry SAY captions.
-  await expect(page.getByTestId("spoken-caption")).toHaveCount(3, { timeout: 20_000 });
+  // Every reply carries a SAY caption, the new one too (the demo's reply echoes the prompt). How
+  // many replies there are depends on what else the demo orchestrator was given at start-up.
+  const replies = page.getByRole("article", { name: "Reply" });
+  const answer = replies.filter({ hasText: "what is the status" }).last();
+  await expect(answer.getByTestId("spoken-caption")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("spoken-caption")).toHaveCount(await replies.count());
   await page.waitForTimeout(1_000);
   let upstream = await fakeRequests(page, fakeURL);
   expect(upstream.filter((request) => request.path?.startsWith("/v1/text-to-speech/"))).toHaveLength(0);
@@ -196,6 +201,8 @@ test("speak mode off: replies are captioned and nothing is synthesised; the play
   await page.getByRole("button", { name: "Play this reply aloud" }).first().click();
   expect((await tts).status()).toBe(200);
   await expect(page.getByTestId("player-bar")).toBeVisible();
+  // A replay names who is speaking, as a live line does.
+  await expect(page.getByTestId("speaker")).toHaveText(/orchestrator/i);
   upstream = await fakeRequests(page, fakeURL);
   expect(upstream.filter((request) => request.path?.startsWith("/v1/text-to-speech/"))).toHaveLength(1);
   await expect(page.getByTestId("speak-toggle")).toHaveAttribute("aria-pressed", "false");

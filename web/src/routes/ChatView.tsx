@@ -89,6 +89,7 @@ export function ChatView() {
           paneFallback={false}
           renderComposer={voice ? (props) => <VoiceComposer {...props} /> : undefined}
           playTarget={voice ? ORCHESTRATOR : undefined}
+          speaker={ORCHESTRATOR}
         />
       ) : (
         <EmptyState icon={MessageSquare} title="Starting the orchestrator">
@@ -171,6 +172,7 @@ function LeadChat({ slug, project, pending, switcher, voice, showThinking, onTog
           paneFallback={false}
           renderComposer={voice ? (props) => <VoiceComposer {...props} /> : undefined}
           playTarget={voice ? paneId : undefined}
+          speaker={agent}
         />
       ) : (
         <EmptyState icon={MessageSquare} title={`Starting ${name}`}>
