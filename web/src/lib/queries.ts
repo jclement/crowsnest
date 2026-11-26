@@ -1,8 +1,9 @@
 // TanStack Query hooks: the one place components get server data from. Each hook names its key
 // from queryKeys so the event stream (lib/live.ts) can invalidate exactly what changed.
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys } from "./api";
 import type { CreateJobRequest } from "./jobs";
+import type { JournalKind } from "./journal";
 import type { AnswerRequest } from "./questions";
 import type { SendKeysRequest } from "./types";
 
@@ -134,5 +135,26 @@ export function useJobMessage(id: string) {
   return useMutation({
     mutationFn: ({ text, force }: { text: string; force?: boolean }) => endpoints.jobMessage(id, text, force),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+// ---- M8: pokes and the journal ----------------------------------------------------------
+
+/** The journal, newest first, one page at a time; `journal` and `poke` events refresh it. */
+export function useJournal(kinds: JournalKind[]) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.journalPage(kinds.join(",")),
+    queryFn: ({ pageParam }) => endpoints.journal(kinds, pageParam || undefined),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.next_before > 0 ? last.next_before : undefined),
+  });
+}
+
+/** "Poke now". The journal refreshes whatever the outcome. */
+export function usePokeNow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: endpoints.poke,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.journal }),
   });
 }

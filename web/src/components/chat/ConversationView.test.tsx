@@ -49,7 +49,7 @@ describe("ConversationView", () => {
     const list = await screen.findByRole("list", { name: "Conversation" });
     const items = within(list).getAllByRole("listitem");
     expect(items).toHaveLength(4);
-    expect(within(items[1]!).getByText("poke")).toBeInTheDocument();
+    expect(within(items[1]!).getByRole("note", { name: "Poke from crowsnest" })).toHaveTextContent("1 reason");
     expect(within(items[2]!).getByRole("button", { name: /Bash/ })).toBeInTheDocument();
     expect(within(items[3]!).getByRole("table")).toBeInTheDocument();
     expect(screen.queryByText("secret reasoning")).not.toBeInTheDocument();

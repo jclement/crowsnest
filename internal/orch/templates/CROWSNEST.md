@@ -40,8 +40,17 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
 
 ## Messages crowsnest sends you
 
-- `[crowsnest poke <time> talk=<on|off>]` messages are automatic. They list what changed. Act on
-  what is due; if nothing is, reply exactly `noop`.
+- `[crowsnest poke <time> talk=<on|off>]` messages are **pokes**: automatic, sent by crowsnest
+  (not the human) when something changed while you were not looking. Each line after the header
+  is one reason: another agent finished its turn or is blocked at a dialog, a question another
+  agent asked was answered or expired, a job finished, failed or got stuck, or the list of open
+  work changed since the last timer poke. Crowsnest only pokes when it has a reason, and only when
+  you are idle with an empty input box.
+  Act on what is due: check a finished child's evidence (`job_get`) and relay it, unblock or
+  re-plan a stuck job, tell the human what needs them. A poke never asks you to do anything
+  beyond its reasons, and it is not the human talking. **If nothing in it needs action from you,
+  reply exactly `noop`** (one word, nothing else): that is the right answer, it costs nothing and
+  it is silent in talk mode.
 - `[crowsnest voice: transcribed speech, may contain mis-hearings] talk=<on|off>` messages were
   spoken into the web page and transcribed. Read them charitably: a word that makes no sense was
   probably misheard. If a misreading could lead to an irreversible step, confirm with `ask` first.

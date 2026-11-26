@@ -11,6 +11,7 @@ import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types"
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
+import type { JournalKind, JournalPage, PokeResult } from "./journal";
 
 /** An error response from the API, carrying the envelope's code and user-facing message. */
 export class ApiError extends Error {
@@ -161,6 +162,17 @@ export const endpoints = {
   jobAction: (id: string, action: "cancel" | "nudge" | "resume") => api<Job>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
   roles: () => api<RoleInfo[]>("/roles"),
   dirs: () => api<DirEntry[]>("/dirs"),
+  // ---- M8: pokes and the journal ----
+  /** "Poke now": the orchestrator is poked if anything is due and the gate allows it. */
+  poke: () => api<PokeResult>("/orchestrator/poke", { method: "POST" }),
+  /** A page of the journal, newest first; `before` is the previous page's next_before. */
+  journal: (kinds: JournalKind[], before?: number) => {
+    const query = new URLSearchParams();
+    if (kinds.length > 0) query.set("kind", kinds.join(","));
+    if (before) query.set("before", String(before));
+    const text = query.toString();
+    return api<JournalPage>(`/journal${text ? `?${text}` : ""}`);
+  },
   // ---- M11: talk mode (every route is 404 when voice is off) ----
   /** Uploads one recording as it came from MediaRecorder; returns what was said. */
   transcribe: (audio: Blob) => uploadAudio(audio),
@@ -237,4 +249,7 @@ export const queryKeys = {
   questionList: (status: string) => ["questions", "list", status] as const,
   question: (id: string) => ["questions", "one", id] as const,
   inboxSummary: ["questions", "summary"] as const,
+  /** Everything about the journal sits under ["journal"]; a `journal` or `poke` event refreshes it. */
+  journal: ["journal"] as const,
+  journalPage: (kinds: string) => ["journal", kinds] as const,
 };

@@ -576,3 +576,17 @@ func TestPokerDisabledOrchestrator(t *testing.T) {
 		t.Fatal("poked a disabled orchestrator")
 	}
 }
+
+// The orchestrator's instructions must explain pokes and that `noop` is the answer when nothing
+// is due (DESIGN.md 7.1), or every timer poke costs a reply.
+func TestInstructionsExplainPokes(t *testing.T) {
+	text, err := New(Options{Session: "crowsnest-test", Dir: "/o", Version: "test"}).Instructions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"[crowsnest poke <time> talk=<on|off>]", "reply exactly `noop`", "not the human talking", "empty input box"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("CROWSNEST.md does not say %q", want)
+		}
+	}
+}
