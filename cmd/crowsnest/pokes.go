@@ -56,14 +56,20 @@ func startPoker(ctx context.Context, cfg config.Config, db *store.Store, events 
 }
 
 // feedPoker turns hub events into poke reasons: a job that finished or got stuck, a question that
-// was settled. A subscription the hub closes (it fell behind) is renewed.
+// was settled. A subscription the hub closes (it fell behind) is renewed, and what settled while
+// it was falling behind is read back from the store (R2-C13): the poker skips anything already
+// delivered or pending, so the replay costs nothing when nothing was lost.
 func feedPoker(ctx context.Context, events *hub.Hub, poker *orch.Poker, services pokeServices, logger *slog.Logger) {
 	for ctx.Err() == nil {
+		since := time.Now()
 		sub := events.Subscribe(0)
 		for event := range sub.Events() {
 			handlePokeEvent(ctx, event, poker, services, logger)
 		}
 		sub.Close()
+		if ctx.Err() == nil {
+			replaySettled(ctx, since, poker, services, logger)
+		}
 		select {
 		case <-ctx.Done():
 		case <-time.After(100 * time.Millisecond): // a closed hub must not spin this loop
@@ -97,6 +103,34 @@ func handlePokeEvent(ctx context.Context, event hub.Event, poker *orch.Poker, se
 		poker.QuestionSettled(ctx, orch.QuestionInfo{
 			ID: question.ID, Title: question.Title, Status: string(question.Status), Kind: string(question.Kind), SourcePane: question.SourcePane,
 		})
+	}
+}
+
+// replaySettled feeds the poker every job and question that settled (or job that is stuck) since
+// a dropped subscription began.
+func replaySettled(ctx context.Context, since time.Time, poker *orch.Poker, services pokeServices, logger *slog.Logger) {
+	if services.jobs != nil {
+		list, err := services.jobs.List(ctx, nil)
+		if err != nil {
+			logger.Warn("poker: re-reading jobs after a dropped subscription", "err", err)
+		}
+		for _, job := range list {
+			settled := job.SettledAt != nil && !job.SettledAt.Before(since)
+			if settled || (job.Stuck && !job.State.Terminal()) {
+				poker.JobChanged(ctx, orch.JobInfo{ID: job.ID, Title: job.Title, State: string(job.State), Stuck: job.Stuck, Cause: job.CauseText, PaneID: job.PaneID})
+			}
+		}
+	}
+	if services.questions != nil {
+		list, err := services.questions.List(ctx, "")
+		if err != nil {
+			logger.Warn("poker: re-reading questions after a dropped subscription", "err", err)
+		}
+		for _, question := range list {
+			if question.SettledAt != nil && !question.SettledAt.Before(since) {
+				poker.QuestionSettled(ctx, orch.QuestionInfo{ID: question.ID, Title: question.Title, Status: string(question.Status), Kind: string(question.Kind), SourcePane: question.SourcePane})
+			}
+		}
 	}
 }
 

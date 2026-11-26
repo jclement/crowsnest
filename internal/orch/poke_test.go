@@ -606,3 +606,23 @@ func TestInstructionsExplainPokes(t *testing.T) {
 		}
 	}
 }
+
+// R2-C13: a job reason held by the gate survives a crowsnest restart.
+func TestPokerPendingReasonsSurviveRestart(t *testing.T) {
+	r := newPokeRig(t)
+	r.set(r.orch, herdr.StatusWorking)
+	r.poker.JobChanged(context.Background(), JobInfo{ID: "j_7", Title: "Child", State: "done", PaneID: r.builder})
+	if got := r.check(); got.Outcome != OutcomeSkipped {
+		t.Fatalf("held: %+v", got)
+	}
+	restarted := NewPoker(r.opts) // a new crowsnest over the same database; the hub event is gone
+	r.settleOrchestrator()
+	if got := restarted.Check(context.Background(), false); got.Outcome != OutcomeSent || !strings.Contains(r.pokes()[0], "job j_7 is done") {
+		t.Fatalf("after the restart: %+v %v", got, r.pokes())
+	}
+	again := NewPoker(r.opts)
+	r.settleOrchestrator()
+	if got := again.Check(context.Background(), false); got.Outcome != OutcomeNothing || len(r.pokes()) != 1 {
+		t.Fatalf("a delivered reason came back: %+v", got)
+	}
+}

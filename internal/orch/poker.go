@@ -115,6 +115,10 @@ type pokeState struct {
 	Delivered     map[string]int64  `json:"delivered"` // event reason key → unix time pushed
 	LastAgentPush int64             `json:"last_agent_push"`
 	Timer         string            `json:"timer"` // fingerprint of the standing list last pushed
+	// Pending are the event reasons (a job or question that settled) not yet delivered (R2-C13):
+	// a restart while the gate held them used to lose them, because the hub event that made
+	// them is gone. Agent and timer reasons are not kept: observation rebuilds them.
+	Pending []Reason `json:"pending,omitempty"`
 }
 
 // Poker decides and sends pokes. Build it with NewPoker, then Run it.
@@ -188,6 +192,9 @@ func (p *Poker) Add(ctx context.Context, reason Reason) {
 			reason.At = p.opts.Now()
 		}
 		p.pending = append(p.pending, reason)
+		if durable(reason) {
+			p.saveLocked(ctx) // kept before the event is acknowledged (R2-C13)
+		}
 	}
 	p.mu.Unlock()
 	select {
@@ -269,7 +276,9 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 // disabled answers a check under --no-orchestrator: nothing to poke, nothing kept pending.
 func (p *Poker) disabled(ctx context.Context, now time.Time, manual bool) PokeResult {
 	p.mu.Lock()
+	p.loadLocked(ctx)
 	p.pending = nil
+	p.saveLocked(ctx)
 	p.mu.Unlock()
 	result := PokeResult{Outcome: OutcomeNothing, Reasons: []string{}, Manual: manual, At: now}
 	if manual {
@@ -500,10 +509,23 @@ func (p *Poker) loadLocked(ctx context.Context) {
 	if state.Delivered == nil {
 		state.Delivered = map[string]int64{}
 	}
+	for _, reason := range state.Pending {
+		_, delivered := state.Delivered[reason.Key]
+		if !delivered && !slices.ContainsFunc(p.pending, func(r Reason) bool { return r.Key == reason.Key }) {
+			p.pending = append(p.pending, reason)
+		}
+	}
+	state.Pending = nil
 	p.state = state
 }
 
+// durable reports a reason that only an event produced, which nothing would rebuild.
+func durable(reason Reason) bool {
+	return reason.Source != SourceAgent && reason.Source != SourceTimer
+}
+
 func (p *Poker) saveLocked(ctx context.Context) {
+	p.state.Pending = slices.DeleteFunc(slices.Clone(p.pending), func(r Reason) bool { return !durable(r) })
 	body, err := json.Marshal(p.state)
 	if err != nil {
 		return
