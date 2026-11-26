@@ -1,7 +1,7 @@
 # Crowsnest: status
 
 Living record kept by the lead agent. Updated at every milestone boundary.
-Last updated: 2026-11-26 04:40
+Last updated: 2026-11-26 05:30
 
 ## Where things stand
 
@@ -21,7 +21,7 @@ Last updated: 2026-11-26 04:40
 | M10 release workflow and devbox image | release pipeline and devbox image merged | `mise run snapshot` produced four archives and the darwin one served the web app (builder). Image built locally (1036 MB, arm64), container proof by the builder: health, login, refusals, non-root, mise installed Claude Code in 7 s. Neither workflow has run on GitHub (needs a tag); nothing pushed to ghcr; multi-arch build untried |
 | M11 talk mode | merged | `mise run check` green on main; Playwright spec against a fake ElevenLabs passed (hold to talk, transcript sent, SAY reply fetched and played). **No real ElevenLabs call has been made**: no key was available. Safari and iOS untried |
 | M12 budgets, review gates, Web Push | not started | |
-| R2 review of jobs, identity, pokes, voice | findings in; fixes in progress | `reviews/R2-codex.md`: 9 high, 7 medium in the jobs supervisor (e.g. a no-op progress update resets the nudge budget forever; crash-recovery gaps; double nudges). `reviews/R2-opus-security.md`: 1 high (an agent could start child jobs in any directory with no limit), 2 medium, 5 low. **Until these land, the never-stop guarantee has known holes** |
+| R2 review of jobs, identity, pokes, voice | fixed; final verification by both reviewers running | All R2 findings were confirmed real by the fix builders and fixed with tests seen to fail first (`reviews/R2-*.md`). Lead then ran on main, with every fix merged: `mise run check`, `mise run test:integration` (real herdr) and `mise run test:claude` (real Claude: ask, orchestrator, poke, and the three-part stop test): all green at 05:25 |
 
 ## Not verified
 
@@ -46,12 +46,12 @@ Nothing. CI on GitHub is green again at b310983: the failure was a real Linux-on
 
 ## In flight
 
-- `crow-fix3a` (Opus), worktree `wip/fix-r2a`: R2 supervisor correctness fixes. Its move.
-- `crow-fix3b` (Opus), worktree `wip/fix-r2b`: R2 security fixes plus questions, poker and identity leftovers. Its move.
-- `crow-m9` (Opus), worktree `wip/m9-e2e`: the test campaign. Its move.
-- After those: re-review of the R2 fixes, the full suite on the merged tip, the wrap-up.
+- `crow-m9` (Opus), worktree `wip/m9-e2e`: the test campaign (hermetic Playwright suite for CI, real-herdr and real-Claude browser suites, docs/TESTING.md). Its move.
+- `crow-r1-codex` and `crow-r1-opus`: final verification of the R2 fixes (`reviews/R3-*.md`). Their move.
+- Then: fix anything serious R3 finds, merge M9, full suite on the final tip, wrap-up. M12 (budgets, review gates, Web Push) will not fit tonight.
 
 ## Things Jeff should know
 
 - The Terminal view is herdr's own TUI, so it shows every machine in the user's herdr config (on quark: `bedev`, over SSH). Anyone who can sign in to crowsnest can reach those too.
+- Two prompts I declined rather than approve for you: a convoluted `git stash` command from the test builder, and your git guard hook asking for a human when it could not evaluate a command; the builder was told to do both another way.
 - I accepted Codex's "trust this folder" prompt for `~/Work/crowsnest` so the Codex reviews you asked for could run. That trust is saved in Codex's settings.
