@@ -130,9 +130,9 @@ type Options struct {
 	ClaudeConfigDir string
 	// Guard, when set, is written to <state>/guard.json and named on the PreToolUse guard hook
 	// (DESIGN.md 8.7). nil: no guard hook.
-	Guard *guard.Rules
-	Disabled        bool          // --no-orchestrator: report disabled, start nothing
-	WatchInterval   time.Duration // DefaultWatchInterval when zero
+	Guard         *guard.Rules
+	Disabled      bool          // --no-orchestrator: report disabled, start nothing
+	WatchInterval time.Duration // DefaultWatchInterval when zero
 	// ShellWait is how long to wait for a pane to show a bare shell (after creating it, or
 	// after /exit). Defaults to 15 s.
 	ShellWait time.Duration
