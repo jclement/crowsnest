@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -34,6 +35,8 @@ type socketFixture struct {
 	socket  string
 	service *questions.Service
 	hub     *hub.Hub
+	jobs    *jobs.Service
+	db      *store.Store
 }
 
 // startSocket serves a fresh agent API on a socket in a short temp dir.
@@ -46,6 +49,7 @@ func startSocket(t *testing.T) *socketFixture {
 	t.Cleanup(func() { _ = db.Close() })
 	events := hub.New()
 	service := questions.New(questions.Options{Store: db, Hub: events})
+	jobService := jobs.New(jobs.Options{Store: db, Hub: events})
 	path := filepath.Join(shortDir(t), "run", "agent.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	listener, err := Listen(ctx, path)
@@ -54,11 +58,11 @@ func startSocket(t *testing.T) *socketFixture {
 	}
 	done := make(chan struct{})
 	go func() {
-		_ = NewServer(ServerOptions{Questions: service, Hub: events, Version: "test"}).Serve(ctx, listener)
+		_ = NewServer(ServerOptions{Questions: service, Jobs: jobService, Hub: events, Version: "test"}).Serve(ctx, listener)
 		close(done)
 	}()
 	t.Cleanup(func() { cancel(); <-done })
-	return &socketFixture{socket: path, service: service, hub: events}
+	return &socketFixture{socket: path, service: service, hub: events, jobs: jobService, db: db}
 }
 
 func TestSocketPermissions(t *testing.T) {

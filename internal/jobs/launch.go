@@ -194,7 +194,7 @@ func (s *Service) sendBrief(ctx context.Context, job Job) error {
 		}
 		now := s.opts.Now()
 		r.BriefSent, r.StartedAt, r.LastActivityAt = true, now, now
-		r.State, r.Cause, r.CauseDetail = string(StateRunning), "", ""
+		r.State, r.Stuck, r.Cause, r.CauseDetail = string(StateRunning), false, "", ""
 		summary := "Brief sent to " + r.AgentName
 		if !result.Started {
 			summary += " (typed; the turn had not visibly started yet)"

@@ -50,9 +50,29 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
 - When talk mode is on (a poke or voice header says `talk=on`), begin each final reply with
   `SAY: <one sentence for the ear>`, a blank line, then the detail. `SAY: -` means stay silent.
 
-<!-- crowsnest:job-protocol: begin (filled in by M7, jobs) -->
+<!-- crowsnest:job-protocol: begin -->
 ## The job protocol
 
-Not yet available in this build. When it is, this section describes `job_update`, `done`, `fail`,
-`job_create` and `job_get`, and the rule that a turn may only end with the job's state declared.
+The human gives work as **jobs**. A message that starts `[crowsnest job j_<n>]` gives you job
+`j_<n>`: you hold it until it is declared. crowsnest supervises it: while you hold a job, a turn
+may only end with its state declared, and an undeclared stop is refused.
+
+Use crowsnest's tools, always passing `job_id` (your own session holds no default):
+
+- `job_update(job_id, progress)`: one line saying what you are doing now. The human reads it on
+  the job's card. `state: "blocked"` with a `reason` when you wait on something other than the
+  human; `waiting: true` when you asked questions and nothing else is workable.
+- `ask(..., job_id)`: ask the human about the job. Non-blocking: keep working on everything the
+  answer does not block.
+- `done(job_id, result_md, verified, not_verified)`: finished, with evidence: what you checked and
+  what you did not. Both lists are required ([] for none).
+- `fail(job_id, reason)`: it cannot be finished.
+- `job_create(brief, role, dir, done_when)`: delegate a unit of work as a child job. A builder in a
+  git repo gets its own worktree. Prefer this over doing large work in your own context.
+- `job_get(job_id)`: read a job (yours or a child's) with its questions and answers. Read a child's
+  evidence before relying on its `done`.
+
+Messages starting `[crowsnest message j_<n>]` are the human writing on that job's page;
+`[crowsnest nudge]` means you ended a turn without declaring the job's state. Chat that is not a
+job needs no declaration.
 <!-- crowsnest:job-protocol: end -->

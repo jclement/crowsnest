@@ -24,7 +24,7 @@ import (
 )
 
 // hookTimeout bounds one hook round trip (DESIGN.md 6.3).
-const hookTimeout = 5 * time.Second
+var hookTimeout = 5 * time.Second
 
 // maxHookInput caps what a hook reads from stdin.
 const maxHookInput = 4 << 20
