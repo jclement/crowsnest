@@ -28,8 +28,12 @@ run = [
 # ---- Run ---------------------------------------------------------------------
 
 [tasks.dev]
-description = "The real thing, locally: the Go server (no auth, localhost:2769) against its own herdr session crowsnest-dev (CROWSNEST_DEV_SESSION), a real Claude orchestrator in .dev/orchestrator, database in .dev/, plus Vite on :5173 with hot reload. HERDR_* is scrubbed, so it is safe from inside a herdr pane. First start: answer Claude's folder-trust prompt once in the Terminal view. Long-running"
+description = "The real thing, locally, as one binary on one port: builds ./bin/crowsnest (web app embedded) and runs it (no auth, http://localhost:2769) against its own herdr session crowsnest-dev (CROWSNEST_DEV_SESSION), with a real Claude orchestrator in .dev/orchestrator and its database in .dev/. A new directory shows Claude's folder-trust prompt once: answer it in the Terminal view. dev:hot is the Vite hot-reload variant; dev:demo needs no herdr or Claude. Long-running"
 run = "bash scripts/dev.sh"
+
+[tasks."dev:hot"]
+description = "As dev, but for UI work: the Go server by go run on :2769 plus Vite with hot reload on :5173 (two ports). Long-running"
+run = "CROWSNEST_DEV_HOT=1 bash scripts/dev.sh"
 
 [tasks."dev:demo"]
 description = "Go server (no auth, localhost, --demo fake herdr, throwaway state) on :2769 plus Vite on :5173 proxying /api to it. No herdr or Claude needed. Long-running"

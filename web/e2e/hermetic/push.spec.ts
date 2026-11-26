@@ -93,16 +93,26 @@ test("turn on, test, receive a push and open its deep link", async ({ page, cont
 
   // Tapping it: the worker's notificationclick focuses this tab and the app routes to the item.
   await page.getByRole("button", { name: "Close" }).click();
-  await worker.evaluate(async () => {
-    // The worker's globals, typed by hand: this project's TypeScript lib is the DOM, not WebWorker.
-    const scope = self as unknown as {
-      registration: ServiceWorkerRegistration;
-      dispatchEvent: (event: Event) => boolean;
-      NotificationEvent: new (type: string, init: { notification: Notification }) => Event;
-    };
-    const [shown] = await scope.registration.getNotifications();
-    scope.dispatchEvent(new scope.NotificationEvent("notificationclick", { notification: shown! }));
-  });
+  // Under heavy parallel load headless Chromium now and then drops the shown notice before the
+  // click (about 1 run in 30 at fifteen-fold repetition; the app itself closes a notice only when
+  // it is clicked: see sw.js). CDP delivery is a test hook, so when the notice is gone it is
+  // delivered again and the click retried, rather than failing on the harness.
+  await expect(async () => {
+    const clicked = await worker.evaluate(async () => {
+      // The worker's globals, typed by hand: this project's TypeScript lib is the DOM, not WebWorker.
+      const scope = self as unknown as {
+        registration: ServiceWorkerRegistration;
+        dispatchEvent: (event: Event) => boolean;
+        NotificationEvent: new (type: string, init: { notification: Notification }) => Event;
+      };
+      const [shown] = await scope.registration.getNotifications();
+      if (!shown) return false;
+      scope.dispatchEvent(new scope.NotificationEvent("notificationclick", { notification: shown }));
+      return true;
+    });
+    if (!clicked) await cdp.send("ServiceWorker.deliverPushMessage", { origin: baseURL!, registrationId: registration, data: JSON.stringify(notice) });
+    expect(clicked).toBe(true);
+  }).toPass({ timeout: 20_000 });
   await expect(page).toHaveURL(/\/inbox\?q=q_1$/);
   const question = (await (await page.request.get("/api/v1/questions/q_1")).json()) as { data: { title: string } };
   await expect(page.getByRole("heading", { name: question.data.title }).first()).toBeVisible();

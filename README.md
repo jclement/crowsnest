@@ -146,8 +146,10 @@ opens it: Ctrl K belongs to the shell. `?` lists every shortcut, and `g` then `j
 or `t` goes to Jobs, Chat, Inbox, Fleet or Terminal; neither fires while you type in a field or a
 terminal.
 
-For development, `mise run dev` runs the Go server with `--no-auth --demo` on :2769 and Vite on
-:5173 (open http://localhost:5173; Vite proxies `/api` to Go).
+For development, `mise run dev` builds the single binary and runs the real thing on one port
+(http://localhost:2769) against its own herdr session. `mise run dev:hot` adds Vite with hot reload
+on :5173 (Vite proxies `/api` to Go), and `mise run dev:demo` runs the scripted demo with no herdr
+or Claude.
 
 To work on the UI with no server at all, open http://localhost:5173/fleet?fixtures=1 on the Vite
 dev server: every API call is answered in memory from `web/src/lib/fixtures.ts` (a fleet with
@@ -532,8 +534,9 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | Task | Does |
 |---|---|
 | `mise run setup` | Install tools, Go modules and web dependencies. Idempotent |
-| `mise run dev` | The real thing, locally (`scripts/dev.sh`): the Go server (`--no-auth`, `--web-dev`, localhost:2769) against its own herdr session `crowsnest-dev` (`CROWSNEST_DEV_SESSION` to change; `default` is refused), with a real Claude orchestrator in `.dev/orchestrator`, its database in `.dev/data` and an empty `.dev/config.yaml` so nothing of a real install is read; Vite on :5173 with hot reload. Every `HERDR_*` variable is removed first, so it is safe to run from inside a herdr pane. The orchestrator's directory is new, so the first start stops at Claude's folder-trust prompt: answer it once in the Terminal view. Long-running; Ctrl+C stops both (the herdr session keeps running) |
-| `mise run dev:demo` | The old `dev`: Go server (`--no-auth`, `--web-dev`, `--demo`) on :2769 and Vite on :5173. No herdr or Claude, throwaway state. Long-running |
+| `mise run dev` | The real thing, locally, as one binary on one port (`scripts/dev.sh`): builds `./bin/crowsnest` with the web app embedded and runs it (`--no-auth`, http://localhost:2769) against its own herdr session `crowsnest-dev` (`CROWSNEST_DEV_SESSION` to change; `default` is refused), with a real Claude orchestrator in `.dev/orchestrator`, its database in `.dev/data` and an empty `.dev/config.yaml` so nothing of a real install is read. Every `HERDR_*` variable is removed first, so it is safe to run from inside a herdr pane. The orchestrator's directory is new, so the first start stops at Claude's folder-trust prompt: answer it once in the Terminal view. Long-running; Ctrl+C stops it (the herdr session keeps running) |
+| `mise run dev:hot` | As `dev`, for UI work: the Go server by `go run` (`--web-dev`) on :2769 plus Vite with hot reload on :5173. Two ports; open :5173 |
+| `mise run dev:demo` | Go server (`--no-auth`, `--web-dev`, `--demo`) on :2769 and Vite on :5173. No herdr or Claude, throwaway state. Long-running |
 | `mise run dev:container` | Build the devbox image for this machine (`image`), then run it in the foreground (`scripts/dev-container.sh`): container `crowsnest-dev` (`--rm`), `127.0.0.1:2770` (`CROWSNEST_DEV_CONTAINER_PORT`), home in the volume `crowsnest-dev-home`, user `crow` with a fresh random password printed once. The password reaches the container only as a 0600 file owned by `crow` in a throwaway volume (`crowsnest-dev-secret`, removed on exit) named by `CROWSNEST_PASSWORD_FILE`: never argv, environment or image. Ctrl+C stops it |
 | `mise run dev:container:reset` | Remove the `crowsnest-dev` container and its volumes |
 | `mise run build` | Build the web app, then `./bin/crowsnest` with version ldflags |

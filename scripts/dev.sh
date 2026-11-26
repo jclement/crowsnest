@@ -51,24 +51,34 @@ export CROWSNEST_SESSION="$session"
 export CROWSNEST_PORT="$port"
 export CROWSNEST_NO_AUTH=true
 
-echo "crowsnest dev: herdr session $session, data in .dev/, API on http://127.0.0.1:$port, UI on http://localhost:5173"
 echo "first start: answer Claude's folder-trust prompt for .dev/orchestrator in the Terminal view"
 
-# Ctrl+C (or either process exiting) stops both: the whole process group goes.
-trap 'kill 0' EXIT INT TERM
-go run ./cmd/crowsnest serve --web-dev --bind localhost &
-server=$!
+if [[ "${CROWSNEST_DEV_HOT:-}" == 1 ]]; then
+  # dev:hot: the Go server by `go run` plus Vite with hot reload, on two ports. For UI work.
+  echo "crowsnest dev (hot reload): herdr session $session, data in .dev/, API on http://127.0.0.1:$port, UI on http://localhost:5173"
+  # Ctrl+C (or either process exiting) stops both: the whole process group goes.
+  trap 'kill 0' EXIT INT TERM
+  go run ./cmd/crowsnest serve --web-dev --bind localhost &
+  server=$!
+  # Vite must not come up before the API does: `go run` compiles first, and a browser tab left
+  # open on :5173 would meanwhile fill the log with proxy ECONNREFUSED errors.
+  echo "building and starting the Go server (the first build after a pull takes a while)..."
+  until curl -fsS -o /dev/null "http://127.0.0.1:$port/api/v1/health" 2>/dev/null; do
+    if ! kill -0 "$server" 2>/dev/null; then
+      echo "the Go server exited before it started listening; its error is above" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+  echo "API is up; starting Vite"
+  npm --prefix web run dev -- --clearScreen false
+  exit
+fi
 
-# Vite must not come up before the API does: `go run` compiles first (tens of seconds after a
-# pull), and a browser tab left open on :5173 would meanwhile fill the log with proxy
-# ECONNREFUSED errors that look like a broken server.
-echo "building and starting the Go server (the first build after a pull takes a while)..."
-until curl -fsS -o /dev/null "http://127.0.0.1:$port/api/v1/health" 2>/dev/null; do
-  if ! kill -0 "$server" 2>/dev/null; then
-    echo "the Go server exited before it started listening; its error is above" >&2
-    exit 1
-  fi
-  sleep 0.5
-done
-echo "API is up; starting Vite"
-npm --prefix web run dev -- --clearScreen false
+# The default: one self-contained binary, web app embedded, one port, exactly what ships. It
+# also gives agents a stable ./bin/crowsnest for the MCP server and hooks (under `go run` those
+# pointed at a temporary build that the next run replaced).
+echo "crowsnest dev: building the binary (web app included)..."
+mise run build
+echo "crowsnest dev: herdr session $session, data in .dev/, everything on http://localhost:$port"
+exec ./bin/crowsnest serve --bind localhost
