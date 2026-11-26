@@ -225,11 +225,14 @@ func TestPaneBridgeCloseBeforeStart(t *testing.T) {
 }
 
 // fillUntilBlocked writes to bridge from a goroutine until one write has been stuck for a
-// while, which means the child's input buffer is full. It returns once that is so.
-func fillUntilBlocked(t *testing.T, bridge Bridge) {
+// while, which means the child's input buffer is full. It returns once that is so, with a
+// channel that is closed when the writing goroutine has given up (its write failed).
+func fillUntilBlocked(t *testing.T, bridge Bridge) <-chan struct{} {
 	t.Helper()
 	progress := make(chan struct{}, 1)
+	writerDone := make(chan struct{})
 	go func() {
+		defer close(writerDone)
 		chunk := bytes.Repeat([]byte("x"), 16<<10)
 		for {
 			if _, err := bridge.Write(chunk); err != nil {
@@ -246,7 +249,7 @@ func fillUntilBlocked(t *testing.T, bridge Bridge) {
 		select {
 		case <-progress:
 		case <-time.After(300 * time.Millisecond):
-			return // no write finished for 300 ms: the writer is blocked
+			return writerDone // no write finished for 300 ms: the writer is blocked
 		case <-deadline:
 			t.Fatal("writes never blocked; the fake is reading after all")
 		}
@@ -254,10 +257,11 @@ func fillUntilBlocked(t *testing.T, bridge Bridge) {
 }
 
 // assertCloseUnblocks checks Close returns at once and the child is gone soon after, even
-// though a write is stuck on a child that never reads (R1-C01).
+// though a write is stuck on a child that never reads (R1-C01), and that the stuck write itself
+// returns rather than leaking its goroutine (on Linux nothing but closing a pollable PTY wakes it).
 func assertCloseUnblocks(t *testing.T, bridge Bridge) {
 	t.Helper()
-	fillUntilBlocked(t, bridge)
+	writerDone := fillUntilBlocked(t, bridge)
 	closed := make(chan struct{})
 	go func() { _ = bridge.Close(); close(closed) }()
 	select {
@@ -266,6 +270,11 @@ func assertCloseUnblocks(t *testing.T, bridge Bridge) {
 		t.Fatal("Close blocked behind a write to a child that does not read")
 	}
 	waitClosed(t, bridge)
+	select {
+	case <-writerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the blocked write never returned after Close")
+	}
 }
 
 func TestPaneBridgeCloseWithBlockedWrite(t *testing.T) {
