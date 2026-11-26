@@ -96,6 +96,25 @@ exists. The first start in a new directory usually stops at Claude's folder-trus
 then shows "Needs terminal" until it is answered in the pane. Conversations are read from
 Claude's JSONL transcripts in `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
 
+The instance has a name (`--name`, else the short hostname, such as `quark`): it is in the
+header, the page title, push notification titles and `/auth/me`. The orchestrator is started
+with Claude Code's Remote Control on, named `<name> crowsnest` (plus the session when it is not
+`crowsnest`), so the same conversation is in the Claude app and claude.ai/code. A login that
+cannot use Remote Control (an API key, a plan without it, an organisation policy) just starts
+without it; the orchestrator's status says whether it came up. `--no-remote-control` turns it
+off; `--job-remote-control` turns it on for job agents too (`<name> <job id> <title>`).
+
+**Keeping the orchestrator small.** Every turn re-reads the whole conversation, and an
+orchestrator poked all day grows past a few hundred thousand tokens. Once its context passes
+`--compact-at` (150000 tokens) and it is idle with an empty input box, crowsnest types `/compact`
+with a focus that keeps open jobs, unanswered questions, your standing instructions and the reply
+contract; it does not compact again until the context has grown or a compaction took. With
+`--fresh-at 04:00`, once a day after that time and after you have been quiet 20 minutes, it is
+asked to write a hand-over (`handoff.md` in the state directory) and is then started on a new
+conversation whose first context includes that file, its open questions and its jobs (the same
+standing context is re-sent after every compaction). The Chat menu shows the context size with
+a bar, and has Compact now. Both are journalled (`upkeep`).
+
 **Terminals.** The Terminal view is the herdr TUI for the whole session (`herdr --session
 <name>` in a PTY; closing the tab kills only that client, never the server or an agent). In the
 Fleet view, an agent's Terminal tab, or any plain shell pane, opens just that pane through
@@ -322,6 +341,47 @@ Roles are prompts: `lead`, `builder`, `reviewer` and `tester` are built in; a fi
 `~/.config/crowsnest/roles/<name>.md` adds a role or replaces a built-in one. The job protocol is
 appended to every role's prompt.
 
+## Scheduled work
+
+Periodic work for the orchestrator is a markdown file in `<--dir>/tasks/` or
+`~/.config/crowsnest/tasks/` (the first wins on a name clash). The files are re-read at every
+check, so adding, editing or removing one needs no restart. The format is claude-agent's front
+door's, so its task files run unchanged:
+
+```markdown
+---
+every: 15m        # 15m, 60m, 4h, 1d, 3d (calendar days, local time), poke or change
+after: 17:00      # optional: not before this local time of day
+as: job           # optional: start a crowsnest job instead of telling the orchestrator
+dir: ~/Work/thing # as: job only: where the job runs (none: the orchestrator takes it)
+role: builder     # as: job only
+---
+# Daily digest
+
+What to do, in plain words. The orchestrator (or the job's agent) reads this file and does it.
+```
+
+- A due task becomes one line of the next poke: `scheduled task digest is due (every 1d after
+  17:00, last run …): read <file> and do what it says`. Nothing due still means no poke. The
+  task is marked run when the poke carrying it is delivered, by crowsnest, so it never repeats
+  because the model forgot to mark it, and never runs twice on one calendar day.
+- `every: poke` rides along with any poke that has something else to say; it never makes one by
+  itself. `every: change` runs when the fleet or the jobs changed since its last run (at most
+  every 5 minutes). Neither can be `as: job`.
+- `as: job` starts a crowsnest job with the body as its brief and the full supervisor; a job
+  task whose previous job is still live waits for it rather than stacking a second copy.
+- A file that cannot be used (no frontmatter, an unknown key, `every: 1w`) is skipped and
+  reported once in the Journal, and listed in the Schedule view.
+- The **Schedule** view (Chat menu, the Jobs view's Schedule button, or the command palette)
+  lists every task with its cadence, last run, next time and last outcome, a Run now button and
+  an on/off switch. The switch is crowsnest's (kept in its database); the file stays the source
+  of what the task says.
+
+`examples/tasks/` holds three to copy: `check.md` (every 15 minutes: anything stuck or waiting
+on you?), `tidy.md` (hourly: bring the orchestrator's notes up to date) and `digest.md` (daily
+after 17:00: one notice with the day's digest). They do nothing until copied into a tasks
+directory.
+
 ## Configuration
 
 Precedence: flag, then environment, then `~/.config/crowsnest/config.yaml` (keys are the flag
@@ -406,17 +466,22 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /admin/update` | session | Verify and install the newer release (as `crowsnest update`), answer `{updated, version, restarting}`, then exit for a supervisor to restart. `409 REFUSED` with the reason (container, development build, Homebrew install, already current), `409 UNSUPPORTED` when self-update is off (development build, `--demo`, container), `502 UPDATE_FAILED` when a download or check failed (nothing changed; the log says why) |
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
-| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version}}` |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (talk mode on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`; off: `{text, pane_id, at}`, which nothing plays); `job` (`{id, state, stuck, cause, title, change}`) when a job changes; `poke` (a poke's result, as `POST /orchestrator/poke` returns it) when a poke is sent or held; `journal` (`{id, kind, summary}`) for each new journal entry |
+| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version, name}}`; `name` is this instance's (`--name`) |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (talk mode on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`; off: `{text, pane_id, at}`, which nothing plays); `job` (`{id, state, stuck, cause, title, change}`) when a job changes; `poke` (a poke's result, as `POST /orchestrator/poke` returns it) when a poke is sent or held; `journal` (`{id, kind, summary}`) for each new journal entry; `schedule` (`{at}`) when a scheduled task's stamp or switch changed |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
 | `GET /agents/{target}/messages?after=&limit=` | session | A page of the agent's conversation from its Claude transcript: `{source, session_id, cursor, reset, earlier, more, messages}`. Without `after` (or with a stale cursor) the newest `limit` (200) messages and `reset: true`; with it, only what changed since. No transcript: one `pane` message with the pane's recent text |
 | `POST /agents/{target}/prompt` | session | `{text, force_over_draft, voice}` (`voice: true` adds the voice header and talk flag; 404 when talk mode is off) → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
-| `GET /orchestrator` | session | `{state, pane_id, session_id, dir, detail, restarts}`; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed` or `disabled` |
+| `GET /orchestrator` | session | `{state, pane_id, session_id, dir, detail, restarts, remote_control, remote_control_note}`; `remote_control` is the Remote Control name Claude was started with, `remote_control_note` `active` once Claude said so, or a sentence when it did not within 45 s; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed` or `disabled` |
 | `POST /orchestrator/restart`, `POST /orchestrator/new` | session | Restart Claude on the same conversation (`--resume`), or with a fresh one |
 | `POST /orchestrator/poke` | session | "Poke now" → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}`. Skips the two-minute limit between agent pokes; `skipped` with `reason` "nothing is due" when there is nothing to say, or why the orchestrator cannot take one (working, a dialog, a draft) |
-| `GET /journal?kind=&before=&limit=` | session | The journal, newest first: `{entries: [{id, at, kind, summary, detail}], total, next_before}`. `kind` filters (comma-separated: `poke`, `skip`, `send`, `answer`, `restart`, `alert`, `backstop`); `before` is the previous page's `next_before`; `limit` defaults to 50, at most 200 |
+| `GET /orchestrator/context` | session | The orchestrator's context: `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}` (`known` is false before the first reading and right after a compaction that recorded no size) |
+| `POST /orchestrator/compact` | session | "Compact now": `/compact` with the focus, at any size → the context as above; `409 CONFLICT` when the orchestrator is busy, at a dialog or has a draft |
+| `GET /schedule` | session | Scheduled tasks: `{tasks: [{name, title, path, origin, every, after, schedule, as, dir, role, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now}], problems: [{path, error}], dirs}` |
+| `POST /schedule/{name}/run` | session | Run now: a poke task goes with the next poke the orchestrator can take, a job task starts its job → the list. `404` for an unknown name |
+| `PUT /schedule/{name}` | session | `{enabled}`: switch a task off or on (kept by crowsnest; the file is untouched) → the list |
+| `GET /journal?kind=&before=&limit=` | session | The journal, newest first: `{entries: [{id, at, kind, summary, detail}], total, next_before}`. `kind` filters (comma-separated: `poke`, `skip`, `send`, `answer`, `restart`, `alert`, `backstop`, `task`, `upkeep`); `before` is the previous page's `next_before`; `limit` defaults to 50, at most 200 |
 | `GET /questions?status=` | session | Questions with a status (`open`, `answered`, `expired`, `cancelled`, a comma-separated list, or `all`), open first; file contents left out (`file_count` says how many) |
 | `GET /questions/{id}` | session | One question with its `files` |
 | `POST /questions/{id}/answer` | session | `{answer_value, answer_note}`: a key, an array of keys for a multi-select, nothing for ack/notice; a `manual` answer is the note. `409 CONFLICT` once settled |
