@@ -38,7 +38,7 @@ export function ChatView() {
 
   return (
     <section aria-label="Chat with the orchestrator" className="flex min-w-0 flex-col md:h-full md:min-h-0">
-      <header className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-3">
+      <header className="sticky top-0 z-10 flex min-h-11 shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-3 md:static">
         <h1 className="text-sm font-semibold text-heading">Orchestrator</h1>
         <ChatStatusChip state={state} />
         {orchestrator.session_id && (
