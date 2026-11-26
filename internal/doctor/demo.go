@@ -58,12 +58,12 @@ func DemoEnv(state string) Env {
 		binaries["codex"] = "/opt/homebrew/bin/codex"
 	}
 	outputs := map[string]string{
-		"herdr --version":            "herdr 0.9.5",
-		"claude --version":           "2.1.332 (Claude Code)",
-		"claude auth status --json":  signedIn,
-		"claude --help":              "--settings x\n--mcp-config x\n--append-system-prompt[-file]\n--session-id x\n--remote-control x\n--permission-mode x\n",
-		"codex --version":            "codex-cli 0.167.0",
-		"codex login status":         "Logged in using ChatGPT",
+		"herdr --version":           "herdr 0.9.5",
+		"claude --version":          "2.1.332 (Claude Code)",
+		"claude auth status --json": signedIn,
+		"claude --help":             "--settings x\n--mcp-config x\n--append-system-prompt[-file]\n--session-id x\n--remote-control x\n--permission-mode x\n",
+		"codex --version":           "codex-cli 0.167.0",
+		"codex login status":        "Logged in using ChatGPT",
 	}
 	return Env{
 		GOOS: "darwin", Home: "/home/demo",
@@ -81,11 +81,15 @@ func DemoEnv(state string) Env {
 			}
 			return output, nil
 		},
-		Getenv:      func(string) (string, bool) { return "", false },
-		Environ:     func() []string { return nil },
-		Listen:      func(string) error { return nil },
-		HTTPGet:     func(context.Context, string, map[string]string) (int, []byte, error) { return 0, nil, errors.New("demo") },
-		HerdrSocket: func(context.Context, string) (string, error) { return "/home/demo/.config/herdr/sessions/crowsnest/herdr.sock", nil },
+		Getenv:  func(string) (string, bool) { return "", false },
+		Environ: func() []string { return nil },
+		Listen:  func(string) error { return nil },
+		HTTPGet: func(context.Context, string, map[string]string) (int, []byte, error) {
+			return 0, nil, errors.New("demo")
+		},
+		HerdrSocket: func(context.Context, string) (string, error) {
+			return "/home/demo/.config/herdr/sessions/crowsnest/herdr.sock", nil
+		},
 		HerdrPing: func(context.Context, string) (herdr.Pong, error) {
 			if state == DemoHerdrMissing {
 				return herdr.Pong{}, errors.New("not running")
