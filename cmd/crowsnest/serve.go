@@ -192,6 +192,18 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	}
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, logger)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
+	startJobs(ctx, jobService, client, logger)
+	startSpend(ctx, cfg, meter, jobService, logger)
+	var pokerRef atomic.Pointer[orch.Poker]
+	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
+	tender := newTender(cfg, client, db, journalLog, orchestrator, conversations, logger)
+	poker := startPoker(ctx, cfg, db, events, pokeServices{
+		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
+		tasks: scheduleTasks{service: scheduleService}, tender: tender, leads: refs.projects.leads.Load,
+	}, client, logger)
+	pokerRef.Store(poker)
+	tasksFor := func(projectID int64) orch.TaskSource { return scheduleTasks{service: scheduleService, projectID: projectID} }
+	refs.projects.taskSource.Store(&tasksFor)
 	leads := refs.projects.startLeads(ctx, leadDeps{
 		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, logger: logger,
 		onStatus: func(project projects.Project, status orch.Status) {
@@ -201,16 +213,6 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 			events.Publish(hub.Event{Type: "lead", Data: projects.LeadStatus{Status: status, ProjectID: project.ID, Slug: project.Slug, Running: true}})
 		},
 	})
-	startJobs(ctx, jobService, client, logger)
-	startSpend(ctx, cfg, meter, jobService, logger)
-	var pokerRef atomic.Pointer[orch.Poker]
-	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
-	tender := newTender(cfg, client, db, journalLog, orchestrator, conversations, logger)
-	poker := startPoker(ctx, cfg, db, events, pokeServices{
-		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
-		tasks: scheduleTasks{service: scheduleService}, tender: tender, leads: leads,
-	}, client, logger)
-	pokerRef.Store(poker)
 
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,

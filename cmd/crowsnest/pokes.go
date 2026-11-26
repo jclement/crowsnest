@@ -37,7 +37,7 @@ type pokeServices struct {
 	tender       orch.Upkeep     // compaction and the daily new conversation (7.9)
 	// leads are the projects' leads; each has a poker of its own for its project's jobs and
 	// the questions those jobs asked (DESIGN.md 21.2). Nil: none.
-	leads *projects.Leads
+	leads func() *projects.Leads
 }
 
 // startPoker builds the poker, feeds it from the hub, and runs it until ctx ends.
@@ -126,10 +126,10 @@ func handlePokeEvent(ctx context.Context, event hub.Event, poker *orch.Poker, se
 
 // leadOf is the poker of a project's running lead, or nil.
 func leadOf(services pokeServices, projectID int64) *orch.Poker {
-	if projectID == 0 || services.leads == nil {
+	if projectID == 0 || services.leads == nil || services.leads() == nil {
 		return nil
 	}
-	if lead := services.leads.Get(projectID); lead != nil {
+	if lead := services.leads().Get(projectID); lead != nil {
 		return lead.Poker
 	}
 	return nil

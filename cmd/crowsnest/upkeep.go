@@ -100,10 +100,15 @@ func (a scheduleJobs) JobState(ctx context.Context, id string) (string, bool, er
 }
 
 // scheduleTasks adapts the schedule service to the poker's TaskSource.
-type scheduleTasks struct{ service *schedule.Service }
+// scheduleTasks is one standing agent's scheduled tasks: projectID 0 for the orchestrator, else
+// that project's lead (DESIGN.md 7.8, 21.4).
+type scheduleTasks struct {
+	service   *schedule.Service
+	projectID int64
+}
 
 func (a scheduleTasks) DueTasks(ctx context.Context, now time.Time) []orch.ScheduledTask {
-	due := a.service.DueTasks(ctx, now)
+	due := a.service.DueTasksFor(ctx, now, a.projectID)
 	out := make([]orch.ScheduledTask, len(due))
 	for i, task := range due {
 		out[i] = orch.ScheduledTask{Name: task.Name, Text: task.Text, RideAlong: task.RideAlong}
