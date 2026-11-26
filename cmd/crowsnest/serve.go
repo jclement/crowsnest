@@ -51,6 +51,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if !cfg.WebDev && !web.HasApp() {
 		return errors.New("this binary was built without the web app; build it with `mise run build`")
 	}
+	cfg, cleanupDemo, err := demoState(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanupDemo()
 	logger := newLogger()
 	slog.SetDefault(logger)
 	logger.Info("starting crowsnest", "version", version, "config", cfg)

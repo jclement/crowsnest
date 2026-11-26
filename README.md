@@ -55,7 +55,9 @@ named by `--session` (default `crowsnest`) and, if nothing answers, starts
 agents outlive crowsnest. `--demo` needs no herdr at all; it serves an in-memory fake fleet that
 changes every few seconds; its terminals are a built-in toy that echoes what you type (no
 shell ever runs in demo mode), and a scripted orchestrator answers in Chat after a short
-"working" period (its transcripts are written under the state directory, never `~/.claude`).
+"working" period. A demo keeps all its state (database, transcripts, the orchestrator's files)
+in a fresh temporary directory that is removed when it exits: it never touches the real
+database, state directory or `~/.claude`, and a login it hands out is no good anywhere else.
 
 Unless `--no-orchestrator` is given, crowsnest then makes sure a Claude agent named
 `orchestrator` runs in the session: it adopts a live one, or starts `claude` in a workspace
@@ -218,7 +220,7 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | `~/.local/state/crowsnest/<session>/herdr-server.log` | Output of a herdr server crowsnest started |
 | `~/.local/state/crowsnest/<session>/CROWSNEST.md` | The orchestrator's instructions (`--append-system-prompt-file`), rewritten from the embedded template on every start |
 | `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file (empty until the jobs supervisor adds hooks) |
-| `~/.local/state/crowsnest/<session>/demo-claude/` | `--demo` only: the demo agents' transcripts |
+| `$TMPDIR/crowsnest-demo-*/` | `--demo` only: the demo's database, state (the demo agents' transcripts) and orchestrator directory, removed on exit |
 
 ## License
 

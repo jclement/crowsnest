@@ -86,7 +86,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--elevenlabs-api-key` | `ELEVENLABS_API_KEY` | none | Enables talk mode |
 | `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id | TTS voice |
 | `--notify-url` | `CROWSNEST_NOTIFY_URL` | none | POST a one-line notice here when something needs Jeff (ntfy-style) |
-| `--demo` | `CROWSNEST_DEMO` | false | In-memory fake herdr and scripted orchestrator: UI work, hermetic E2E, screenshots |
+| `--demo` | `CROWSNEST_DEMO` | false | In-memory fake herdr and scripted orchestrator: UI work, hermetic E2E, screenshots. All its state (database, state dir, orchestrator dir) lives in a temporary directory removed on exit, never the real ones (R1 L2) |
 | `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs base URL (section 13; tests point it at a fake) |
 | `--i-know-this-is-open` | `CROWSNEST_I_KNOW_THIS_IS_OPEN` | false | Allow `--no-auth` on an open bind (startup rules) |
 | `--allow-default-session` | `CROWSNEST_ALLOW_DEFAULT_SESSION` | false | Allow `--session default` (startup rules) |
