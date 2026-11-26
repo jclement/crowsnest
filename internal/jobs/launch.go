@@ -36,6 +36,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 // LaunchOptions configure how job agents are started.
@@ -57,6 +58,9 @@ type LaunchOptions struct {
 	// bound to the pane and the job, and a token per start for its MCP server and hooks. The
 	// socket derives the caller's job from them, never from CROWSNEST_JOB. nil: no tokens.
 	Identity *agentid.Registry
+	// RemoteControlPrefix, when set (--job-remote-control), starts Claude job agents with Remote
+	// Control named "<prefix> <job id> <short title>" (DESIGN.md 7.10). Empty: off.
+	RemoteControlPrefix string
 }
 
 func (o LaunchOptions) shellWait() time.Duration {
@@ -521,11 +525,24 @@ func (s *Service) agentArgs(job Job, files jobFiles, resume bool) []string {
 	if job.Model != "" {
 		args = append(args, "--model", job.Model)
 	}
+	if prefix := s.opts.Launch.RemoteControlPrefix; prefix != "" {
+		args = append(args, "--remote-control", RemoteControlName(prefix, job))
+	}
 	args = append(args, "--append-system-prompt-file", files.prompt, "--settings", files.settings)
 	if files.mcpConfig != "" {
 		args = append(args, "--mcp-config", files.mcpConfig)
 	}
 	return args
+}
+
+// remoteControlTitleRunes keeps a job's Remote Control name readable in a phone's session list.
+const remoteControlTitleRunes = 40
+
+// RemoteControlName is a job agent's Remote Control session name: the instance name, the job id
+// and the start of its title, on one clean line (the title can be an agent's words).
+func RemoteControlName(prefix string, job Job) string {
+	title := termtext.Cap(termtext.Clean(job.Title), remoteControlTitleRunes)
+	return strings.TrimSpace(prefix + " " + job.ID + " " + title)
 }
 
 func sessionOf(agent herdr.Agent) string {
