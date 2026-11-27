@@ -10,7 +10,8 @@ import { ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-reac
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { factsSummary, folderWarnings, hostNote, isPathInput, type FolderFacts } from "../../lib/browse";
 import { leadStartLabels, permissionModes, suggestName, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
-import { useDirs, useFolderFacts, useRoles } from "../../lib/queries";
+import { useDirs, useEngines, useFolderFacts, useRoles } from "../../lib/queries";
+import { engineInfo, withoutSentence } from "../../lib/engines";
 import { DirPicker } from "../browse/DirPicker";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
@@ -73,6 +74,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
   const [trustFolder, setTrustFolder] = useState(true);
   const dirs = useDirs();
   const roles = useRoles();
+  const codexInfo = engineInfo(useEngines().data, "codex");
   const typed = useSettled(creating && isPathInput(dir) ? dir.trim() : "", TYPED_FACTS_DELAY_MS);
   const factsQuery = useFolderFacts(typed);
   const facts = factsQuery.data && typed !== "" ? factsQuery.data : undefined;
@@ -218,8 +220,9 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
             <select value={engine} onChange={(event) => setEngine(event.target.value)} className={inputClass}>
               <option value="">Default (Claude)</option>
               <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
+              <option value="codex">Codex{codexInfo && !codexInfo.installed ? " (not installed)" : ""}</option>
             </select>
+            {engine === "codex" && codexInfo && <span className="font-normal text-warning">{withoutSentence(codexInfo)}</span>}
           </label>
           <label className={labelClass}>
             Model

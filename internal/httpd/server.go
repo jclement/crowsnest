@@ -31,6 +31,7 @@ import (
 	"github.com/jclement/crowsnest/internal/changes"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/digest"
+	"github.com/jclement/crowsnest/internal/engines"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
@@ -119,6 +120,9 @@ type Deps struct {
 	// FolderTrust records the agents' own folder-trust answer for a project folder the human
 	// chose (DESIGN.md 8.2.1) and reads whether a folder is trusted. Nil: neither is offered.
 	FolderTrust FolderTrust
+	// Engines answers GET /engines with this machine's facts (installed, Codex's models). Nil: the
+	// table without them.
+	Engines *engines.Catalog
 	// Schedule serves /schedule (scheduled tasks, 7.8). Nil: those routes answer 503.
 	Schedule *schedule.Service
 	// Spend serves /spend and /spend/summary (7.11). Nil: they answer 503.
@@ -296,6 +300,7 @@ func (s *Server) routes() http.Handler {
 	s.registerJournalRoutes(mux)
 	s.registerScheduleRoutes(mux)
 	s.registerProjectRoutes(mux)
+	s.registerEngineRoutes(mux)
 	s.registerVoiceRoutes(mux)
 	s.registerPushRoutes(mux)
 	s.registerSpendRoutes(mux)

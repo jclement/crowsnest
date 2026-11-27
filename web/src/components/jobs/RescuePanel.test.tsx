@@ -100,3 +100,33 @@ describe("RescuePanel", () => {
     expect(screen.queryByRole("list", { name: "Rescue actions" })).toBeNull();
   });
 });
+
+describe("RescuePanel for a Codex job", () => {
+  it("offers only what works on Codex, and says why the rest is not offered", async () => {
+    const fleet = makeFleet();
+    fleet.agents = [{ ...(fleet.agents[0] as (typeof fleet.agents)[number]), pane_id: "w3:p1", name: "job-5", status: "idle" }];
+    const refusal = (id: string) => ({ id, available: false, refusal: `No ${id} on Codex.` });
+    stubApi((call) => {
+      if (call.path === "/fleet") return { body: { data: fleet } };
+      if (call.path === "/engines")
+        return {
+          body: {
+            data: [
+              { id: "claude", name: "Claude Code", installed: true, summary: "", capabilities: [], without: [], models: [{ id: "sonnet", label: "Sonnet" }],
+                rescue: ["interrupt", "continue", "nudge", "unstick", "restart", "compact", "model"].map((id) => ({ id, available: true })) },
+              { id: "codex", name: "Codex", installed: true, summary: "", capabilities: [], without: ["Answer receipts"], models: [{ id: "gpt-x", label: "GPT-X" }],
+                rescue: [...["interrupt", "continue", "nudge", "unstick"].map((id) => ({ id, available: true })), refusal("restart"), refusal("compact"), refusal("model")] },
+            ],
+          },
+        };
+      return undefined;
+    });
+    renderWithClient(<RescuePanel job={{ ...job, engine: "codex" }} defaultOpen />);
+    expect(await screen.findByTestId("rescue-engine-note")).toHaveTextContent("Not offered for a Codex job: No restart on Codex. No compact on Codex. No model on Codex.");
+    expect(screen.getByRole("button", { name: /Interrupt \(Esc\)/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Restart/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Compact now/ })).toBeNull();
+    expect(screen.queryByLabelText("Model")).toBeNull();
+    expect(screen.queryByText(/sonnet|opus|haiku|Claude/)).toBeNull();
+  });
+});

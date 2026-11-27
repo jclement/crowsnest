@@ -140,6 +140,11 @@ export function useRoles() {
   return useQuery({ queryKey: queryKeys.roles, queryFn: endpoints.roles, staleTime: 5 * 60_000 });
 }
 
+/** What each engine gives a job (GET /engines): the one table the form, cards and Rescue read. */
+export function useEngines() {
+  return useQuery({ queryKey: queryKeys.engines, queryFn: endpoints.engines, staleTime: 10 * 60_000 });
+}
+
 export function useDirs() {
   return useQuery({ queryKey: queryKeys.dirs, queryFn: endpoints.dirs });
 }

@@ -8,7 +8,17 @@ import (
 	"github.com/jclement/crowsnest/internal/agenttrust"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/doctor"
+	"github.com/jclement/crowsnest/internal/engines"
 )
+
+// engineCatalog is GET /engines' source: this machine's CLIs, except in the demo, whose table must
+// not depend on what is installed (the hermetic browser suite runs it).
+func engineCatalog(cfg config.Config) *engines.Catalog {
+	if cfg.Demo {
+		return nil
+	}
+	return engines.NewCatalog()
+}
 
 // folderTrust is httpd.FolderTrust over the agents' real config files (DESIGN.md 8.2.1). The
 // setting is read live on every call. A demo instance writes into its own state directory, never

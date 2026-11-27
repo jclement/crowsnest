@@ -34,6 +34,7 @@ import type {
 } from "./landing";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
 import type { ContextInfo, ScheduleInput, ScheduleView } from "./schedule";
+import type { EngineInfo } from "./engines";
 import type { LeadAction, LeadStatus, ProjectCreateInput, ProjectInput, ProjectList, ProjectView } from "./projects";
 import type { AgentInstructions, InstructionsList, LayerDetail, LayerScope } from "./instructions";
 import type { AttachmentLimits } from "./attachments";
@@ -259,6 +260,8 @@ export const endpoints = {
     }),
   jobAction: (id: string, action: "cancel" | "nudge" | "resume") => api<Job>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
   roles: () => api<RoleInfo[]>("/roles"),
+  /** What each engine gives a job (DESIGN.md 20.1). */
+  engines: () => api<EngineInfo[]>("/engines"),
   dirs: () => api<DirEntry[]>("/dirs"),
   // ---- The folder picker (DESIGN.md 4.23) ----
   browse: (path: string, options: BrowseOptions = {}) =>
@@ -531,6 +534,7 @@ export const queryKeys = {
   digests: ["digests"] as const,
   digestSettings: ["digests", "settings"] as const,
   roles: ["roles"] as const,
+  engines: ["engines"] as const,
   dirs: ["dirs"] as const,
   browse: (path: string, options: BrowseOptions) => ["browse", path, !!options.files, !!options.hidden] as const,
   browseFacts: (path: string) => ["browse-facts", path] as const,

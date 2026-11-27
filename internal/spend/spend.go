@@ -40,8 +40,9 @@ func tokensOf(c store.SpendCounts) Tokens {
 
 // Not-measured reasons (Summary.Reason).
 const (
-	// ReasonCodex: Codex records its usage in its own session files, which crowsnest does not map
-	// to jobs; shown as "not measured", never as zero.
+	// ReasonCodex: a Codex job whose thread crowsnest never learned (started before Codex jobs had
+	// hooks, or its SessionStart hook never ran), so its rollout cannot be found; shown as "not
+	// measured", never as zero. A Codex job with a known thread is measured from its rollout.
 	ReasonCodex = "codex"
 	// ReasonOrchestrator: the orchestrator does the job in its own conversation, so its use is on
 	// the orchestrator's line.
@@ -142,6 +143,7 @@ type JobInfo struct {
 	Engine       string // claude or codex
 	Orchestrated bool   // held by the orchestrator: its use is on the orchestrator's line
 	LeadHeld     bool   // held by a project's lead: its use is on the lead's line
+	SessionKnown bool   // its agent's session (Codex: thread) is known, so it can be measured
 	StartedAt    *time.Time
 	SettledAt    *time.Time
 }
@@ -174,7 +176,7 @@ func (r *Reader) Summaries(ctx context.Context, jobs []JobInfo) (map[string]Summ
 			out[job.ID] = Summary{Reason: ReasonLead, Models: []string{}}
 		case job.Orchestrated:
 			out[job.ID] = Summary{Reason: ReasonOrchestrator, Models: []string{}}
-		case job.Engine == "codex":
+		case job.Engine == "codex" && !job.SessionKnown:
 			out[job.ID] = Summary{Reason: ReasonCodex, Models: []string{}}
 		default:
 			subjects = append(subjects, job.ID)

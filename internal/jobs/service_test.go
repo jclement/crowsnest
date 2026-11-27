@@ -409,6 +409,52 @@ func TestCodexGetsTheProtocolInItsFirstPrompt(t *testing.T) {
 	}
 }
 
+// With an agent socket and a token, a Codex job gets crowsnest's hooks for its session (DESIGN.md
+// 20.1): approvals on request, every hook pointing at the job's own script, which runs `crowsnest
+// hook` with the job's token file. The command typed into the pane stays short.
+func TestCodexGetsCrowsnestsHooks(t *testing.T) {
+	r := newRig(t, func(o *Options) { o.Launch.Identity = agentid.New(o.Store, nil) })
+	r.create(CreateInput{Brief: "Port it", Dir: t.TempDir(), Engine: "codex"})
+	start := r.fake.Starts()[0]
+	if argValue(start.Args, "--ask-for-approval") != "on-request" || argValue(start.Args, "--sandbox") != "workspace-write" || !slices.Contains(start.Args, "--dangerously-bypass-hook-trust") {
+		t.Fatalf("codex start %+v", start.Args)
+	}
+	joined := strings.Join(start.Args, " ")
+	for _, event := range []string{"hooks.Stop=", "hooks.SessionStart=", "hooks.PostToolUse=", "hooks.PermissionRequest="} {
+		if !strings.Contains(joined, event) {
+			t.Errorf("no %s in %s", event, joined)
+		}
+	}
+	if len(joined) > 1500 {
+		t.Errorf("the start command is %d characters; keep it short (DESIGN 7 step 4)", len(joined))
+	}
+	script := regexp.MustCompile(`command="'([^']+/codex-hook)' stop"`).FindStringSubmatch(joined)
+	if script == nil {
+		t.Fatalf("the Stop hook does not run the job's script: %s", joined)
+	}
+	body, err := os.ReadFile(script[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(script[1])
+	if !strings.Contains(string(body), "'/opt/crowsnest/bin/crowsnest' hook \"$@\" --socket") || !strings.Contains(string(body), "--token-file") || info.Mode().Perm() != 0o500 {
+		t.Errorf("script (%v):\n%s", info.Mode().Perm(), body)
+	}
+}
+
+// Rescue's restart is refused for a Codex job, with the engines table's sentence (DESIGN.md 20.1).
+func TestRestartAgentRefusesCodex(t *testing.T) {
+	r := newRig(t, nil)
+	job := r.create(CreateInput{Brief: "Port it", Dir: t.TempDir(), Engine: "codex"})
+	_, err := r.svc.RestartAgent(context.Background(), job.ID)
+	if !IsValidation(err) || !strings.Contains(err.Error(), "Codex") {
+		t.Fatalf("restart of a Codex job: %v", err)
+	}
+	if len(r.fake.Starts()) != 1 {
+		t.Errorf("nothing may be restarted: %d starts", len(r.fake.Starts()))
+	}
+}
+
 // ---- Hooks ---------------------------------------------------------------------------------
 
 func TestStopHookNudgesUntilDeclaredAndProgressResetsTheBudget(t *testing.T) {

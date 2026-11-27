@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/attach"
+	"github.com/jclement/crowsnest/internal/engines"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/journal"
@@ -154,6 +155,10 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), promptTimeout)
 	defer cancel()
+	if refusal := s.engineCommandRefusal(ctx, target, body.Text); refusal != "" {
+		writeError(w, http.StatusConflict, codeConflict, refusal)
+		return
+	}
 	delivered, ok := s.promptAttachments(w, r, target, request.Attachments)
 	if !ok {
 		return
@@ -248,4 +253,28 @@ func (s *Server) relaunchOrchestrator(w http.ResponseWriter, r *http.Request, wh
 		s.deps.Logger.Info("orchestrator relaunched", "operation", what, "session", status.SessionID)
 		writeData(w, http.StatusOK, status)
 	}
+}
+
+// engineCommandRefusal refuses the Rescue sheet's Claude-only commands (/compact, /model <name>)
+// typed to a Codex agent (DESIGN.md 20.1): engines says which actions an engine supports and the
+// sentence for the rest. Anything else, and any agent herdr cannot name, is let through.
+func (s *Server) engineCommandRefusal(ctx context.Context, target, text string) string {
+	command := strings.Fields(strings.TrimSpace(text))
+	if len(command) == 0 {
+		return ""
+	}
+	action := ""
+	switch {
+	case command[0] == "/compact" && len(command) == 1:
+		action = engines.RescueCompact
+	case command[0] == "/model" && len(command) == 2:
+		action = engines.RescueModel
+	default:
+		return ""
+	}
+	agent, err := s.deps.Herdr.AgentGet(ctx, target)
+	if err != nil {
+		return ""
+	}
+	return engines.RescueRefusal(agent.Agent, action)
 }

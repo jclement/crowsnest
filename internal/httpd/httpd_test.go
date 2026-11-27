@@ -141,7 +141,7 @@ type harnessOptions struct {
 	projects *projects.Service
 	// folderTrust: nil, no folder trust offered.
 	folderTrust FolderTrust
-	leads    *projects.Leads
+	leads       *projects.Leads
 	// Extra allowed Host names (the tailnet name detected at start).
 	hostNames []string
 	// The System page, Settings and the first run (system_test.go); nil: 503
