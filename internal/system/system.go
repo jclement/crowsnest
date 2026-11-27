@@ -57,13 +57,13 @@ type Options struct {
 	// process's own flags and environment. It validates a change before it is saved.
 	Reload func(stored map[string]string) (config.Config, error)
 	// Apply is told the new config after a change is saved, to apply what can be applied live.
-	Apply  func(previous, next config.Config)
-	Env    doctor.Env // the doctor's view of the machine; the demo's fake states replace it
+	Apply func(previous, next config.Config)
+	Env   doctor.Env // the doctor's view of the machine; the demo's fake states replace it
 	// OnStarted is called when the first-run checklist's Start is pressed (serve greets the
 	// person from the orchestrator once it is up). Nil: nothing.
 	OnStarted func()
-	Logger *slog.Logger
-	Now    func() time.Time
+	Logger    *slog.Logger
+	Now       func() time.Time
 }
 
 // Service is the server's view of itself.

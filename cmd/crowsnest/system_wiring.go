@@ -41,10 +41,10 @@ const setupWorkspace = "setup"
 type liveServices struct {
 	// greet sends the first-run greeting (set once the orchestrator exists).
 	greeter atomic.Pointer[func()]
-	poker  atomic.Pointer[orch.Poker]
-	tender atomic.Pointer[orch.Tender]
-	jobs   atomic.Pointer[jobs.Service]
-	system atomic.Pointer[system.Service]
+	poker   atomic.Pointer[orch.Poker]
+	tender  atomic.Pointer[orch.Tender]
+	jobs    atomic.Pointer[jobs.Service]
+	system  atomic.Pointer[system.Service]
 }
 
 // greet runs the first-run greeting, when it is wired.

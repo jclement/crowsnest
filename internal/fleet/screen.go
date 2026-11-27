@@ -65,9 +65,9 @@ type Dialog struct {
 type DialogOption struct {
 	Key      string   `json:"key"`
 	Keys     []string `json:"keys,omitempty"`
-	Label    string `json:"label"`
-	Selected bool   `json:"selected"`          // the highlighted (cursor) option
-	Warning  string `json:"warning,omitempty"` // set when the label itself is risky
+	Label    string   `json:"label"`
+	Selected bool     `json:"selected"`          // the highlighted (cursor) option
+	Warning  string   `json:"warning,omitempty"` // set when the label itself is risky
 }
 
 // dialogFooterLines is how many of the last non-blank lines may hold the footer hint.
