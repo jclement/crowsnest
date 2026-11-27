@@ -1,10 +1,10 @@
 # Crowsnest: status
 
-Living record kept by the lead agent. Last updated: 2026-11-27 10:55 (CST, read from the clock). Jeff has been awake and trying it since about 06:30.
+Living record kept by the lead agent. Last updated: 2026-11-27 15:10 (CST, read from the clock). Jeff has been awake and trying it since about 06:30.
 
 ## In one paragraph
 
-Crowsnest is one Go binary that starts a herdr session and a Claude orchestrator and serves a phone-friendly web app for running coding agents across several projects. `v0.1.0` was released on 2026-11-26. `main` is now far beyond it and every builder branch is merged: local gates are green on the tip (677 unit tests; the browser suite passes apart from one load-dependent flake). Two things stand between `main` and a tag: **CI on GitHub is red** (a Linux-only database error I could not reproduce, plus flaky browser tests; a builder is on it), and **the R7 review's findings** (below; a builder is on those too).
+Crowsnest is one Go binary that starts a herdr session and a Claude orchestrator and serves a phone-friendly web app for running coding agents across several projects. `v0.1.0` was released on 2026-11-26. `main` is now far beyond it, every builder branch is merged and no builder is running. On the tip (`44883af` plus docs): 696 unit tests and 591 browser tests pass locally, and CI on GitHub is green again (it was red for a day; the cause was a test double-closing a file descriptor). Jeff called it "feature completeish, ready to try" at about 14:30. What stands between `main` and a `v0.2.0` tag: **nobody has used it for real work or on a real phone**, the R7 fixes have not been re-reviewed, and the real-Claude suites have not had one clean run on the final tip.
 
 ## Try it
 
@@ -50,7 +50,7 @@ Seven rounds are in `reviews/`. R1 to R5 were fixed and verified by a later roun
 - **The R6 fix builder reports all 28 findings real and fixed, each with a test.** Holds are now kept apart from agent-declared state and every agent call goes through one function, table-tested per hold and verb; the check refuses a dirty tree at the start and voids the run if the tree is dirty or HEAD moved at the end. It still runs in the job's own worktree, not a separate copy (an earlier version of this file said "clean copy"; that was my error, not the builder's).
 - What the builder says an agent can still do: write files as the same user (crowsnest's own risk rules, `.git/config`, role files); fake its own usage limit (two colluding agents can hold an engine for a day at most; the human can clear it); and persuade with an ordinary question. "Accepted" means the project's own check command passed on that commit: the branch can change that command, so it is not independent evidence.
 
-## Merged this morning (27 Nov), and how it was checked
+## Merged on 27 Nov, and how it was checked
 
 Each was merged, then `mise run check` and the hermetic browser suite were run on `main` by me.
 
@@ -65,19 +65,13 @@ Each was merged, then `mise run check` and the hermetic browser suite were run o
 | Live diff viewer: syntax colour, split/unified, Viewed marks tied to content, fullscreen, `/diff` | Go tests on real git repos; journeys; one real-Claude run where an edit appeared live | Line comments were designed, not built; a real 5,000-line file; swipe on a real phone |
 | Design pass and five paired light/dark themes | Token and contrast tests; axe on 10 views x 5 themes x 2 modes; whole suite also green under the phosphor theme | View-level polish on Inbox, Chat, Projects, job detail; `/diff` fullscreen in the theme axe run |
 | Built-in manual (`docs/manual`, Help in the app, contextual "?") | Link, shortcut and setting checks so it cannot drift; journeys | Its pages on first run, Tailscale, push, voice, Remote Control and backup were written from the code, not from watching them |
+| CI green: a double-closed descriptor in a test, two product races (hub subscription; a job and its events in one transaction), spec races | CI green on the branch and on `main`; stress runs | `projects.spec.ts:135` flake and one 10-minute Go timeout never reproduced |
+| R7 fixes, isolated check | Local gates, real-herdr tiers | See Reviews above |
+| Publish to your tailnet (`tailscale serve` as a supervised child; System page card with QR; never Funnel; refuses without a login) | Fake `tailscale` binary only: port choice, never-clobber, child gone after SIGKILL | **Any real tailscale.** The first real publish is Jeff's; checklist in the builder's report |
 
 ## In flight
 
-| Agent | Branch | Doing |
-|---|---|---|
-| `crow-fix7` | `wip/fix-r7` | The R7 findings |
-| `crow-ci` | `wip/ci` | CI red on every push since about `3f2111b`: `TestServeStartsWithoutHerdrAndRecovers` fails with a SQLite write error on the runner only (passes in a Linux container here), `TestRunFollowsFleetEvents`, a voice test on Linux WebKit, and flaky browser tests. May push its branch and open one draft PR to run CI |
-
-Known flake on this machine under load, passing alone: `projects.spec.ts:135` (chat with a lead), seen three times; `remote.spec.ts:43` and `jobs.spec.ts:31` once or twice each. Once the whole `cmd/crowsnest` Go package timed out at ten minutes in a full gate and passed in 55 s alone; not explained.
-
-- **R7 (Codex and Opus security, on `3456e19`)** verified them. Opus: every R6 security finding fixed or partly fixed, "no way around a human gate" found, safe on a tailnet with a password. Codex: 6 of 13 fixed, 7 partly, and **not fit to tag**. New findings, being fixed on `wip/fix-r7`:
-  - high: the check can still be fooled by changing files during the run and restoring them, because it runs in the live worktree (R7-C01); a crash between saving a parent's budget hold and passing it to queued children loses the children's hold for good (R7-C02);
-  - medium: "Allow and remember" on an elevated non-shell tool remembers the tool name, so every later call to that tool is allowed (R7-S1); opening the diff of a hostile job can fill the disk (R7-S2); bidi and invisible characters are not flagged in the diff or review cards (R7-S3); restore brings back check commands and instruction layers (R7-S4); "require all files viewed" fails open (R7-C07); several continuation and delivery races in budgets, waits and check feedback.
+Nothing. Waiting on Jeff: how to install on quark and bedev (Homebrew only has `v0.1.0`; a current brew install needs a `v0.2.0` tag, which is his call).
 
 ## Decisions and things only Jeff can do
 

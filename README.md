@@ -42,50 +42,6 @@ building it; the manual explains using it:
   terminal](docs/manual/how-to/rescue.md), [landing](docs/manual/how-to/review-and-land.md) and
   [acceptance](docs/manual/concepts/acceptance.md).
 - [What crowsnest protects, and what it does not](docs/manual/safety.md).
-||||||| 6c3ef9f
-**Approvals and the needs-you tray** (DESIGN.md 8.7). When a Claude agent crowsnest started is
-about to ask for a permission, a `PermissionRequest` hook turns the request into an approval card:
-a Bash command with its directory, an edit as a diff, a URL, an MCP call, rated low, elevated or
-dangerous. Allow it once or deny it with a note from a tray that sits on every view (bottom-right
-on a desktop, a bar above the bottom nav on a phone; `g` then `n` focuses it), from the Inbox, or,
-for low-risk ones, from a notification's buttons. **Low** means the call matched a list of
-known-harmless shapes (reading files, read-only git, `go test`, the test and lint scripts…), read
-after quoting, wrappers, `sh -c` strings and git's global options are taken apart. Anything else
-is at least elevated, and so is a summary too long to show whole. Questions that grant something
-(a land request, a held job, any allow or approve) are never answered from a notification
-(DESIGN.md 4.22). The agent waits on the hook and goes on with no
-terminal dialog to answer; the dialog is still on its terminal meanwhile, and whichever is
-answered first wins. A dangerous call needs a second confirmation, "always allow" is only in the
-terminal, and anything that goes wrong falls back to Claude's own dialog, never to an allow.
-
-So the phone is not a tap per test run, crowsnest keeps **approval rules** of its own (DESIGN.md
-8.7, Policy): on a project's page, "Allow Bash commands matching `go test *`", "Allow edits under
-`internal/`", "Allow the tool `WebSearch`", each shown with what it would have matched in the
-project's last week before you save it; "Allow and remember for this job" on a card, gone when the
-job ends; and "Allow N low-risk calls from <agent>" for one job's waiting calls. A matching call is
-allowed by the hook at once and journalled on the job's timeline. A dangerous call is never allowed
-by a rule, and a rule allows an elevated call only when you said so. Pending approvals survive a
-crowsnest restart for 150 s, enough for their hooks to come back. A `PreToolUse` guard refuses outright a few commands no agent should run unattended (reaching a
-protected host, pushing onto a protected branch, `herdr server stop`, another herdr session).
-
-**On a phone** (DESIGN.md 23). Every question, approval or terminal dialog opens as a **decision
-packet** (`/decide?item=…`): the project and job, the ask, what each choice does, the
-recommendation, then the evidence (the diff behind a file list, the command, the agent's last
-message), with the answer in a bar at the bottom under your thumb. Your note survives rotating the
-phone or switching apps; a decision someone already took says so. Notifications say the project,
-the job, the question and the recommendation, and open the packet; where the phone shows buttons, a
-routine question offers its recommended option and Snooze, a low-risk call whose command fits
-offers Allow and Deny, and anything that widens what agents may do offers nothing. A stuck job has
-**Rescue** buttons (interrupt, continue, nudge, restart on the same conversation, compact, switch
-model, the dialog's own options), so a 44-column terminal is the last resort; when you do need
-it, the key bar fits the screen and has Copy and ^C. With talk mode on, Now's job box has a mic:
-hold, speak ("Website: fix the checkout validation"), check the readback, Create, and Undo for a
-few seconds. `docs/PHONE-CHECK.md` is the checklist for a real iPhone.
-
-A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
-default, serves nothing but a token-gated setup page until a login exists (or an explicit
-`--no-auth`), and checks Host and Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the
-security model.
 
 ## Getting started
 
