@@ -261,6 +261,11 @@ func startDigest(ctx context.Context, d digestDeps) *digest.Service {
 	})
 	if !d.cfg.Demo {
 		go service.Run(ctx)
+	} else if list, err := service.List(ctx, 1); err == nil && len(list) == 0 {
+		// --demo shows one digest in the list and the Inbox (DESIGN.md 7.12).
+		if _, err := service.Start(ctx); err != nil {
+			d.logger.Warn("seeding the demo digest", "err", err)
+		}
 	}
 	return service
 }

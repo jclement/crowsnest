@@ -210,7 +210,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	if cfg.Demo {
 		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)
 	}
-	startJobs(ctx, jobService, client, projectOf, logger)
+	startJobs(ctx, jobService, client, projectOf, cfg.StateDir, logger)
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, ctl, logger)
