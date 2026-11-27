@@ -198,6 +198,21 @@ type Job struct {
 	// Spend is what the job's agent has used so far (7.11); nil when the server measures nothing.
 	Spend *spend.Summary `json:"spend,omitempty"`
 
+	// Landing and review (DESIGN.md 6.7, 6.11).
+	BaseBranch    string     `json:"base_branch"`
+	WalkthroughMD string     `json:"walkthrough_md"`
+	Reviewer      string     `json:"reviewer"`            // what the job asked for: "" default, off, claude, codex
+	ReviewOf      string     `json:"review_of,omitempty"` // a reviewer job: the job it reviews
+	ReviewRound   int        `json:"review_round"`        // rounds the job has been through
+	ReviewVerdict string     `json:"review_verdict"`      // "" | approve | changes | error
+	ReviewMD      string     `json:"review_md"`           // the latest round's findings
+	LandState     string     `json:"land_state"`          // "" | merged | pr | discarded
+	LandDetail    string     `json:"land_detail"`         // a sentence, or the PR's address
+	LandedAt      *time.Time `json:"landed_at"`
+	TornDownAt    *time.Time `json:"torn_down_at"`
+	LandRequest   string     `json:"land_request,omitempty"` // a lead's request waiting on the human
+	StartAnyway   bool       `json:"start_anyway"`
+
 	isolate   bool // the job asked for a worktree (Isolated)
 	briefSent bool // the brief reached the agent (a restart resumes rather than briefs again)
 }
@@ -229,6 +244,8 @@ const (
 	EventFail     = "fail"
 	EventChild    = "child"
 	EventSession  = "session"
+	EventReview   = "review" // the review gate (6.7)
+	EventLand     = "land"   // merged, pushed, discarded, torn down (6.11)
 )
 
 // Detail is a job with its timeline and questions (GET /jobs/{id}).

@@ -118,6 +118,9 @@ type Options struct {
 	// Throttle limits the job agents running at once and holds new starts on a busy machine
 	// (6.12). Nil: no limit.
 	Throttle StartThrottle
+	// Landing configures the review gate and Land (DESIGN.md 6.7, 6.11). Zero: no review gate,
+	// merge commits, no protected branches.
+	Landing LandingOptions
 }
 
 // InstructionLayers is what the launcher needs of internal/instructions, as an interface so that
@@ -512,6 +515,12 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 	}
 	if r.ParentID > 0 {
 		job.ParentID = FormatID(r.ParentID)
+	}
+	job.BaseBranch, job.WalkthroughMD, job.Reviewer, job.ReviewRound = r.BaseBranch, r.WalkthroughMD, r.Reviewer, r.ReviewRound
+	job.ReviewVerdict, job.ReviewMD, job.LandState, job.LandDetail = r.ReviewVerdict, r.ReviewMD, r.LandState, r.LandDetail
+	job.LandedAt, job.TornDownAt, job.LandRequest, job.StartAnyway = timePtr(r.LandedAt), timePtr(r.TornDownAt), r.LandRequest, r.StartAnyway
+	if r.ReviewOf > 0 {
+		job.ReviewOf = FormatID(r.ReviewOf)
 	}
 	job.DoingNow = doingNow(r, s.opts.Now())
 	return job

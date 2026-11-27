@@ -79,6 +79,7 @@ func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
 	if !s.cancelEffect(job.ID) {
 		s.interrupt(ctx, job.PaneID)
 	}
+	s.afterSettled(ctx, job)
 	return job, nil
 }
 

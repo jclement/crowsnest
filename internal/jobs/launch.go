@@ -36,6 +36,7 @@ import (
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/landing"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/termtext"
@@ -163,6 +164,7 @@ func (s *Service) startJobAgent(ctx context.Context, cl claim, job Job) error {
 		r.PaneID, r.WorkDir, r.WorktreeBranch, r.AgentName, r.ClaudeSessionID = pane.paneID, pane.workDir, pane.branch, AgentName(job.ID), sessionID
 		// The directory its children may use, fixed now, before its agent has run (R3-H1).
 		r.RootDir = confinementRoot(pane.workDir)
+		r.BaseBranch, r.BaseCommit, r.WorkspaceID = pane.baseBranch, pane.baseCommit, pane.workspaceID
 		summary := "Opened pane " + pane.paneID + " in " + pane.workDir
 		if pane.branch != "" {
 			summary += " (worktree, branch " + pane.branch + ")"
@@ -312,6 +314,9 @@ func (s *Service) sendText(ctx context.Context, paneID, agent, text string) erro
 
 type preparedPane struct {
 	paneID, workDir, branch string
+	// For a worktree: the main checkout's branch and the commit the worktree started at, and the
+	// workspace herdr opened on it (Land's review and teardown, DESIGN.md 6.11).
+	baseBranch, baseCommit, workspaceID string
 }
 
 // preparePane finds or makes the pane a job's agent starts in.
@@ -341,6 +346,7 @@ func (s *Service) preparePane(ctx context.Context, job Job) (preparedPane, error
 // worktreePane: worktree.create, then a tab with the job env in the new workspace.
 func (s *Service) worktreePane(ctx context.Context, job Job) (preparedPane, error) {
 	branch := branchName(job)
+	baseBranch, _ := landing.CurrentBranch(ctx, job.Dir) // "" when unknown: Land then offers no merge
 	params := herdr.WorktreeCreateParams{Cwd: job.Dir, Branch: branch, Label: AgentName(job.ID)}
 	if s.opts.Launch.WorktreeRoot != "" {
 		params.Path = filepath.Join(s.opts.Launch.WorktreeRoot, strings.ReplaceAll(branch, "/", "-"))
@@ -362,7 +368,9 @@ func (s *Service) worktreePane(ctx context.Context, job Job) (preparedPane, erro
 		return preparedPane{}, fmt.Errorf("opening a tab in the job's worktree: %w", err)
 	}
 	s.bindPaneToken(ctx, token, tab.RootPane.ID, job.ID)
-	return preparedPane{paneID: tab.RootPane.ID, workDir: workDir, branch: branch}, nil
+	baseCommit, _ := landing.Head(ctx, workDir)
+	return preparedPane{paneID: tab.RootPane.ID, workDir: workDir, branch: branch,
+		baseBranch: baseBranch, baseCommit: baseCommit, workspaceID: created.Workspace.ID}, nil
 }
 
 // tabPane: a tab in a workspace open on job.Dir, else a new workspace there.
