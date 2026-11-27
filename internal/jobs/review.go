@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/landing"
 	"github.com/jclement/crowsnest/internal/store"
@@ -87,6 +88,11 @@ func (s *Service) reviewerFor(r store.JobRecord) string {
 	if r.ReviewOf != 0 || r.WorktreeBranch == "" || r.ReviewRound >= maxReviewRounds || r.WorkDir == "" {
 		return ""
 	}
+	return s.reviewEngine(r)
+}
+
+// reviewEngine is the engine r's reviews use, whatever the round ("" for none).
+func (s *Service) reviewEngine(r store.JobRecord) string {
 	switch r.Reviewer {
 	case ReviewerOff:
 		return ""
@@ -128,7 +134,7 @@ func (s *Service) startReview(ctx context.Context, job Job, engine string) {
 	}
 	reviewer, err := s.Create(ctx, CreateInput{
 		Brief: reviewBrief(job), Dir: job.WorkDir, Role: "reviewer", Engine: engine, Isolate: &off, Reviewer: ReviewerOff,
-		reviewOf: mustParse(job.ID),
+		reviewOf: mustParse(job.ID), reviewRound: job.ReviewRound,
 	}, job.ID)
 	if err != nil {
 		s.opts.Logger.Warn("starting a reviewer", "job", job.ID, "err", err)
@@ -197,6 +203,9 @@ func (s *Service) reviewSettled(ctx context.Context, reviewer Job) {
 	if err != nil || parent.State != StateInReview {
 		return
 	}
+	if reviewer.ReviewRound != 0 && reviewer.ReviewRound != parent.ReviewRound {
+		return // a reviewer of an earlier round, settling late: its verdict is not this round's
+	}
 	findings, verdict := reviewer.ResultMD, ParseVerdict(reviewer.ResultMD)
 	switch reviewer.State {
 	case StateFailed:
@@ -233,8 +242,53 @@ func (s *Service) reviewSettled(ctx context.Context, reviewer Job) {
 		s.reviewNeedsHuman(ctx, parent.ID, findings, findings)
 	case parent.ReviewRound >= maxReviewRounds:
 		s.reviewNeedsHuman(ctx, parent.ID, fmt.Sprintf("The reviewer still objects after %d rounds; decide: land it anyway, message the builder, or discard it", maxReviewRounds), findings)
+	case s.heldWhilePaused(ctx, "review:"+parent.ID, "the review findings for "+parent.ID):
+		// Sending the findings starts a builder turn: not while paused (R5-C08). The job stays in
+		// review, which is durable; reconcileReview delivers them at the first tick after resume.
 	default:
 		s.sendBackForChanges(ctx, parent, reviewer, findings, path)
+	}
+}
+
+// reviewAskGrace is how long a job may sit in review with no reviewer for its round before the
+// reconciler starts one: Done starts it a moment after recording the round.
+const reviewAskGrace = time.Minute
+
+// reconcileReview gives every intermediate state of the review gate an owner (R5-C05): a job in
+// review whose round has no reviewer (crowsnest stopped between Done and startReview) gets one;
+// a job whose reviewer has already settled (crowsnest stopped before applying the verdict, or the
+// pause held the findings) has the verdict applied. A reviewer records the round it reviews when
+// it is created, so the round's reviewer is found by that, never by counting. A live reviewer is supervised like any job: if it
+// dies, its own settle lands here.
+func (s *Service) reconcileReview(ctx context.Context, r store.JobRecord) {
+	if State(r.State) != StateInReview || r.AcceptState == AcceptChecking || r.ReviewRound == 0 {
+		return // a running check is accept.go's to finish
+	}
+	reviewers, err := s.opts.Store.ListReviewJobs(ctx, r.ID)
+	if err != nil {
+		return
+	}
+	id := FormatID(r.ID)
+	var current *store.JobRecord
+	for i := range reviewers {
+		if reviewers[i].ReviewRound == r.ReviewRound {
+			current = &reviewers[i] // the newest of this round wins (oldest first)
+		}
+	}
+	switch {
+	case current == nil:
+		if s.opts.Now().Sub(r.LastProgressAt) < reviewAskGrace || s.inflight(id) {
+			return
+		}
+		engine := s.reviewEngine(r)
+		if engine == "" {
+			s.reviewNeedsHuman(ctx, id, "The reviewer could not be started: no reviewer is configured for this job any more", "")
+			return
+		}
+		_ = s.Journal(ctx, id, EventReview, fmt.Sprintf("Round %d had no reviewer (crowsnest stopped before starting it); starting one", r.ReviewRound), nil)
+		s.startReview(ctx, s.toJob(r, 0), engine)
+	case State(current.State).Terminal():
+		s.reviewSettled(ctx, s.toJob(*current, 0))
 	}
 }
 

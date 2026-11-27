@@ -43,7 +43,8 @@ type CreateInput struct {
 	// "claude" or "codex".
 	Reviewer string `json:"reviewer,omitempty"`
 
-	reviewOf int64 // set by the review gate for a reviewer job
+	reviewOf    int64 // set by the review gate for a reviewer job
+	reviewRound int   // and the round it reviews (R5-C05: the reconciler finds a round's reviewer by it)
 	fixOf    int64 // set by AskRebase for a job that brings another job's branch up to date
 }
 
@@ -203,7 +204,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 		Title: titleOf(brief), BriefMD: brief, DoneWhen: strings.TrimSpace(input.DoneWhen), Role: role, Dir: dir,
 		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent, ProjectID: input.ProjectID,
 		State: string(StateQueued), VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: s.opts.Now(),
-		Reviewer: reviewer, ReviewOf: input.reviewOf, FixOf: input.fixOf,
+		Reviewer: reviewer, ReviewOf: input.reviewOf, ReviewRound: input.reviewRound, FixOf: input.fixOf,
 	}, nil
 }
 
@@ -453,6 +454,12 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 				return invalid("job %s is being checked by crowsnest; wait for the result", FormatID(r.ID))
 			}
 			return invalid("job %s is already in review; wait for the reviewer's findings", FormatID(r.ID))
+		}
+		if State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseReview {
+			// The review gate ended in front of the human (R5-C07): only they decide. Another
+			// done would clear the decision with nobody having accepted the findings.
+			return invalid("job %s is waiting for the human's decision after its review (%s); keep working if you like, "+
+				"but done is refused until the human lands it, discards it or sends it back with a message", FormatID(r.ID), oneLine(r.CauseDetail, 160))
 		}
 		s.markProgressLocked(r)
 		r.State, r.ResultMD = string(StateDone), result

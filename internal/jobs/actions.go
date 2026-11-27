@@ -52,6 +52,12 @@ func (s *Service) Message(ctx context.Context, id string, input MessageInput) (o
 		if r.Stuck && Cause(r.Cause) == CauseUnresponsive {
 			r.Stuck, r.Cause, r.CauseDetail = false, "", ""
 		}
+		if State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseReview {
+			// A message is the human's decision to send the job back after its review (R5-C07):
+			// it runs again, and its next done is accepted (the reviewer's verdict stays on it).
+			r.State, r.Cause, r.CauseDetail = string(StateRunning), "", ""
+			c.event(EventReview, "You sent it back to the builder after its review", nil)
+		}
 		c.event(EventMessage, "You: "+oneLine(text, 200), nil)
 		return nil
 	})
