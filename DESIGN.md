@@ -1602,7 +1602,8 @@ a rule) below them are an agent's numbered reply, not a dialog, because Claude h
 box while a dialog is up. The options are the last run numbered 1, 2, 3…; the screen hash is
 SHA-256 over the ANSI-stripped visible screen with trailing spaces and blank lines removed.
 
-**8.3 Telling Jeff.** The tab title and nav badge show the open count; the page uses the browser
+**8.3 Telling Jeff.** The tab title and nav badge show the attention queue's count (section 22: one
+number for every surface); the page uses the browser
 Notification API when permitted; `--notify-url` gets a one-line POST for `blocking` items; Web
 Push (8.5) reaches subscribed devices with no tab open.
 
@@ -1984,14 +1985,14 @@ the fallback that is always there.
   note ("sent with a deny"), and Allow once, Deny, Open terminal. A settled one shows how it
   ended. Keyboard: `y` and `n` answer only while the card itself has focus (a key in the note, on a
   button or anywhere else answers nothing); `y` on a dangerous card opens the confirmation.
-- **The needs-you tray** (`components/tray`), on every view: pending approvals, open questions
-  (not notices), terminal dialogs (not one whose pane has a pending approval: that dialog is the
-  same request) and stuck jobs or jobs needing a login or config fix; most urgent first (dangerous
-  approvals, then elevated approvals and blocking questions, then low approvals and dialogs, then
-  other questions, then jobs), newest first within each. Each row expands in place: an approval's
+- **The needs-you tray** (`components/tray`), on every view but Now and the Inbox (they show the
+  same queue in full, R4 Fable 1.5): since R4 its rows are the attention queue's (section 22), in
+  the server's order, each with its project and job, and nothing in the browser counts or orders
+  them. Each row expands in place: an approval's
   card; a confirm or choice question's options (one tap answers; "Open in the Inbox" to add a
   note); a dialog's card with its digit buttons (8.2's `DialogCard`); a job's cause and "Open the
-  job". Every row has "Snooze for 10 minutes" (kept in `localStorage`). Desktop: a stack anchored
+  job". Every row has "Snooze for 10 minutes" (kept on the server since R4, so it holds on every
+  device; section 22). Desktop: a stack anchored
   bottom-right showing the top three ("Show all N"), foldable into a pill, with a count, an
   arrival slide and an optional chime (off by default, a switch in its header, remembered in the
   browser). Phone: a 44 px bar in the page's flow between the content and the bottom nav (the top
@@ -2104,7 +2105,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /setup/open/{id}` | Setup mode only: the browser opener's one-time handoff (3.3), loopback peers only, `303` to the relative `/setup#token=…` (else to `/setup`) |
 | `GET /setup`, `POST /setup` | First-run setup (4.14), unauthenticated: `{required, default_name?, min_password_length}`; `{token, username, password, name}` → `201` + session cookie, `403 BAD_TOKEN`, `400`, `429` + `Retry-After`, `410` once done. While setup waits every other `/api/` path is `403 SETUP_REQUIRED` (`503 STARTING` between completion and the full server) |
 | `GET /account`, `POST /account/password`, `PUT /account/name` | The Account sheet: `{username, source: database\|config\|none, name, name_managed, min_password_length}`; `{current_password, new_password}` (`403 WRONG_PASSWORD`, `409` for a configured login; signs every other session out and re-issues this one's cookie); `{name}` (`409` under `--name`). The name is live in `/auth/me` at once; push titles and the Remote Control name take it at the next start |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `approval` (`{id, status, risk, tool, job_id, pane_id, change}`, 8.7), `instructions` (`{at}`, a layer changed, 21.3), `project` (`{id, change}`, 21.1), `lead` (a lead's status, 21.2), `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `approval` (`{id, status, risk, tool, job_id, pane_id, change}`, 8.7), `instructions` (`{at}`, a layer changed, 21.3), `project` (`{id, change}`, 21.1), `lead` (a lead's status, 21.2), `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend`, `attention` (the attention queue's whole snapshot, 22) events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
@@ -2134,7 +2135,9 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
 | `GET /approvals?status=pending\|all\|<status>`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` | Tool-call approvals (8.7): `{id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, created_at, settled_at, expires_at, summary}`; decide `{decision: allow\|deny, note, confirm}` → the approval, `409 CONFLICT` when no longer pending, `409 CONFIRM_REQUIRED` for an unconfirmed dangerous allow |
 | `POST /push/action` | A notification's button (8.7): `{token, action}` with the single-use action token alone (no session) → `{item, message}`; `403` for an unknown, used, expired or out-of-scope token, or an elevated or dangerous approval |
-| `GET /inbox/summary` | `{open, blocking}`: the Inbox badge (added in M6) |
+| `GET /inbox/summary` | `{open, blocking}`: open questions only (added in M6); the web app's badge is the attention queue's count since R4 |
+| `GET /attention`, `POST /attention/snooze` `{id, until?}`, `/attention/unsnooze` `{id}`, `/attention/dismiss` `{id}` | The one attention queue (22): `{items, counts: {total, blocking, can_wait, snoozed, by_project}, revision, at, partial?}`; snooze (10 minutes, every device), bring back, dismiss a failed job (`409` for anything else, `404` for an item resolved meanwhile). An `attention` SSE event carries the whole snapshot when it changes |
+| `GET /now`, `GET /now/since?browser=`, `POST /now/beat` `{browser}`, `POST /now/seen` `{browser}` | The Now view (22): `{rows, counts}`; what finished, failed, was cancelled or asked since this browser left (`{since, first, events, counts}`); this browser is in use; mark all seen. A browser id is 8 to 64 of `[A-Za-z0-9_-]` |
 | `POST /orchestrator/poke` | "Poke now" (M8) → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}` (7.7) |
 | `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated (`task`, a scheduled job started, 7.8; `upkeep`, compaction and hand-over, 7.9); `limit` 50 by default, at most 200 |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
@@ -2246,7 +2249,7 @@ idle_seconds}`), `POST /presence/gone`, `PUT /presence/dnd` `{until}`, `GET /dig
 - `agent_instructions(id, subject, session_id, at, path, memory_type, load_reason, size)` (0013, 21.3): the instruction files Claude reported loading (the `InstructionsLoaded` hook), paths and a stat's size only, at most 200 rows per subject
 - `projects(id, slug, name, dir, root_dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, archived_at, created_at, updated_at)` (migration `0013_projects.sql`, 21.1): archived, never deleted; a partial unique index keeps two live projects off one root; `jobs.project_id` (0 Unfiled) with an index on `(project_id, state)`
 - Migration `0014_landing.sql` (6.7, 6.11, 6.12, 7.13): `jobs` gains `base_branch`, `base_commit`, `workspace_id`, `walkthrough_md`, `reviewer`, `review_of` (indexed), `review_round`, `review_verdict`, `review_md`, `land_state`, `land_detail`, `landed_at`, `torn_down_at`, `land_request`, `land_question_id`, `start_anyway`; new `digests(id, day, at, source, body_md, question_id)`. kv adds `pause.state`, `throttle.settings`, `presence.dnd_until`, `digest.settings`
-- `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
+- `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings; the attention queue's snoozes and dismissals (`attention.snoozed`, `attention.dismissed`: id → unix time) and each browser's "since you left" record (`browser.<id>`: last beat and window start; 22). The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
 - Migration `0015_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
@@ -2266,14 +2269,18 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 
 | View | Mobile | Desktop |
 |---|---|---|
-| **Jobs** (default) | A text box at the top ("What needs doing?", with where/role/done-when behind one tap). Below it the board: needs-you and stuck first, then running, then finished today. Each card: title, state chip, the progress line, time since last activity, open-question count, agent. Tap for the job: timeline, result, questions, message box, and its Conversation and Terminal | Board at left, selected job at right |
+| **Now** (default, `/`; section 22) | What needs you (the attention queue, answerable in place), then a row per project (lead state, what it is doing, running / waiting on you / done today, spend today, last activity, who owns the work), unfiled work and the orchestrator, then "since you left", then the job box with its project | The queue and the projects side by side |
+| **Jobs** (`/jobs`) | A text box at the top ("What needs doing?", with where/role/done-when behind one tap). Below it the board: needs-you and stuck first, then running, then finished today. Each card: title, state chip, the progress line, time since last activity, open-question count, agent. Tap for the job: timeline, result, questions, message box, and its Conversation and Terminal | Board at left, selected job at right |
 | **Chat** | Conversation, sticky composer, push-to-talk button when voice is on, orchestrator status chip (idle/working/blocked), "Poke now" in a menu | Same, centred column, fleet rail at left |
-| **Inbox** (badge) | Cards: questions, dialogs and stuck jobs, newest blocking first; full-screen sheet to answer | List and detail side by side |
+| **Inbox** (badge) | The attention queue in full (approvals, questions, dialogs, stuck, failed or landable jobs, standing agents), the server's order, each with project and job; snoozed ones folded; notices apart; full-screen sheet to answer | List and detail side by side |
 | **Fleet** | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal | Tree at left, selected agent at right with Conversation/Terminal toggle |
 | **Terminal** | Full-screen xterm on the herdr TUI, with a key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Full-height xterm, font size in the status line |
 
-Bottom nav on mobile, left rail from `md`, in the order Jobs, Projects, Chat, Inbox, Fleet, Terminal
-(Projects since wip/projects, `g p`). Jobs is the default route (`/`); the others are `/projects`
+Since R4 (section 22) the nav has four primary destinations, Now, Projects, Inbox and Chat, which
+are the phone's bottom bar, plus **More** (a sheet: Jobs, Fleet, Terminal, System); the desktop
+rail shows the same order with Jobs, Fleet and Terminal under a "More" heading (`components/nav.ts`
+is the one list). Now is the default route (`/`, `g h`); a link made before it (`/?job=j_12`,
+`/?project=<slug>`) is redirected to the board at `/jobs` (`g j`); the others are `/projects`
 (`/projects/<slug>` a project), `/chat` (`?target=lead-<slug>` a project's lead), `/inbox`, `/fleet` (`?agent=<pane id>`
 selects an agent, so links and reloads land on it) and `/terminal`. A web app manifest and icons
 make it installable to a home screen.
@@ -2377,8 +2384,8 @@ key rules in `lib/hotkeys.ts`; all three are pure and unit-tested.
   cwd); every word must match, and a word scoring under half a perfect word-start run there is
   dropped as scattered noise. Matched title and subtitle characters are highlighted.
 - **Order.** With no query: recent items (localStorage `crowsnest-palette-recent`, the last 12,
-  not Give job texts or answers), Needs you (blocking questions, agents at a dialog, then the other
-  open questions, as the Inbox orders them), the five views, live jobs (needs attention first),
+  not Give job texts or answers), Needs you (exactly the attention queue's unsnoozed items in its
+  order, section 22), the views, live jobs (needs attention first),
   actions. With a query: matching items grouped, groups ordered by their best match, at most 8 a
   group (10 jobs). **Give job: <text>** and **Send to orchestrator: <text>** are always offered
   for free text; they come first unless the best match is strong (at least 0.75 of a perfect
@@ -3070,6 +3077,9 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 97. **The Terminal view's client gets its own state directory** (10, 20): herdr's client reads saved SSH machines from its state directory; a directory of crowsnest's own removes the one-click path from a browser session to the user's other hosts without changing herdr or the user's files. `--terminal-machines` puts it back.
 98. **Tailscale identity only from this machine's serve, for listed logins** (4.20), and a session made from it is re-checked on every request rather than trusted for 30 days.
 99. **One crowsnest per machine, a read-only Machines list** (4.21): the small version that answers "what needs me where" without moving the agent socket, hooks or terminals across machines.
+100. **One attention queue, computed on the server** (22; R4 Fable 1.1, 1.3, 1.5, Codex C2). Four surfaces counted "needs you" four ways in the browser (12 in the tray, 11 on the Inbox, 4 on the board at the same moment). One server-side model, one snapshot, one SSE event and one number make them agree by construction; the browser keeps no rule about what counts. Snoozes moved to the server with it, so a snooze on the phone holds on the desktop.
+101. **Now is home; the board is `/jobs`** (22; Fable 1.2, Codex C1). The first screen answers what needs me, what each project is doing and what happened while I was away; giving a job stays one box down. Four primary destinations plus More on a phone (Fable 1.4, Codex C4); the same order on the desktop rail, so nothing moves between devices.
+102. **"Since you left" is per browser, kept on the server** (22.3). A random id in localStorage names the browser; its last activity and its window start live in kv. Keeping them on the server means a phone and a laptop each have their own "since", and a cleared tab does not replay a day; a ten-minute gap is "leaving", shorter is a tab switch.
 
 ## 18. Milestones
 
@@ -3261,7 +3271,8 @@ project's main checkout, workers in worktrees under it, and a front door above a
   model, since it is typed into the lead's conversation). A child job stays in its parent's
   project. The orchestrator may hand a job to a project (`job_create(project=…)`), validated as
   the human's; a job agent or a lead cannot choose another project.
-- **Counts** for the board's switcher: per project, needs-you (needs you, or stuck) and running
+- **Counts** for the board's switcher: per project, needs-you (since R4 the attention queue's own
+  count for the project, section 22, so the switcher shows the badge's number) and running
   (running, blocked, in review, queued and not stuck), plus Unfiled's.
 - **Opening a project** in the app asks `GET /projects/{ref}?open=1`, which applies
   `lead_start=open`; a refetch without `open=1` never starts anything.
@@ -3470,3 +3481,99 @@ on a throwaway session; the lead answers with a SAY line, knows a codeword only 
 layer gives, holds and finishes a job given to the project through the MCP tools, reports Remote
 Control active, and has the repository's `CLAUDE.md` recorded by InstructionsLoaded. Vitest and
 Playwright cover the views (section 12).
+
+## 22. One attention queue, and Now
+
+Built on `wip/now` (2026-11-27) from the R4 product reviews (`reviews/R4-fable-product.md` 1.1 to
+1.7, 2.9 and section 6; `reviews/R4-codex-product.md` C1 to C3, X1). Jeff wants crowsnest "to work
+really well for being able to coordinate lots of different projects efficiently from the web
+browser, from my phone".
+
+### 22.1 The attention model
+
+(`internal/attention`: `model.go` pure, `service.go` the snapshot and the watcher;
+`internal/httpd/attention.go`; `cmd/crowsnest/attention_wiring.go`; the web app's
+`lib/attention.ts`.)
+
+- **One definition.** An item is something that will not move until the human acts. `Build`
+  turns the sources into the list, pure and time-injected: pending approvals; open questions
+  (never notices); agents at a terminal dialog; jobs stuck, needing a fix only the human can make
+  (auth, config, launch, a dialog the screen did not show), held for approval to start, failed in
+  the last 72 hours (until dismissed), finished with a worktree waiting to be landed, or put in
+  front of the human by a reviewer that still objects (6.11); and the orchestrator or a lead
+  needing its terminal or having failed.
+- **One item per obligation.** An approval and its pane's dialog are one item (the approval). A job
+  is listed through whatever stands for it: its approval, its question, its dialog; it is listed
+  by itself only when nothing else does. A standing agent's dialog is the dialog item.
+- **Every item says where it belongs**: its project (found through its job, by id or by the pane
+  that holds it, or through a lead's pane), its job's id and title, its agent, how long it has
+  been waiting, the kind and the action that resolves it, and its payload in its own endpoint's
+  shape (the approval, question, fleet agent, job or standing agent), so any surface can answer it
+  in place.
+- **Urgency and order.** Two bands (Fable 1.1): **blocking** (work has stopped: approvals, dialogs,
+  blocking questions or ones the asker waits on or whose job declared it is waiting, jobs that will
+  not recover by themselves, standing agents) and **can wait** (a non-blocking question, a job
+  retrying a limit by itself, a failure to look at, a worktree ready to land). Within a band by
+  rank (dangerous approvals first), then the longest wait first (Fable 1.9).
+- **One number.** `counts.total` is every unsnoozed item; `blocking`, `can_wait`, `snoozed` and
+  `by_project` beside it. The nav badge, the tab title, the tray, the palette's "Needs you", the
+  Inbox's Open list and its count line, the Now view, the project switcher and the project pages
+  (`/projects` reports `needs_you` from `by_project`) all read it; the web app has no other rule.
+  The Fleet tree's own count is relabelled "at a dialog", a fact about the agents it draws.
+- **Live.** The service rebuilds when a `job`, `question`, `approval`, `fleet`, `orchestrator`,
+  `lead` or `project` event arrives (coalesced over 250 ms) and every 30 s, and publishes an
+  `attention` event carrying the whole snapshot only when it changed; the browser writes it into
+  its cache. A source that cannot be read is named in `partial`.
+- **Snooze and dismiss** are the server's (kv `attention.snoozed`, `attention.dismissed`): a snooze
+  hides an item from the count for ten minutes on every device (the Inbox lists snoozed items
+  folded, with "Bring back"); only a failed job can be dismissed, everything else leaves when
+  what it stands for is resolved.
+
+### 22.2 Now
+
+`routes/NowView.tsx`, `GET /now`. The default route. On a phone, top to bottom; from `lg` the
+queue and the projects side by side.
+
+1. **Needs you**: the queue, each row the tray's (expands to an approval's card, a question's
+   options, a dialog's digits, a job's or agent's way in). The tray itself is hidden on Now and
+   the Inbox.
+2. **Projects**: one row per live project with its lead's state, what it is doing in a line (the
+   most recently active moving job's "doing now", "+N more"), running / waiting on you (the
+   queue's count) / done today / failed today, estimated spend today (its jobs and its lead,
+   7.11), last activity, and the sentence saying who owns its work (`orch.OwnershipLead`, or that
+   no lead is running and the orchestrator hears instead); then **Unfiled** and the
+   **Orchestrator** (its held job, its spend, `orch.OwnershipOrchestrator`). A row opens the
+   project, the unfiled board, or Chat.
+3. **Since you left** (22.3), open by default, collapsible, with "Mark all seen".
+4. **Give a job**: the job box with "For: the orchestrator / <project>".
+
+### 22.3 Since you left
+
+Each browser keeps a random id (`crowsnest-browser` in localStorage) and beats (`POST /now/beat`)
+on load, every minute while visible and on becoming visible. kv `browser.<id>` keeps its last beat
+and the start of its window: a beat after more than ten minutes of silence (`AwayAfter`) starts a
+new window at the last beat; a browser never seen gets the last twelve hours. The window lists
+jobs that finished, failed or were cancelled and questions asked after it, newest first, at most
+50, each with its project; "Mark all seen" moves the start to now. Nothing but the id is sent.
+
+### 22.4 Ownership on a job
+
+A job's detail shows its chain from the human down, "you → lead Crowsnest → lead j_11 → builder
+j_12", every job in it a link, and the jobs it started (`lib/jobs.ts` `ownershipChain`,
+`childrenOf`). Who is poked for what is 7.4 (lead-first routing).
+
+### 22.5 The demo and the tests
+
+The demo is the five-project story of 21.5; its four standing obligations (the dangerous force
+push in Crowsnest, the blocking homepage question in Website, Handbook's dialog, Mobile's usage
+limit) are what the busy-day journey finds. `--demo` without `--max-running-jobs` runs 32 slots so
+the story's dozen live jobs do not hold a job given in the demo. Tests: `internal/attention`
+(the de-duplication table, labels, order, counts, the snapshot event on change only, snooze on
+every caller and its expiry, dismissal, since per browser, the Now rows), `internal/httpd`
+(`attention_test.go`: sessions, CSRF, snooze, per-browser since), Vitest (tray rows from the
+snapshot, the server snooze, the Inbox's list and count, the palette's group, the nav, the
+ownership chain), and Playwright `e2e/hermetic/now.spec.ts` at 390x844 (Chromium and WebKit) and
+1440: the busy-day walk without Chat, one number across badge, title, Now, Inbox and tray,
+answering a question and an approval from Now, since-you-left per browser, the phone nav and an
+old `/?job=` link; axe on Now; screenshots `web/screenshots/now-*.png`.
+

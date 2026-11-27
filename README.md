@@ -24,6 +24,19 @@ see every agent in the fleet.
 > review gates arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
 > [STATUS.md](STATUS.md).
 
+**Now, and one queue of what needs you** (DESIGN.md 22). Home is **Now**: what needs you
+(approvals, questions, terminal dialogs, stuck, failed or ready-to-land jobs, a lead or the
+orchestrator at its terminal), each labelled with its project and job, de-duplicated (an approval
+and its dialog are one item) and answerable in place; then one row per project (its lead, what it
+is doing, running / waiting on you / done today, spend today, who owns the work), unfiled work and
+the orchestrator; then **since you left**, kept per browser (Mark all seen); then the job box. The
+server builds that queue once (`GET /attention`, an `attention` event), and the badge, the tab
+title, the tray, the palette and the Inbox all show its one number; a snooze holds on every
+device. On a phone the bottom bar is Now, Projects, Inbox, Chat and **More** (Jobs, Fleet,
+Terminal, System); the desktop rail has the same order. The Jobs board is at `/jobs`. A job in a
+project is its lead's: the lead hears when it finishes, gets stuck or asks; the orchestrator hears
+only outcomes of work it handed over and what a lead could not resolve (DESIGN.md 7.4).
+
 **Approvals and the needs-you tray** (DESIGN.md 8.7). When a Claude agent crowsnest started is
 about to ask for a permission, a `PermissionRequest` hook turns the request into an approval card:
 a Bash command with its directory, an edit as a diff, a URL, an MCP call, rated low, elevated or
@@ -227,8 +240,8 @@ open an agent's conversation or terminal, and answer a confirm or single-choice 
 options. Restart, New conversation and Cancel ask first, in the same words as the views. Esc goes
 back a level, then closes and puts focus back where it was. With an empty box, recently used
 items come first (kept in localStorage, `crowsnest-palette-recent`). Inside a terminal only ⌘K
-opens it: Ctrl K belongs to the shell. `?` lists every shortcut, and `g` then `j`, `c`, `i`, `f`
-or `t` goes to Jobs, Chat, Inbox, Fleet or Terminal; neither fires while you type in a field or a
+opens it: Ctrl K belongs to the shell. `?` lists every shortcut, and `g` then `h`, `p`, `j`, `c`,
+`i`, `f` or `t` goes to Now, Projects, Jobs, Chat, Inbox, Fleet or Terminal; neither fires while you type in a field or a
 terminal.
 
 For development, `mise run dev` builds the single binary and runs the real thing on one port
@@ -950,7 +963,9 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /questions/{id}` | session | One question with its `files`, the agent's `attachments` and the `answer_attachments` sent with the answer |
 | `POST /questions/{id}/answer` | session | `{answer_value, answer_note, attachments}` (`attachments`: upload ids, copied into the asker's inbox and named in the answer line): a key, an array of keys for a multi-select, nothing for ack/notice; a `manual` answer is the note. `409 CONFLICT` once settled |
 | `DELETE /questions/{id}` | session | Cancel an open question; the asker is told |
-| `GET /inbox/summary` | session | `{open, blocking}` for the Inbox badge |
+| `GET /inbox/summary` | session | `{open, blocking}`: open questions (the badge is the attention count) |
+| `GET /attention`; `POST /attention/snooze`, `/unsnooze`, `/dismiss` `{id}` | session | The one queue of what needs you, with its counts; snooze an item for ten minutes on every device; dismiss a failed job |
+| `GET /now`, `GET /now/since?browser=`, `POST /now/beat`, `POST /now/seen` | session | The Now view's rows; what happened since this browser left; this browser is in use; mark all seen |
 | `GET /approvals?status=` | session | Tool-call approvals (`pending`, the default; `all`; or one status), newest first: `{id, job_id, pane_id, agent_name, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, created_at, settled_at, expires_at, summary}` |
 | `GET /approvals/{id}` | session | One approval |
 | `POST /approvals/{id}/decide` | session | `{decision: "allow"\|"deny", note?, confirm?}` → the approval. `409 CONFLICT` when it is no longer pending; `409 CONFIRM_REQUIRED` for a dangerous allow without `confirm: true`. The note is the deny message the agent gets |
