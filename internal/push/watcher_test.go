@@ -280,3 +280,16 @@ func TestGateQuestionsGetNoButtons(t *testing.T) {
 		t.Fatalf("an ordinary confirm lost its buttons: %+v", got[3])
 	}
 }
+
+// TestNoticeURLRefusesControlCharacters is R5-S13: "/\t/evil.example" parses as an off-origin
+// URL once the tab is dropped, so a control character anywhere sends the notice to "/".
+func TestNoticeURLRefusesControlCharacters(t *testing.T) {
+	for _, bad := range []string{"/\t/evil.example", "/\n/evil.example", "/x\x7f"} {
+		if got := (Notice{URL: bad}).Clean().URL; got != "/" {
+			t.Errorf("URL %q became %q, want /", bad, got)
+		}
+	}
+	if got := (Notice{URL: "/inbox?q=q_1"}).Clean().URL; got != "/inbox?q=q_1" {
+		t.Fatalf("a good URL changed: %q", got)
+	}
+}

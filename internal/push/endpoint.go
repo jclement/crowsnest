@@ -150,7 +150,23 @@ func publicAddress(addr netip.Addr) bool {
 		// NAT64 can embed any IPv4 address, private ones included.
 		return false
 	}
+	for _, prefix := range notPublic {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
 	return true
+}
+
+// notPublic are the special-purpose ranges netip's predicates do not cover (R5-S13): benchmarking,
+// IETF protocol assignments, the reserved class E, and the IPv6 transition prefixes (6to4,
+// Teredo), which can carry a private IPv4 address inside a global-looking one.
+var notPublic = []netip.Prefix{
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("2001::/32"),
 }
 
 // errBlockedAddress is the dial refusal; its text names the address class, never the URL.

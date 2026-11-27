@@ -64,8 +64,16 @@ function actionsSupported() {
 
 /** Only a path on this origin may be opened: a pushed URL can never send the app elsewhere. */
 function safePath(url) {
-  if (typeof url !== "string" || !url.startsWith("/") || url.startsWith("//") || url.includes("\\")) return "/";
-  return url;
+  // Parse, then require the same origin (R5-S13): string checks alone let "/\t/evil.example"
+  // through, which the URL parser turns into a link off this origin.
+  if (typeof url !== "string" || !url.startsWith("/") || /[\u0000-\u001f\u007f\\]/.test(url)) return "/";
+  try {
+    const parsed = new URL(url, self.location.origin);
+    if (parsed.origin !== self.location.origin) return "/";
+    return parsed.pathname + parsed.search + parsed.hash;
+  } catch {
+    return "/";
+  }
 }
 
 /** Shows the notification for a payload. Exposed on self for the hermetic browser suite. */

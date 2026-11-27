@@ -101,8 +101,8 @@ func (n Notice) Clean() Notice {
 	n.Title = termtext.Cap(redact.String(termtext.Clean(n.Title)), maxTitleRunes)
 	n.Body = termtext.Cap(redact.String(termtext.Clean(n.Body)), maxBodyRunes)
 	n.Tag = termtext.Cap(termtext.Clean(n.Tag), 64)
-	if !strings.HasPrefix(n.URL, "/") || strings.HasPrefix(n.URL, "//") || strings.ContainsAny(n.URL, "\\\r\n") {
-		n.URL = "/"
+	if !strings.HasPrefix(n.URL, "/") || strings.HasPrefix(n.URL, "//") || strings.ContainsFunc(n.URL, func(r rune) bool { return r == '\\' || r < 0x20 || r == 0x7f }) {
+		n.URL = "/" // a control character (a tab, R5-S13) can be dropped by a URL parser into "//"
 	}
 	if n.Urgency == "" {
 		n.Urgency = UrgencyNormal
