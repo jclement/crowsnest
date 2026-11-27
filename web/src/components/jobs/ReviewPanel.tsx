@@ -4,13 +4,19 @@
 // content, "N files not viewed" here and in Land's confirmation); beside it the agent's own account
 // (result, evidence, walkthrough) and the review rounds; and the Land actions, each behind a
 // confirmation that says exactly what will happen. Diff text is rendered as text nodes only.
+// Line comments left in the viewer have their own card here: how many wait to be sent, when they
+// were last sent, and "Send N comments to the agent"; with Settings' "Require all files viewed
+// before Land" on, unsent ones are named in Land's confirmation (a warning, never a block).
 import { AlertTriangle, Eye, GitBranch, GitMerge, GitPullRequest, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/cn";
 import { landActions, landLabels, verdictText, type LandAction, type ReviewView } from "../../lib/landing";
 import { landedWord, type JobDetail } from "../../lib/jobs";
+import { whereText } from "../../lib/comments";
 import { useLand, useLandOverride, useReview, useTeardown } from "../../lib/queries";
 import { useDiffSummary } from "../../lib/changes-queries";
+import { useComments } from "../../lib/comments-queries";
+import { SendForm } from "../changes/Comments";
 import { EmbeddedDiff } from "../changes/JobChanges";
 import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
@@ -33,6 +39,7 @@ export function ReviewPanel({ job }: { job: JobDetail }) {
     <div className="flex min-w-0 flex-col gap-3">
       <LandCard job={job} view={view} />
       {view.produced && <EmbeddedDiff who={{ kind: "job", id: job.id }} />}
+      {view.produced && !view.land.state && <ReviewComments job={job} />}
       <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex min-w-0 flex-col gap-3">
           <Summary view={view} />
@@ -69,6 +76,27 @@ function EvidenceList({ title, items, tone }: { title: string; items: string[]; 
   );
 }
 
+// ---- Comments ------------------------------------------------------------------------------
+
+/** The job's line comments: the count, when they were last sent, and Send (the list is the viewer's). */
+function ReviewComments({ job }: { job: JobDetail }) {
+  const who = { kind: "job", id: job.id } as const;
+  const comments = useComments(who);
+  if (!comments.data || comments.data.comments.length === 0) {
+    return (
+      <p className="flex items-center gap-1 text-2xs text-muted">
+        Comment on a line, a range, a change or a file in the diff above (select a line number, then c), and send them to the agent as one message.
+        <HelpButton topic="how-to/review-changes#comments" what="line comments" />
+      </p>
+    );
+  }
+  return (
+    <Card title="Comments" actions={<HelpButton topic="how-to/review-changes#comments" what="line comments" />}>
+      <SendForm who={who} list={comments.data} />
+    </Card>
+  );
+}
+
 // ---- Land ----------------------------------------------------------------------------------
 
 function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
@@ -80,6 +108,8 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
   // Settings require them all viewed; then the server refuses with UNVIEWED).
   const committed = useDiffSummary({ kind: "job", id: job.id }, "committed", "", !options.state && !options.torn_down);
   const unviewed = committed.data ? committed.data.total - committed.data.viewed : 0;
+  const comments = useComments({ kind: "job", id: job.id }, !options.state && !!view.require_viewed);
+  const unsent = view.require_viewed ? (comments.data?.drafts ?? 0) : 0;
   const overrideLand = useLandOverride(job.id, options.head);
   const teardown = useTeardown();
   const toast = useToast();
@@ -196,6 +226,17 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
           {confirming !== "discard" && unviewed > 0 && (
             <p className="mt-2 text-xs text-warning">
               {unviewed} of {committed.data?.total} files are not marked viewed.
+            </p>
+          )}
+          {confirming !== "discard" && unsent > 0 && (
+            <p className="mt-2 text-xs text-warning">
+              {unsent} comment{unsent === 1 ? " is" : "s are"} not sent to the agent yet:{" "}
+              {comments.data?.comments
+                .filter((comment) => comment.pending)
+                .slice(0, 5)
+                .map((comment) => `${comment.path} (${whereText(comment)})`)
+                .join(", ")}
+              {unsent > 5 ? ", …" : ""}. Landing does not send them.
             </p>
           )}
           {blocked(confirming) && (

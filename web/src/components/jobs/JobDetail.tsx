@@ -9,6 +9,7 @@ import { relativeTime } from "../../lib/format";
 import { actionFor, actionLabels, causeHelpTopic, childrenOf, hasReview, isFinished, jobAnswerText, ownershipChain, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
 import { useFleet, useJob, useJobAction, useJobGuard, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
 import { ReviewPanel } from "./ReviewPanel";
+import { useComments } from "../../lib/comments-queries";
 import { EmbeddedDiff } from "../changes/JobChanges";
 import { BudgetCard, EvidenceCard, LastMessage, WaitLine } from "./AcceptPanels";
 import { acceptChip } from "../../lib/accept";
@@ -46,6 +47,13 @@ export function JobDetail({ id }: { id: string }) {
     );
   }
   const job = query.data;
+  return <JobView job={job} tab={tab} setTab={setTab} />;
+}
+
+/** The job's header and tabs; the Review (or Land) tab counts the diff comments waiting to be sent. */
+function JobView({ job, tab, setTab }: { job: Detail; tab: DetailTab; setTab: (tab: DetailTab) => void }) {
+  const drafts = useComments({ kind: "job", id: job.id }, hasReview(job) && !job.land_state && !job.torn_down_at).data?.drafts ?? 0;
+  const reviewLabel = (readyToLand(job) ? "Land" : "Review") + (drafts > 0 ? ` · ${drafts} comment${drafts === 1 ? "" : "s"} to send` : "");
   return (
     <article aria-label={job.title} className="flex min-h-full max-w-4xl flex-col gap-3 p-3 md:p-4">
       <JobHeader job={job} />
@@ -57,7 +65,7 @@ export function JobDetail({ id }: { id: string }) {
         onChange={setTab}
         items={[
           { value: "overview", label: "Overview" },
-          ...(hasReview(job) ? [{ value: "review" as const, label: readyToLand(job) ? "Land" : "Review", icon: GitCompareArrows }] : []),
+          ...(hasReview(job) ? [{ value: "review" as const, label: reviewLabel, icon: GitCompareArrows }] : []),
           ...(hasChanges(job) ? [{ value: "changes" as const, label: "Changes", icon: FileDiff }] : []),
           { value: "conversation", label: "Conversation", icon: MessageSquare },
           { value: "terminal", label: "Terminal", icon: SquareTerminal },

@@ -1756,7 +1756,7 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
 (`internal/landing/changes.go`, `internal/changes`, `internal/httpd/changes.go`,
 `cmd/crowsnest/changes_wiring.go`, `internal/jobs/demo_diff.go`, migration `0020_diff_marks.sql`,
 `web/src/components/changes/`, `web/src/lib/changes*.ts`, `web/src/lib/syntax.ts`,
-`web/src/routes/DiffView.tsx`.)
+`web/src/routes/DiffView.tsx`; line comments, below: `wip/comments`.)
 
 - **Subjects.** A job (`j_N`: its worktree, or its directory when not isolated), a project's main
   checkout (`project:<id>`, the lead's), or the orchestrator's folder. `changes.Resolver`
@@ -1872,13 +1872,88 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
   work on top, and whose `web/src/cart.ts` gains a line every minute (and on `POST
   /changes/jobs/{id}/demo-touch`, demo only); a done job ready to land.
 
-**Not built: comments on lines.** Specified here, skipped tonight rather than half-built: click
-a line (or shift-click a range) in the viewer to leave a note; a `diff_comments(id, subject,
-path, side old|new, line_start, line_end, quote, body_md, hash, created_at, sent_at)` table; the
-Review tab lists them; **Send N comments to the agent** sends one message through the job's
-message path (`POST /jobs/{id}/message`, termtext-sanitised), each as file:line, the quoted code
-and the note, as an attachment when over 4 KB; a sent comment is marked `sent`, nothing more (no
-threads, no resolution). A comment whose file hash changed shows as outdated.
+**Comments on lines** (built on `wip/comments`; Jeff, 2026-11-27: "Can we do line comments";
+R8 Fable H5, Codex half-done 5). `internal/changes/comments.go` and `compose.go`,
+`internal/jobs/comments.go`, `internal/httpd/comments.go`, migration `0022_diff_comments.sql`,
+`web/src/lib/comments*.ts`, `web/src/components/changes/Comments.tsx`, `cmd/crowsnest/demo_comments.go`.
+
+- **Where a note is.** On a range of lines of one side of a file (`old` or `new`), or on the
+  whole file (`file`, lines 0). The viewer's line numbers are buttons: a click selects a line,
+  shift-click or a drag down the numbers a range (the same side of the same file); on a phone a tap
+  selects and a tap on another number extends, since a phone has no shift. A floating bar says
+  what is selected (it floats so that appearing mid-drag never moves the rows under the pointer),
+  with **Comment** and **Clear**. `c` comments on the selection, else on the line number that has
+  focus, else on the whole current file; Esc closes the editor, then clears the selection, then
+  leaves full screen. Each hunk has **Ask for change here** (its new lines, or its old ones when it
+  only removes), and each file header one for the whole file. Line comments are off while "since
+  viewed" shows a blob-to-blob diff (its line numbers are not the file's own sides').
+- **The record**: `diff_comments(id, subject, author, scope, path, side, line_start, line_end,
+  quote, body, hash, old_blob, new_blob, created_at, updated_at, sent_at, dismissed_at)`, per
+  subject as `diff_marks` (a job, `project:<id>`, the orchestrator). A note is saved only with the
+  hash the browser showed (`409 STALE` otherwise), and its **quote is read by crowsnest from the
+  blob of its side**, never taken from the browser, so what goes back to the agent is what git held
+  (at most 40 lines of 400 characters; a binary or over-256-KB side quotes nothing). Bounds: 8,000
+  characters a note, 2,000 lines a range.
+- **Status, worked out on every read**: **draft** (not sent); **sent**; **outdated** when the
+  file's work-tree content (its new blob in the "all" comparison) is no longer the one the note was
+  written against, or the file no longer differs from the base. Committing an edit unchanged keeps
+  the content, so a note is not outdated by a commit. A note is drawn beside its lines only while
+  its side holds the blob it was written against; otherwise (outdated, whole-file, or from another
+  comparison) it is listed under the file's header with its quote. Edit and delete while pending;
+  **Dismiss** hides one for good; **Re-send** puts one back with the drafts. Pending means it goes
+  with the next send: a draft, or a re-sent note (an outdated pending note says it was written on an
+  earlier version). No threads, no resolution beyond dismissing.
+- **Send** composes every pending note into **one message** (`changes.Compose`, in file and line
+  order): a header with the count, the human's optional overall note, then each note as its file,
+  where ("line 3 (your version)", "lines 4–6 (removed side, before your change)", "the whole
+  file"), the quoted code as `   > …` lines and the note. A preview (`dry_run`) shows exactly that
+  text. Over 4 KB it goes as an attached file, `review-comments.md`, copied into the agent's inbox,
+  and one line pointing at it is typed. Only a delivery that succeeded marks the notes sent
+  (`sent_at`); the Review tab and the Comments sheet show when.
+- **How it reaches a job** (`jobs.SendReviewComments`, by the paths crowsnest already has):
+  - a live job (running, blocked, needs_you) that nothing holds: the human's message path
+    (`Message`, typed now or queued by Claude behind its turn); as a message does, it lifts a final
+    review's objection (the human sends it back to the builder);
+  - a live job that is paused, held (budget, check, questions, approval) or under the fleet's
+    usage limit: the message is appended to the job's **pending feedback** and typed by
+    `deliverFeedback`, which passes the continuation gate (R7-C04) and so never starts a turn a hold
+    forbids; the tick types it once nothing holds the job. The answer says "waiting" and why;
+  - **a finished job** (done: accepted, approved or unverified) **is not reopened**: done is
+    terminal (`CheckTransition`), its agent's tokens are revoked at settling, and the jobs waiting
+    on it were woken. "Request changes" is a **fix job** in its own worktree (as `AskRebase`'s),
+    briefed with the composed comments and the job's brief, queued like any job (the pause, the
+    throttle and budgets hold it); when it is done crowsnest checks the job again (`fixSettled`).
+    One fix job at a time (a rebase's included). A finished job with no worktree is refused ("give
+    a new job with these comments");
+  - a job crowsnest is checking or reviewing (`in_review`) is refused until that ends; a failed or
+    cancelled one is refused.
+  A project's diff goes to its **lead** and the orchestrator's folder to the **orchestrator**, as a
+  prompt (the human's chat: the pause does not hold it); a lead that is not running is refused.
+- **Hidden characters** (R7-S3) both ways: the quoted code (the agent's) and the note (the
+  human's) are shown with chips and a warning in the viewer, the sheet and the preview; in the
+  composed message every invisible or direction-changing character is written out as `⟨U+XXXX⟩`
+  (the terminal path would otherwise drop it silently and change the quote), words mixing Latin
+  with look-alike letters are named in a closing note, and no line can pass for a `[crowsnest …]`
+  header (quotes start `   > `, and `termtext.DisarmHeaders` runs over the whole text).
+- **Counts and Land.** The viewer's header counts the notes to send and opens the Comments sheet
+  (every note by file, the overall note, Preview, **Send N comments to the agent**); the job's
+  Review tab is labelled "Review · N comments to send" and has the same Send under the diff. With
+  "Require all files viewed before Land" on (`GET /jobs/{id}/review` carries `require_viewed`),
+  Land's confirmation names the unsent notes: a warning, not a block.
+- **Retention**: a job's notes go with its viewed marks (`Resolver.Retired`: landed, discarded,
+  torn down or deleted), on its `job` event, at start and hourly; the sweep looks at subjects with
+  notes as well as marks. A comment change publishes a `changes` event, so every open view
+  refetches.
+- **Demo**: the running diff job (j_24) has an agent and a transcript of its own, and starts with
+  two drafts (a range in the Go handler, the whole stylesheet), one sent (the README) and one sent
+  and then outdated (the checkout doc, which the "agent" rewrote).
+
+**What differs from the spec above** (the earlier "not built" paragraph): the table keeps both
+blobs, the scope, `updated_at` and `dismissed_at` as well; outdated is judged on the work-tree
+content (the new blob) rather than the file's diff hash, so committing does not outdate a note;
+notes can sit on the old side, a hunk or a whole file; sending to a finished job is a fix job, not a
+message (a message cannot reach a finished job's agent, whose tokens are revoked); a held or paused
+job gets it as pending feedback; the attachment threshold is 4 KB of the composed text.
 
 Also not done: "open in a terminal at this file" (it needs a pane to type into, and typing into an
 agent's pane is a message; the copy-path button is there instead); the comparison of a project's
@@ -3391,6 +3466,18 @@ added, deleted, at}}`; `POST /changes/jobs/{id}/demo-touch` (`--demo` only). `PO
 /jobs/{id}/land` answers `409 UNVIEWED` under `--require-viewed-before-land`. Event `changes`
 `{subject, revision}`.
 
+**Added on `wip/comments`** (6.21, line comments): `GET …/comments` → `{subject, kind, label,
+job_id?, job_state?, comments: [{id, path, side, line_start, line_end, quote, body, scope, hash,
+old_blob, new_blob, status draft|sent|outdated, created_at, updated_at, sent_at?, pending}], drafts,
+sent, outdated, last_sent_at?}`; `POST …/comments` `{path, scope, side old|new|file, line_start,
+line_end, body, hash}` → the note (`201`; `409 STALE`, `404` for a file the diff does not list,
+`400`); `PATCH …/comments/{cid}` `{body}`, `DELETE …/comments/{cid}`, `POST …/comments/{cid}/dismiss`,
+`POST …/comments/{cid}/resend` → the list; `POST …/comments/send` `{overall, dry_run, force}` →
+`{message, count, hidden, mixed?, sent, how typed|queued|waiting|fix_job, why?, fix_job?, attached?,
+at?}` (`400` with nothing pending or a job that cannot take it, `409` no agent, a dialog or a
+draft in the input box, a lead not running). `…` is `/changes/jobs/{id}`, `/changes/projects/{ref}`
+or `/changes/orchestrator`. `GET /jobs/{id}/review` gains `require_viewed`.
+
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
 - `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host)` (`host` added by migration `0003_session_host.sql`, R1 M2: the `Host:port` the session is valid at)
@@ -3421,6 +3508,10 @@ added, deleted, at}}`; `POST /changes/jobs/{id}/demo-touch` (`--demo` only). `PO
 - Migration `0020_diff_marks.sql` (6.21): `diff_marks(subject, reviewer, scope, path, hash,
   old_blob, new_blob, viewed_at)`, primary key `(subject, reviewer, scope, path)`; a job's rows go
   when it lands, is discarded or deleted
+- Migration `0022_diff_comments.sql` (6.21, line comments): `diff_comments(id, subject, author,
+  scope, path, side old|new|file, line_start, line_end, quote, body, hash, old_blob, new_blob,
+  created_at, updated_at, sent_at, dismissed_at)`, indexed by `(subject, path)`; a job's rows go
+  with its viewed marks
 - Migration `0021_check_isolation.sql` (6.15, R7-C01): `job_checks` gains `mode` (`worktree` |
   `isolated`), `tree_before`, `tree_after` (content fingerprints of a worktree check); `projects`
   gains `check_isolated` and `check_prepare`. kv adds (no migration) `restored.check_command.<id>`,
@@ -4457,13 +4548,16 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 123. **A viewed mark is the file's content, not a timestamp** (6.21). Azure's behaviour Jeff asked for, "until they change again", falls out of comparing hashes; a mark is accepted only with the hash the browser showed, so a file that changed while being read is not marked as seen.
 124. **The live diff is pulled, throttled and watched, never pushed with content** (6.21). Readings at most every 4 s per subject and only while a browser has the view open (2 minutes after its last request); the event carries only a revision, and the browser refetches. One busy agent cannot make crowsnest run git in a loop, and nothing reads git for a diff nobody is looking at.
 125. **Full screen is a route, not a modal** (6.21; Jeff, 2026-11-27). The same component on `/diff?…` with the frame bare gives fullscreen, a new tab and a deep link in one; the phone's view is that route too. Position travels in the URL (scope, file) and sessionStorage (scroll).
-126. **Comments on lines were specified, not built** (6.21). Viewed tracking, live updates and full screen took the night; a half-built comment feature (notes with no way to send them, or sent without the quoted code) would be worse than none.
+126. **Comments on lines were specified, not built** (6.21). Viewed tracking, live updates and full screen took the night; a half-built comment feature (notes with no way to send them, or sent without the quoted code) would be worse than none. (Built since, on `wip/comments`: decisions 129 to 131.)
 127. **Publishing to the tailnet is a supervised foreground `tailscale serve`, not `--bg`** (3.5.1; Jeff, 2026-11-27: "love it. yes do that"). A background config would outlive crowsnest and is Tailscale's to keep; the foreground session is tied to crowsnest by a watchdog and a lifeline pipe, so the address cannot be left published by a crash. The cost is a child process, a restart loop, and a session that ends when tailscaled restarts (crowsnest starts it again). Funnel, `reset` and `off` are outside an argv allowlist, so no code path can publish to the internet or remove anyone's config.
 128. **Publishing is an app setting, and needs a login** (3.5.1). The owner turning it on from the System page is the feature, and it does not change who may sign in, so it is editable in the app, unlike `--tailscale-auth`; a Tailscale-signed-in session may not change it. With `--no-auth` it is refused (a start error from a flag), and a locked first-run setup is never published.
-129. **Folder trust is written only for a folder the human chose, and only where the agents themselves would record it** (8.2.1). Neither agent offers a flag that skips the question for a session, and the agents' own rule (a worktree takes its checkout's trust) means one record at project creation covers every job; so the narrow write of the agents' own record, behind a box ticked by default and a Setting, removes the prompt without crowsnest ever answering a prompt on screen. Writing per worktree, or for a folder an agent named, would be crowsnest deciding trust for code nobody looked at.
-130. **The trust question is a decision with two named buttons, not the agent's menu** (8.2.1). "Trust this folder" and "Don't trust" read the same whatever shape the agent drew (an arrow list, a numbered list, a digit that only selects), and each carries its own key sequence; the screen is one tap away. An answer is confirmed by watching the screen (`dialog_gone`), because "the keys were sent" is not "the question went".
-131. **Codex gets crowsnest's hooks on the command line, not in its config** (20.1). `-c hooks.…` with `--dangerously-bypass-hook-trust` hands them to the one session, reviewed by crowsnest (it wrote them); writing them into `~/.codex/hooks.json` would add them to every Codex session Jeff starts. The cost is that a repository's own Codex hooks also run unreviewed in a crowsnest job, the same trust Claude Code gives a trusted folder.
-132. **One table says what each engine gets** (20.1). The job form, project defaults, a Codex job's card, Rescue, the API's refusals and the manual all read `internal/engines`, so an engine's gap is stated once and cannot be promised away by one surface.
+129. **Review comments on a finished job start a fix job; the job is not reopened** (6.21, `wip/comments`). The brief asked for "the existing path that sends feedback and returns the job to work". For a live job that is the message path, or pending feedback when it is held. A done job has no such path: done is terminal by design (`CheckTransition`), its agent's tokens are revoked when it settles, and jobs that waited on it were woken. Reopening would have had to undo all three, in the part of the code the R6 and R7 reviews care most about. The existing way to change a finished job's branch is a fix job in its worktree followed by a fresh check (`AskRebase`, `fixSettled`), so comments take that path. The cost: the fix job is a new conversation, so the comments carry the job's brief with them.
+130. **A note's quote is read from git, and "outdated" means the work-tree content changed** (6.21). The browser shows the lines but does not supply them: the server reads the blob named by the hash it showed, so a note cannot carry code that was never there. Outdated compares the file's current new blob with the one the note was written against, not the diff hash: committing an edit unchanged changes no content, and a note should not go stale because the agent committed.
+131. **Comments to a held or paused job wait as pending feedback** (6.21, R7-C04). A human's message types now even into a held job; review comments are a batch the human composed earlier and may send in passing, so they take the gate automatic prompts take and are typed when nothing holds the job. The answer says "waiting" and why, so the human is not misled into thinking the agent has them.
+132. **Folder trust is written only for a folder the human chose, and only where the agents themselves would record it** (8.2.1). Neither agent offers a flag that skips the question for a session, and the agents' own rule (a worktree takes its checkout's trust) means one record at project creation covers every job; so the narrow write of the agents' own record, behind a box ticked by default and a Setting, removes the prompt without crowsnest ever answering a prompt on screen. Writing per worktree, or for a folder an agent named, would be crowsnest deciding trust for code nobody looked at.
+133. **The trust question is a decision with two named buttons, not the agent's menu** (8.2.1). "Trust this folder" and "Don't trust" read the same whatever shape the agent drew (an arrow list, a numbered list, a digit that only selects), and each carries its own key sequence; the screen is one tap away. An answer is confirmed by watching the screen (`dialog_gone`), because "the keys were sent" is not "the question went".
+134. **Codex gets crowsnest's hooks on the command line, not in its config** (20.1). `-c hooks.…` with `--dangerously-bypass-hook-trust` hands them to the one session, reviewed by crowsnest (it wrote them); writing them into `~/.codex/hooks.json` would add them to every Codex session Jeff starts. The cost is that a repository's own Codex hooks also run unreviewed in a crowsnest job, the same trust Claude Code gives a trusted folder.
+135. **One table says what each engine gets** (20.1). The job form, project defaults, a Codex job's card, Rescue, the API's refusals and the manual all read `internal/engines`, so an engine's gap is stated once and cannot be promised away by one surface.
 
 ## 18. Milestones
 

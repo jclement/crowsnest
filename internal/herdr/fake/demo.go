@@ -332,6 +332,21 @@ func (d *Demo) startTurn(f *Fake, paneID, text string) {
 	d.busy[paneID] = demoTurn{until: d.step + 2, resume: resume}
 	d.mu.Unlock()
 	d.working(paneID, "Working on: "+firstLine(text), 0)
+	d.recordPrompt(paneID, text)
+}
+
+// recordPrompt appends what was typed to a job agent's transcript when it has one (a session), so
+// its Conversation shows the message as Claude's own transcript would (a review's comments, a
+// message from the job's page). Agents without a session are left alone.
+func (d *Demo) recordPrompt(paneID, text string) {
+	if d.scribe == nil {
+		return
+	}
+	d.scribe.mu.Lock()
+	defer d.scribe.mu.Unlock()
+	if w, err := d.writerFor(paneID); err == nil {
+		w.user(text)
+	}
 }
 
 func firstLine(text string) string {

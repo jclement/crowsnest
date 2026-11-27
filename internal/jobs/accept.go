@@ -947,6 +947,12 @@ func (s *Service) fixSettled(ctx context.Context, fix Job) {
 			c.event(EventAccept, "The rebase by "+fix.ID+" did not finish ("+string(fix.State)+"); the job still needs one", nil)
 			return nil
 		}
+		if r.AcceptState == AcceptNone || r.AcceptState == AcceptUnverified {
+			// A job crowsnest never checked (no check command, or acceptance off) is not checked
+			// now either: a fix job for review comments (comments.go) leaves it as it was.
+			c.event(EventAccept, "The fix by "+fix.ID+" is done; this job has no check to run again", nil)
+			return nil
+		}
 		r.AcceptState, r.AcceptDetail = AcceptChecking, "Rebased by "+fix.ID+"; crowsnest is running the check again"
 		c.event(EventAccept, r.AcceptDetail, nil)
 		return nil

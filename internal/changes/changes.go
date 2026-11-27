@@ -14,7 +14,8 @@
 //     its current hash, in whichever comparison the mark was made; a mark whose hash no longer
 //     matches makes the file "changed since you viewed it", and the comparison from the version
 //     seen to now is served for it.
-//   - A job's marks go when it lands, is discarded or is deleted (Resolver.Retired).
+//   - A job's marks and comments go when it lands, is discarded or is deleted (Resolver.Retired).
+//   - Line comments (comments.go, compose.go) are kept per subject and sent back as one message.
 //
 // The package knows nothing of jobs or projects: a Resolver turns a subject into a Target.
 package changes
@@ -1172,9 +1173,11 @@ func (s *Service) ProjectChanges(ctx context.Context, ref string) ([]ProjectRow,
 // Run follows job activity and the slow tick until ctx ends, reading watched subjects again, and
 // removes the marks of retired jobs (at start, after a job event, and hourly).
 func (s *Service) Run(ctx context.Context) {
-	if subjects, err := s.opts.Store.DiffMarkSubjects(ctx); err == nil {
-		for _, subject := range subjects {
-			s.noteMarked(subject)
+	for _, list := range []func(context.Context) ([]string, error){s.opts.Store.DiffMarkSubjects, s.opts.Store.DiffCommentSubjects} {
+		if subjects, err := list(ctx); err == nil {
+			for _, subject := range subjects {
+				s.noteMarked(subject) // marks or comments: either is retired with its job
+			}
 		}
 	}
 	s.sweep(ctx)
@@ -1295,6 +1298,11 @@ func (s *Service) sweep(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	commented, err := s.opts.Store.DiffCommentSubjects(ctx)
+	if err != nil {
+		return
+	}
+	subjects = append(subjects, commented...)
 	for _, subject := range subjects {
 		if s.opts.Resolver.Retired(ctx, subject) {
 			s.retire(ctx, subject)
@@ -1305,6 +1313,10 @@ func (s *Service) sweep(ctx context.Context) {
 func (s *Service) retire(ctx context.Context, subject string) {
 	if _, err := s.opts.Store.DeleteSubjectMarks(ctx, subject); err != nil {
 		s.opts.Logger.Warn("removing a job's viewed marks", "subject", subject, "err", err)
+		return
+	}
+	if _, err := s.opts.Store.DeleteSubjectComments(ctx, subject); err != nil {
+		s.opts.Logger.Warn("removing a job's diff comments", "subject", subject, "err", err)
 		return
 	}
 	s.mu.Lock()

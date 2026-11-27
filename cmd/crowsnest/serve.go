@@ -298,6 +298,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		}
 	}
 	changeService := startChanges(ctx, cfg, db, events, jobService, refs.projects.service, logger)
+	if cfg.Demo {
+		go seedDemoComments(ctx, changeService, logger) // demo_comments.go
+	}
 	// "Require all files viewed before Land" (live), enforced in the jobs service's one Land path
 	// so an agent's approved land request passes it too (R7-C07).
 	jobService.SetViewedGate(func(ctx context.Context, jobID, head string) error {
@@ -373,7 +376,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(), Attention: attentionService, Now: nowSources,
-		Changes: changeService, FolderTrust: newFolderTrust(cfg, live.config.get), Engines: engineCatalog(cfg),
+		Changes: changeService, RequireViewed: func() bool { return live.config.get().RequireViewedBeforeLand },
+		FolderTrust: newFolderTrust(cfg, live.config.get), Engines: engineCatalog(cfg),
 	}
 	if cfg.Demo {
 		deps.DemoTouch = func(ctx context.Context, id string) error { return jobs.DemoDiffTouch(ctx, jobService, id) }

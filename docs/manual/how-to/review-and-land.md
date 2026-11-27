@@ -67,9 +67,14 @@ confirmation then says how many of the files it would merge you have not viewed.
 
 ## Sending it back
 
-Write in the job's message box (**Message to job-N**) what to change and **Send**. The agent picks
-it up on its next turn; when it says done again, it is checked again. After a failed final review
-the agent's done is refused until you land, discard, or send it back.
+To point at code, comment in the diff on the Review tab: select a line number (or a range), press
+`c`, write what to change; then **Send N comments to the agent** sends them all as one message, with
+the quoted code ([Review changes: Comments](review-changes.md#comments)). For a job that is already
+done, that starts a fix job in its worktree, and the job is checked again when it finishes.
+
+For anything else, write in the job's message box (**Message to job-N**) what to change and
+**Send**. The agent picks it up on its next turn; when it says done again, it is checked again.
+After a failed final review the agent's done is refused until you land, discard, or send it back.
 
 ## Clearing old worktrees
 
