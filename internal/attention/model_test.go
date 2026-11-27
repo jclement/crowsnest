@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -319,5 +320,16 @@ func TestQuestionUrgency(t *testing.T) {
 		if got, _ := questionUrgency(tc.q, tc.job); got != tc.want {
 			t.Errorf("%s: got %s want %s", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A folder-trust question is said as the decision it is: who asks, about which folder (8.2.1).
+func TestBuildNamesATrustQuestion(t *testing.T) {
+	agent := dialogAgent("w1:p1", "job-1")
+	agent.TrustPrompt, agent.TrustFolder = true, "/work/new-app"
+	src := Sources{Agents: []fleet.AgentEntry{agent}, Jobs: []jobs.Job{job("j_1", 1, "w1:p1", jobs.StateNeedsYou, false, jobs.CauseDialog)}, Projects: []projects.Project{crow}}
+	items := Build(src, testNow)
+	if len(items) != 1 || items[0].Title != "job-1 asks to trust /work/new-app" || items[0].Action.Label != "Trust or not" || !strings.Contains(items[0].Detail, "j_1") {
+		t.Fatalf("items = %+v", items)
 	}
 }

@@ -13,7 +13,7 @@ commands matching `go test *`"). Never allows a dangerous call. [Projects](../ho
 **Attention queue**: the one list of everything waiting on you; every badge and count reads it.
 [The attention queue and Now](../concepts/attention-and-now.md)
 
-**Backstop**: the herdr-side nudge for agents without hooks (Codex): idle 60 seconds with an empty
+**Backstop**: the herdr-side nudge for agents without hooks (sessions crowsnest did not start, a failed hook): idle 60 seconds with an empty
 input box while holding a live job.
 
 **Blocked**: a job waiting on something other than you, with a wake-up crowsnest will act on.

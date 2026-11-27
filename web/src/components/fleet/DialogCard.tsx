@@ -189,8 +189,8 @@ function TrustCard({ trust, agentName, screen, pending, conflict, stillUp, onPre
       <p className="text-xs text-body">
         Trusting lets {engine} read, edit and run files in this folder, and lets the folder&apos;s own agent settings and
         hooks run. Crowsnest&apos;s guard and approvals still apply. Trust it if you know what is in it: your own
-        repository, or one your team works in. {engine} remembers the answer, and job worktrees made from this repository
-        inherit it.
+        repository, or one your team works in. {engine} remembers the answer for this folder; trusting a project&apos;s own folder
+        (its page offers it) spares every job worktree made from it this question.
       </p>
       <div className="flex flex-col gap-1.5 sm:flex-row">
         <Button variant="primary" disabled={pending} onClick={() => onPress(trust.allow, `${agentName} may work in ${folder}`)} className="sm:flex-1">

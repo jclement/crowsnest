@@ -22,7 +22,9 @@ says "(estimated)".
 - Prices are built in, with the date they were checked. To correct or add one, write
   `~/.config/crowsnest/prices.json` (the README shows its shape); it reprices history too.
 - A model with no known price shows its tokens and "cost unknown", never $0.
-- **Codex** agents are not measured: they show "not measured", never zero. Budgets bound them by
+- **Codex** agents are measured in tokens from Codex's own session log, with no cost (crowsnest has
+  no prices for OpenAI's models); one whose session crowsnest never learned shows "not measured",
+  never zero. Budgets bound them by
   minutes and turns instead.
 - A job the orchestrator or a lead holds in its own conversation is counted on that agent's line.
 
@@ -49,6 +51,7 @@ Days are the server's local calendar days; weeks start on Monday.
 
 ## What can go wrong
 
-- **$0 or "not measured"**: a Codex job, or a transcript crowsnest has not found yet.
+- **$0, "cost unknown" or "not measured"**: a Codex job (tokens, no cost), or a transcript
+  crowsnest has not found yet.
 - **Different from your Anthropic bill**: expected on a subscription; on API keys, the built-in
   prices may be out of date (fix with `prices.json`).

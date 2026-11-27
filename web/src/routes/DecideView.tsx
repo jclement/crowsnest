@@ -109,12 +109,14 @@ function DialogPacket({ paneId, itemId, item, loaded }: { paneId: string; itemId
   if (screen.isError) return <LoadError what={paneId} message={screen.error.message} retry={() => void screen.refetch()} />;
   const data: AgentScreen = screen.data;
   const present = !!item || (!loaded && data.dialog.present);
-  const title = `${data.name || item?.agent || "An agent"} is stopped at a terminal dialog`;
+  const who = data.name || item?.agent || "An agent";
+  const trust = data.dialog.present ? data.dialog.trust : undefined;
+  const title = trust ? `${who} asks to trust ${trust.folder || "its folder"}` : `${who} is stopped at a terminal dialog`;
   return (
     <Packet
       itemId={itemId}
       item={item}
-      brief={dialogBrief(paneId, title, data.dialog.options)}
+      brief={dialogBrief(paneId, title, data.dialog.options, trust)}
       jobId={item?.job_id}
       since={item?.since}
       stale={present && data.dialog.present ? null : "The dialog is gone: it was answered or the agent moved on."}

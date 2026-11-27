@@ -7,7 +7,7 @@
 // answered first, the screen changed) refetches, so the packet turns into its stale notice
 // instead of an error, and the note stays.
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, Check, CheckCheck, ExternalLink, Send, ShieldCheck, Star, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCheck, ExternalLink, FolderLock, Send, ShieldCheck, Star, X } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { ApiError } from "../../lib/api";
 import type { Approval } from "../../lib/approvals";
@@ -278,12 +278,17 @@ function DialogChoices({ paneId, screen, agentName, onError, onDone }: Omit<Choi
       </Link>
     );
   }
-  const press = (option: DialogOption) => {
+  const press = (option: DialogOption, success?: string) => {
     onError(null);
     const keys = option.keys && option.keys.length > 0 ? option.keys : [option.key];
     sendKeys.mutateAsync({ keys, screen_hash: screen.screen_hash }).then(
-      () => {
-        toast.show({ tone: "success", title: `Answered ${agentName || "the agent"}`, description: option.label });
+      (result) => {
+        if (result.dialog_gone === false) {
+          // The server watched the screen: the same question is still up (DESIGN.md 8.2.1).
+          onError("Your answer was sent, but the same question is still on the agent's screen. Look at the screen above; if it has not moved, open the terminal.");
+          return;
+        }
+        toast.show({ tone: "success", title: success ?? `Answered ${agentName || "the agent"}`, description: option.label });
         onDone();
       },
       (failure: unknown) => {
@@ -297,6 +302,20 @@ function DialogChoices({ paneId, screen, agentName, onError, onDone }: Omit<Choi
       },
     );
   };
+  const trust = screen.dialog.trust;
+  if (trust) {
+    const folder = trust.folder || "its folder";
+    return (
+      <OptionList count={2}>
+        <BarButton primary onPress={() => press(trust.allow, `${agentName || "The agent"} may work in ${folder}`)} disabled={sendKeys.isPending} icon={<FolderLock className="h-4 w-4" aria-hidden />}>
+          Trust this folder
+        </BarButton>
+        <BarButton onPress={() => press(trust.deny, `${agentName || "The agent"} was told not to trust ${folder}`)} disabled={sendKeys.isPending} icon={<X className="h-4 w-4" aria-hidden />}>
+          Don&apos;t trust
+        </BarButton>
+      </OptionList>
+    );
+  }
   return (
     <OptionList count={options.length}>
       {options.map((option, index) => (

@@ -51,7 +51,7 @@ test("first run: setup link → password → checklist → Start → trust answe
   await page.getByRole("button", { name: "Start" }).click();
   await expect(page.getByRole("heading", { name: "Starting the orchestrator…" })).toBeVisible();
   // Claude stops at the folder-trust question; the checklist shows it as a dialog card.
-  const trustButton = page.getByRole("button", { name: /Yes, I trust this folder|Yes, proceed|^1\b.*Yes/i }).first();
+  const trustButton = page.getByRole("button", { name: /^Trust this folder$/ }).first();
   const reachedChat = page.waitForURL(/\/chat$/, { timeout: 180_000 }).then(() => "chat" as const);
   const sawTrust = trustButton.waitFor({ timeout: 120_000 }).then(() => "trust" as const);
   const first = await Promise.race([reachedChat, sawTrust]);

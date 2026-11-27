@@ -93,8 +93,13 @@ Some things only appear on the agent's screen: Claude's permission menu when no 
 the one-time "do you trust this folder?" question, a login prompt. crowsnest reads the pane, shows
 the dialog as a card with its options, and presses the key you choose (for example `2`, or `down`
 then `Enter`). The press is bound to the exact screen it was read from, so if the screen changed
-meanwhile, nothing is pressed and the card refreshes. crowsnest never answers a dialog by itself.
+meanwhile, nothing is pressed and the card refreshes; after it, crowsnest watches the screen and
+says so if the same question is still there. crowsnest never answers a dialog by itself.
 A form (several fields) opens the terminal instead.
+
+The folder-trust question gets its own card, whichever agent asks and however it draws its menu:
+the agent and the folder named, what trusting means, **Trust this folder** and **Don't trust**
+([how to avoid it](../troubleshooting/common-problems.md#the-folder-trust-prompt)).
 
 ## Gates: questions that grant something
 

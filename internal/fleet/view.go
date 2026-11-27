@@ -77,6 +77,12 @@ type Agent struct {
 	SessionID        string            `json:"session_id,omitempty"` // Claude's session id
 	Title            string            `json:"title"`
 	HasDialog        bool              `json:"has_dialog"`
+	// TrustFolder is the folder a folder-trust question on screen asks about (8.2.1); "" when the
+	// dialog is something else, or none.
+	TrustFolder      string            `json:"trust_folder,omitempty"`
+	// TrustPrompt says the dialog on screen is a folder-trust question (TrustFolder may still be
+	// "" when the folder could not be read).
+	TrustPrompt      bool              `json:"trust_prompt,omitempty"`
 	HasTranscript    bool              `json:"has_transcript"` // a Claude session id is known
 	InteractiveReady bool              `json:"interactive_ready"`
 }
@@ -108,7 +114,7 @@ func (f Fleet) HasPane(paneID string) bool {
 }
 
 // buildFleet reshapes a snapshot. dialogs says which panes show a dialog on screen.
-func buildFleet(session string, snapshot herdr.Snapshot, dialogs map[string]bool) Fleet {
+func buildFleet(session string, snapshot herdr.Snapshot, dialogs map[string]paneDialog) Fleet {
 	agentsByPane := make(map[string]herdr.Agent, len(snapshot.Agents))
 	for _, agent := range snapshot.Agents {
 		agentsByPane[agent.PaneID] = agent
@@ -145,7 +151,7 @@ func buildFleet(session string, snapshot herdr.Snapshot, dialogs map[string]bool
 	return fleet
 }
 
-func buildPane(p herdr.Pane, agentsByPane map[string]herdr.Agent, dialogs map[string]bool) Pane {
+func buildPane(p herdr.Pane, agentsByPane map[string]herdr.Agent, dialogs map[string]paneDialog) Pane {
 	pane := Pane{ID: p.ID, Cwd: firstNonEmpty(p.ForegroundCwd, p.Cwd), Title: firstNonEmpty(p.Label, p.Title, p.TerminalTitle), Focused: p.Focused, AgentStatus: p.AgentStatus}
 	agent, ok := agentsByPane[p.ID]
 	if !ok {
@@ -153,7 +159,10 @@ func buildPane(p herdr.Pane, agentsByPane map[string]herdr.Agent, dialogs map[st
 	}
 	view := &Agent{
 		Name: agent.Name, Target: firstNonEmpty(agent.Name, agent.PaneID), Kind: agent.Agent, Status: agent.AgentStatus,
-		Title: firstNonEmpty(agent.Title, agent.TerminalTitle), HasDialog: dialogs[p.ID], InteractiveReady: agent.InteractiveReady,
+		Title: firstNonEmpty(agent.Title, agent.TerminalTitle), HasDialog: dialogs[p.ID].present, InteractiveReady: agent.InteractiveReady,
+	}
+	if trust := dialogs[p.ID].trust; trust != nil {
+		view.TrustPrompt, view.TrustFolder = true, trust.Folder
 	}
 	if session := agent.AgentSession; session != nil && session.Kind == "id" {
 		view.SessionID = session.Value

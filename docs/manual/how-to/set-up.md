@@ -33,7 +33,7 @@ cosign commands), or build from source (`mise run setup`, then `mise run build`,
    - Optional steps are folded away: the name, a voice key, notifications on this device, and the
      `tailscale serve` command for reaching it from a phone.
 4. Press **Start**. The orchestrator starts. The first time, Claude asks whether it trusts the
-   orchestrator's folder: the question appears right there as a card with its buttons. Answer it.
+   orchestrator's folder: the question appears right there as a card. Press **Trust this folder**.
 5. You land in **Chat**, where the orchestrator says hello. Done.
 
 Nothing else is needed: no config file, no flags. [Open System](app:/system) any time for the same
@@ -76,9 +76,9 @@ container](devbox.md).
 
 - **Port in use**: another crowsnest, or something else, is on 2769. `crowsnest doctor` tells them
   apart; start with `--port N`.
-- **"do you trust this folder?" every time**: Claude asks once per directory; answer it in the
-  card or the terminal. Projects' directories get the same question the first time a lead or job
-  starts there.
+- **"do you trust this folder?" every time**: an agent asks once per folder; press **Trust this
+  folder** on its card. A project created in the app with its box ticked (the default) is trusted
+  at once, and its jobs' worktrees with it; see [The folder-trust prompt](../troubleshooting/common-problems.md#the-folder-trust-prompt).
 - **Claude not signed in**: `claude` in a terminal, then `/login`. The checklist notices.
 - **The setup link expired**: it is new at every start. Restart crowsnest and use the new link,
   or `crowsnest reset-setup` to start over (asks first).
