@@ -77,7 +77,7 @@ describe("ApprovalRulesCard", () => {
     expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/approval-rules"))).toBe(false);
     await user.clear(pattern);
     await user.type(pattern, "go test *");
-    await user.click(screen.getByLabelText(/Also when elevated/));
+    await user.click(screen.getByRole("switch", { name: "Also when elevated" }));
     await user.click(screen.getByRole("button", { name: "Add rule" }));
     await waitFor(() =>
       expect(calls.find((call) => call.method === "POST" && call.path === "/projects/crowsnest/approval-rules")?.body).toEqual({ kind: "bash", pattern: "go test *", max_risk: "elevated" }),

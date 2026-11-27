@@ -193,7 +193,7 @@ function ProjectSchedules({ project }: { project: ProjectView }) {
               <span className="text-2xs text-muted">
                 last {task.last_run_at ? relativeTime(task.last_run_at) : "never"} · next {nextDueText(task, relativeTime)}
               </span>
-              <Button compact variant="ghost" icon={Play} onClick={() => void run(task.name, task.as === "job")} disabled={action.isPending || task.run_now} aria-label={`Run ${task.name} now`}>
+              <Button compact variant="ghost" icon={Play} onClick={() => void run(task.name, task.as === "job")} disabled={action.isPending || task.run_now} aria-label={`Run now: ${task.name}`}>
                 Run now
               </Button>
             </li>

@@ -131,6 +131,22 @@ func seedDemoPolicy(ctx context.Context, service *Service, panes DemoPanes) erro
 	return err
 }
 
+// SeedDemoParallel adds two more low-risk calls from Website's link fixer (j_14), beside its ap_1,
+// as a subagent's parallel calls would arrive, so "Allow 3 low-risk calls from job-14" has
+// something to batch. Only when CROWSNEST_DEMO_PARALLEL is set (the policy e2e spec): the plain
+// demo keeps one call per agent, as its story and the other specs expect.
+func SeedDemoParallel(ctx context.Context, service *Service, panes DemoPanes) error {
+	for _, command := range []string{
+		`{"command":"npx linkinator ./dist/blog --recurse","description":"Check the blog's links"}`,
+		`{"command":"ls dist/changelog","description":"See which release pages were built"}`,
+	} {
+		if _, err := service.Request(ctx, panes.request(demoCall{demostory.LinkFixer, "Bash", fixed(command)})); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RunDemo keeps the demo's approvals moving until ctx ends: every second it tells the fleet about
 // decided ones, and every interval (default 3 minutes), while fewer than three are pending, it
 // asks the next call from the rotation whose job has nothing pending.

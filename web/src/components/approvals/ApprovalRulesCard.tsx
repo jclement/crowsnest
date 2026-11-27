@@ -24,6 +24,7 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Chip } from "../ui/Chip";
 import { SkeletonRows } from "../ui/Skeleton";
+import { Switch } from "../ui/Switch";
 import { useToast } from "../ui/toast-context";
 
 export function ApprovalRulesCard({ projectRef, archived }: { projectRef: string; archived?: boolean }) {
@@ -114,7 +115,7 @@ function PreviewLines({ preview }: { preview: RulePreview }) {
       {preview.above_max_risk.length > 0 && (
         <p className="break-words text-warning">
           Also matches {preview.above_max_risk.length} elevated call{preview.above_max_risk.length === 1 ? "" : "s"}, still asked unless &ldquo;also when
-          elevated&rdquo; is ticked.
+          elevated&rdquo; is on.
         </p>
       )}
       {preview.dangerous.length > 0 && (
@@ -165,7 +166,7 @@ function AddRuleForm({ projectRef }: { projectRef: string }) {
       (failure: Error) => setError(failure.message),
     );
   };
-  const field = "min-h-11 rounded border border-border-strong bg-surface px-2 text-sm text-heading md:min-h-8 md:text-xs";
+  const field = "h-11 rounded border border-border-strong bg-surface px-2 text-sm text-heading md:h-8 md:text-xs";
   return (
     <form
       aria-label="Add a rule"
@@ -201,13 +202,12 @@ function AddRuleForm({ projectRef }: { projectRef: string }) {
         </label>
       </div>
       <p className="text-2xs text-muted">{kindExamples[kind].hint}</p>
-      <label htmlFor={ids.elevated} className="flex min-h-11 items-start gap-2 text-xs text-body md:min-h-0">
-        <input id={ids.elevated} type="checkbox" checked={elevated} onChange={(event) => setElevated(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>
-          Also when elevated
-          <span className="block text-2xs text-warning">Elevated calls push, install, reach the network or write outside the job. Tick only for a pattern you trust that far.</span>
-        </span>
-      </label>
+      <div className="flex flex-col gap-0.5">
+        <Switch checked={elevated} onChange={setElevated} label="Also when elevated" text="Also when elevated" className="self-start" />
+        <p id={ids.elevated} className="text-2xs text-warning">
+          Elevated calls push, install, reach the network or write outside the job. Turn this on only for a pattern you trust that far.
+        </p>
+      </div>
       <label className="flex flex-col gap-0.5 text-2xs text-muted" htmlFor={ids.note}>
         Note (optional)
         <input id={ids.note} value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} className={field} placeholder="why this is safe" />

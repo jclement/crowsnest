@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,9 @@ type demoInbox struct {
 	stateDir  string
 }
 
+// envDemoParallel adds two parallel low-risk calls from one demo job (the batch allow's e2e).
+const envDemoParallel = "CROWSNEST_DEMO_PARALLEL"
+
 // startDemoInbox seeds the demo approvals and questions (each only into an empty store), attaches
 // the demo files, and starts their rotations.
 func startDemoInbox(ctx context.Context, inbox demoInbox, logger *slog.Logger) error {
@@ -39,6 +43,11 @@ func startDemoInbox(ctx context.Context, inbox demoInbox, logger *slog.Logger) e
 	approvalPanes := approvals.DemoPanes{Askers: askers, Asked: inbox.showApproval, Settled: inbox.settleApproval}
 	if err := approvals.SeedDemo(ctx, inbox.approvals, approvalPanes); err != nil {
 		return fmt.Errorf("seeding the demo approvals: %w", err)
+	}
+	if os.Getenv(envDemoParallel) != "" {
+		if err := approvals.SeedDemoParallel(ctx, inbox.approvals, approvalPanes); err != nil {
+			return fmt.Errorf("seeding the demo's parallel approvals: %w", err)
+		}
 	}
 	go approvals.RunDemo(ctx, inbox.approvals, approvalPanes, 0, logger)
 	questionPanes := questions.DemoPanes{Askers: askers}
