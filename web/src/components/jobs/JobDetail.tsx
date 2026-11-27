@@ -14,6 +14,7 @@ import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
 import { AgentTerminal } from "../agent/AgentTerminal";
 import { QuestionDetail } from "../inbox/QuestionDetail";
 import { JobFiles, JobMessageBox } from "./JobMessageBox";
+import { RescuePanel } from "./RescuePanel";
 import { Markdown } from "../Markdown";
 import { SpendSection } from "../spend/SpendSection";
 import { Banner } from "../ui/Banner";
@@ -149,6 +150,11 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
   return (
     <>
       <StuckBanner job={job} openTerminal={openTerminal} openReview={openReview} />
+      {/* Rescue buttons for a job's own agent; a standing agent (a lead, the orchestrator) has
+          its own controls, and restart-agent refuses its jobs. */}
+      {!isFinished(job.state) && job.pane_id && !job.agent_name.startsWith("lead-") && job.agent_name !== "orchestrator" && (
+        <RescuePanel job={job} defaultOpen={job.stuck || job.state === "needs_you"} />
+      )}
       {job.state === "in_review" && (
         <Banner tone="info" icon={GitCompareArrows} action={<Button compact onClick={openReview}>Open the review</Button>}>
           In review, round {job.review_round ?? 1} of 2: a reviewer agent is looking at the change.

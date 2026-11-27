@@ -14,6 +14,7 @@
 // Keyboard: g then n focuses the tray (expanding it); Tab moves through it; Enter opens an item,
 // and an open approval takes focus so y and n answer it. Nothing else in the app answers to y or n.
 import { isRoutine } from "../../lib/decision";
+import { RescuePanel } from "../jobs/RescuePanel";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { BellDot, BellOff, Bot, ChevronDown, ChevronUp, Clock, ListTodo, MessageSquareWarning, MessagesSquare, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
@@ -28,6 +29,7 @@ import { useAgentScreen, useAnswerQuestion } from "../../lib/queries";
 import type { Question } from "../../lib/questions";
 import { onArrival, setTraySound, traySoundOn } from "../../lib/traySound";
 import { ApprovalCard } from "../approvals/ApprovalCard";
+import { BatchAllow } from "../approvals/BatchAllow";
 import { DialogCard } from "../fleet/DialogCard";
 import { Button, IconButton } from "../ui/Button";
 import { Chip } from "../ui/Chip";
@@ -324,13 +326,16 @@ function RowBody({ item, cardRef, onDone, onNavigate }: { item: TrayItem; cardRe
   switch (item.kind) {
     case "approval":
       return (
-        <ApprovalCard
-          ref={cardRef}
-          approval={item.approval}
-          compact
-          onDecided={onDone}
-          onOpenTerminal={item.approval.pane_id ? () => go("/fleet", { agent: item.approval.pane_id ?? "" }) : undefined}
-        />
+        <div className="flex flex-col gap-2">
+          <ApprovalCard
+            ref={cardRef}
+            approval={item.approval}
+            compact
+            onDecided={onDone}
+            onOpenTerminal={item.approval.pane_id ? () => go("/fleet", { agent: item.approval.pane_id ?? "" }) : undefined}
+          />
+          <BatchAllow approval={item.approval} onDone={onDone} />
+        </div>
       );
     case "question":
       return <QuickAnswer question={item.question} onOpen={() => go("/decide", { item: `question:${item.question.id}` })} />;
@@ -340,6 +345,9 @@ function RowBody({ item, cardRef, onDone, onNavigate }: { item: TrayItem; cardRe
       return (
         <div className="flex flex-col gap-2">
           <p className="text-xs text-body">{item.item.detail || item.job.cause_text || "This job is not moving."}</p>
+          {item.job.pane_id && !item.job.agent_name.startsWith("lead-") && item.job.agent_name !== "orchestrator" && item.job.state !== "failed" && item.job.state !== "done" && (
+            <RescuePanel job={item.job} />
+          )}
           <Button compact onClick={() => go("/jobs", { job: item.job.id })}>
             Open the job
           </Button>
