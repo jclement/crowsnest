@@ -139,7 +139,8 @@ describe("buildItems", () => {
     const needs = items.filter((item) => item.group === "needs");
     expect(needs.map((item) => item.id)).toEqual(["q:q_3", "dialog:w3:p1", "q:q_2", "need:job:j_3"]);
     expect(needs[1]?.subtitle).toContain("Website · Rebuild the docs");
-    expect(needs[1]?.command).toEqual({ kind: "navigate", to: "/inbox", search: { q: "dialog:w3:p1" } });
+    // A dialog opens its decision packet (DESIGN.md 23.1).
+    expect(needs[1]?.command).toEqual({ kind: "navigate", to: "/decide", search: { item: "dialog:w3:p1" } });
     expect(needs[3]?.command).toEqual({ kind: "navigate", to: "/jobs", search: { job: "j_3" } });
   });
 
