@@ -32,7 +32,8 @@ Goals, in priority order:
 8. Safe by default: a web terminal is remote code execution, so it fails closed.
 
 Non-goals for v1: multiple users or roles; managing more than one herdr session per process;
-remote machines (`herdr --machine`); editing files; a public-internet threat model
+remote machines (`herdr --machine`; R4 decided one crowsnest per machine, shown side by side by a
+read-only Machines list, 4.21); editing files; a public-internet threat model
 (the target is localhost, a tailnet, or a container behind a tunnel with auth on).
 
 ## 2. Architecture
@@ -96,6 +97,12 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host: the guard hook refuses commands that would reach it, and an approval naming it is dangerous (8.7). Repeatable; added to the file's hosts |
 | `--protected-hosts-file` | `CROWSNEST_PROTECTED_HOSTS_FILE` | `~/Developer/claude-agent/config/protected-hosts` | One host per line, `#` comments; read when it exists, `''` for none (8.7) |
 | `--protected-branch` | `CROWSNEST_PROTECTED_BRANCHES` | none | A branch agents may not commit or push onto, nor force-push: the guard hook (8.7). Repeatable |
+| `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | false | Let the Terminal view's herdr client read the user's saved SSH machines; off, it runs with `XDG_STATE_HOME=<state>/terminal-client` (10, 20). Never editable from a browser |
+| `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | false | Sign in allowed tailnet logins from `tailscale serve`'s identity headers (4.20). Never editable from a browser |
+| `--backup-every` | `CROWSNEST_BACKUP_EVERY` | `0` (off) | Automatic backup interval, at least `1h` (4.17); editable in Settings |
+| `--backup-keep` | `CROWSNEST_BACKUP_KEEP` | `7` | Automatic backups kept (4.17); editable |
+| `--archive-after-days` | `CROWSNEST_ARCHIVE_AFTER_DAYS` | `14` | Settled jobs leave the boards after this many days; `0` never (4.19); editable |
+| `--delete-after-days` | `CROWSNEST_DELETE_AFTER_DAYS` | `180` | Settled history is deleted after this many days; `0` never (4.19); editable |
 | `--allowed-host` | `CROWSNEST_ALLOWED_HOSTS` | derived | Extra Host/Origin names (reverse proxy, MagicDNS). Repeatable |
 | `--trusted-proxy` | `CROWSNEST_TRUSTED_PROXY` | none | `loopback`, an IP or a CIDR whose client-IP header is believed (4.2, R2-L2). Repeatable |
 | `--trusted-proxy-header` | `CROWSNEST_TRUSTED_PROXY_HEADER` | `x-forwarded-for` | The one header a trusted proxy's client is read from: `x-forwarded-for` (its last hop) or `cf-connecting-ip` (cloudflared only; 4.2, R3-L1) |
@@ -157,7 +164,8 @@ The settings that make sense to change while crowsnest runs are editable in the 
 sheet (12.9): `model`, `job-model`, `engine`, `permission-mode`, `no-remote-control` (shown as
 "Remote Control" on/off), `job-remote-control`, `poke-interval`, `compact-at`, `fresh-at`,
 `attachment-max-mb`, `attachment-quota-mb`, `notify-url` (write-only), `protected-host`,
-`protected-branch`; the instance name stays in the Account sheet, voice and notifications in
+`protected-branch`, and since R4 `backup-every`, `backup-keep`, `archive-after-days`,
+`delete-after-days` (section "Backups and storage", all live); the instance name stays in the Account sheet, voice and notifications in
 theirs. They are kept in `kv` as `settings.<option>` in the text form a flag would take.
 
 **Precedence, decided deliberately: flag, then environment, then the app (database), then the
@@ -269,9 +277,9 @@ connected, the MagicDNS name and whether it is allowed, HTTPS certificates enabl
 `tailscale serve status --json` already proxies to the port; if not, the command
 (`tailscale serve --bg <port>`, the syntax of `tailscale serve --help` in 1.104). crowsnest never
 runs a state-changing Tailscale command; it prints them. Tailscale serve also sends identity
-headers (`Tailscale-User-Login`, `-Name`, `-Profile-Pic`); they are not used for anything yet, and
-are the obvious way to a later "sign in with Tailscale" (only from a loopback peer, only with a
-serve config, and only for a login the owner named).
+headers (`Tailscale-User-Login`, `-Name`, `-Profile-Pic`); since R4 `--tailscale-auth` signs in
+an allowed login from them, only from a loopback peer and only for a Host a serve config on this
+machine proxies to crowsnest's port (4.20).
 
 ## 4. Security model
 
@@ -341,6 +349,120 @@ remedy is a host name of crowsnest's own: give it a dedicated MagicDNS or `tails
 name (HTTPS, so the cookie is `__Host-` prefixed and Secure) and open nothing else under that
 name. On a shared host name over plain HTTP, treat every other local web service you visit as
 able to take your session.
+
+### 4.17 Backup and restore (R4, `wip/ops`)
+
+`internal/backup`, `cmd/crowsnest/backup.go`. **One gzipped tar**, entries in this order: `manifest.json`
+(format 1, created time, crowsnest version, schema version, instance name, session, reason
+`manual|scheduled|download`, every file's path, size and SHA-256, and the `not_included` list),
+`crowsnest.db`, `attachments/<sha256>[.thumb.jpg]`, `config/roles/*.md`, `config/tasks/*.md`,
+`config/risk.yaml`, `orchestrator/tasks/*.md`. Nothing else is ever written by a restore: names
+are matched against that pattern, so a crafted archive cannot escape its directories.
+
+**The database copy** is `VACUUM INTO` from one read transaction, consistent while the server
+writes. **Credentials are removed from the copy only** (`store.ScrubSnapshot`, then `VACUUM` with
+`secure_delete` so the rows do not linger in free pages): `auth_sessions`, `action_tokens`,
+`push_subscriptions`, `api_tokens`, `machines.token`, and kv `agent_token:*`, `push.vapid`,
+`settings.notify-url`. The owner's argon2id hash stays (it is not the password; without it a
+restore could not be signed in to). **Not included**, and said in the manifest: Claude's
+transcripts, herdr's state, repositories and worktrees, the config file (it may hold the
+password). Decision: Web Push keys are not carried, so a restored instance has new VAPID keys and
+devices subscribe again; carrying a private key in a file meant for copying elsewhere is worse.
+
+**Restore** stages everything under a private directory in the data directory and checks it
+before moving anything: the manifest first, every name allowed, every size and digest equal,
+nothing missing or extra, a format and a schema no newer than this binary. Refused over a
+database that has a schema (and, in the CLI, while the agent socket or health endpoint answers)
+unless `--force`, which keeps the replaced database as `<db>.before-restore-<stamp>` (with its
+`-wal`/`-shm`); existing config files are kept unless forced. The restored database is opened
+once (so newer migrations run), and gets kv `pause.state` `{paused: true, by: "restore", …}`
+(the pause switch's own row and shape, 6.13 on `wip/landing`) and `restore.pending`.
+
+**The start after a restore.** While `pause.state` says paused by a restore
+(`cmd/crowsnest/restorehold.go`), the orchestrator's start gate stays shut and the job
+supervisor does not start, so nothing is dispatched. In the background the start waits (up to
+90 s) for herdr and compares the restored live jobs with herdr's panes, journals which still
+have one and which do not (kinds `storage` and `alert`), and clears `restore.pending`. The
+System page shows "Paused after a restore" with **Resume** (`POST /restore/resume`, which deletes
+only a restore's pause row). Gap: project leads are not held (21.2 has no start gate); their
+jobs are, since the supervisor is.
+
+**Scheduled backups** (`backupScheduler`): every minute, a backup when the newest
+`auto-<session>-*.tar.gz` in `<data-dir>/backups` is older than `--backup-every`; then all but
+the newest `--backup-keep` are deleted; each run is journalled. **Download backup** streams a
+fresh one (`GET /backup`).
+
+### 4.18 Upgrades
+
+Migrations only go forward. Before `store.Open`, serve calls `backup.PrepareUpgrade`: a read-only
+look at the database; when its schema is behind this binary's, or kv `version.last_started` is
+not this version, it copies the database (`VACUUM INTO` over a read-only connection) to
+`<data-dir>/backups/pre-migration-<session>-<stamp>-s<schema>-<version>.db` and keeps the newest
+three. A schema newer than the binary is refused before anything is touched, naming the fix (run
+the newer crowsnest, or restore a backup). After opening, a version different from the last one
+is recorded in kv `version.updated_from` (`{from, to, at}`), which the System page shows as
+"Updated from vA to vB, What changed" (the release page for a release version) until dismissed.
+
+### 4.19 Retention
+
+`internal/retention`, queries in `internal/store/retention.go`. One `Plan` serves the preview and
+the run, so "Clean up now" shows exactly what it will do. Steps: archive settled jobs that
+settled before `--archive-after-days` (a row in `job_archive`; the board leaves them out, `GET
+/jobs?q=&archived=1` finds them); delete settled jobs that settled before `--delete-after-days`
+with their timeline, settled questions and approvals, agent layers and loaded instructions,
+spend turns and attachment rows (`DeleteJobs`, one transaction, at most 500 a run); sweep
+settled questions and approvals of no job, journal rows and spend turns past the same time,
+expired action tokens, uploads never sent after a day, released attachments past the time
+**except evidence** (role `result` or `ask`), and devices with five or more failures and no
+success in 30 days; remove a blob only when no row refers to it (checked again just before
+removal); remove job state directories of jobs that are gone (older than a minute) or settled
+past the archive time. **Held**: a settled `done` job with a worktree branch or `isolate` may
+hold unlanded work; it is listed with the reason and deleted only when its id is confirmed in a
+run (`confirm`), never by the nightly run. Worktrees are never removed here (the landing sweep
+owns them, 6.12 on `wip/landing`, and knows what landed). The nightly run: checked every 15
+minutes, runs in the 03:00 local hour once 20 hours have passed, or at any hour after 48; the
+report is kept in kv `retention.last_run` and journalled.
+
+### 4.20 Sign in with Tailscale
+
+`internal/tsauth`, `internal/httpd/ops.go`. With `--tailscale-auth`, a request with no valid
+session is signed in when all hold: the TCP peer is loopback; the Host is one that a serve
+config on this machine proxies to crowsnest's port (`tailscale serve status --json`, cached 30
+s; any failure is "no"); `Tailscale-User-Login` is a plausible login (trimmed, lower-cased, no
+spaces or controls, ≤ 254 bytes); and the login is on the owner's list (kv `tailscale.allow`).
+It gets a normal session whose stored user agent starts `tailscale:<login> ` (no schema change),
+and that session is honoured only while each request still meets all of the above for the same
+login, so removing a login or turning the option off ends it at once (the event stream's
+heartbeat re-checks the same way). The list starts empty; the owner adds their own login from a
+browser signed in with the password through serve (`POST /auth/tailscale/allow-me` reads the
+login from that request), and may add others; a session signed in with Tailscale may not change
+the list (`403`). Password login always remains.
+
+Threats, plainly. **Forged headers from the network**: a peer that reaches the port directly is
+not loopback and is refused (tested). **Without the option**: headers are ignored (tested).
+**From loopback with no serve config, or for a Host serve does not proxy**: refused (tested).
+**A local process**: anything on this machine can connect over loopback with a Host and the
+header; serve strips client copies, but a process that bypasses serve is not stopped. On a
+single-user machine that process already runs as the user (and could read the database); on a
+shared machine, leave the option off. **Tagged devices and Funnel**: serve sends no identity for
+them, so they cannot sign in this way. **A serve config pointed elsewhere later**: noticed within
+30 s. The `--trusted-proxy` setting is independent (it only decides the limiter's client
+address).
+
+### 4.21 Machines: decided, and the small version built
+
+**Decision (R4):** one crowsnest per machine, each with its own herdr and its own name, and a
+read-only way to see them together. A single instance driving remote herdr sessions would need
+the agent socket, the hooks and the terminals to cross machines, which is the large version.
+**Built:** scoped API tokens (`cnk_` + 32 random bytes, base64url; only a SHA-256 kept in
+`api_tokens`, with a name, scope, the last four characters, created, last used, revoked) minted
+and revoked in the System page's Machines card and shown once; scope `read` opens `GET
+/api/v1/summary` (`requireAuthOrToken`) and nothing else. `machines(name, url, token)` lists
+other instances: `https://` to any host, or `http://` only to a tailnet address, a `*.ts.net`
+name or loopback; summaries are fetched by the server in parallel (5 s, no redirects, no proxy,
+64 KiB), so the browser needs no cross-origin access and never sees a token; errors are crowsnest's
+own sentences, never the remote's text. No remote control of another instance. A machine's token
+is kept as given (it must be presented) in the 0600 database, and blanked in backups.
 
 ## 5. Driving herdr
 
@@ -1759,7 +1881,7 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /system/demo-state` | `--demo` only: switch the scripted machine the doctor sees (`doctor.DemoStates`) |
 | `GET /settings`, `PUT /settings/{name}` | Settings (3.2): every editable setting with value, default, source, `locked` and `apply`; a change is `{value}` or `{clear: true}`, `409` for a setting the app may not change or one a flag or variable sets, `400` with the loader's message |
 | `GET /onboarding`, `POST /onboarding/start`, `POST /onboarding/shell` | The first-run checklist (4.14.1): its state; finish it (`{engine?}`); a shell pane in the orchestrator's folder with an offered fix command typed in |
-| `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, isolate?}`; `budget?` with M12) → `201` and the queued job; detail with `timeline` and `questions` (6.8) |
+| `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board (archived jobs left out; `?q=` searches title, brief and result, `?archived=1` archived only, 4.19); create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, isolate?}`; `budget?` with M12) → `201` and the queued job; detail with `timeline` and `questions` (6.8) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
 | `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}[?open=1]`, `PUT /projects/{ref}` | Projects (21.1): `{projects: [Project + {lead, counts: {needs_you, running, total}}], unfiled: counts}`; create `{name, dir, slug?, description?, default_role?, default_engine?, default_model?, default_isolate?: -1\|0\|1, permission_mode?, lead_start?}` (`400` with the reason: not a directory, too wide, overlapping); `{ref}` is the id or slug; `?open=1` applies `lead_start=open`; `PUT` edits or `{archived}` (archiving stops the lead). A `project` event `{id, change}` |
@@ -1787,6 +1909,14 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /attachments` (raw body + `X-Filename`, or multipart `file`) → `201` the pending attachment; `GET /attachments/{id}` (the bytes), `/thumb`, `/meta`; `GET /attachments?owner=job:j_3[&role=]` or `?answer=q_7`; `DELETE /attachments/{id}` (pending only) | Attachments (8.6). `POST /agents/{target}/prompt`, `POST /jobs` (which also takes `project_id` and `to`, 21.1), `POST /jobs/{id}/message` and `POST /questions/{id}/answer` take `attachments: [ids]`; questions carry `attachments` and `answer_attachments`; `/auth/me` reports `features.attachments` `{max_bytes, max_files}`; an `attachment` event `{owner}` says an owner's files changed |
 | `GET /push/key`, `GET`/`PUT /push/settings`, `POST`/`DELETE /push/subscriptions`, `DELETE /push/subscriptions/{id}`, `POST /push/test` | Web Push (8.5) |
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
+| `GET /backup` | A fresh backup as a download (4.17) |
+| `GET /updated`, `POST /updated/seen` | The "what changed" notice `{from, to, at, release_url}` or `null` (4.18) |
+| `GET /restore/hold`, `POST /restore/resume` | The pause a restore left `{at, reason}` or `null`; lift it (4.17) |
+| `GET /storage`, `POST /storage/cleanup` | The Storage card; `{dry_run (default true), confirm: [j_…]}` → the retention report (4.19) |
+| `GET /summary` | Session or a read token (`Authorization: Bearer cnk_…`): `{name, version, attention, questions, blocking, approvals, needs_you, running, jobs, orchestrator, paused, stats, at}` (4.21) |
+| `GET`/`POST /tokens`, `DELETE /tokens/{id}` | Scoped tokens; `POST {name}` → `201 {token, record}` (4.21) |
+| `GET`/`POST /machines`, `DELETE /machines/{id}` | Other instances with their summaries or an error (4.21) |
+| `GET`/`PUT /auth/tailscale`, `POST /auth/tailscale/allow-me` | Sign in with Tailscale: state, replace the list, add this request's login; changes need a password session (4.20) |
 
 **Addressing and the TypeScript mirror.** The table rows above are the authority for every shape.
 The web app addresses an agent by its **pane id** (`w1:p1`, URL-encoded as `w1%3Ap1`) even though
@@ -1872,6 +2002,7 @@ The client sends a resize first; the server starts the process on that first res
 - `projects(id, slug, name, dir, root_dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, archived_at, created_at, updated_at)` (migration `0013_projects.sql`, 21.1): archived, never deleted; a partial unique index keeps two live projects off one root; `jobs.project_id` (0 Unfiled) with an index on `(project_id, state)`
 - `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
+- Migration `0014_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -2325,6 +2456,10 @@ internal/attach/             attachments: blobs, sniffing, thumbnails, quota, ag
 internal/push/               Web Push: VAPID keys, subscriptions, SSRF-guarded sender, notice watcher
 internal/agentapi/           unix-socket server, the CLI client, the stdio MCP proxy
 internal/update/             self-update: GitHub release check, Sigstore + checksum verification, install
+internal/backup/             backup and restore archives, the pre-migration copy (4.17, 4.18)
+internal/retention/          archive, delete settled history, the Storage card, the nightly run (4.19)
+internal/tsauth/             sign in with Tailscale: the allowlist and the serve check (4.20)
+internal/machines/           scoped API tokens and the list of other instances (4.21)
 internal/store/              SQLite, migrations/
 internal/hub/                pub/sub
 web/                         React app; web/e2e Playwright; web/embed.go embeds web/dist
@@ -2667,6 +2802,13 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 86. **The folder-trust question is answered on a card, not by crowsnest** (4.14.1). Detecting the arrow-key menu and sending the keys the person picked keeps the rule (crowsnest never answers a start-up dialog itself) and removes the one step that needed the Terminal view.
 87. **Codex can be the orchestrator, with its gaps stated** (7.12) rather than refused: a machine with only Codex still gets a working crowsnest.
 
+88. **Backups never carry a credential, and restore starts paused** (4.17). A backup is a file meant to be copied elsewhere; anything that lets its holder act as the user (sessions, tokens, the push key, the notify URL) is removed from the copy, at the cost of signing in and subscribing again after a restore. Paused, because a restored database describes agents that may no longer exist: the human looks before anything is dispatched.
+89. **Archive is a table, not a column** (4.19): the jobs row, and every query of it (and the landing branch's sixteen new columns), stay as they were; the board filters by the set.
+90. **Retention holds what may be unlanded** (4.19): deleting the record of a job whose branch was never merged loses the only pointer to that work, so it needs the human's tick, one job at a time.
+91. **The Terminal view's client gets its own state directory** (10, 20): herdr's client reads saved SSH machines from its state directory; a directory of crowsnest's own removes the one-click path from a browser session to the user's other hosts without changing herdr or the user's files. `--terminal-machines` puts it back.
+92. **Tailscale identity only from this machine's serve, for listed logins** (4.20), and a session made from it is re-checked on every request rather than trusted for 30 days.
+93. **One crowsnest per machine, a read-only Machines list** (4.21): the small version that answers "what needs me where" without moving the agent socket, hooks or terminals across machines.
+
 ## 18. Milestones
 
 Each is one builder (Opus) in a herdr worktree; at most two build at once; each ends green on `mise run check`.
@@ -2745,6 +2887,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - The long-poll's waiter state is in memory: after a crowsnest restart, an asker blocked on `ask --wait` gets its answer from its next poll and also typed into its pane.
 - One controller per pane: two browsers on the same pane view take turns (the one that lost the pane says so and offers Reconnect).
 - The Terminal view is herdr's own TUI. Until R4 it showed every SSH machine the user had saved in herdr (`herdr machine add`), so anyone who could open it reached those hosts as well (M5). Since R4 (`wip/ops`) its client runs with `XDG_STATE_HOME=<state>/terminal-client`, a state directory of crowsnest's own, so it has no saved machines and still attaches to the session (the session's socket is under herdr's config directory, which is not changed); `--terminal-machines` restores the old behaviour. What remains: the TUI is still a shell as the user, and from any pane a user can still type `ssh` or `herdr --remote` by hand; the isolation removes the one-click path, not the user's own reach. The pane view is limited to the session's own panes.
+- **Day thirty (R4, `wip/ops`)**: a restored instance holds the orchestrator and the job supervisor but not project leads, which start as before (4.17). The reconciliation after a restore only reports which restored jobs still have their pane; it changes no job's state. Retention's held rule knows only a branch or worktree, not whether a job's result was reviewed or landed (the landing branch's landed predicate should replace it once merged). The Storage card's database figure is the file and its WAL, not per table bytes. Sign in with Tailscale trusts any local process that can open a loopback connection (4.20). Machines show only another instance's headline figures, refetched every minute; tokens of a machine restored from a backup are blank and must be minted again. The update notice links to a release page only for release versions. The archived-job search has an API and no view of its own yet.
 - **Login lockout by a peer** (R1 L1): anyone who can reach the port can make 20 failed logins a minute and so keep every new login refused, the real user's included, for as long as they keep it up. Sessions that already exist keep working; only signing in on a new device is blocked. This is the trade DESIGN 4.2 states (a global cap stops a guesser that rotates IPs); a loopback exemption or a delay instead of a refusal are the options if it bites.
 - **Open from the R1 review**: there is no "sign out everywhere" (I6): revoking a stolen session means changing the password, which ends every session. (I1, the missing `redact` helper, was closed by M6's `internal/redact`, which `--notify-url` notices go through; the `POST /keys` log line can now carry only allowlisted key names, R1 I3.)
 - Talk mode has been checked once against the real ElevenLabs API (13.4), from a Mac, not from a
