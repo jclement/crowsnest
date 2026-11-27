@@ -37,7 +37,7 @@ function causeAdvice(job: RescueJob): { text: string; push: boolean } | null {
       return null;
   }
 }
-import { useAgentScreen, useFleet, useJobAction, useJobMessage, useRestartWithInstructions, useSendKeys } from "../../lib/queries";
+import { useAgentScreen, useApprovals, useFleet, useJobAction, useJobMessage, useRestartWithInstructions, useSendKeys } from "../../lib/queries";
 import { DialogCard, ScreenText } from "../fleet/DialogCard";
 import { useToast } from "../ui/toast-context";
 
@@ -97,13 +97,22 @@ function RescueBody({ job, openTerminal }: { job: RescueJob; openTerminal: () =>
   };
   const typeCommand = (name: string, text: string, done: string) => run(name, () => endpoints.prompt(job.pane_id, { text }), done);
   const dialog = screen.data?.dialog;
+  // A tool call waiting as a structured approval is the same decision as the terminal's permission
+  // dialog: only the approval is offered, so one thing is not answerable two ways on one screen.
+  const approvals = useApprovals("pending");
+  const approvalPending = (approvals.data ?? []).some((approval) => approval.status === "pending" && (approval.pane_id === job.pane_id || approval.job_id === job.id));
   const advice = causeAdvice(job);
   const canPush = advice?.push ?? true;
 
   return (
     <div className="flex flex-col gap-3 border-t border-border p-3">
-      {dialog?.present && screen.data && (
+      {dialog?.present && screen.data && !approvalPending && (
         <DialogCard target={job.pane_id} agentName={job.agent_name} screen={screen.data} onOpenTerminal={openTerminal} />
+      )}
+      {approvalPending && (
+        <p className="text-xs text-body" data-testid="rescue-approval-note">
+          A tool call waits for your approval: answer it on its approval card. The terminal's own dialog is the same decision, so it is not offered here too.
+        </p>
       )}
       {advice && (
         <p className="text-xs font-medium text-warning" data-testid="rescue-advice">
