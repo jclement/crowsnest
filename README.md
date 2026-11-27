@@ -57,6 +57,20 @@ by a rule, and a rule allows an elevated call only when you said so. Pending app
 crowsnest restart for 150 s, enough for their hooks to come back. A `PreToolUse` guard refuses outright a few commands no agent should run unattended (reaching a
 protected host, pushing onto a protected branch, `herdr server stop`, another herdr session).
 
+**On a phone** (DESIGN.md 23). Every question, approval or terminal dialog opens as a **decision
+packet** (`/decide?item=…`): the project and job, the ask, what each choice does, the
+recommendation, then the evidence (the diff behind a file list, the command, the agent's last
+message), with the answer in a bar at the bottom under your thumb. Your note survives rotating the
+phone or switching apps; a decision someone already took says so. Notifications say the project,
+the job, the question and the recommendation, and open the packet; where the phone shows buttons, a
+routine question offers its recommended option and Snooze, a low-risk call whose command fits
+offers Allow and Deny, and anything that widens what agents may do offers nothing. A stuck job has
+**Rescue** buttons (interrupt, continue, nudge, restart on the same conversation, compact, switch
+model, the dialog's own options), so a 44-column terminal is the last resort; when you do need
+it, the key bar fits the screen and has Copy and ^C. With talk mode on, Now's job box has a mic:
+hold, speak ("Website: fix the checkout validation"), check the readback, Create, and Undo for a
+few seconds. `docs/PHONE-CHECK.md` is the checklist for a real iPhone.
+
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
 default, serves nothing but a token-gated setup page until a login exists (or an explicit
 `--no-auth`), and checks Host and Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the
@@ -990,7 +1004,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /projects/{ref}/approval-rules` | session | `{kind: "bash"\|"edit"\|"tool", pattern, max_risk?: "low"\|"elevated", note?}` → `201` the rule; `400` with a sentence when it is not valid |
 | `POST /projects/{ref}/approval-rules/preview` | session | The same body → `{considered, allowed, above_max_risk, dangerous}`: the project's recent calls (last 7 days, at most 50) the pattern matches; dangerous ones are never auto-allowed |
 | `DELETE /approval-rules/{id}`, `GET /jobs/{id}/approval-rules` | session | Remove a project or job rule; a job's remembered rules. None of the rule routes exists on the agent socket |
-| `POST /push/action` | action token | A notification's button: `{token, action}` with the single-use, item-scoped, 15-minute token the push carried (never the session cookie) → `{item, message}`; `403` for a used, expired, forged or out-of-scope token, and for any elevated or dangerous approval |
+| `POST /push/action` | action token | A notification's button: `{token, action}` with the single-use, item-scoped, 15-minute token the push carried (never the session cookie) → `{item, message}`; `403` for a used, expired, forged or out-of-scope token, and for any elevated or dangerous approval. Action `snooze` hides the item from the queue for ten minutes and decides nothing |
 | `POST /attachments` | session | One file: the raw body with its name in `X-Filename` (URL-encoded), or multipart `file` → `201` the pending attachment `{id, name, type, size, sha256, image, thumb, inline, …}`. The type is sniffed from the bytes. `413 TOO_LARGE` past `--attachment-max-mb`, `507 QUOTA_FULL` when the quota cannot be freed |
 | `GET /attachments/{id}` | session | The file: inline only for PNG, JPEG, GIF, WebP, BMP, PDF and plain text; everything else (SVG, HTML, …) as a download; always `nosniff`, and a sandboxing CSP on all but an inline PDF. `?download=1` forces a download. `/thumb` is a JPEG thumbnail of a picture, `/meta` the record |
 | `GET /attachments?owner=&role=`, `?answer=` | session | An owner's files (`job:j_3`, `question:q_7`, `orchestrator:`), or the files sent with an answer (`answer=q_7`) |

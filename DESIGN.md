@@ -2163,7 +2163,9 @@ the fallback that is always there.
   which lists approvals first (`?q=approval:ap_3`) and keeps settled ones in History; the palette's
   "Needs you" group lists them too (opening the card; the palette allows nothing itself). The nav
   badge and the tab title count pending approvals as well.
-- **Answering from a notification.** A Web Push for a low-risk approval carries Allow and Deny
+- **Answering from a notification.** (Narrowed on `wip/phone`, 23.4: a cut summary gets no Allow,
+  a question only its recommended option and only when routine and not a gate, everything else
+  Snooze or nothing; the text below is the mechanism.) A Web Push for a low-risk approval carries Allow and Deny
   buttons, and one for a confirm or choice question (not multi-select) its first two options, with
   a single-use action token minted for that one notice (`internal/actions`): 32 random bytes
   (`cna_…`), kept only as its SHA-256, scoped to one item (`approval:ap_3`, `question:q_7`) and
@@ -3256,6 +3258,10 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
  107. **A rule is shown with what it would have matched** (8.7 Policy; R5 review). The add form previews the project's last week of calls as the pattern is typed, and flags any dangerous match as never auto-allowed; each listed rule keeps that line, so a too-broad rule is visible before and after it is saved.
  108. **Pending approvals survive a restart for a grace, not forever** (8.7 (e); Fable R4 2.11). 150 s from the start covers the hook's two minutes of poll retries; one polled again is kept and still answered from the card, one never polled again is superseded, so an upgrade no longer drops every card back to the terminal.
  109. **Batch allow is one job's low-risk calls only** (8.7 Policy). Mixing jobs or risks in one tap would hide which agent got what; the server refuses the whole batch rather than allowing part of it.
+110. **One decision packet per decision, keyed by the queue's item id** (23.1; R4 Codex P1, Fable 3.3). A push, the tray, Now, the palette and a phone's Inbox open the same `/decide?item=…`, so the evidence is never a different shape depending on where Jeff came from. Brief first, evidence second, the answer in a sticky bar: a phone reads top down and answers at the bottom.
+111. **A consequential choice never gets a shorter path than its evidence** (23.1, 23.4; Codex P2, R5-S2). Only a routine question (one choice, no files, a body under 400 characters, not gate-shaped) is answered from a row or a notification button; anything else opens the packet, and a gate's granting choice there takes a second tap. A gate, an elevated or a dangerous approval carries no action token at all, not even Snooze.
+112. **A spoken job is read back before it exists, and exists durably once confirmed** (23.3; Codex P3/V1). No auto-send for job creation: transcript, project (asked when ambiguous), readback, Create; then a real job id, with Undo for eight seconds that cancels it. The readback uses the browser's own speech, never ElevenLabs: the words are Jeff's, not an agent's, and the server's rule that only agent text is synthesised stands.
+113. **Rescue reuses existing routes; slash commands only at idle** (23.2; Fable 3.2/3.5). Interrupt is the keys route's Esc, Compact and Switch model type `/compact` and `/model …` as a plain prompt, and only while the agent is idle, because Claude queues input typed during a turn and a queued slash command arrives as text. No new server endpoint, nothing the agent can reach.
 
 ## 18. Milestones
 
@@ -3752,4 +3758,145 @@ ownership chain), and Playwright `e2e/hermetic/now.spec.ts` at 390x844 (Chromium
 1440: the busy-day walk without Chat, one number across badge, title, Now, Inbox and tray,
 answering a question and an approval from Now, since-you-left per browser, the phone nav and an
 old `/?job=` link; axe on Now; screenshots `web/screenshots/now-*.png`.
+
+## 23. The phone: decisions, rescue, voice, the lock screen
+
+Built on `wip/phone` (2026-11-27) from the R4 product reviews (Fable 2.6, 2.11, 3 and 4; Codex P1
+to P5, V1, top-ten rows 6, 7 and 9) and the R5 security review's S2 and S7. Jeff wants to run many
+projects "from my phone using Claude Remote". The approval policy is 8.7 (Policy) and Remote
+Control is 7.10.1; this section is the rest. Nothing here has run on a real iPhone:
+`docs/PHONE-CHECK.md` is the ten-minute pass that does.
+
+### 23.1 The decision packet
+
+`/decide?item=<attention item id>` (`routes/DecideView.tsx`, `components/decide/`,
+`lib/decision.ts`): one screen per question, approval or terminal dialog, top to bottom:
+
+1. **Where it belongs**: kind, project, the job (a link), its title, the agent, how long it has
+   waited.
+2. **The ask** in a line (the question's title, "Allow Bash: …?", "job-5 is stopped at a terminal
+   dialog"), and what stays blocked.
+3. **If you choose**: each choice with its consequence in a line (the option's `detail`, else a
+   default: "The agent goes ahead", "It runs once, now, in <dir>", "Presses 2 in the agent's
+   terminal"; a warning on a dialog option says so).
+4. **The recommendation**: the agent's recommended option with its detail; for a low-risk approval
+   "Low risk: a routine call".
+5. **The evidence**: context chips, the body, the change (`DiffNavigator`: a file list with counts
+   first; collapsed by default past 3 files or 120 changed lines; a tap jumps to a file and opens
+   it; each file folds), attachments; the call (`ApprovalCard`'s `CallBody`); the screen; and the
+   agent's last assistant message from its conversation.
+6. **The answer bar**, sticky at the bottom, opaque: the note, the choices (more than three scroll
+   inside the bar, at most 38 % of the height), and "Open the full job". A question's option
+   answers in one press (multi: checkboxes and Submit); a gate's granting option (`isGate`:
+   crowsnest's `land_for`/`approval_for`/`requested_by` context or an allow/approve/merge/push
+   option, the web mirror of `push.GateShaped`) asks "This widens what agents may do … Yes, <label>"
+   first (R5-S2); an approval is Allow once or Deny, a dangerous allow confirmed again; a dialog's
+   options press their digit bound to the screen hash, a form opens the terminal.
+
+The **note** is kept in localStorage per item (`crowsnest-note:<item>`, swept after three days),
+so a rotation, a trip to another app or iOS discarding the page never loses it; it is cleared once
+the answer is in. A **stale** decision (answered elsewhere, expired, superseded, the dialog gone)
+shows why instead of the bar; a 409 on submit refetches, which turns the page stale, and keeps the
+note. After an answer the packet moves to the next decision in the queue, else Now.
+
+Who links here: the queue's `itemLink` (palette, tray agent rows), a push (23.4), the tray's
+question rows ("Review the decision" for anything not routine, "Review (add a note)" beside a
+routine one's options), and the Inbox's Open list on a phone (below `md`; the desktop keeps its
+list beside the detail; `/inbox?q=` links still open the sheet). The tray and the footer are
+hidden on `/decide`. Unified diffs everywhere now have one narrow line-number gutter and do not
+wrap (code scrolls sideways in its file, focusable for the keyboard); "Wrap" turns wrapping on.
+
+### 23.2 Rescue without a terminal
+
+`components/jobs/RescuePanel.tsx`, on a live job's detail (open by default when it is stuck or
+needs the human) and in a stuck job's tray row (folded): Interrupt (Esc through `POST
+/agents/{pane}/keys`, no hash), Continue (a job message: carry on, or say why with job_update),
+Nudge, Get it moving (the job's resume: retry now, restart a gone agent, else nudge), Restart on
+the same conversation (`restart-agent`, confirmed), Compact now (`/compact` typed as a prompt) and
+Switch model (`/model sonnet|opus|haiku`; for the rest of that conversation, a restart goes back
+to the job's model), the last two only while the agent is idle (decision 113); the dialog's own
+options (`DialogCard`) when one is up; the last screen as text; Open the terminal. Each says what
+it does in a line. Not offered on a job a lead or the orchestrator holds (they have their own
+controls). Sending a sentence is the message box below it.
+
+**The phone terminal** (`KeyBar`, `TerminalPanel`, `XTerm`): below `sm` the key bar is two rows,
+Esc Tab Ctrl ← ↑ ↓ → Enter, then ^C Paste Copy A− A+ (one scrolling row of 44 px keys left Paste
+half off screen at 390 px); from `sm` (landscape) one row. Copy takes the selection, or the
+visible screen when nothing is selected (a long-press selection in xterm on a phone is unreliable).
+The touch default font is 11 px (about 54 columns at 390 px; it was 13, 44 columns). Not done:
+horizontal pan at 80 columns.
+
+### 23.3 Voice: a job by voice, the readback, earcons; walk mode specified
+
+**A job by voice** (`components/jobs/VoiceJob.tsx`, `lib/voice/jobIntent.ts`; on Now's job box
+when talk mode is on): hold the mic (a tap locks it on, the next stops), speak; the transcript is
+shown editable; the project is worked out (`interpretJob`: a project's name or slug in the
+speech, "Website: …" or "for Website, …" taken off the brief; naming two, or none while none is
+chosen, asks "Which project?" with buttons, and a spoken name that contradicts the box's choice
+asks too); the readback "Website: Fix the checkout validation. Create the job?" is shown and, with
+speak mode on, spoken by the browser's own speech synthesis; nothing exists until Create, which
+gives the job to the project's lead (or the orchestrator) and shows "Created j_42 for Website"
+with Undo for 8 s (cancels it). Pressing the mic stops a readback (barge-in).
+
+**Earcons** (`lib/voice/earcons.ts`, Web Audio, no files): heard, sent, received, needs you, error.
+Heard, sent and error play in the voice job box; needs you plays when the queue's count rises with
+speak mode on (`AppFrame`).
+
+**Walk mode: specified, not built** (Fable 4.1 item 2, Codex V2). It is larger than the rest of
+this branch together and needs a real phone to tune. What it must be when built:
+- A full-screen page (`/walk`) holding a screen wake lock, large controls only: Talk, Repeat, Skip,
+  Stop; a listening indicator that cannot be missed (colour and shape and an earcon).
+- It reads the queue aloud in the server's order, blocking first: "<project>, <agent> asks:
+  <ask>. Recommended: <label>. Say <options>, skip or later." Then it listens automatically.
+- A spoken answer is matched to option labels and numbers for that question id only, read back
+  ("Answer Website's question with Short headline?") and committed after "yes" or two seconds
+  without "cancel"; silence is never consent; a generic "yes" after another item interrupted is
+  rejected.
+- Approvals above low risk, gates and anything with a diff are never answered by voice: "this one
+  needs your eyes", and it moves on. Free speech goes to the orchestrator as a job request through
+  23.3's readback.
+- Barge-in: talking stops speech; anything missed while talking is summarised, never dropped.
+- Platform ceiling, said plainly: a web page cannot hold the microphone with the screen locked on
+  iOS; for driving, the Claude app's own voice mode on a Remote Control session may be the better
+  tool (unverified).
+
+### 23.4 The lock screen: decision-grade notices
+
+`internal/push/decision.go`. A question, approval or dialog notice says where it belongs in the
+title ("<instance>: Website: blocking question", "Crowsnest: DANGEROUS approval",
+"Handbook: terminal dialog", "Unfiled" when there is no project) and the decision in the body
+("j_15 Homepage hero: Which hero copy? · Recommended: Short headline", "j_14 Fix links: job-14
+wants Bash: npx linkinator …"); the project and job come from `push.Describer` (the job given, or
+the one in the asking pane, else the project whose lead is in it). A tap opens the decision packet.
+Buttons (only where the platform shows them; never on iOS), narrowed under R5:
+
+| Item | Buttons |
+|---|---|
+| Low-risk approval whose summary fits uncut | Allow, Deny (as before) |
+| Low-risk approval whose summary was cut | Snooze |
+| Elevated or dangerous approval | none, and no token |
+| Gate-shaped question | none, and no token |
+| Routine question (one choice, no files, short body) with a recommendation | the recommended option, Snooze |
+| Any other question, a dialog | Snooze |
+
+Snooze (`POST /push/action` with action `snooze`) hides the item from the queue for ten minutes on
+every device and decides nothing. `/push/action` still answers only what the token was minted for;
+the fix builder of R5 enforces server-side that gates are never answerable from it. Not done:
+default-to-blocking-only push volume and per-project collapsing (Fable 3.4's third point).
+
+### 23.5 Tests
+
+Vitest: `lib/decision.test.ts` (item ids, briefs, staleness, routine and gate rules, the note's
+store and sweep, the last message), `components/decide/AnswerBar.test.tsx` (the note across a
+remount, a 409 turning stale with the note kept, the gate's second tap, the dangerous
+confirmation), `DiffNavigator.test.tsx`, `DiffView.test.tsx` (one gutter, wrap),
+`RescuePanel.test.tsx`, `TerminalPanel.test.tsx` (Copy, ^C), `lib/voice/jobIntent.test.ts`,
+`VoiceJob.test.tsx` (readback before create, Undo, the ambiguous ask). Go: `internal/push`
+(`decision_test.go`: the text, the button table, gates; the watcher's tests updated),
+`internal/httpd` (a Snooze press never decides). Playwright: `e2e/hermetic/phone.spec.ts` (390x844
+Chromium and WebKit, and 1440: a packet from a push link with the bar on screen, the note through
+reload, rotation and a background trip, stale after the answer; approvals with the dangerous
+confirmation; a long diff; rescue; the terminal's keys all on screen; axe on the packet and the
+rescue panel) and `phone-voice.spec.ts` (fake ElevenLabs and microphone: readback, Create, Undo);
+screenshots `web/screenshots/phone-*.png`.
 
