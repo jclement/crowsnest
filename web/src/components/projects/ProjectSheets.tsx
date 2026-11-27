@@ -3,23 +3,41 @@
 // Archiving stops the project's lead; an archived project takes no work until unarchived.
 import { Archive, ArchiveRestore } from "lucide-react";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { endpoints, queryKeys } from "../../lib/api";
 import type { ProjectInput, ProjectView } from "../../lib/projects";
 import { useCreateProject, useUpdateProject } from "../../lib/queries";
 import { Button } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
-import { ProjectForm } from "./ProjectForm";
+import { ProjectForm, type ProjectExtras } from "./ProjectForm";
 
-export function NewProjectSheet({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated?: (project: ProjectView) => void }) {
+interface NewProjectSheetProps {
+  open: boolean;
+  onClose: () => void;
+  onCreated?: (project: ProjectView) => void;
+  /** Open the folder picker as the sheet opens. */
+  browse?: boolean;
+}
+
+export function NewProjectSheet({ open, onClose, onCreated, browse }: NewProjectSheetProps) {
   const create = useCreateProject();
   const toast = useToast();
-  const submit = (input: ProjectInput) =>
+  const queryClient = useQueryClient();
+  const submit = (input: ProjectInput, extras: ProjectExtras) =>
     create.mutate(input, {
       onSuccess: (project) => {
         toast.show({ tone: "success", title: `Project ${project.name} created`, description: project.dir });
         create.reset();
         onClose();
         onCreated?.(project);
+        // A check command other than the one found by itself is the project's acceptance setting.
+        if (extras.checkCommand && extras.checkCommand !== extras.detectedCheck) {
+          endpoints
+            .setProjectAccept(project.id, { check_command: extras.checkCommand, budget_usd: 0, budget_minutes: 0 })
+            .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.projectAccept(project.id) }))
+            .catch((error: unknown) => toast.show({ tone: "danger", title: "The check command was not saved", description: error instanceof Error ? error.message : String(error) }));
+        }
       },
     });
   const close = () => {
@@ -28,7 +46,7 @@ export function NewProjectSheet({ open, onClose, onCreated }: { open: boolean; o
   };
   return (
     <Sheet open={open} onClose={close} title="New project" size="md">
-      {open && <ProjectForm submitLabel="Create project" pending={create.isPending} error={create.error?.message} onSubmit={submit} onCancel={close} />}
+      {open && <ProjectForm submitLabel="Create project" pending={create.isPending} error={create.error?.message} onSubmit={submit} onCancel={close} startBrowsing={browse} />}
     </Sheet>
   );
 }
