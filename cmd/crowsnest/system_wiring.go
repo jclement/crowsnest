@@ -95,13 +95,21 @@ func (l *liveServices) applyJobDefaults(ctx context.Context, cfg config.Config) 
 }
 
 // reloader returns the function that loads the config again with saved settings: the
-// process's own flags and environment, as at start.
-func reloader(flags *pflag.FlagSet) func(map[string]string) (config.Config, error) {
+// process's own flags and environment, as at start, with the secret variables start removed
+// from the environment read from secrets instead (config.SecretEnvSnapshot).
+func reloader(flags *pflag.FlagSet, secrets map[string]string) func(map[string]string) (config.Config, error) {
 	if flags == nil {
 		return nil
 	}
+	getenv := func(name string) (string, bool) {
+		if value, ok := os.LookupEnv(name); ok {
+			return value, true
+		}
+		value, ok := secrets[name]
+		return value, ok
+	}
 	return func(stored map[string]string) (config.Config, error) {
-		return config.Load(flags, config.Options{Stored: stored})
+		return config.Load(flags, config.Options{Stored: stored, Getenv: getenv})
 	}
 }
 

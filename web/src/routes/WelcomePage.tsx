@@ -20,6 +20,7 @@ import { TerminalPanel } from "../components/terminal/TerminalPanel";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { Button } from "../components/ui/Button";
 import { Sheet } from "../components/ui/Sheet";
+import { PublishCard } from "../components/system/PublishCard";
 import { ApiError, endpoints, queryKeys, terminalPaths, type Me } from "../lib/api";
 import { findCheck, readyToStart, systemEndpoints, systemKeys, type Check, type OnboardingView } from "../lib/system";
 
@@ -254,9 +255,16 @@ function OptionalSteps({ view }: { view: OnboardingView }) {
         </li>
         <li>
           <p className="font-medium text-heading">Reach it from your phone</p>
-          <p className="text-muted">{tailscale?.detail ?? view.bind}</p>
-          {tailscale?.command && tailscale.status !== "ok" && <CommandLine command={tailscale.command} className="mt-1" />}
-          {!tailscale && <CommandLine command="crowsnest --bind tailnet" className="mt-1" />}
+          <PublishCard
+            bare
+            fallback={
+              <>
+                <p className="text-muted">{tailscale?.detail ?? view.bind}</p>
+                {tailscale?.command && tailscale.status !== "ok" && <CommandLine command={tailscale.command} className="mt-1" />}
+                {!tailscale && <CommandLine command="crowsnest --bind tailnet" className="mt-1" />}
+              </>
+            }
+          />
         </li>
       </ul>
       <NotificationSettings open={notifications} onClose={() => setNotifications(false)} />

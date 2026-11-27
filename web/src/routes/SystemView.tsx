@@ -3,7 +3,8 @@
 // running instance (uptime, orchestrator, hooks seen firing, recent errors); paths; settings
 // not at their default and where they came from; and "Copy diagnostics", a redacted text report
 // for pasting into an issue. Since R4 (day thirty): the update notice, Storage (with Download
-// backup and Clean up now), Machines and Sign in with Tailscale (components/system/OpsCards.tsx).
+// backup and Clean up now), Machines and Sign in with Tailscale (components/system/OpsCards.tsx);
+// and Publish to your tailnet (components/system/PublishCard.tsx).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCopy, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -11,6 +12,7 @@ import { CheckList, StatusMark } from "../components/system/CheckList";
 import { MachineDetail } from "../components/system/MachineStats";
 import { WaitsCard } from "../components/system/WaitsCard";
 import { MachinesCard, StorageCard, TailscaleCard, UpdatedNotice } from "../components/system/OpsCards";
+import { PublishCard } from "../components/system/PublishCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
@@ -139,6 +141,7 @@ function SystemBody({ report }: { report: SystemReport }) {
       <WaitsCard />
       <StorageCard />
       <MachinesCard />
+      <PublishCard />
       <TailscaleCard />
       {live?.last_errors && live.last_errors.length > 0 && (
         <Card title="Recent warnings and errors">

@@ -625,3 +625,17 @@ func TestNeverTheRealBinaryUnderTest(t *testing.T) {
 		t.Fatalf("found %q", service.opts.Binary)
 	}
 }
+
+// Turning publishing on answers "starting" with the offer's address at once, not a stale "off".
+func TestEnableAnswersStartingAtOnce(t *testing.T) {
+	f := newFake(t)
+	f.write("mode", "serve-disabled") // stays starting
+	service, _ := newService(f, false, nil)
+	running(t, service)
+	offer := waitState(t, service, StateOff)
+	service.SetEnabled(true)
+	view := service.View(context.Background())
+	if view.State != StateStarting || !view.Show || view.URL != offer.URL {
+		t.Fatalf("%+v", view)
+	}
+}

@@ -71,7 +71,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	cfg, err := loadConfig(cmd.Context(), cmd.Flags())
-	config.UnsetSecretEnv() // loaded or refused, nothing after this needs them (R1 H1)
+	secrets := config.SecretEnvSnapshot() // for the Settings reload only (system_wiring.go reloader)
+	config.UnsetSecretEnv()               // loaded or refused, nothing after this needs them (R1 H1)
 	if err != nil {
 		return err
 	}
@@ -104,7 +105,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	hooks := defaultServeHooks()
-	hooks.logs, hooks.reload, hooks.open = logs, reloader(cmd.Flags()), browserOpener(cfg, logger)
+	hooks.logs, hooks.reload, hooks.open = logs, reloader(cmd.Flags(), secrets), browserOpener(cfg, logger)
 	return serve(ctx, cfg, logger, hooks)
 }
 

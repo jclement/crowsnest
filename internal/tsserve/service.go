@@ -189,6 +189,13 @@ func orDefault(value, def time.Duration) time.Duration {
 func (s *Service) SetEnabled(on bool) {
 	s.mu.Lock()
 	s.stoppedByHuman = !on && s.enabled
+	if on && !s.enabled && !s.busy {
+		// Until Run has planned again, say what is about to happen rather than the stale "off".
+		starting := s.offer
+		starting.Show, starting.State, starting.Enabled = true, StateStarting, true
+		starting.Reason, starting.Fix, starting.FixURL = "", "", ""
+		s.view = starting
+	}
 	s.enabled = on
 	s.offerAt = time.Time{}
 	s.mu.Unlock()

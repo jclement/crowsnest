@@ -644,6 +644,22 @@ func SecretEnvNames() []string { return append([]string(nil), secretEnv...) }
 
 // UnsetSecretEnv removes the secret and auth-switch variables from this process's environment.
 // Call it once the config has been loaded.
+// SecretEnvSnapshot returns the secret variables that are set now, for serve to keep before
+// UnsetSecretEnv: a setting saved in the app is validated by loading the whole config again
+// (3.2), and that reload must see the login the start saw. Without it, an instance whose login
+// came from CROWSNEST_PASSWORD refused every Settings change ("--username and --password must
+// be given together"). The values stay in this process's memory, where the loaded Config holds
+// them anyway; they are never put back into the environment.
+func SecretEnvSnapshot() map[string]string {
+	snapshot := map[string]string{}
+	for _, name := range secretEnv {
+		if value, ok := os.LookupEnv(name); ok {
+			snapshot[name] = value
+		}
+	}
+	return snapshot
+}
+
 func UnsetSecretEnv() {
 	for _, name := range secretEnv {
 		_ = os.Unsetenv(name)
