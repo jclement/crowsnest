@@ -504,18 +504,15 @@ func (s *Service) mutateLocked(ctx context.Context, id string, fn func(record *s
 	return job, nil
 }
 
+// save writes the record and its new timeline events together (one transaction).
 func (s *Service) save(ctx context.Context, record store.JobRecord, c change) error {
-	if err := s.opts.Store.UpdateJob(ctx, record); err != nil {
-		return err
-	}
 	now := s.opts.Now()
-	for _, event := range c.events {
+	events := make([]store.JobEventRecord, len(c.events))
+	for i, event := range c.events {
 		event.JobID, event.At = record.ID, now
-		if _, err := s.opts.Store.InsertJobEvent(ctx, event); err != nil {
-			return err
-		}
+		events[i] = event
 	}
-	return nil
+	return s.opts.Store.UpdateJobWithEvents(ctx, record, events)
 }
 
 // reconcileQuestionsLocked derives needs_you from the job's questions (c.questions): a live job

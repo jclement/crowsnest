@@ -108,3 +108,43 @@ func TestJobQuestionsLeaveTheFilesBehind(t *testing.T) {
 		t.Fatalf("summary %+v %v (the failed delivery must not count)", summary, err)
 	}
 }
+
+// TestUpdateJobWithEventsIsOneTransaction: the record and its events land together or not at all,
+// so a reader never sees a new state without the events that explain it.
+func TestUpdateJobWithEventsIsOneTransaction(t *testing.T) {
+	ctx := context.Background()
+	db, err := OpenMemory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	at := time.Unix(1_700_000_000, 0)
+	id, err := db.InsertJob(ctx, JobRecord{Title: "t", BriefMD: "b", Role: "builder", Engine: "claude", State: "queued",
+		VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, _ := db.GetJob(ctx, id)
+	job.State = "running"
+	both := []JobEventRecord{{JobID: id, At: at, Kind: "launch", Summary: "Brief sent"}, {JobID: id, At: at, Kind: "state", Summary: "queued → running"}}
+	if err := db.UpdateJobWithEvents(ctx, job, both); err != nil {
+		t.Fatal(err)
+	}
+	if events, _ := db.ListJobEvents(ctx, id, 10); len(events) != 2 || events[1].Summary != "queued → running" {
+		t.Fatalf("events: %+v", events)
+	}
+
+	// The second event names a job that does not exist (the foreign key refuses it): the state
+	// change and the first event are rolled back with it.
+	job.State = "done"
+	broken := []JobEventRecord{{JobID: id, At: at, Kind: "state", Summary: "running → done"}, {JobID: id + 100, At: at, Kind: "x", Summary: "orphan"}}
+	if err := db.UpdateJobWithEvents(ctx, job, broken); err == nil {
+		t.Fatal("an event for a missing job was accepted")
+	}
+	if again, _ := db.GetJob(ctx, id); again.State != "running" {
+		t.Fatalf("the record was written without its events: %s", again.State)
+	}
+	if events, _ := db.ListJobEvents(ctx, id, 10); len(events) != 2 {
+		t.Fatalf("a partial set of events was written: %+v", events)
+	}
+}

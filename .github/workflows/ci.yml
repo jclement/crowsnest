@@ -34,10 +34,12 @@ jobs:
   # The hermetic browser suite (DESIGN.md 15): Playwright against the built binary in --demo,
   # desktop Chromium plus phone-sized Chromium and WebKit. Browsers come from Playwright's own
   # installer at the version web/package-lock.json pins (with the system libraries WebKit needs);
-  # the HTML report is uploaded when the suite fails.
+  # the HTML report is uploaded when the suite fails. 30 minutes: setup and the browser install take
+  # about 5 and the suite about 14 on a runner, and a slower runner was cut off at 20 while still
+  # passing.
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:

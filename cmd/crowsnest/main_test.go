@@ -165,7 +165,10 @@ func TestDemoServeLeavesTheRealDirectoriesAlone(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- root.ExecuteContext(ctx) }()
 	health := fmt.Sprintf("http://127.0.0.1:%d/api/v1/health", port)
-	deadline := time.Now().Add(10 * time.Second)
+	// This checks where the demo writes, not how fast it starts. The demo's start seeds projects,
+	// git repositories and jobs; under -race on a 4-core CI runner beside the other packages it
+	// took 9.7 s and 10.05 s, so a 10 s budget failed for timing, not behaviour.
+	deadline := time.Now().Add(60 * time.Second)
 	for {
 		response, err := http.Get(health) //nolint:noctx // a test poll
 		if err == nil {

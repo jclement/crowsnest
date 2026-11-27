@@ -3226,6 +3226,10 @@ ring, unknown a dash) so colour is never the only cue. Inter and JetBrains Mono 
 no font CDN); the terminals add their own fallback chain ("Terminal font", below). Data comes only through `lib/queries.ts` hooks (`useFleet`, `useAgentScreen`,
 `useSendKeys`, …) over `lib/api.ts`; `lib/live.ts` maps each SSE event name to the query keys it
 invalidates (`fleet` refetches the fleet and every agent's queries; `hello` refetches everything).
+An event that arrives while a query's first fetch is still in flight makes that query fetch again
+once the first one settles: TanStack folds such an invalidation into the running fetch (it
+restarts only a query that already has data), which would leave a change made after the fetch
+read the server off screen until the next poll.
 `components/Markdown.tsx` is the one renderer for untrusted markdown (section 4.8), with mermaid
 loaded lazily. The Fleet view's Conversation and Terminal bodies are the exported slots
 `components/agent/AgentConversation.tsx` and `AgentTerminal.tsx`: later milestones replace their

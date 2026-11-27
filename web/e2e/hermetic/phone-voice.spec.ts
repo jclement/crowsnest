@@ -43,6 +43,10 @@ voiceTest.use({
 });
   // Chromium's fake microphone is a desktop switch; WebKit has its own mock device.
   voiceTest.skip(({ browserName, isMobile }) => browserName === "chromium" && isMobile, "desktop Chromium covers Chromium");
+  // The same rule as talk.spec.ts's hold-Space tests: holding the mic must record, and Playwright's
+  // WebKit has a mock capture device on macOS but none on Linux, where the button never reaches
+  // "Listening" (every CI run). CI covers this flow with desktop Chromium; a Mac run covers WebKit.
+  voiceTest.skip(({ browserName }) => browserName === "webkit" && process.platform === "linux", "Playwright's WebKit has no mock microphone on Linux");
 
   voiceTest("give a job by voice: readback before anything is created, then a job id with Undo", async ({ page }, testInfo) => {
     await sizeFor(page, testInfo);

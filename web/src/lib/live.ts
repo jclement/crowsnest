@@ -2,7 +2,7 @@
 // server says "something changed" and the client refetches what it shows (DESIGN.md section 10).
 // The mapping lives here as data so it is tested without a browser and later milestones extend
 // one table instead of adding handlers across the app.
-import { useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useQueryClient, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { queryKeys } from "./api";
 import type { ApprovalEvent } from "./approvals";
@@ -97,6 +97,37 @@ export function isFleet(data: unknown): data is Fleet {
  */
 export const BEAT_EVENT = "crowsnest-beat";
 
+/** Queries already waiting for their first fetch to settle before fetching again. */
+const refetchPending = new WeakSet<Query>();
+
+/**
+ * Invalidates queryKey, and makes sure the change is fetched. TanStack folds an invalidation into a
+ * query's first fetch when that is still in flight (it cancels and restarts only a query that
+ * already has data: query-core's Query.fetch), so a change made after the first fetch had read the
+ * server stayed off screen until the next poll: a job opened the moment it was given showed "Brief
+ * sent" but not "queued → running" for 30 s (CI, WebKit). Such a query is fetched again once its
+ * first fetch settles.
+ */
+export function invalidate(queryClient: QueryClient, queryKey: QueryKey): void {
+  const cache = queryClient.getQueryCache();
+  for (const query of cache.findAll({ queryKey })) {
+    if (query.state.data !== undefined || query.state.fetchStatus !== "fetching" || refetchPending.has(query)) continue;
+    refetchPending.add(query);
+    const unsubscribe = cache.subscribe((event) => {
+      if (event.query !== query) return;
+      if (event.type === "removed") {
+        refetchPending.delete(query);
+        unsubscribe();
+      } else if (event.type === "updated" && query.state.fetchStatus === "idle") {
+        refetchPending.delete(query);
+        unsubscribe();
+        void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true });
+      }
+    });
+  }
+  void queryClient.invalidateQueries({ queryKey });
+}
+
 /** Opens the app's one event stream and wires it to the query cache. Returns its state. */
 export function useLiveQueries(): StreamState {
   const queryClient = useQueryClient();
@@ -115,11 +146,11 @@ export function useLiveQueries(): StreamState {
             const written = !!payload && payload.accept(data);
             if (written) queryClient.setQueryData(payload.key, data);
             sideEffects[name as EventName]?.(data);
-            if (keys === null) void queryClient.invalidateQueries();
+            if (keys === null) invalidate(queryClient, []);
             else
               for (const queryKey of keys) {
                 if (written && queryKey === payload.key) continue;
-                void queryClient.invalidateQueries({ queryKey });
+                invalidate(queryClient, queryKey);
               }
           },
         ]),

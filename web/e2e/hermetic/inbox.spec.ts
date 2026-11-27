@@ -168,7 +168,10 @@ test("a terminal dialog is answered from its card; a press against a changed scr
 
   // The refreshed card carries the real hash; the press goes through.
   stale = false;
-  await page.unroute("**/api/v1/agents/*/screen");
+  // The card polls its screen, so a handler is often mid-fetch here: a plain unroute leaves it
+  // running, and its fulfill then lands on a route already handled ("Route is already handled!",
+  // seen under load). Wait for running handlers to finish; this is the test's only route.
+  await page.unrouteAll({ behavior: "wait" });
   await page.reload();
   const fresh = detailRegion(page, testInfo, "Selected item").getByLabel("Dialog from job-5");
   await fresh.getByRole("list", { name: "Options" }).getByRole("button").first().click();

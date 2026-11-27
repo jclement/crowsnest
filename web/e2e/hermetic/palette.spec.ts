@@ -121,7 +121,11 @@ test("giving a job from the palette puts it on the board, and the toast opens it
 test("⌘/Ctrl+Enter on Give job opens the full form with the text in it", async ({ page }) => {
   await pinPlatform(page, "other");
   await page.goto("/chat");
+  // The page first, then the chord: pressed before the app had mounted its key listener, the
+  // chord went nowhere and the palette never opened (CI, a loaded runner).
+  await expect(page.getByRole("list", { name: "Conversation" })).toBeVisible();
   await page.keyboard.press(chord("other"));
+  await expect(palette(page)).toBeVisible();
   await input(page).fill("> Tidy the README");
   await page.keyboard.press("Control+Enter");
   await expect(page).toHaveURL(/\/jobs$/);
