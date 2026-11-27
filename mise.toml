@@ -270,3 +270,43 @@ echo "Tag pushed! GitHub Actions will build and release."
 [tasks."dev:reset"]
 description = "Blow away local state: build output, web dist, Vite cache, .dev/ (dev database and orchestrator dir), and stop and delete the crowsnest-dev herdr session (only that one, by exact name) with its state dir"
 run = "bash scripts/dev-reset.sh"
+
+# ---- Promo film (promo/README.md) ---------------------------------------------
+# The narrated walkthrough, recorded from the real app in --demo. `mise run promo` does it all;
+# the stages are separate so one can be redone. Heavy (Chromium + ffmpeg): run under `heavy`.
+
+[tasks."promo:setup"]
+description = "Promo film: Python deps (uv) and Playwright's Chromium. Needs mise run setup first (the recorder uses web/node_modules)"
+dir = "promo"
+run = ["uv sync --quiet", "npx --prefix ../web playwright install chromium"]
+
+[tasks."promo:voice"]
+description = "Promo film: perform the narration lines that have no cached clip in promo/voice/ (ElevenLabs; key from ELEVENLABS_API_KEY, promo/.env or ~/Downloads/eleven.env) and write out/timeline.json. `-- --fake` needs no key"
+dir = "promo"
+run = "uv run --quiet scripts/voice.py"
+
+[tasks."promo:record"]
+description = "Promo film: record every scene from ./bin/crowsnest --demo into promo/out/clips/ (`-- give nudge` for some), and draw the caption plates"
+dir = "promo"
+run = "node recorder/record.mjs"
+
+[tasks."promo:music"]
+description = "Promo film: compose the music bed (promo/out/audio/bed.wav)"
+dir = "promo"
+run = "uv run --quiet scripts/music.py"
+
+[tasks."promo:assemble"]
+description = "Promo film: mix, caption and encode promo/out/crowsnest-tour.mp4 (+ .srt, promo/contact-sheet.png) and copy it to ~/Downloads (`-- --no-copy` not)"
+dir = "promo"
+run = "uv run --quiet scripts/assemble.py"
+
+[tasks.promo]
+description = "Promo film, start to finish: build, voice, record, music, assemble"
+depends = ["build"]
+dir = "promo"
+run = [
+  "uv run --quiet scripts/voice.py",
+  "node recorder/record.mjs",
+  "uv run --quiet scripts/music.py",
+  "uv run --quiet scripts/assemble.py",
+]
