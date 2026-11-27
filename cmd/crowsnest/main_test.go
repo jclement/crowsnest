@@ -170,7 +170,9 @@ func TestDemoServeLeavesTheRealDirectoriesAlone(t *testing.T) {
 		response, err := http.Get(health) //nolint:noctx // a test poll
 		if err == nil {
 			_ = response.Body.Close()
-			break
+			if response.StatusCode == http.StatusOK {
+				break // up (while it starts, the early-bound port answers 503)
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("serve --demo never answered: %v", err)
