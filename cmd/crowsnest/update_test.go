@@ -26,7 +26,7 @@ func fakeGitHub(t *testing.T) *update.Client {
 	}))
 	t.Cleanup(server.Close)
 	return &update.Client{API: server.URL, HTTP: server.Client(), UserAgent: "test",
-		Verify: func(_, _ []byte) error { return errors.New("tests never install") }}
+		Verify: func(_, _ []byte, _ string) error { return errors.New("tests never install") }}
 }
 
 func TestUpdateCheck(t *testing.T) {

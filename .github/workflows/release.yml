@@ -49,6 +49,11 @@ jobs:
           install: true
           cache: true
       - name: Setup
+        # No npm install scripts (R5-S10): the web/dist built below is embedded in the signed
+        # binaries, so nothing a dependency runs at install may touch it. The Dockerfile does the
+        # same (--ignore-scripts); nothing in the web build needs one.
+        env:
+          npm_config_ignore_scripts: "true"
         run: mise run setup
       - name: Check
         run: mise run check
@@ -106,6 +111,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write # keyless cosign: sign the image by digest with this workflow's identity (R5-S10)
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -140,8 +146,11 @@ jobs:
             org.opencontainers.image.title=crowsnest
             org.opencontainers.image.description=crowsnest devbox: herdr, mise and Claude Code behind a web UI
       - name: Build and push
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
+          provenance: mode=max # a SLSA provenance attestation beside the image
+          sbom: true
           context: .
           file: deploy/Dockerfile
           platforms: linux/amd64,linux/arm64
@@ -154,3 +163,11 @@ jobs:
             BUILD_DATE=${{ steps.version.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+      - name: Sign the image
+        # By digest, never by tag (a tag can be moved): `cosign verify` with this workflow's
+        # identity proves an image came from this release (README, Container).
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"

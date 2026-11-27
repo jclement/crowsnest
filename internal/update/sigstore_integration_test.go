@@ -33,7 +33,7 @@ func TestIntegrationSigstoreVerifiesARealRelease(t *testing.T) {
 	if err := verifySigstore(checksums, bundle, issuer, signer); err != nil {
 		t.Fatalf("a real signed release did not verify: %v", err)
 	}
-	if err := SigstoreVerifier(checksums, bundle); err == nil {
+	if err := SigstoreVerifier(checksums, bundle, "v1.0.0"); err == nil {
 		t.Fatal("another repository's signature was accepted as crowsnest's")
 	}
 	tampered := []byte(strings.Replace(string(checksums), "a", "b", 1))

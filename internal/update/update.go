@@ -80,9 +80,9 @@ type Release struct {
 	BundleURL   string `json:"-"` // checksums.txt.sigstore.json
 }
 
-// Verifier proves that bundle is a valid signature over artifact by the expected signer.
-// SigstoreVerifier is the real one; tests substitute their own.
-type Verifier func(artifact, bundle []byte) error
+// Verifier proves that bundle is a valid signature over artifact by the expected signer, the
+// release workflow at tag. SigstoreVerifier is the real one; tests substitute their own.
+type Verifier func(artifact, bundle []byte, tag string) error
 
 // Client talks to GitHub. The zero value is not usable; use NewClient.
 type Client struct {
@@ -253,7 +253,7 @@ func (c *Client) Apply(ctx context.Context, rel Release, execPath string) error 
 	if err != nil {
 		return fmt.Errorf("downloading the checksums signature: %w", err)
 	}
-	if err := c.Verify(checksums, bundle); err != nil {
+	if err := c.Verify(checksums, bundle, rel.TagName); err != nil {
 		return fmt.Errorf("checksums.txt is not signed by %s's release workflow; refusing to install: %w", Repo, err)
 	}
 	want, err := checksumFor(checksums, rel.AssetName)

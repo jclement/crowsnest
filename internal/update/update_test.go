@@ -152,7 +152,7 @@ func (f *fakeRelease) client(verify Verifier) *Client {
 
 // acceptSignature stands in for Sigstore and records what it was asked to verify.
 func acceptSignature(seen *[]byte) Verifier {
-	return func(artifact, bundle []byte) error {
+	return func(artifact, bundle []byte, _ string) error {
 		*seen = artifact
 		if string(bundle) != "bundle" {
 			return errors.New("wrong bundle")
@@ -222,7 +222,7 @@ func TestApplyInstallsAVerifiedRelease(t *testing.T) {
 
 func TestApplyRefusesABadSignature(t *testing.T) {
 	fake := newFakeRelease(t, []byte("evil"), nil)
-	client := fake.client(func(_, _ []byte) error { return errors.New("certificate identity mismatch") })
+	client := fake.client(func(_, _ []byte, _ string) error { return errors.New("certificate identity mismatch") })
 	rel, err := client.Latest(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -302,5 +302,19 @@ func TestCheckerIgnoresAnUnreachableGitHub(t *testing.T) {
 	checker.CheckOnce(context.Background())
 	if _, ok := checker.Available(); ok {
 		t.Fatal("an error became an update")
+	}
+}
+
+// TestSignerPatternForBindsTheTag is R5-S10: a signature is accepted only for the tag being
+// installed, not any v* tag.
+func TestSignerPatternForBindsTheTag(t *testing.T) {
+	pattern := regexp.MustCompile(SignerPatternFor("v1.2.3"))
+	if !pattern.MatchString("https://github.com/jclement/crowsnest/.github/workflows/release.yml@refs/tags/v1.2.3") {
+		t.Fatal("the release's own tag is refused")
+	}
+	for _, other := range []string{"v1.2.4", "v1.2.3-evil", "v1.2.30", "v0.0.1"} {
+		if pattern.MatchString("https://github.com/jclement/crowsnest/.github/workflows/release.yml@refs/tags/" + other) {
+			t.Errorf("a signature for %s vouches for v1.2.3", other)
+		}
 	}
 }
