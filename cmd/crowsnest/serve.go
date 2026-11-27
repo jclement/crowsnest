@@ -171,6 +171,22 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		}
 	}
 	cfg = storedName(ctx, cfg, db)
+	// The port is bound now, before the slow part of the start, and held from here on: a port in
+	// use is reported at once, and nothing can take it while the services are wired (the test
+	// that reserved a port and bound it seconds later lost it about one run in five to the
+	// parallel suite's own connections).
+	listeners, err := httpd.Bind(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			for _, listener := range listeners {
+				_ = listener.Close()
+			}
+		}
+	}()
 
 	authService, err := auth.New(ctx, auth.Options{Username: cfg.Username, Password: cfg.Password, NoAuth: cfg.NoAuth}, db)
 	if err != nil {
@@ -346,6 +362,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	serverRef.Store(server)
+	server.Prebound, handedOver = listeners, true
 	var readyOnce sync.Once
 	server.OnListening = func(url string) {
 		readyOnce.Do(func() { logReady(ctx, sys, []string{browsableBase(url)}, logger) })

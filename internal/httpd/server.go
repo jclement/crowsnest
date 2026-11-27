@@ -207,6 +207,8 @@ type Server struct {
 	// OnListening, when set, is called with each listener's URL once it is bound: serve prints
 	// the setup link from it, with the real port.
 	OnListening func(url string)
+	// Prebound are listeners serve bound early (Bind); Run serves them instead of binding.
+	Prebound []net.Listener
 }
 
 // New wires the routes and middleware.
@@ -331,14 +333,18 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
+// Bind opens a listener on every address cfg names (skipping an optional one that cannot be
+// bound) and returns them. serve calls it before the slow part of its start (R5: the start test
+// reserved a port, then took seconds to bind it, and under a busy test suite another connection
+// could take the port meanwhile), and hands the listeners to Server.Prebound; the port is held
+// from then on, and a port in use is reported at once rather than after the whole start.
+func Bind(ctx context.Context, cfg config.Config, logger *slog.Logger) ([]net.Listener, error) {
 	var listeners []net.Listener
 	var listenConfig net.ListenConfig
-	limiter := newConnLimiter(maxConnections, maxConnectionsPerPeer)
-	for _, target := range s.deps.Config.Listeners {
+	for _, target := range cfg.Listeners {
 		listener, err := listenConfig.Listen(ctx, "tcp", target.Addr.String())
 		if err != nil && target.Optional {
-			s.deps.Logger.Warn("skipping optional listen address", "addr", target.Addr.String(), "err", err)
+			logger.Warn("skipping optional listen address", "addr", target.Addr.String(), "err", err)
 			continue
 		}
 		if err != nil {
@@ -352,14 +358,32 @@ func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 			}
 			return nil, fmt.Errorf("listening on %s (from --bind %s): %w", target.Addr, target.Source, err)
 		}
+		listeners = append(listeners, listener)
+	}
+	if len(listeners) == 0 {
+		return nil, errors.New("no address could be bound; check --bind")
+	}
+	return listeners, nil
+}
+
+// listen returns the listeners Run serves: Prebound when serve bound them already, else freshly
+// bound ones; each is wrapped in the connection limiter, logged and reported to OnListening.
+func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
+	raw := s.Prebound
+	if raw == nil {
+		var err error
+		if raw, err = Bind(ctx, s.deps.Config, s.deps.Logger); err != nil {
+			return nil, err
+		}
+	}
+	limiter := newConnLimiter(maxConnections, maxConnectionsPerPeer)
+	listeners := make([]net.Listener, 0, len(raw))
+	for _, listener := range raw {
 		listeners = append(listeners, limiter.wrap(listener))
 		s.deps.Logger.Info("listening", "url", s.urlFor(listener.Addr()))
 		if s.OnListening != nil {
 			s.OnListening(s.urlFor(listener.Addr()))
 		}
-	}
-	if len(listeners) == 0 {
-		return nil, errors.New("no address could be bound; check --bind")
 	}
 	return listeners, nil
 }
