@@ -1,0 +1,291 @@
+# The crowsnest walkthrough: the whole film in one file.
+#
+# Each [[scene]] is one shot. `lines` is the narration, one clip and one caption per line, spoken
+# in order with `gap` seconds between them; a line may be { text = "...", say = "..." } when the
+# spoken words need respelling (the caption always shows `text`). `shows` says what the picture
+# does; the recording itself is the function of the same id in recorder/scenes.mjs, which waits
+# for each line to start before it acts, so picture follows words. A scene lasts lead + its lines
+# + tail, or `min` seconds if that is longer.
+#
+#   kind = "card"   a title or section card (recorder/cards.mjs), drawn frame by frame
+#   kind = "app"    the real app at 1440x810 CSS px (1920x1080 on screen), ./bin/crowsnest --demo
+#   kind = "phone"  the real app at 390x844 in a phone frame
+#
+# Change a line and only that line is performed again (`mise run promo:voice`); every line's clip
+# is cached in voice/ by a hash of its spoken text, the voice, the model and the settings.
+
+[film]
+title = "crowsnest: a walkthrough"
+voice_id = "cjVigY5qzO86Huf0OWal"   # "Eric - Smooth, Trustworthy" (premade): calm, American, middle-aged
+model = "eleven_multilingual_v2"
+stability = 0.55                     # steady, not sing-song
+similarity_boost = 0.75
+style = 0.0
+output_format = "mp3_44100_128"
+gap = 0.55                           # silence between two lines of one scene
+lead = 0.5                           # before a scene's first line
+tail = 0.7                           # after its last line
+fps = 30
+
+# ---- Open: the problem, then the answer ------------------------------------------------------
+
+[[scene]]
+id = "problem"
+kind = "card"
+card = "problem"
+shows = "Dark card. The problem in Jeff's words, typed out one phrase at a time."
+lines = [
+  "You give an agent a job, and it just works for a while. And then it stops.",
+  "Maybe it finished. Maybe it asked you something an hour ago. You only find out when you go and look.",
+]
+
+[[scene]]
+id = "title"
+kind = "card"
+card = "title"
+shows = "The crowsnest mark and name, the one-line pitch beneath."
+lines = [
+  "Crowsnest is one program that runs your coding agents, keeps them working, and tells you when they need you.",
+]
+
+# ---- 1. Give it a job ------------------------------------------------------------------------
+
+[[scene]]
+id = "s1"
+kind = "card"
+card = "section"
+section = "1"
+heading = "Give it a job"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "give"
+kind = "app"
+shows = "Jobs board. Type a job, open the options, point it at the crowsnest repo as a builder, Give job; the card appears and moves from Queued to Running. Then the board's sections, top to bottom."
+lines = [
+  { text = "Type what needs doing into one box.", after = 2.0 },
+  { text = "Crowsnest hands it to a new agent, in its own git worktree, and the job lands on the board.", after = 1.2 },
+  "The board keeps everything in order: what needs you, what's stuck, what's running, and what finished today.",
+]
+min = 24.0
+
+# ---- 2. It never silently stops --------------------------------------------------------------
+
+[[scene]]
+id = "s2"
+kind = "card"
+card = "section"
+section = "2"
+heading = "It never silently stops"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "nudge"
+kind = "app"
+shows = "Open 'Tidy the README install section' (2 nudges); scroll to its timeline; highlight the nudge rows."
+lines = [
+  { text = "An agent that ends its turn without saying done, blocked, or waiting on you is sent straight back to work.", after = 0.8 },
+  "Every nudge is on the job's timeline.",
+]
+min = 12.5
+
+[[scene]]
+id = "stuck"
+kind = "app"
+shows = "Open 'Migrate the settings page' (stuck on a usage limit): highlight the cause and Retry now. Then 'Profile the fleet cache' (stopped three times): highlight Nudge."
+lines = [
+  "If it keeps stopping, or hits a usage limit, the job is marked stuck, with the cause, and the one button that fixes it.",
+]
+min = 11.0
+
+# ---- 3. It asks without stopping -------------------------------------------------------------
+
+[[scene]]
+id = "s3"
+kind = "card"
+card = "section"
+section = "3"
+heading = "It asks without stopping"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "question"
+kind = "app"
+shows = "Inbox. Open 'Apply the fleet cache refactor?': the sequence diagram, then scroll to the diff."
+lines = [
+  { text = "When an agent needs a decision, it asks, and the rest of the work carries on.", after = 0.6 },
+  "Questions land in the Inbox, with a diagram or a diff when that helps.",
+]
+min = 13.0
+
+[[scene]]
+id = "approval"
+kind = "app"
+shows = "Inbox. The dangerous 'git push --force' approval card: command, directory, the risk line. Then the low-risk 'go test' card: Allow once."
+lines = [
+  { text = "Tool permissions arrive as readable cards: the command, where it runs, and how risky it is.", after = 0.8 },
+  "Allow it once, or deny it with a note.",
+]
+min = 11.5
+
+[[scene]]
+id = "tray"
+kind = "app"
+shows = "Back on the Jobs board; the needs-you tray expands in the corner and is highlighted. Then Fleet, with the tray still there."
+lines = [
+  "And the needs-you tray follows you onto every page.",
+]
+min = 7.0
+
+# ---- 4. Reviewed, then landed -----------------------------------------------------------------
+
+[[scene]]
+id = "s4r"
+kind = "card"
+card = "section"
+section = "4"
+heading = "Reviewed, then landed"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "land"
+kind = "app"
+shows = "Open 'Retry widget fetches with back-off' (reviewed, ready to land): the Review tab, its files and the reviewer's rounds; open a file's diff; press Merge and read the confirmation (nothing is merged on screen)."
+lines = [
+  { text = "When a job is done, a second agent reviews it. The Review tab shows what it produced, file by file, beside the reviewer's verdict.", after = 0.8 },
+  "Then land it: merge, open a pull request, or discard it, and its worktree is cleaned up.",
+]
+min = 17.0
+
+# ---- 5. Many projects ------------------------------------------------------------------------
+
+[[scene]]
+id = "s4"
+kind = "card"
+card = "section"
+section = "5"
+heading = "Many projects, one front door"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "projects"
+kind = "app"
+shows = "Projects. Open Crowsnest: its lead, its jobs. Then Chat: switch from the orchestrator to a project lead. Then Cmd+K: type 'fleet cache' and jump to that job."
+lines = [
+  { text = "Each project gets its own lead agent, with its own jobs, schedules and instructions.", after = 0.6 },
+  { text = "Chat with the orchestrator, or with any lead.", after = 1.2 },
+  { text = "And Command-K gives a job, or jumps anywhere.", say = "And Command K gives a job, or jumps anywhere." },
+]
+min = 17.0
+
+# ---- 6. From your phone ----------------------------------------------------------------------
+
+[[scene]]
+id = "s5"
+kind = "card"
+card = "section"
+section = "6"
+heading = "From your phone"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "phone"
+kind = "phone"
+section = "6"
+title = "The same app, in your pocket"
+subtitle = "Answer, approve and glance from anywhere. Push notifications when something needs you."
+shows = "Phone, 390x844. The board; the Inbox; answer 'Where should the release notes live?'; open the 'go test' approval and Allow once."
+lines = [
+  { text = "On your phone it's the same app. Glance at the board, answer a question, approve a command.", after = 5.0 },
+  { text = "Push notifications tell you when something needs you.", after = 2.0 },
+]
+
+[[scene]]
+id = "talk"
+kind = "phone"
+section = "6"
+title = "Talk to it"
+subtitle = "Hold to talk. Each reply comes back as one spoken line, in each agent's own voice."
+shows = "Phone. Chat with the orchestrator: the spoken one-line summaries above each reply, the mic held down to talk. Then the Voice sheet."
+lines = [
+  { text = "Hold to talk to the orchestrator. Replies come back as one spoken line, and each agent can have its own voice.", after = 3.2 },
+  "And every project's lead shows up in Claude's Remote Control, under its own name.",
+]
+
+# ---- 7. See and steer everything -------------------------------------------------------------
+
+[[scene]]
+id = "s6"
+kind = "card"
+card = "section"
+section = "7"
+heading = "See and steer everything"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "fleet"
+kind = "app"
+shows = "Fleet: every agent by workspace. Open the builder: its conversation, then its live Terminal tab."
+lines = [
+  "The fleet shows every agent in the session and what it's doing, and each one's terminal runs live in the browser.",
+]
+min = 12.5
+
+[[scene]]
+id = "spend"
+kind = "app"
+shows = "Jobs board. Open Spend (by job, then by day); close it; Schedule; Journal. Then highlight the machine strip in the header."
+lines = [
+  { text = "Spend is measured per job and per day. Schedules bring recurring work round on time, and the journal records every nudge, answer and restart.", after = 0.6 },
+  "And the header shows the machine's load at a glance.",
+]
+
+# ---- 8. Getting started ----------------------------------------------------------------------
+
+[[scene]]
+id = "s7"
+kind = "card"
+card = "section"
+section = "8"
+heading = "Getting started"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "install"
+kind = "card"
+card = "install"
+shows = "A terminal card: brew install jclement/tap/crowsnest, then crowsnest, which prints its setup link."
+lines = [
+  "Getting started is one install, and one command.",
+]
+min = 4.6
+
+[[scene]]
+id = "setup"
+kind = "app"
+setup = true
+shows = "The real first-run page from that link: a username and a long password, Set up crowsnest, then the first-run checklist (herdr, Claude Code, Codex) with Start."
+lines = [
+  "Open the link it prints and pick a password. A short checklist confirms your tools, and you press Start.",
+]
+min = 13.0
+
+# ---- Close -----------------------------------------------------------------------------------
+
+[[scene]]
+id = "close"
+kind = "card"
+card = "close"
+shows = "The mark again: 'Give it a job. It keeps going.' and where to get it."
+min = 6.0
+lines = [
+  "No more checking tabs to see who stopped. Give it a job. Crowsnest keeps it going.",
+]
