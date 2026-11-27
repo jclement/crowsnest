@@ -86,7 +86,8 @@ function QuestionMeta({ question }: { question: Question }) {
   );
 }
 
-function Outcome({ question }: { question: Question }) {
+/** A settled question's outcome and its answer's receipt; the decision packet shows it too. */
+export function Outcome({ question }: { question: Question }) {
   const delivered =
     question.delivery === "poll"
       ? "The agent was waiting and got the answer at once."

@@ -92,6 +92,8 @@ test("a question's decision packet from a push link: brief first, the bar in rea
   await expect(page).not.toHaveURL(new RegExp(encodeURIComponent(question!.id)));
   await page.goto(`/decide?item=${encodeURIComponent(question!.id)}`);
   await expect(page.getByRole("status").filter({ hasText: "Already answered." })).toBeVisible();
+  // What was answered, and how far it got (stored, held, received: main's answer receipt).
+  await expect(page.getByRole("region", { name: "Outcome" })).toBeVisible();
   await expect(page.getByTestId("answer-bar")).toHaveCount(0);
 });
 

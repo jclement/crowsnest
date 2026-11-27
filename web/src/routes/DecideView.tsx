@@ -14,6 +14,7 @@ import { CallBody } from "../components/approvals/ApprovalCard";
 import { AnswerBar } from "../components/decide/AnswerBar";
 import { DiffNavigator } from "../components/decide/DiffNavigator";
 import { ScreenText } from "../components/fleet/DialogCard";
+import { Outcome } from "../components/inbox/QuestionDetail";
 import { Markdown } from "../components/Markdown";
 import { Banner } from "../components/ui/Banner";
 import { Button } from "../components/ui/Button";
@@ -74,6 +75,8 @@ function QuestionPacket({ id, itemId, item }: { id: string; itemId: string; item
       paneId={question.source_pane}
       bar={(next) => <AnswerBar itemId={itemId} jobId={question.job_id ?? item?.job_id} target={{ kind: "question", question }} onAnswered={next} />}
     >
+      {/* Settled: what was answered and how far it got (stored, held, received: DESIGN.md 6.19). */}
+      {question.status !== "open" && <Outcome question={question} />}
       <QuestionEvidence question={question} />
     </Packet>
   );
