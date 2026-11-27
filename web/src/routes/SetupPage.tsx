@@ -3,8 +3,7 @@
 // this browser in and restarts itself as the full server (herdr, the orchestrator), which takes
 // a few seconds: the page waits for /health to say it is ready, then opens the app.
 import { useEffect, useState } from "react";
-import { Footer } from "../components/Footer";
-import { ThemeToggle } from "../components/ThemeToggle";
+import { FirstLight } from "../components/brand/FirstLight";
 import { endpoints } from "../lib/api";
 import { captureSetupToken } from "../lib/setupToken";
 import { SetupForm } from "./SetupForm";
@@ -16,32 +15,20 @@ export function SetupPage({ defaultName, minLength }: { defaultName: string; min
   const [doneAs, setDoneAs] = useState<string | null>(null);
 
   return (
-    <div className="flex min-h-full flex-col">
-      <header className="flex h-11 shrink-0 items-center gap-2 bg-chrome pl-3 pr-1 text-chrome-fg md:h-10">
-        <img src="/icons/crowsnest.svg" alt="" className="h-5 w-5" />
-        <span className="text-sm font-semibold">crowsnest</span>
-        <div className="ml-auto">
-          <ThemeToggle />
-        </div>
-      </header>
-      <main className="flex flex-1 items-start justify-center p-4 md:items-center">
-        <div className="w-full max-w-sm">
-          {doneAs === null ? (
-            <>
-              <h1 className="text-base font-semibold text-heading">Set up crowsnest</h1>
-              <p className="mb-4 mt-1 text-xs text-muted">
-                Choose the username and password for this crowsnest. Anyone who has them has a shell on this machine, so make the
-                password a long one.
-              </p>
-              <SetupForm initialToken={token} defaultName={defaultName} minLength={minLength} onDone={setDoneAs} />
-            </>
-          ) : (
-            <Starting username={doneAs} />
-          )}
-        </div>
-      </main>
-      <Footer className="px-3 py-2 text-center" />
-    </div>
+    <FirstLight>
+      {doneAs === null ? (
+        <>
+          <h1 className="font-mono text-xs font-semibold uppercase tracking-wider text-heading">Set up crowsnest</h1>
+          <p className="mb-4 mt-1 text-xs text-muted">
+            Choose the username and password for this crowsnest. Anyone who has them has a shell on this machine, so make the
+            password a long one.
+          </p>
+          <SetupForm initialToken={token} defaultName={defaultName} minLength={minLength} onDone={setDoneAs} />
+        </>
+      ) : (
+        <Starting username={doneAs} />
+      )}
+    </FirstLight>
   );
 }
 

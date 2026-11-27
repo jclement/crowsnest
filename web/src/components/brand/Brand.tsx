@@ -9,12 +9,12 @@ import { cn } from "../../lib/cn";
 export function Mark({ className, accentClassName = "text-chrome-accent" }: { className?: string; accentClassName?: string }) {
   return (
     <svg viewBox="0 0 64 64" aria-hidden className={cn("shrink-0", className)} fill="none" strokeLinecap="round">
-      <path d="M32 12v40" stroke="currentColor" strokeWidth="4" />
-      <path d="M10 53h44" stroke="currentColor" strokeWidth="4" strokeOpacity="0.55" />
+      <path d="M29 15v40" stroke="currentColor" strokeWidth="4" />
+      <path d="M7 56h44" stroke="currentColor" strokeWidth="4" strokeOpacity="0.55" />
       <g className={accentClassName}>
-        <path d="M19 19h26l-4 11H23z" fill="currentColor" />
-        <path d="M44.5 10.5a14 14 0 0 1 6 9.5" stroke="currentColor" strokeWidth="3.5" />
-        <path d="M50.5 4.5a22 22 0 0 1 9 15" stroke="currentColor" strokeWidth="3.5" strokeOpacity="0.55" />
+        <path d="M16 22h26l-4 11H20z" fill="currentColor" />
+        <path d="M41.5 13.5a14 14 0 0 1 6 9.5" stroke="currentColor" strokeWidth="3.5" />
+        <path d="M47.5 7.5a22 22 0 0 1 9 15" stroke="currentColor" strokeWidth="3.5" strokeOpacity="0.55" />
       </g>
     </svg>
   );
