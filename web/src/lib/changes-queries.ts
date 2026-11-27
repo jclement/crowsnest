@@ -1,4 +1,4 @@
-// Data for the diff viewer (DESIGN.md 6.20). Everything sits under ["changes"]: a `changes` event
+// Data for the diff viewer (DESIGN.md 6.21). Everything sits under ["changes"]: a `changes` event
 // refreshes the summaries; a file's diff is keyed by its content hash, so a file that did not
 // change keeps its cached diff and one that did gets a new key (and a fresh fetch) by itself.
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

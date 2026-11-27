@@ -343,7 +343,7 @@ describe("projects in the palette", () => {
     const items = buildItems(sources({ projects: list.projects }));
     const projects = items.filter((item) => item.group === "projects" && !item.id.startsWith("changes:"));
     expect(projects.map((item) => item.title)).toEqual(["Crowsnest", "Website", "Infra"]);
-    // Each live project's main checkout has its diff view too ("Changes: <project>", DESIGN.md 6.20).
+    // Each live project's main checkout has its diff view too ("Changes: <project>", DESIGN.md 6.21).
     const changes = items.filter((item) => item.id.startsWith("changes:project:"));
     expect(changes.map((item) => item.title)).toEqual(["Changes: Crowsnest", "Changes: Website", "Changes: Infra"]);
     expect(changes[0]!.command).toEqual({ kind: "navigate", to: "/diff", search: { project: "crowsnest" } });

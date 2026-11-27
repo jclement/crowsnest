@@ -82,7 +82,7 @@ export function AppFrame() {
     }
   };
 
-  // The standalone diff is the viewer's full screen: no header, nav, tray or footer (DESIGN.md 6.20).
+  // The standalone diff is the viewer's full screen: no header, nav, tray or footer (DESIGN.md 6.21).
   if (pathname === "/diff") {
     return (
       <PaletteProvider onSignOut={() => void signOut()}>

@@ -1,4 +1,4 @@
--- 0019: a diff at any time, with viewed tracking (DESIGN.md 6.20).
+-- 0020: a diff at any time, with viewed tracking (DESIGN.md 6.21).
 --
 -- diff_marks is a reviewer's "Viewed" tick on one file of a diff. It is tied to the file's
 -- content: hash is the file's diff hash (both blobs, both paths, both modes, landing.FileHash), so

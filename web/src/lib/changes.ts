@@ -1,4 +1,4 @@
-// A diff at any time (DESIGN.md 6.20): the TypeScript mirror of internal/changes, and the pure
+// A diff at any time (DESIGN.md 6.21): the TypeScript mirror of internal/changes, and the pure
 // model the viewer renders from: unified-diff hunks, rows for the unified and split views, the
 // gaps between hunks that can be expanded from the file's whole text, word-level emphasis on
 // modified lines, and syntax tokens per line. Everything here is pure and unit-tested; the

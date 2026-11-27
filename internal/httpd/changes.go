@@ -1,4 +1,4 @@
-// Browser routes for a diff at any time and its viewed marks (DESIGN.md 6.20). Every route needs a
+// Browser routes for a diff at any time and its viewed marks (DESIGN.md 6.21). Every route needs a
 // session; the state-changing ones pass the origin check and need X-Crowsnest like every other.
 // {who} is jobs/{id}, projects/{ref} or orchestrator:
 //

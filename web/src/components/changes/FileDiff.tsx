@@ -1,4 +1,4 @@
-// One file's diff body (DESIGN.md 6.20): unified or split rows, syntax tokens from the whole old
+// One file's diff body (DESIGN.md 6.21): unified or split rows, syntax tokens from the whole old
 // and new text (so both sides highlight correctly), word-level emphasis on modified lines, the
 // gaps between hunks expandable from the file's text (20 lines up or down, or all of it), and the
 // rows rendered in chunks as they scroll near, so a 5,000-line file does not block the page.

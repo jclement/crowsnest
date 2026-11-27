@@ -73,7 +73,7 @@ export function JobDetail({ id }: { id: string }) {
 }
 
 /** A job in a folder of its own that is not a worktree (those have the Review tab): its diff is the
- * folder's changes since it started (DESIGN.md 6.20). Reviewers read, they do not change. */
+ * folder's changes since it started (DESIGN.md 6.21). Reviewers read, they do not change. */
 function hasChanges(job: Detail): boolean {
   return !hasReview(job) && !!(job.work_dir || job.dir) && !job.review_of && job.role !== "reviewer";
 }

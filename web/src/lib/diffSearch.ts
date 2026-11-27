@@ -1,4 +1,4 @@
-// The standalone diff route's search (/diff?job=j_12&scope=all&file=…), validated (DESIGN.md 6.20).
+// The standalone diff route's search (/diff?job=j_12&scope=all&file=…), validated (DESIGN.md 6.21).
 import { scopes, type ChangeScope, type DiffWho } from "./changes";
 
 export interface DiffSearch {

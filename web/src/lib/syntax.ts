@@ -1,4 +1,4 @@
-// Syntax tokens per line for the diff viewer (DESIGN.md 6.20), from lowlight (highlight.js as a
+// Syntax tokens per line for the diff viewer (DESIGN.md 6.21), from lowlight (highlight.js as a
 // tree, the same engine rehype-highlight uses for markdown, so no second highlighter ships). The
 // whole file is highlighted at once and then cut into lines, so a comment or string that spans
 // lines is coloured correctly on both sides of a diff; the result is plain data rendered as text

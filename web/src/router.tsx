@@ -179,7 +179,7 @@ const decideRoute = createRoute({
 });
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
-// The standalone diff (DESIGN.md 6.20): full screen, the app's chrome hidden (AppFrame).
+// The standalone diff (DESIGN.md 6.21): full screen, the app's chrome hidden (AppFrame).
 const diffRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/diff",

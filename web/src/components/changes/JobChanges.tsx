@@ -1,4 +1,4 @@
-// The diff viewer where the app embeds it (DESIGN.md 6.20), loaded lazily so the highlighter and
+// The diff viewer where the app embeds it (DESIGN.md 6.21), loaded lazily so the highlighter and
 // the viewer stay out of the main bundle. Fullscreen goes to the standalone route with the scope,
 // file and base, and comes back here.
 import { useNavigate, useRouterState } from "@tanstack/react-router";

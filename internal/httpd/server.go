@@ -174,7 +174,7 @@ type Deps struct {
 	Machines *machines.Service
 	// Tailscale is sign in with Tailscale (DESIGN.md 4.20). Nil: off.
 	Tailscale *tsauth.Gate
-	// Changes is the live diff and its viewed marks (DESIGN.md 6.20). Nil: those routes answer
+	// Changes is the live diff and its viewed marks (DESIGN.md 6.21). Nil: those routes answer
 	// 503. RequireViewed reads the "require all files viewed before Land" setting now; DemoTouch
 	// makes a --demo job edit a file at once (the e2e's handle on "the file changes").
 	Changes       *changes.Service

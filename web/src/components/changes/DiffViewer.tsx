@@ -1,4 +1,4 @@
-// The diff viewer (DESIGN.md 6.20): one job's, lead's or the orchestrator's changes, live. A scope
+// The diff viewer (DESIGN.md 6.21): one job's, lead's or the orchestrator's changes, live. A scope
 // switch (all, commits on this branch, uncommitted, since you viewed), a file list with status,
 // diffstat bars, a filter and Viewed ticks, and the files themselves: sticky headers, a Viewed
 // checkbox that collapses the file and is tied to its content (a file that changes again comes

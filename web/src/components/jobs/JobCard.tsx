@@ -17,7 +17,7 @@ interface JobCardProps {
   onSelect: (id: string) => void;
   /** The project's name, for a chip (the board shows it when it lists every project). */
   projectName?: string;
-  /** How much of its diff is marked viewed, once its diff was opened (DESIGN.md 6.20). */
+  /** How much of its diff is marked viewed, once its diff was opened (DESIGN.md 6.21). */
   progress?: DiffProgress;
 }
 

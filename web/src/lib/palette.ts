@@ -331,7 +331,7 @@ function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
 }
 
 /** "Changes: <job>" for each job with a checkout still there, and "Changes: <project>" for each
- * project's main checkout: the diff viewer full screen (DESIGN.md 6.20). */
+ * project's main checkout: the diff viewer full screen (DESIGN.md 6.21). */
 export function changesItems(jobs: Job[], projects: ProjectView[]): PaletteItem[] {
   const items: PaletteItem[] = [];
   for (const job of jobs) {

@@ -1,4 +1,4 @@
-// A diff at any time (DESIGN.md 6.20): what a checkout holds now against a base, while its agent
+// A diff at any time (DESIGN.md 6.21): what a checkout holds now against a base, while its agent
 // is still working. Three comparisons, all between trees, so every file carries the blob ids of
 // both sides and a content hash that changes exactly when the file's diff does:
 //

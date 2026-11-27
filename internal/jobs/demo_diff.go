@@ -1,4 +1,4 @@
-// --demo for the diff view (DESIGN.md 6.20): the Website demo project's folder becomes a real,
+// --demo for the diff view (DESIGN.md 6.21): the Website demo project's folder becomes a real,
 // throwaway git repository (a small storefront in Go, TypeScript, CSS and Markdown) with edits
 // its lead has not committed, and two worktree jobs filed under it:
 //

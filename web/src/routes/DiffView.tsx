@@ -1,4 +1,4 @@
-// The standalone diff (DESIGN.md 6.20): /diff?job=j_12, /diff?project=<slug> or /diff?orchestrator=1,
+// The standalone diff (DESIGN.md 6.21): /diff?job=j_12, /diff?project=<slug> or /diff?orchestrator=1,
 // with &scope=, &file= and &base= keeping where the reader is. The app's chrome (header, nav, the
 // needs-you tray, the bottom bar on a phone) is hidden here (AppFrame's bare mode), so this is the
 // viewer's full screen: the fullscreen toggle and "Open in a new tab" both come here. Leaving goes

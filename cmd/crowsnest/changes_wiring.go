@@ -1,4 +1,4 @@
-// Wiring for a diff at any time (DESIGN.md 6.20): the resolver that turns a job, a project or the
+// Wiring for a diff at any time (DESIGN.md 6.21): the resolver that turns a job, a project or the
 // orchestrator into the checkout internal/changes reads, and the service's background loop.
 
 package main

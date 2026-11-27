@@ -1,4 +1,4 @@
-// A project's Changes (DESIGN.md 6.20): its main checkout (the lead's uncommitted work) and each
+// A project's Changes (DESIGN.md 6.21): its main checkout (the lead's uncommitted work) and each
 // job that still has a worktree, with its diffstat and how much of it is viewed; each opens its
 // diff full screen.
 import { Link } from "@tanstack/react-router";

@@ -1,4 +1,4 @@
-// Package changes is a diff at any time (DESIGN.md 6.20): what a job's worktree, a project's main
+// Package changes is a diff at any time (DESIGN.md 6.21): what a job's worktree, a project's main
 // checkout or the orchestrator's folder holds now against its base, in three comparisons
 // (committed, uncommitted, all) plus "since you viewed", with a Viewed mark per file that is tied
 // to the file's content and clears by itself when the file changes again.

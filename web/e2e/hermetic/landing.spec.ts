@@ -25,7 +25,7 @@ test("the review tab shows what the job produced, and Merge lands it after a con
   await detail.getByRole("button", { name: "Review and land" }).click();
 
   await expect(detail.getByText("1 commit ahead of main")).toBeVisible();
-  // The diff is the live viewer (DESIGN.md 6.20), in reading order: the walkthrough names retry.go
+  // The diff is the live viewer (DESIGN.md 6.21), in reading order: the walkthrough names retry.go
   // first, then the test, then the docs.
   const viewer = detail.getByRole("region", { name: /^Changes: / });
   const sections = viewer.locator("[data-file-section]");

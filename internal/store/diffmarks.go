@@ -1,4 +1,4 @@
-// Viewed marks on a diff's files (migration 0019, DESIGN.md 6.20).
+// Viewed marks on a diff's files (migration 0020, DESIGN.md 6.21).
 
 package store
 

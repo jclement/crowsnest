@@ -1,4 +1,4 @@
-// The diff view (DESIGN.md 6.20): whether Land requires every file of a job's diff to be marked
+// The diff view (DESIGN.md 6.21): whether Land requires every file of a job's diff to be marked
 // viewed. Off by default: the Review tab and Land's confirmation say how many are not viewed,
 // as a warning. Kept in its own file and loader step, like accept.go.
 

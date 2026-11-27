@@ -1,4 +1,4 @@
-// The diff view and viewed tracking as a user drives them (DESIGN.md 6.20), against `crowsnest
+// The diff view and viewed tracking as a user drives them (DESIGN.md 6.21), against `crowsnest
 // --demo`. The diff demo (internal/jobs/demo_diff.go): the Website project's folder is a real
 // throwaway git repository with the lead's uncommitted edits, a running job on
 // job/120-checkout-redesign (Go, TypeScript, CSS, Markdown, a rename, a deletion, a PNG and a
