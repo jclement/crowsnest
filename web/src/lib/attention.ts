@@ -11,7 +11,7 @@ import type { Job } from "./jobs";
 import type { Question } from "./questions";
 import type { Agent } from "./types";
 
-export type AttentionKind = "approval" | "question" | "dialog" | "job" | "agent";
+export type AttentionKind = "approval" | "question" | "dialog" | "job" | "agent" | "limit" | "wait";
 export type Urgency = "blocking" | "can_wait";
 
 export interface ProjectRef {
@@ -55,6 +55,8 @@ export interface AttentionItem {
   dialog_agent?: Agent;
   job?: Job;
   standing?: StandingAgent;
+  /** A fleet usage limit (DESIGN.md 6.17). */
+  limit?: import("./accept").FleetLimit;
 }
 
 export interface AttentionCounts {
@@ -115,7 +117,16 @@ export function kindLabel(item: AttentionItem): string {
       if (item.action.kind === "land") return item.job?.state === "done" ? "Ready to land" : "Reviewer objects";
       if (item.job?.state === "failed") return "Failed job";
       if (item.job?.state === "queued") return "Waiting to start";
+      if (item.job?.cause === "check") return "Check failed";
+      if (item.job?.cause === "budget") return "Budget reached";
+      if (item.job?.cause === "spinning") return "Spinning";
+      if (item.job?.accept_state === "needs_rebase") return "Needs rebase";
+      if (item.job?.accept_state === "stale" || item.job?.accept_state === "failed") return "Evidence stale";
       return item.job?.stuck ? "Stuck job" : "Job needs you";
+    case "limit":
+      return "Usage limit";
+    case "wait":
+      return "No owner";
   }
 }
 
@@ -130,7 +141,10 @@ export function itemLink(item: AttentionItem): { to: string; search: Record<stri
     case "dialog":
       return { to: "/decide", search: { item: item.id } };
     case "job":
+    case "wait":
       return { to: "/jobs", search: { job: item.job_id ?? "" } };
+    case "limit":
+      return { to: "/jobs", search: {} };
     case "agent":
       return { to: "/fleet", search: item.pane_id ? { agent: item.pane_id, view: "terminal" } : {} };
   }
@@ -176,7 +190,7 @@ export interface NowResponse {
 }
 
 export interface SinceEvent {
-  kind: "done" | "failed" | "cancelled" | "asked";
+  kind: "done" | "failed" | "cancelled" | "asked" | "answered";
   at: string;
   title: string;
   detail?: string;

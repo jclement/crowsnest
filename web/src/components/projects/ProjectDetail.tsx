@@ -25,6 +25,7 @@ import { Card } from "../ui/Card";
 import { Chip } from "../ui/Chip";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
+import { AcceptCard } from "./AcceptCard";
 import { LeadControls } from "./LeadControls";
 import { ArchiveButton, EditProjectSheet } from "./ProjectSheets";
 
@@ -83,6 +84,7 @@ function Detail({ project }: { project: ProjectView }) {
       <ProjectJobs project={project} />
       <ProjectSchedules project={project} />
       <ApprovalRulesCard projectRef={project.slug} archived={project.archived} />
+      <AcceptCard projectId={project.id} />
       <Card title="Project instructions" aria-label="Project instructions">
         <LayerEditor scope="project" apiKey={String(project.id)} hint="The lead and every job agent of this project get this, after the global and role layers." />
       </Card>

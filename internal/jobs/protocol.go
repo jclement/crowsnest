@@ -44,6 +44,7 @@ type CreateInput struct {
 	Reviewer string `json:"reviewer,omitempty"`
 
 	reviewOf int64 // set by the review gate for a reviewer job
+	fixOf    int64 // set by AskRebase for a job that brings another job's branch up to date
 }
 
 // maxTitleRunes caps the title taken from the brief's first line.
@@ -202,7 +203,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 		Title: titleOf(brief), BriefMD: brief, DoneWhen: strings.TrimSpace(input.DoneWhen), Role: role, Dir: dir,
 		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent, ProjectID: input.ProjectID,
 		State: string(StateQueued), VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: s.opts.Now(),
-		Reviewer: reviewer, ReviewOf: input.reviewOf,
+		Reviewer: reviewer, ReviewOf: input.reviewOf, FixOf: input.fixOf,
 	}, nil
 }
 
@@ -287,6 +288,12 @@ type UpdateInput struct {
 	Reason string `json:"reason,omitempty"`
 	// Waiting declares that nothing is left that the open questions do not block.
 	Waiting *bool `json:"waiting,omitempty"`
+	// A blocked declaration's wake-up (6.18), exactly one of: RecheckIn (a duration such as
+	// 30m), RecheckAt (HH:MM local, or RFC 3339), UntilJob (j_N settles) or UntilHuman.
+	RecheckIn  string `json:"recheck_in,omitempty"`
+	RecheckAt  string `json:"recheck_at,omitempty"`
+	UntilJob   string `json:"until_job,omitempty"`
+	UntilHuman bool   `json:"until_human,omitempty"`
 }
 
 // Update is job_update: a heartbeat with a "doing now" line, and optionally a declared state.
@@ -319,10 +326,11 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Job
 				c.event(EventProgress, "Declared: nothing left that the open questions do not block", nil)
 			}
 		}
-		if err := applyDeclaredState(r, c, input); err != nil {
+		if err := s.applyDeclaredState(ctx, r, c, input); err != nil {
 			return err
 		}
-		if r.Progress != before.Progress || r.Waiting != before.Waiting || r.State != before.State || r.BlockedReason != before.BlockedReason {
+		if r.Progress != before.Progress || r.Waiting != before.Waiting || r.State != before.State || r.BlockedReason != before.BlockedReason ||
+			r.WakeKind != before.WakeKind || !r.WakeAt.Equal(before.WakeAt) || r.WakeJob != before.WakeJob {
 			s.markProgressLocked(r)
 		} else {
 			r.LastActivityAt = s.opts.Now() // a heartbeat, not progress
@@ -331,7 +339,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Job
 	})
 }
 
-func applyDeclaredState(r *store.JobRecord, c *change, input UpdateInput) error {
+func (s *Service) applyDeclaredState(ctx context.Context, r *store.JobRecord, c *change, input UpdateInput) error {
 	switch strings.TrimSpace(input.State) {
 	case "":
 		return nil
@@ -340,10 +348,27 @@ func applyDeclaredState(r *store.JobRecord, c *change, input UpdateInput) error 
 		if reason == "" {
 			return invalid("state blocked needs a reason: what are you waiting on?")
 		}
+		if err := s.parseWake(ctx, r, input); err != nil {
+			return err
+		}
+		if State(r.State) != StateBlocked {
+			r.Rechecks = 0 // a new blocked spell
+		}
 		r.State, r.BlockedReason = string(StateBlocked), reason
-		c.event(EventProgress, "Blocked: "+reason, nil)
+		c.event(EventProgress, "Blocked: "+reason+" ("+wakeText(*r)+")", map[string]any{"wake": r.WakeKind})
+		if r.WakeKind == WakeHuman {
+			c.notify = fmt.Sprintf("crowsnest: job %s is blocked until you look: %s", FormatID(r.ID), oneLine(reason, 100))
+		}
 	case string(StateRunning):
-		if State(r.State) == StateBlocked || (State(r.State) == StateNeedsYou && Cause(r.Cause) != CauseQuestions) {
+		// An agent may come back from blocked, or from a dialog or an error it has dealt with;
+		// never from what only the human or crowsnest lifts: questions, its budget, a failed
+		// check, a review that needs the human.
+		switch {
+		case State(r.State) == StateBlocked:
+			r.State, r.BlockedReason = string(StateRunning), ""
+			r.Cause, r.CauseDetail = "", ""
+			clearWake(r)
+		case State(r.State) == StateNeedsYou && !humanOnlyCause(Cause(r.Cause)):
 			r.State, r.BlockedReason = string(StateRunning), ""
 			r.Cause, r.CauseDetail = "", ""
 		}
@@ -351,6 +376,15 @@ func applyDeclaredState(r *store.JobRecord, c *change, input UpdateInput) error 
 		return invalid("state may be blocked or running; to finish call done, to give up call fail")
 	}
 	return nil
+}
+
+// humanOnlyCause reports whether a needs_you cause is lifted only by the human or crowsnest.
+func humanOnlyCause(cause Cause) bool {
+	switch cause {
+	case CauseQuestions, CauseBudget, CauseCheck, CauseReview:
+		return true
+	}
+	return false
 }
 
 // markProgressLocked records that the agent did something: it resets the nudge streak and
@@ -383,6 +417,9 @@ type DoneInput struct {
 	// WalkthroughMD explains the change chunk by chunk (why each part exists, what was tested and
 	// what was not, the risk both ways). Optional: done is never refused for its absence.
 	WalkthroughMD string `json:"walkthrough_md,omitempty"`
+	// NoCommitsReason says why a job in a worktree of its own finished with no commits (6.15):
+	// without it, such a done is refused.
+	NoCommitsReason string `json:"no_commits_reason,omitempty"`
 }
 
 // Done declares the job finished with its evidence.
@@ -400,12 +437,21 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 	if len(walkthrough) > maxResultBytes {
 		walkthrough = walkthrough[:maxResultBytes]
 	}
-	review := ""
+	// Acceptance looks at the tree before anything is recorded (accept.go): a dirty tree or a
+	// branch with no commits is refused here, with what to do.
+	plan, err := s.planAccept(ctx, id, input.NoCommitsReason)
+	if err != nil {
+		return Job{}, err
+	}
+	review, checking := "", false
 	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s", FormatID(r.ID), r.State)
 		}
 		if State(r.State) == StateInReview {
+			if r.AcceptState == AcceptChecking {
+				return invalid("job %s is being checked by crowsnest; wait for the result", FormatID(r.ID))
+			}
 			return invalid("job %s is already in review; wait for the reviewer's findings", FormatID(r.ID))
 		}
 		s.markProgressLocked(r)
@@ -416,7 +462,11 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 		r.VerifiedJSON, r.NotVerifiedJSON = encodeList(input.Verified), encodeList(input.NotVerified)
 		r.Stuck, r.Cause, r.CauseDetail, r.Waiting = false, "", "", false
 		c.event(EventDone, "Done: "+oneLine(result, 160), map[string]any{"verified": len(decodeList(r.VerifiedJSON)), "not_verified": len(decodeList(r.NotVerifiedJSON))})
+		if checking = applyAcceptLocked(r, c, plan, input.NoCommitsReason); checking {
+			return nil // the review gate, if any, looks at the revision that passes (accept.go)
+		}
 		if review = s.reviewerFor(*r); review != "" {
+			r.ReviewCommit = plan.head
 			// The review gate (review.go): not done yet, in review by a reviewer job.
 			r.State = string(StateInReview)
 			r.ReviewRound++
@@ -426,6 +476,10 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 	})
 	if err != nil {
 		return Job{}, err
+	}
+	if checking {
+		s.startCheck(ctx, job.ID)
+		return s.jobNow(ctx, job.ID, job), nil
 	}
 	if review != "" {
 		s.startReview(ctx, job, review)
@@ -522,7 +576,7 @@ func (s *Service) GetForAgent(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ContextBlock(detail) + ReviewBlock(detail.Job) + SpendBlock(detail.Spend), nil
+	return ContextBlock(detail) + ReviewBlock(detail.Job) + AcceptBlock(detail) + SpendBlock(detail.Spend) + budgetLine(detail.Budget), nil
 }
 
 // ReviewBlock is the latest review round as job_get shows it to the builder: the findings it
@@ -533,6 +587,20 @@ func ReviewBlock(job Job) string {
 	}
 	return fmt.Sprintf("\n## Review, round %d of %d (%s)\n\nWritten by a reviewer agent, not by the human:\n\n%s\n", job.ReviewRound, maxReviewRounds,
 		firstNonEmptyDir(job.ReviewVerdict, "pending"), indent(job.ReviewMD))
+}
+
+// AcceptBlock is the job's acceptance as job_get shows it: the latest check, so an agent sent
+// back by a failed check can read what failed (6.15).
+func AcceptBlock(d Detail) string {
+	if d.Evidence == nil || d.AcceptState == AcceptNone {
+		return ""
+	}
+	e := d.Evidence
+	tail := e.OutputTail
+	if lines := strings.Split(tail, "\n"); len(lines) > 60 {
+		tail = strings.Join(lines[len(lines)-60:], "\n")
+	}
+	return fmt.Sprintf("\n## crowsnest's check (%s)\n\n`%s` at %s: %s, exit %d. The end of its output:\n\n%s\n", d.AcceptState, e.Command, shortHash(e.Commit), e.Status, e.ExitCode, indent(tail))
 }
 
 // SpendBlock is the job's spend as job_get shows it: so an agent can see what it has used.

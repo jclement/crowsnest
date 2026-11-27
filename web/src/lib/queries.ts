@@ -4,6 +4,7 @@ import type { SpendGroup } from "./spend";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys } from "./api";
 import type { CreateJobRequest } from "./jobs";
+import type { BudgetInput, ProjectAccept } from "./accept";
 import type { JournalKind } from "./journal";
 import type { ScheduleInput, ScheduleView } from "./schedule";
 import type { LeadAction, LeadStatus, ProjectInput, ProjectView } from "./projects";
@@ -439,11 +440,22 @@ export function useReviewDiff(id: string, path: string, enabled: boolean) {
   return useQuery({ queryKey: queryKeys.reviewDiff(id, path), queryFn: () => endpoints.reviewDiff(id, path), enabled, staleTime: 30_000 });
 }
 
-/** Land: merge, push with a PR, or discard (the confirmation is the caller's). */
-export function useLand(id: string) {
+/** Land: merge, push with a PR, or discard (the confirmation is the caller's). head is the commit
+ * the Review tab showed: the server lands exactly it, or refuses (R5-S4). */
+export function useLand(id: string, head?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (action: LandAction) => endpoints.land(id, action),
+    mutationFn: (action: LandAction) => endpoints.land(id, action, head),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+/** Land over crowsnest's evidence (stale, failed or missing check; a base that moved on): only ever
+ * after the human ticked the explicit override. */
+export function useLandOverride(id: string, head?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: LandAction) => endpoints.landOverride(id, action, head),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
   });
 }
@@ -461,6 +473,69 @@ export function useStartAnyway() {
   return useMutation({
     mutationFn: (id: string) => endpoints.startAnyway(id),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+// ---- Acceptance, budgets, wake-ups, the usage limit, receipt (DESIGN.md 6.15 to 6.19) ----
+
+/** The fleet's usage limits; a `limits` event refreshes them, and a minute's poll keeps the countdown honest. */
+export function useLimits() {
+  return useQuery({ queryKey: queryKeys.limits, queryFn: endpoints.limits, refetchInterval: 60_000 });
+}
+
+/** Live jobs that break "every wait has an owner and a wake-up" (the System page). */
+export function useWaits() {
+  return useQuery({ queryKey: queryKeys.waits, queryFn: endpoints.waits, refetchInterval: 60_000 });
+}
+
+export function useProjectAccept(id: number) {
+  return useQuery({ queryKey: queryKeys.projectAccept(id), queryFn: () => endpoints.projectAccept(id), enabled: id > 0 });
+}
+
+export function useSetProjectAccept(id: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes">) => endpoints.setProjectAccept(id, value),
+    onSuccess: (view) => queryClient.setQueryData(queryKeys.projectAccept(id), view),
+  });
+}
+
+export type GuardAction = "recheck" | "rebase" | "finish-step" | "wake";
+
+/** The job view's acceptance, budget and wake-up actions. */
+export function useJobGuard(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: GuardAction) => {
+      switch (action) {
+        case "recheck":
+          return endpoints.recheck(id);
+        case "rebase":
+          return endpoints.rebase(id);
+        case "finish-step":
+          return endpoints.finishStep(id);
+        default:
+          return endpoints.wake(id);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+export function useSetBudget(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (budget: BudgetInput) => endpoints.setBudget(id, budget),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+/** An answer's reconcile ("did it arrive?") and the explicit retype. */
+export function useAnswerReceipt(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: "reconcile" | "retype") => (action === "reconcile" ? endpoints.reconcileAnswer(id) : endpoints.retypeAnswer(id)),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.questions }),
   });
 }
 

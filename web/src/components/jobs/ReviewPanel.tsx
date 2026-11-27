@@ -10,7 +10,7 @@ import { useState } from "react";
 import { cn } from "../../lib/cn";
 import { landActions, landLabels, parseUnified, verdictText, type FileChange, type LandAction, type ReviewView } from "../../lib/landing";
 import { landedWord, type JobDetail } from "../../lib/jobs";
-import { useLand, useReview, useReviewDiff, useTeardown } from "../../lib/queries";
+import { useLand, useLandOverride, useReview, useReviewDiff, useTeardown } from "../../lib/queries";
 import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
@@ -70,10 +70,12 @@ function EvidenceList({ title, items, tone }: { title: string; items: string[]; 
 
 function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
   const [confirming, setConfirming] = useState<LandAction | null>(null);
-  const land = useLand(job.id);
+  const [override, setOverride] = useState(false);
+  const options = view.land;
+  const plainLand = useLand(job.id, options.head);
+  const overrideLand = useLandOverride(job.id, options.head);
   const teardown = useTeardown();
   const toast = useToast();
-  const options = view.land;
   if (options.state) {
     return (
       <Card title="Landed">
@@ -113,6 +115,9 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
       </Card>
     );
   }
+  // crowsnest's evidence does not support this revision: merge and push need the explicit override.
+  const blocked = (action: LandAction) => !!options.evidence && action !== "discard";
+  const land = confirming && blocked(confirming) ? overrideLand : plainLand;
   const run = (action: LandAction) =>
     land.mutate(action, {
       onSuccess: (result) => {
@@ -130,6 +135,12 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
       {options.request && (
         <Banner tone="warning">An agent asked to {options.request === "pr" ? "push it and open a pull request" : options.request + " it"}; answer in the Inbox, or land it here.</Banner>
       )}
+      {options.evidence && (
+        <Banner tone="warning">
+          crowsnest's evidence does not support landing this revision: {options.evidence_why}. Run the check again (or ask an agent to rebase) in the
+          Overview; landing it anyway needs an explicit override.
+        </Banner>
+      )}
       {options.base_protected && (
         <p className="mb-2 text-xs text-warning">{options.base} is protected: Land never merges into it. Use the pull request.</p>
       )}
@@ -142,7 +153,10 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
             icon={actionIcons[action]}
             disabled={!options.allowed[action] || land.isPending}
             title={options.why?.[action]}
-            onClick={() => setConfirming(action)}
+            onClick={() => {
+              setOverride(false);
+              setConfirming(action);
+            }}
           >
             {landLabels[action]}
           </Button>
@@ -162,8 +176,19 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
       {confirming && (
         <div role="alertdialog" aria-label={`Confirm ${landLabels[confirming]}`} className="mt-3 rounded border border-border bg-surface-raised p-3 text-sm">
           <p className="text-body">{options.confirm[confirming]}</p>
+          {blocked(confirming) && (
+            <label className="mt-2 flex items-start gap-2 text-xs text-warning">
+              <input type="checkbox" checked={override} onChange={(event) => setOverride(event.target.checked)} className="mt-0.5" />
+              <span>Land it anyway, over crowsnest's evidence ({options.evidence_why}).</span>
+            </label>
+          )}
           <div className="mt-2 flex gap-2">
-            <Button compact variant={confirming === "discard" ? "danger" : "primary"} disabled={land.isPending} onClick={() => run(confirming)}>
+            <Button
+              compact
+              variant={confirming === "discard" ? "danger" : "primary"}
+              disabled={land.isPending || (blocked(confirming) && !override)}
+              onClick={() => run(confirming)}
+            >
               {land.isPending ? "Working…" : `Yes, ${landLabels[confirming].toLowerCase()}`}
             </Button>
             <Button compact variant="ghost" onClick={() => setConfirming(null)}>

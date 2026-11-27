@@ -14,7 +14,7 @@
 // On a phone the sections stack in that order; from lg the queue and the projects sit side by
 // side, so the first screen answers all three questions.
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Bot, CheckCheck, CheckCircle2, ChevronRight, CircleAlert, Clock, FolderKanban, Gauge, HelpCircle, Inbox, XCircle } from "lucide-react";
+import { Bot, CheckCheck, CheckCircle2, ChevronRight, CircleAlert, Clock, FolderKanban, Gauge, HelpCircle, Inbox, MessageSquareReply, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { NewJobForm } from "../components/jobs/NewJobForm";
 import { VoiceJob } from "../components/jobs/VoiceJob";
@@ -220,9 +220,10 @@ const sinceIcons: Record<SinceEvent["kind"], typeof CheckCircle2> = {
   failed: XCircle,
   cancelled: CircleAlert,
   asked: HelpCircle,
+  answered: MessageSquareReply,
 };
 
-const sinceWords: Record<SinceEvent["kind"], string> = { done: "Finished", failed: "Failed", cancelled: "Cancelled", asked: "Asked" };
+const sinceWords: Record<SinceEvent["kind"], string> = { done: "Finished", failed: "Failed", cancelled: "Cancelled", asked: "Asked", answered: "Answered" };
 
 function SinceSection() {
   const browser = useMemo(() => browserId(), []);
@@ -241,7 +242,7 @@ function SinceSection() {
   };
   const events = since.data?.events ?? [];
   const open = (event: SinceEvent) => {
-    if (event.kind === "asked" && event.ref) void navigate({ to: "/inbox", search: { q: event.ref } });
+    if ((event.kind === "asked" || event.kind === "answered") && event.ref) void navigate({ to: "/inbox", search: { q: event.ref } });
     else if (event.job_id) void navigate({ to: "/jobs", search: { job: event.job_id } });
   };
   return (

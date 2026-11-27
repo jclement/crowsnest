@@ -7,8 +7,10 @@ import { Ban, CheckCircle2, CircleSlash, GitCompareArrows, MessageSquare, Play, 
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
 import { actionFor, actionLabels, childrenOf, hasReview, isFinished, jobAnswerText, ownershipChain, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
-import { useFleet, useJob, useJobAction, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
+import { useFleet, useJob, useJobAction, useJobGuard, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
 import { ReviewPanel } from "./ReviewPanel";
+import { BudgetCard, EvidenceCard, LastMessage, WaitLine } from "./AcceptPanels";
+import { acceptChip } from "../../lib/accept";
 import { AgentConversation } from "../agent/AgentConversation";
 import { JobRulesCard } from "../approvals/JobRulesCard";
 import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
@@ -69,11 +71,17 @@ export function JobDetail({ id }: { id: string }) {
 
 function JobHeader({ job }: { job: Detail }) {
   const chip = stateChip(job);
+  const accept = acceptChip(job);
   return (
     <header className="flex flex-col gap-1.5">
       <h2 className="break-words text-base font-semibold leading-snug text-heading">{job.title}</h2>
       <div className="flex flex-wrap items-center gap-1.5">
         <Chip tone={chip.tone}>{chip.label}</Chip>
+        {accept && job.state !== "in_review" && (
+          <Chip tone={accept.tone} title={accept.title}>
+            {accept.label}
+          </Chip>
+        )}
         <Chip mono>{job.id}</Chip>
         <Chip>{job.role}</Chip>
         {job.engine !== "claude" && <Chip>{job.engine}</Chip>}
@@ -94,6 +102,7 @@ function JobHeader({ job }: { job: Detail }) {
           {job.last_activity_at && <span className="text-2xs text-muted"> · active {relativeTime(job.last_activity_at)}</span>}
         </p>
       )}
+      <WaitLine job={job} />
     </header>
   );
 }
@@ -156,7 +165,13 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
       {!isFinished(job.state) && job.pane_id && !job.agent_name.startsWith("lead-") && job.agent_name !== "orchestrator" && (
         <RescuePanel job={job} defaultOpen={job.stuck || job.state === "needs_you"} />
       )}
-      {job.state === "in_review" && (
+      <LastMessage job={job} />
+      {job.state === "in_review" && job.accept_state === "checking" && (
+        <Banner tone="info" icon={GitCompareArrows}>
+          The agent said it is done; crowsnest is checking before it believes it: {job.accept_detail}
+        </Banner>
+      )}
+      {job.state === "in_review" && job.accept_state !== "checking" && (
         <Banner tone="info" icon={GitCompareArrows} action={<Button compact onClick={openReview}>Open the review</Button>}>
           In review, round {job.review_round ?? 1} of 2: a reviewer agent is looking at the change.
         </Banner>
@@ -167,6 +182,8 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
         </Banner>
       )}
       {job.state === "blocked" && <Banner tone="warning">Blocked: {job.blocked_reason}</Banner>}
+      <EvidenceCard job={job} />
+      <BudgetCard job={job} />
       {job.state === "done" && <Result job={job} />}
       {job.state === "needs_you" && job.cause === "review" && job.review_md && (
         <Card title={`Review findings (round ${job.review_round ?? 1})`} tone="danger">
@@ -216,6 +233,7 @@ function StuckBanner({ job, openTerminal, openReview }: { job: Detail; openTermi
   const action = actionFor(job);
   const run = useJobAction(job.id);
   const startAnyway = useStartAnyway();
+  const guard = useJobGuard(job.id);
   const navigate = useNavigate();
   const toast = useToast();
   if (!action || (!job.stuck && job.state !== "needs_you" && job.cause !== "held")) return null;
@@ -223,6 +241,12 @@ function StuckBanner({ job, openTerminal, openReview }: { job: Detail; openTermi
   const press = () => {
     if (action === "terminal") return openTerminal();
     if (action === "review") return openReview();
+    if (action === "budget") return document.querySelector('[aria-label="Budget"]')?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (action === "recheck")
+      return guard.mutate("recheck", {
+        onSuccess: () => toast.show({ tone: "success", title: "Running the check again" }),
+        onError: (error) => toast.show({ tone: "danger", title: "Not started", description: error.message }),
+      });
     if (action === "start")
       return startAnyway.mutate(job.id, {
         onSuccess: () => toast.show({ tone: "success", title: "Starting it now, past the limits" }),
@@ -246,7 +270,7 @@ function StuckBanner({ job, openTerminal, openReview }: { job: Detail; openTermi
           variant="warning"
           icon={action === "terminal" ? SquareTerminal : action === "nudge" ? Zap : action === "start" ? Play : action === "review" ? GitCompareArrows : RefreshCw}
           onClick={press}
-          disabled={run.isPending || startAnyway.isPending}
+          disabled={run.isPending || startAnyway.isPending || guard.isPending}
         >
           {actionLabels[action]}
         </Button>
@@ -264,8 +288,8 @@ function Result({ job }: { job: Detail }) {
     <Card title="Result" actions={<CheckCircle2 className="h-4 w-4 text-success" aria-label="Done" />}>
       <Markdown className="text-sm">{job.result_md}</Markdown>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Evidence title="Verified" items={job.verified} empty="Nothing was verified." tone="text-success" />
-        <Evidence title="Not verified" items={job.not_verified} empty="Nothing left unverified." tone="text-warning" />
+        <Evidence title="Verified (reported by the agent)" items={job.verified} empty="Nothing was verified." tone="text-success" />
+        <Evidence title="Not verified (reported by the agent)" items={job.not_verified} empty="Nothing left unverified." tone="text-warning" />
       </div>
     </Card>
   );
@@ -296,6 +320,9 @@ const eventTones: Record<string, string> = {
   restart: "text-warning",
   retry: "text-warning",
   question: "text-accent",
+  accept: "text-accent",
+  budget: "text-warning",
+  wake: "text-accent",
 };
 
 function Timeline({ events }: { events: JobEvent[] }) {

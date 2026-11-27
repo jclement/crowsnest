@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jclement/crowsnest/internal/landing"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -116,6 +117,15 @@ func (s *Service) reviewerFor(r store.JobRecord) string {
 // puts the job in front of the human rather than leaving it in review with nobody reviewing.
 func (s *Service) startReview(ctx context.Context, job Job, engine string) {
 	off := false
+	if head, err := landing.Head(ctx, job.WorkDir); err == nil {
+		_, _ = s.mutate(ctx, job.ID, func(r *store.JobRecord, _ *change) error {
+			if r.ReviewCommit == head {
+				return errSkip
+			}
+			r.ReviewCommit = head
+			return nil
+		})
+	}
 	reviewer, err := s.Create(ctx, CreateInput{
 		Brief: reviewBrief(job), Dir: job.WorkDir, Role: "reviewer", Engine: engine, Isolate: &off, Reviewer: ReviewerOff,
 		reviewOf: mustParse(job.ID),
@@ -171,6 +181,10 @@ func indent(text string) string {
 // afterSettled runs when a job reaches done or failed (and from Cancel): a reviewer's outcome
 // moves the job it reviews on.
 func (s *Service) afterSettled(ctx context.Context, job Job) {
+	s.wakeWaiters(ctx, job) // jobs blocked until this one settled (waits.go)
+	if job.FixOf != "" {
+		s.fixSettled(ctx, job)
+	}
 	if job.ReviewOf == "" {
 		return
 	}
@@ -193,14 +207,28 @@ func (s *Service) reviewSettled(ctx context.Context, reviewer Job) {
 	path := s.writeFindings(parent.ID, parent.ReviewRound, findings)
 	switch {
 	case verdict == VerdictApprove:
-		_, _ = s.mutate(ctx, parent.ID, func(r *store.JobRecord, c *change) error {
+		recheck := false
+		approved, err := s.mutate(ctx, parent.ID, func(r *store.JobRecord, c *change) error {
 			if State(r.State) != StateInReview {
 				return errSkip
 			}
-			r.State, r.ReviewVerdict, r.ReviewMD = string(StateDone), verdict, findings
+			r.ReviewVerdict, r.ReviewMD = verdict, findings
 			c.event(EventReview, fmt.Sprintf("Review approved by %s (round %d)", reviewer.ID, r.ReviewRound), map[string]any{"reviewer": reviewer.ID, "findings": path})
+			// The approval is for the revision the reviewer saw; evidence for another revision
+			// (a commit since the check) is checked again before the job is done (6.15).
+			if recheck = s.evidenceMovedLocked(ctx, r); recheck {
+				r.AcceptState, r.AcceptDetail = AcceptChecking, "The branch moved after its check; crowsnest is running it again"
+				c.event(EventAccept, r.AcceptDetail, nil)
+				return nil
+			}
+			r.State = string(StateDone)
 			return nil
 		})
+		if err == nil && recheck {
+			s.startCheck(ctx, parent.ID)
+		} else if err == nil && approved.State == StateDone {
+			s.afterSettled(ctx, approved)
+		}
 	case verdict == VerdictError:
 		s.reviewNeedsHuman(ctx, parent.ID, findings, findings)
 	case parent.ReviewRound >= maxReviewRounds:
@@ -269,4 +297,18 @@ func (s *Service) writeFindings(jobID string, round int, findings string) string
 		return ""
 	}
 	return path
+}
+
+// evidenceMovedLocked reports whether a job accepted by a check has moved past the commit it
+// passed at (s.mu held): then an approval needs a fresh check before the job is done.
+func (s *Service) evidenceMovedLocked(ctx context.Context, r *store.JobRecord) bool {
+	if r.AcceptState != AcceptAccepted {
+		return false
+	}
+	check, err := s.opts.Store.LatestCheck(ctx, r.ID)
+	if err != nil || check.Status != CheckPassed {
+		return false
+	}
+	head, err := landing.Head(ctx, workDirOf(*r))
+	return err == nil && head != check.Commit
 }

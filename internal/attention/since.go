@@ -42,7 +42,7 @@ type browserRecord struct {
 
 // SinceEvent is one thing that happened in the window.
 type SinceEvent struct {
-	Kind    string      `json:"kind"` // done, failed, cancelled, asked
+	Kind    string      `json:"kind"` // done, failed, cancelled, asked, answered
 	At      time.Time   `json:"at"`
 	Title   string      `json:"title"`
 	Detail  string      `json:"detail,omitempty"`
@@ -94,11 +94,39 @@ func SinceEvents(src SinceSources, since time.Time) []SinceEvent {
 		events = append(events, SinceEvent{Kind: "asked", At: question.CreatedAt, Title: question.Title, JobID: question.JobID,
 			Ref: question.ID, Detail: string(question.Status), Project: refOf(src.Projects, jobProject[question.JobID])})
 	}
+	// Answers given in the window, with how far each got to its agent (DESIGN.md 6.19): an
+	// answer held at a dialog or uncertain is news, not a done deal.
+	for _, question := range src.Questions {
+		if question.Status != questions.StatusAnswered || question.SettledAt == nil || !question.SettledAt.After(since) || question.Receipt == "" {
+			continue
+		}
+		events = append(events, SinceEvent{Kind: "answered", At: *question.SettledAt, Title: question.Title, JobID: question.JobID,
+			Ref: question.ID, Detail: receiptWords(question.Receipt), Project: refOf(src.Projects, jobProject[question.JobID])})
+	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].At.After(events[j].At) })
 	if len(events) > maxSinceEvents {
 		events = events[:maxSinceEvents]
 	}
 	return events
+}
+
+// receiptWords is an answer's receipt for the "since you left" line.
+func receiptWords(receipt string) string {
+	switch receipt {
+	case questions.ReceiptReceived:
+		return "received by the agent"
+	case questions.ReceiptDelivered:
+		return "typed to the agent, not yet seen taken in"
+	case questions.ReceiptHeld:
+		return "held: the agent could not take it yet"
+	case questions.ReceiptUncertain:
+		return "delivery uncertain: check whether it arrived"
+	case questions.ReceiptFailed:
+		return "not delivered"
+	case questions.ReceiptStored:
+		return "stored, not yet delivered"
+	}
+	return receipt
 }
 
 func refOf(projects map[int64]ProjectRef, id int64) *ProjectRef {

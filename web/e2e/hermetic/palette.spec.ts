@@ -12,7 +12,7 @@
 // a limit). Demo questions (internal/questions/demo.go) include "Apply the fleet cache refactor?"
 // (confirm, blocking: "Apply it" or "Not yet"). Demo agents (internal/herdr/fake/demo.go): the
 // orchestrator, the linter, and job-<n> for each job with a pane (job-12 reviews the fleet cache).
-// A job given here is j_23 (the landing demo is j_18 to j_22).
+// A job given here is j_24 (the landing demo is j_18 to j_23).
 import type { Page } from "@playwright/test";
 import { askAsAgent } from "../support/agent";
 import { expect, expectAccessible, expectNoSidewaysScroll, isPhone, test } from "../support/fixtures";
@@ -110,10 +110,10 @@ test("giving a job from the palette puts it on the board, and the toast opens it
   await expect(activeOption(page)).toContainText("Give job: Rewrite the onboarding emails for new users");
   await page.keyboard.press("Enter");
   await expect(palette(page)).toBeHidden();
-  await expect(page.getByText("Job j_23 given")).toBeVisible();
+  await expect(page.getByText("Job j_24 given")).toBeVisible();
   await expect(page.getByRole("region", { name: "In progress" }).or(page.getByRole("region", { name: "Needs you or stuck" })).getByText("Rewrite the onboarding emails for new users").first()).toBeVisible();
-  await page.getByRole("button", { name: "Open j_23" }).click();
-  await expect(page).toHaveURL(/job=j_23/);
+  await page.getByRole("button", { name: "Open j_24" }).click();
+  await expect(page).toHaveURL(/job=j_24/);
   const detail = isPhone(testInfo) ? page.getByRole("dialog") : page.getByRole("region", { name: "Selected job" });
   await expect(detail.getByRole("heading", { name: "Rewrite the onboarding emails for new users" })).toBeVisible();
 });

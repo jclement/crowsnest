@@ -60,6 +60,14 @@ func SeedDemoLanding(ctx context.Context, s *Service, root string, worktrees fun
 	if err := demoGit(repo, "init", "-q", "-b", "main"); err != nil {
 		return err
 	}
+	// The demo's Land runs the product's own git, with the machine's configuration. A machine with
+	// no git identity (a CI runner, a fresh container) cannot make the merge commit, and one that
+	// signs commits would ask for a key: the demo repository carries its own identity and no signing.
+	for _, setting := range [][2]string{{"user.name", "Demo"}, {"user.email", "demo@example.invalid"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}} {
+		if err := demoGit(repo, "config", setting[0], setting[1]); err != nil {
+			return err
+		}
+	}
 	for name, body := range map[string]string{
 		"README.md":      "# Widgets\n\nA small service that renders widgets.\n",
 		"retry.go":       "package widgets\n\n// Fetch gets a widget once.\nfunc Fetch(id string) (string, error) {\n\treturn get(id)\n}\n",
@@ -88,8 +96,18 @@ func SeedDemoLanding(ctx context.Context, s *Service, root string, worktrees fun
 	if err := seedDemoReviewer(ctx, s, review, repo); err != nil {
 		return err
 	}
-	_ = ready
-	return seedDemoHeld(ctx, s, repo)
+	if err := seedDemoEvidence(ctx, s, ready, CheckPassed, "go vet ./...\nok\ngo test ./...\nok  widgets 0.41s", 0); err != nil {
+		return err
+	}
+	if err := seedDemoHeld(ctx, s, repo); err != nil {
+		return err
+	}
+	// After the held job, so the landing demo's ids stay as they were (j_15 waits for a slot).
+	failed, err := seedDemoWorktreeJob(ctx, s, repo, demoCheckFailed())
+	if err != nil {
+		return err
+	}
+	return seedDemoEvidence(ctx, s, failed, CheckFailed, demoFailedTail, 1)
 }
 
 // demoWork is one seeded worktree job: what it was asked, the files it changed, and its record.

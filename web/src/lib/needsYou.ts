@@ -3,6 +3,7 @@
 // de-duplication (an approval and its agent's dialog are one row; a job waiting on a question is
 // listed through the question); this file only picks the payload each row's card needs. Snoozed
 // items are left out here and listed in the Inbox.
+import type { FleetLimit } from "./accept";
 import type { Approval } from "./approvals";
 import { activeItems, type AttentionItem, type AttentionSnapshot, type StandingAgent } from "./attention";
 import type { Job } from "./jobs";
@@ -23,7 +24,8 @@ export type TrayItem =
   | (Base & { kind: "question"; question: Question })
   | (Base & { kind: "dialog"; agent: Agent })
   | (Base & { kind: "job"; job: Job })
-  | (Base & { kind: "agent"; standing: StandingAgent });
+  | (Base & { kind: "agent"; standing: StandingAgent })
+  | (Base & { kind: "limit"; limit: FleetLimit });
 
 /** One tray row for an attention item, or null when the item lacks its payload. */
 export function trayItemOf(item: AttentionItem): TrayItem | null {
@@ -36,7 +38,10 @@ export function trayItemOf(item: AttentionItem): TrayItem | null {
     case "dialog":
       return item.dialog_agent ? { ...base, kind: "dialog", agent: item.dialog_agent } : null;
     case "job":
+    case "wait":
       return item.job ? { ...base, kind: "job", job: item.job } : null;
+    case "limit":
+      return item.limit ? { ...base, kind: "limit", limit: item.limit } : null;
     case "agent":
       return item.standing ? { ...base, kind: "agent", standing: item.standing } : null;
   }

@@ -47,7 +47,7 @@ func TestApprovalWaitLeavesOtherDispositionsAlone(t *testing.T) {
 	r := newRig(t, nil)
 	ctx := context.Background()
 	job := r.create(CreateInput{Brief: "Block", Dir: t.TempDir()})
-	if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "waiting on CI", State: string(StateBlocked), Reason: "CI is down"}); err != nil {
+	if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "waiting on CI", State: string(StateBlocked), Reason: "CI is down", RecheckIn: "30m"}); err != nil {
 		t.Fatal(err)
 	}
 	_ = r.svc.SetApprovalWaiting(ctx, job.ID, true, "Bash: ls")

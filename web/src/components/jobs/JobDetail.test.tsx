@@ -56,9 +56,10 @@ describe("JobDetail", () => {
 
   it("shows the result with what was verified and what was not", async () => {
     renderDetail(makeDetail({ state: "done", result_md: "Fixed the **race**.", verified: ["npm test: 50 runs"], not_verified: ["Safari"] }));
-    const verified = await screen.findByRole("region", { name: "Verified" });
+    // The agent's own account is labelled as such: crowsnest's evidence is a separate card (6.15).
+    const verified = await screen.findByRole("region", { name: "Verified (reported by the agent)" });
     expect(within(verified).getByText("npm test: 50 runs")).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Not verified" })).getByText("Safari")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Not verified (reported by the agent)" })).getByText("Safari")).toBeInTheDocument();
     expect(screen.queryByLabelText(/Message to/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel job" })).not.toBeInTheDocument();
   });

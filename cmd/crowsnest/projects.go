@@ -38,6 +38,8 @@ type projectWiring struct {
 	extra atomic.Pointer[func(ctx context.Context, project projects.Project) string]
 	// taskSource gives a lead's poker its project's scheduled tasks; nil gives none.
 	taskSource atomic.Pointer[func(projectID int64) orch.TaskSource]
+	// jobs is the jobs service, for a lead poker's spend ceiling and usage-limit hold (6.16).
+	jobs atomic.Pointer[jobs.Service]
 	// upkeep gives a lead's poker its timer list and its tender; nil gives neither.
 	upkeep atomic.Pointer[leadUpkeep]
 }
@@ -179,7 +181,11 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 				}
 			},
 		})
-		return agent, orch.NewPoker(w.leadPokerOptions(deps, project, agent))
+		options := w.leadPokerOptions(deps, project, agent)
+		if service := w.jobs.Load(); service != nil {
+			options.Hold = standingHold(service, "lead:"+project.Slug)
+		}
+		return agent, orch.NewPoker(options)
 	}
 }
 

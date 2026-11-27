@@ -43,6 +43,7 @@ const (
 // sourceEvents are the hub events that can change the queue.
 var sourceEvents = map[string]bool{
 	"job": true, "question": true, "approval": true, "fleet": true, "orchestrator": true, "lead": true, "project": true,
+	"limits": true,
 }
 
 // KV is where snoozes and dismissals live (the store's kv table).
@@ -59,10 +60,14 @@ type Options struct {
 	Jobs      func(ctx context.Context) ([]jobs.Job, error)
 	Standing  func(ctx context.Context) []StandingAgent
 	Projects  func(ctx context.Context) ([]projects.Project, error)
-	KV        KV
-	Hub       *hub.Hub
-	Logger    *slog.Logger
-	Now       func() time.Time
+	// Limits and Violations are the jobs service's fleet usage limits and wait-invariant
+	// violations (DESIGN.md 6.17, 6.18); nil: none.
+	Limits     func(ctx context.Context) []jobs.LimitState
+	Violations func() []jobs.Violation
+	KV         KV
+	Hub        *hub.Hub
+	Logger     *slog.Logger
+	Now        func() time.Time
 }
 
 // Snapshot is the queue at one moment: what GET /attention returns and the `attention` event
@@ -194,6 +199,12 @@ func (s *Service) gather(ctx context.Context) (Sources, []string) {
 	}
 	if s.opts.Standing != nil {
 		src.Standing = s.opts.Standing(ctx)
+	}
+	if s.opts.Limits != nil {
+		src.Limits = s.opts.Limits(ctx)
+	}
+	if s.opts.Violations != nil {
+		src.Violations = s.opts.Violations()
 	}
 	return src, partial
 }

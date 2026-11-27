@@ -16,7 +16,7 @@
 import { isRoutine } from "../../lib/decision";
 import { RescuePanel } from "../jobs/RescuePanel";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { BellDot, BellOff, Bot, ChevronDown, ChevronUp, Clock, ListTodo, MessageSquareWarning, MessagesSquare, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { BellDot, BellOff, Bot, ChevronDown, ChevronUp, Clock, Hourglass, ListTodo, MessageSquareWarning, MessagesSquare, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
@@ -251,6 +251,8 @@ function rowIcon(item: TrayItem): ReactNode {
       return <ListTodo className={cn("mt-0.5 h-4 w-4 shrink-0", item.job.state === "failed" ? "text-danger" : "text-warning")} aria-hidden />;
     case "agent":
       return <Bot className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />;
+    case "limit":
+      return <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />;
   }
 }
 
@@ -341,6 +343,15 @@ function RowBody({ item, cardRef, onDone, onNavigate }: { item: TrayItem; cardRe
       return <QuickAnswer question={item.question} onOpen={() => go("/decide", { item: `question:${item.question.id}` })} />;
     case "dialog":
       return <QuickDialog paneId={item.agent.pane_id} name={item.agent.name || item.agent.pane_id} onOpen={() => go("/fleet", { agent: item.agent.pane_id })} />;
+    case "limit":
+      return (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-body">{item.item.detail}</p>
+          <Button compact onClick={() => go("/jobs", {})}>
+            See the jobs
+          </Button>
+        </div>
+      );
     case "job":
       return (
         <div className="flex flex-col gap-2">

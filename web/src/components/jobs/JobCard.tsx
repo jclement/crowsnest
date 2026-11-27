@@ -4,7 +4,9 @@
 import { Bot, FolderKanban, MessageCircleQuestion, RotateCcw, Zap } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/format";
+import { acceptChip, budgetChip } from "../../lib/accept";
 import { cardLine, retryLabel, stateChip, type Job } from "../../lib/jobs";
+import { LastMessage } from "./AcceptPanels";
 import { SpendChip } from "../spend/SpendChip";
 import { Chip } from "../ui/Chip";
 
@@ -20,6 +22,10 @@ export function JobCard({ job, selected, onSelect, projectName }: JobCardProps) 
   const chip = stateChip(job);
   const line = cardLine(job);
   const retry = retryLabel(job);
+  const accept = acceptChip(job);
+  const budget = budgetChip(job.budget);
+  // A job held by the fleet's usage limit is one banner, not a red card each (6.17).
+  const limitHeld = job.cause === "limit" && /usage limit/.test(job.cause_detail);
   const active = job.last_activity_at ?? job.started_at ?? job.created_at;
   return (
     <li>
@@ -31,9 +37,20 @@ export function JobCard({ job, selected, onSelect, projectName }: JobCardProps) 
       >
         <span className="flex w-full items-start gap-2">
           <span className="min-w-0 flex-1 break-words text-sm font-medium text-heading">{job.title}</span>
-          <Chip tone={chip.tone}>{chip.label}</Chip>
+          {accept && job.state !== "in_review" && (
+            <Chip tone={accept.tone} title={accept.title}>
+              {accept.label}
+            </Chip>
+          )}
+          <Chip tone={limitHeld ? "neutral" : chip.tone}>{limitHeld ? "Held" : chip.label}</Chip>
         </span>
-        {line && <span className={cn("line-clamp-2 text-xs", job.stuck || job.state === "needs_you" ? "text-warning" : "text-body")}>{line}</span>}
+        {line && <span className={cn("line-clamp-2 text-xs", (job.stuck && !limitHeld) || job.state === "needs_you" ? "text-warning" : "text-body")}>{line}</span>}
+        {job.wake && job.state === "blocked" && (
+          <span className="text-2xs text-muted">
+            Waits on {job.wait_owner}: {job.wake}
+          </span>
+        )}
+        {!limitHeld && <LastMessage job={job} clamp />}
         <span className="flex flex-wrap items-center gap-1 text-2xs text-muted">
           <span>{job.state === "queued" ? `queued ${relativeTime(job.created_at)}` : `active ${relativeTime(active)}`}</span>
           {job.open_questions > 0 && (
@@ -58,6 +75,11 @@ export function JobCard({ job, selected, onSelect, projectName }: JobCardProps) 
             <Chip tone="accent" title="Project">
               <FolderKanban className="h-3 w-3" aria-hidden />
               {projectName}
+            </Chip>
+          )}
+          {budget && (
+            <Chip tone={budget.tone} title={budget.title}>
+              {budget.label}
             </Chip>
           )}
           <SpendChip spend={job.spend} />

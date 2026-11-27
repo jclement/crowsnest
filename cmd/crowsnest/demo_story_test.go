@@ -126,8 +126,9 @@ func (w demoWorld) slug(job jobs.Job) string { return w.slugOf[job.ProjectID] }
 
 func TestDemoStory(t *testing.T) {
 	w := seedDemoWorld(t)
-	// The story's 17 jobs, and the landing demo's five beside them (j_18 to j_22).
-	if len(w.slugOf) != 5 || len(w.jobs) != 17 || w.landing != 5 {
+	// The story's 17 jobs, and the landing demo's six beside them (j_18 to j_22, and j_23 whose
+	// check failed: DESIGN.md 6.15).
+	if len(w.slugOf) != 5 || len(w.jobs) != 17 || w.landing != 6 {
 		t.Fatalf("%d projects, %d story jobs and %d landing jobs", len(w.slugOf), len(w.jobs), w.landing)
 	}
 	t.Run("jobs sit in their project's workspace, held by the agent they name", func(t *testing.T) { checkDemoJobs(t, w) })

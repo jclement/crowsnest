@@ -263,6 +263,7 @@ func (s *Server) routes() http.Handler {
 	s.registerQuestionRoutes(mux)
 	s.registerJobRoutes(mux)
 	s.registerLandingRoutes(mux)
+	s.registerAcceptRoutes(mux)
 	s.registerJournalRoutes(mux)
 	s.registerScheduleRoutes(mux)
 	s.registerProjectRoutes(mux)

@@ -123,7 +123,13 @@ func (r *stopRig) testLanding(t *testing.T) {
 	if code := r.call(http.MethodPost, "/api/v1/jobs/"+job.ID+"/land", map[string]any{"action": "merge"}, nil); code != http.StatusConflict {
 		t.Fatalf("a land without confirm: %d, want 409", code)
 	}
-	if code := r.call(http.MethodPost, "/api/v1/jobs/"+job.ID+"/land", map[string]any{"action": "merge", "confirm": true}, &result); code != http.StatusOK {
+	// The Review tab's commit goes back with the land (R5-S4): what lands is what was reviewed.
+	var view jobs.ReviewView
+	r.call(http.MethodGet, "/api/v1/jobs/"+job.ID+"/review", nil, &view)
+	if view.Land.Head == "" {
+		t.Fatalf("the Review tab names no commit: %+v", view.Land)
+	}
+	if code := r.call(http.MethodPost, "/api/v1/jobs/"+job.ID+"/land", map[string]any{"action": "merge", "confirm": true, "expected_head": view.Land.Head}, &result); code != http.StatusOK {
 		t.Fatalf("land merge: %d", code)
 	}
 	landed := r.get(t, job.ID)
@@ -146,7 +152,8 @@ func (r *stopRig) testPausedNotNudged(t *testing.T, pause *switchPause) {
 	pause.set(true)
 	defer pause.set(false)
 	var job jobs.Job
-	if code := r.call(http.MethodPost, "/api/v1/jobs", map[string]any{"brief": "Reply with the single word hello and end your turn. Do not call any tool.",
+	if code := r.call(http.MethodPost, "/api/v1/jobs", map[string]any{"brief": "Reply with the single word hello and end your turn. Do not call any tool: not done, not job_update, nothing. " +
+		"This is a test of what happens when a turn ends with nothing declared, so calling done would spoil it.",
 		"dir": r.repo, "model": "haiku", "reviewer": "off"}, &job); code != http.StatusCreated {
 		t.Fatalf("creating the job: %d", code)
 	}

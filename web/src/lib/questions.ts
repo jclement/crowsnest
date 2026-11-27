@@ -46,6 +46,10 @@ export interface Question {
   delivery: Delivery;
   delivered_at: string | null;
   delivery_error?: string;
+  /** The answer's journey to the agent (DESIGN.md 6.19): stored, held, uncertain, failed, delivered or received. */
+  receipt?: import("./accept").Receipt;
+  received_at?: string | null;
+  held_reason?: string;
   /** The asker's files (GET /questions/{id} only). */
   attachments?: Attachment[];
   /** The human's files sent with the answer, with the asker's copies. */

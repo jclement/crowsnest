@@ -90,7 +90,7 @@ func (s *Service) HandleHook(ctx context.Context, event, jobID, callerPane strin
 				return nil
 			}
 			s.touchLocked(r, c, input)
-			s.applyHookLocked(r, c, event, input)
+			s.applyHookLocked(ctx, r, c, event, input)
 			return nil
 		})
 		return HookReply{}, err
@@ -151,6 +151,23 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 	var reply HookReply
 	_, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		s.touchLocked(r, c, input)
+		r.Turns++
+		if message := strings.TrimSpace(input.LastAssistant); message != "" {
+			r.LastMessage, r.LastMessageAt = capRunes(message, maxLastMessageRunes), s.opts.Now()
+		}
+		if budgetStopLocked(r, c) {
+			// The human let it finish its step (6.16): the step is over, the turn may end.
+			r.LastStopAt = s.opts.Now()
+			reply = HookReply{}
+			return nil
+		}
+		if held, state := s.limitHeld(ctx, r.Engine); held && !State(r.State).Terminal() {
+			// Every agent of this engine is under the usage limit (6.17): a nudge would only hit it.
+			r.LastStopAt = s.opts.Now()
+			c.event(EventHook, "Turn ended (usage limit: "+limitText(state)+"; resumed after the reset)", map[string]any{"rule": RuleLimitHeld})
+			reply = HookReply{}
+			return nil
+		}
 		if s.paused() {
 			// The supervisor will not act while paused, so it must not hold the agent in a loop
 			// either: every turn may end, and the timeline says why (holds.go).
@@ -160,7 +177,8 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 			return nil
 		}
 		job := s.toJob(*r, c.questions.Open)
-		decision := Decide(&job, c.questions.Open, StopInput{SessionID: input.SessionID, StopHookActive: input.StopHookActive}, s.historyLocked(*r, c), s.opts.Now())
+		decision := Decide(&job, c.questions.Open, StopInput{SessionID: input.SessionID, StopHookActive: input.StopHookActive, LastAssistantMessage: input.LastAssistant},
+			s.historyLocked(*r, c), s.opts.Now())
 		// The stop is handled here: the herdr-side backstop leaves a stop whose hook ran alone, so
 		// it is never nudged twice (internal/orch/backstop.go). Except when the turn was let end
 		// only because input is on its way, an answer (R2-C04) or crowsnest's own typing (R3-C05):
@@ -206,7 +224,11 @@ func (s *Service) applyDecisionLocked(r *store.JobRecord, c *change, decision De
 	now := s.opts.Now()
 	r.Nudges++
 	r.LastNudgeAt = now
-	c.event(EventNudge, fmt.Sprintf("Nudged (%d of %d): the turn ended with nothing declared", decision.Streak, MaxNudges),
+	why := "the turn ended with nothing declared"
+	if decision.Rule == RuleProseQuestion {
+		why = "it asked the human a question in prose; told to call ask"
+	}
+	c.event(EventNudge, fmt.Sprintf("Nudged (%d of %d): %s", decision.Streak, MaxNudges, why),
 		map[string]any{"rule": decision.Rule, "streak": decision.Streak, "stop_hook_active": input.StopHookActive, "last_message": oneLine(input.LastAssistant, 300)})
 	body, _ := json.Marshal(map[string]string{"decision": "block", "reason": decision.Reason})
 	return HookReply{Stdout: string(body)}
@@ -238,12 +260,12 @@ func (s *Service) hookSessionStart(ctx context.Context, id string, input HookInp
 
 // ---- Notification, StopFailure, PermissionDenied, SessionEnd --------------------------------
 
-func (s *Service) applyHookLocked(r *store.JobRecord, c *change, event string, input HookInput) {
+func (s *Service) applyHookLocked(ctx context.Context, r *store.JobRecord, c *change, event string, input HookInput) {
 	switch event {
 	case HookNotification:
 		s.notificationLocked(r, c, input)
 	case HookStopFailure:
-		s.stopFailureLocked(r, c, input)
+		s.stopFailureLocked(ctx, r, c, input)
 	case HookPermissionDenied:
 		r.Denials++
 		c.event(EventHook, "Auto mode denied "+input.ToolName, map[string]any{"tool": input.ToolName, "reason": oneLine(input.Reason, 300), "in_a_row": r.Denials})
@@ -280,7 +302,7 @@ func (s *Service) notificationLocked(r *store.JobRecord, c *change, input HookIn
 	}
 }
 
-func (s *Service) stopFailureLocked(r *store.JobRecord, c *change, input HookInput) {
+func (s *Service) stopFailureLocked(ctx context.Context, r *store.JobRecord, c *change, input HookInput) {
 	now := s.opts.Now()
 	summary := "API error: " + input.Error
 	if input.ErrorDetails != "" {
@@ -290,6 +312,11 @@ func (s *Service) stopFailureLocked(r *store.JobRecord, c *change, input HookInp
 	case "rate_limit":
 		r.Stuck, r.Cause, r.CauseDetail = true, string(CauseLimit), oneLine(firstNonEmpty(input.ErrorDetails, "Usage or rate limit"), 300)
 		r.RetryAt = now.Add(retryDelay(limitRetries, limitEvery, r.RetryCount))
+		// One limit for the whole fleet (6.17): the retry waits for its reset, and every other
+		// agent of the engine is held with it rather than discovering it one by one.
+		if state, ok := s.noteLimitLocked(ctx, r, firstNonEmpty(input.ErrorDetails, input.Error)); ok {
+			r.CauseDetail = oneLine(limitText(state), 300)
+		}
 	case "authentication_failed", "billing_error", "oauth_org_not_allowed", "account_on_hold", "cloud_credential_error":
 		r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseAuth), summary
 		r.Stuck, r.RetryAt = false, zeroTime

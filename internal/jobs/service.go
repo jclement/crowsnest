@@ -125,6 +125,22 @@ type Options struct {
 	// Landing configures the review gate and Land (DESIGN.md 6.7, 6.11). Zero: no review gate,
 	// merge commits, no protected branches.
 	Landing LandingOptions
+	// Accept turns on acceptance: crowsnest's own evidence for a finished coding job (6.15).
+	// Zero: off, done is the agent's word.
+	Accept AcceptOptions
+	// Budgets are the default budgets and the fleet's ceilings (6.16). Zero: unlimited.
+	Budgets BudgetOptions
+	// Limits is the fleet-wide usage limit (6.17); nil: each job retries on its own.
+	Limits *FleetLimits
+	// SpendToday is today's spend for the fleet's ceiling and the standing agents' (6.16); nil:
+	// the ceilings never apply.
+	SpendToday func(ctx context.Context) (DaySpend, error)
+	// OnViolation is told each new wait-invariant violation (6.18), for the server's journal.
+	// Nil: they are on the job's timeline and the System page only.
+	OnViolation func(Violation)
+	// OnReceived is told when an answer is seen taken in by its asker (6.19), so the Inbox can
+	// update. Nil: nothing is published.
+	OnReceived func(questionID int64)
 }
 
 // InstructionLayers is what the launcher needs of internal/instructions, as an interface so that
@@ -158,6 +174,9 @@ type Service struct {
 	liveDefaults atomic.Pointer[[2]string]
 	// liveLanding overrides opts.Landing's review default and merge mode (Settings, SetLanding).
 	liveLanding atomic.Pointer[LandingOptions]
+	// liveAccept and liveBudgets override opts.Accept and opts.Budgets (Settings).
+	liveAccept  atomic.Pointer[AcceptOptions]
+	liveBudgets atomic.Pointer[BudgetOptions]
 	mu          sync.Mutex
 	// instance names this process in the lifecycle claims it writes (lifecycle.go).
 	instance string
@@ -167,6 +186,14 @@ type Service struct {
 
 	effectsMu sync.Mutex
 	effects   map[string]*inflightEffect // a step's herdr effect while it runs (lifecycle.go)
+
+	checksMu sync.Mutex
+	checks   map[string]bool // jobs whose check this process is running (accept.go)
+
+	watchMu sync.Mutex
+	watch   map[string]*jobWatch // per-job supervisor memory: spinning samples, budget reads (spinning.go)
+
+	inv invariants // the latest wait-invariant check (waits.go)
 }
 
 // New returns a Service.
@@ -219,6 +246,15 @@ func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
 	jobsWithSpend := []Job{detail.Job}
 	s.attachSpend(ctx, jobsWithSpend)
 	detail.Job = jobsWithSpend[0]
+	if detail.AcceptState != AcceptNone {
+		detail.Evidence = s.EvidenceOf(ctx, detail.Job)
+		if fresh, err := s.opts.Store.GetJob(ctx, numeric); err == nil {
+			detail.AcceptState, detail.AcceptDetail = fresh.AcceptState, fresh.AcceptDetail
+		}
+	}
+	if !detail.State.Terminal() {
+		detail.Budget = s.BudgetOf(ctx, record)
+	}
 	if s.opts.Spend != nil && detail.Spend != nil && detail.Spend.Measured {
 		if turns, err := s.opts.Spend.Turns(ctx, detail.ID); err == nil {
 			detail.SpendTurns = turns
@@ -250,7 +286,11 @@ func (s *Service) List(ctx context.Context, states []State) ([]Job, error) {
 			}
 			open = summary.Open
 		}
-		out = append(out, s.toJob(record, open))
+		job := s.toJob(record, open)
+		if !job.State.Terminal() {
+			job.Budget = s.BudgetOf(ctx, record)
+		}
+		out = append(out, job)
 	}
 	s.attachSpend(ctx, out)
 	return out, nil
@@ -345,6 +385,14 @@ func (s *Service) questionsOf(ctx context.Context, id int64) ([]Question, error)
 		question.Options = []QuestionOption{}
 		if len(record.Options) > 0 {
 			_ = json.Unmarshal(record.Options, &question.Options)
+		}
+		if record.Status != "open" {
+			full := questions.Question{Status: questions.Status(record.Status), Delivery: questions.Delivery(record.Delivery),
+				DeliveredAt: timePtr(record.DeliveredAt), DeliveryError: record.DeliveryError}
+			if receipt, err := s.opts.Store.GetQuestionReceipt(ctx, record.ID); err == nil {
+				full.ReceivedAt, full.HeldReason = timePtr(receipt.ReceivedAt), receipt.HeldReason
+			}
+			question.Receipt = questions.ReceiptOf(full)
 		}
 		out = append(out, question)
 	}
@@ -531,6 +579,16 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 	if r.ReviewOf > 0 {
 		job.ReviewOf = FormatID(r.ReviewOf)
 	}
+	job.AcceptState, job.AcceptDetail, job.CheckRounds, job.NoCommitsReason = r.AcceptState, r.AcceptDetail, r.CheckRounds, r.NoCommitsReason
+	if r.FixOf > 0 {
+		job.FixOf = FormatID(r.FixOf)
+	}
+	job.Turns, job.Rechecks, job.WakeKind, job.WakeAt = r.Turns, r.Rechecks, r.WakeKind, timePtr(r.WakeAt)
+	if r.WakeJob > 0 {
+		job.WakeJob = FormatID(r.WakeJob)
+	}
+	job.LastMessage, job.LastMessageAt = r.LastMessage, timePtr(r.LastMessageAt)
+	job.WaitOwner, job.Wake = waitOf(r, s.paused())
 	job.DoingNow = doingNow(r, s.opts.Now())
 	return job
 }

@@ -188,6 +188,19 @@ func (r *approvalRig) decide(t *testing.T, id, decision, note string) {
 	}
 }
 
+// allowFollowUps allows every pending approval of the job other than first, as the human would.
+func (r *approvalRig) allowFollowUps(t *testing.T, jobID, first string) {
+	t.Helper()
+	var pending []approvals.Approval
+	r.call(http.MethodGet, "/api/v1/approvals?status=pending", nil, &pending)
+	for _, approval := range pending {
+		if approval.JobID == jobID && approval.ID != first {
+			t.Logf("follow-up approval %s: %s (allowed)", approval.ID, approval.Summary)
+			r.decide(t, approval.ID, "allow", "")
+		}
+	}
+}
+
 // screenHasDialog reports whether the pane shows a permission dialog right now.
 func (r *approvalRig) screenHasDialog(paneID string) bool {
 	read, err := r.client.PaneRead(context.Background(), paneID, herdr.ReadOptions{Source: herdr.SourceVisible})
@@ -211,7 +224,12 @@ func (r *approvalRig) testAllowed(t *testing.T) {
 	t.Logf("the terminal shows the dialog meanwhile: %v (it is drawn beside the hook; nobody answers it)", r.screenHasDialog(detail.PaneID))
 	time.Sleep(3 * time.Second) // a human takes a moment; the hook holds
 	r.decide(t, approval.ID, "allow", "")
-	detail = r.waitFor(t, job.ID, 4*time.Minute, func(d jobs.Detail) bool { return d.State.Terminal() })
+	// The agent may ask for more after the command (haiku sometimes commits its work: a second
+	// approval for `git commit`). The test plays the human for those too, so the job can finish.
+	detail = r.waitFor(t, job.ID, 4*time.Minute, func(d jobs.Detail) bool {
+		r.allowFollowUps(t, job.ID, approval.ID)
+		return d.State.Terminal()
+	})
 	r.record(t, "(d) allowed through the API", detail)
 	if detail.State != jobs.StateDone {
 		t.Fatalf("the job did not end done: %+v", detail.Job)

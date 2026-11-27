@@ -84,7 +84,7 @@ func TestBriefDeliveryKeepsWhatTheAgentDeclaredMeanwhile(t *testing.T) {
 		cause Cause
 	}{
 		{"blocked", func(r *rig, id string) {
-			if _, err := r.svc.Update(context.Background(), id, UpdateInput{Progress: "waiting on the database", State: string(StateBlocked), Reason: "the database is down"}); err != nil {
+			if _, err := r.svc.Update(context.Background(), id, UpdateInput{Progress: "waiting on the database", State: string(StateBlocked), Reason: "the database is down", RecheckIn: "30m"}); err != nil {
 				r.t.Error(err)
 			}
 		}, StateBlocked, ""},
@@ -126,7 +126,7 @@ func TestDispatchKeepsWhatTheOrchestratorDeclaredMeanwhile(t *testing.T) {
 	r.fake.OnPrompt(func(_ *fake.Fake, paneID, _ string) {
 		if paneID == pane {
 			r.fake.OnPrompt(nil)
-			if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "need a decision", State: string(StateBlocked), Reason: "waiting on the vendor"}); err != nil {
+			if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "need a decision", State: string(StateBlocked), Reason: "waiting on the vendor", RecheckIn: "30m"}); err != nil {
 				t.Error(err)
 			}
 		}

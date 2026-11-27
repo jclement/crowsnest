@@ -71,6 +71,7 @@ func (l *liveServices) apply(_ config.Config, next config.Config) {
 		tender.SetThresholds(next.CompactAt, next.FreshAt)
 	}
 	l.applyJobDefaults(context.Background(), next)
+	applyAcceptConfig(next, l.jobs.Load())
 	if ctl := l.ctl.Load(); ctl != nil {
 		ctl.applyConfig(next, l.jobs.Load())
 	}
