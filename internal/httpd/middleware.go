@@ -158,7 +158,14 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 		}
 		token := sessionToken(r)
 		session, err := s.deps.Auth.Authenticate(r.Context(), token, sessionHost(r))
+		if err == nil && !s.tailscaleSessionValid(r, session) {
+			err = auth.ErrNoSession // signed in with Tailscale, and that no longer holds (DESIGN.md 4.20)
+		}
 		if errors.Is(err, auth.ErrNoSession) {
+			if tailnet, ok := s.signInWithTailscale(w, r); ok {
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, tailnet)))
+				return
+			}
 			if token != "" {
 				clearSessionCookie(w, r)
 			}

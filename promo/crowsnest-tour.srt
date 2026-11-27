@@ -1,0 +1,172 @@
+1
+00:00:00,500 --> 00:00:05,351
+You give an agent a job, and it just works for a while. And then it stops.
+
+2
+00:00:05,601 --> 00:00:09,306
+Maybe it finished. Maybe it asked you something an hour ago.
+
+3
+00:00:09,006 --> 00:00:11,520
+You only find out when you go and look.
+
+4
+00:00:12,420 --> 00:00:15,767
+Crowsnest is one program that runs your coding agents,
+
+5
+00:00:15,467 --> 00:00:18,757
+keeps them working, and tells you when they need you.
+
+6
+00:00:21,658 --> 00:00:24,094
+Type what needs doing into one box.
+
+7
+00:00:26,344 --> 00:00:28,609
+Crowsnest hands it to a new agent,
+
+8
+00:00:28,309 --> 00:00:31,845
+in its own git worktree, and the job lands on the board.
+
+9
+00:00:33,295 --> 00:00:36,648
+The board keeps everything in order: what needs you,
+
+10
+00:00:36,348 --> 00:00:39,818
+what's stuck, what's running, and what finished today.
+
+11
+00:00:47,658 --> 00:00:51,261
+An agent that ends its turn without saying done, blocked,
+
+12
+00:00:50,961 --> 00:00:54,042
+or waiting on you is sent straight back to work.
+
+13
+00:00:55,091 --> 00:00:57,527
+Every nudge is on the job's timeline.
+
+14
+00:01:00,158 --> 00:01:04,667
+If it keeps stopping, or hits a usage limit, the job is marked stuck,
+
+15
+00:01:04,367 --> 00:01:07,656
+with the cause, and the one button that fixes it.
+
+16
+00:01:13,158 --> 00:01:17,777
+When an agent needs a decision, it asks, and the rest of the work carries on.
+
+17
+00:01:18,626 --> 00:01:22,595
+Questions land in the Inbox, with a diagram or a diff when that helps.
+
+18
+00:01:26,158 --> 00:01:28,755
+Tool permissions arrive as readable cards:
+
+19
+00:01:28,455 --> 00:01:31,381
+the command, where it runs, and how risky it is.
+
+20
+00:01:32,430 --> 00:01:34,913
+Allow it once, or deny it with a note.
+
+21
+00:01:37,658 --> 00:01:40,744
+And the needs-you tray follows you onto every page.
+
+22
+00:01:46,658 --> 00:01:49,823
+When a job is done, a second agent reviews it.
+
+23
+00:01:49,523 --> 00:01:54,992
+The Review tab shows what it produced, file by file, beside the reviewer's verdict.
+
+24
+00:01:56,042 --> 00:01:58,859
+Then land it: merge, open a pull request,
+
+25
+00:01:58,559 --> 00:02:01,683
+or discard it, and its worktree is cleaned up.
+
+26
+00:02:05,658 --> 00:02:10,881
+Each project gets its own lead agent, with its own jobs, schedules and instructions.
+
+27
+00:02:11,730 --> 00:02:14,259
+Chat with the orchestrator, or with any lead.
+
+28
+00:02:15,709 --> 00:02:18,377
+And Command-K gives a job, or jumps anywhere.
+
+29
+00:02:24,658 --> 00:02:26,758
+On your phone it's the same app.
+
+30
+00:02:26,458 --> 00:02:30,020
+Glance at the board, answer a question, approve a command.
+
+31
+00:02:35,269 --> 00:02:37,845
+Push notifications tell you when something needs you.
+
+32
+00:02:40,745 --> 00:02:42,746
+Hold to talk to the orchestrator.
+
+33
+00:02:42,446 --> 00:02:46,664
+Replies come back as one spoken line, and each agent can have its own voice.
+
+34
+00:02:50,114 --> 00:02:54,501
+And every project's lead shows up in Claude's Remote Control, under its own name.
+
+35
+00:02:57,401 --> 00:03:00,940
+The fleet shows every agent in the session and what it's doing,
+
+36
+00:03:00,640 --> 00:03:03,460
+and each one's terminal runs live in the browser.
+
+37
+00:03:09,901 --> 00:03:15,913
+Spend is measured per job and per day. Schedules bring recurring work round on time,
+
+38
+00:03:15,613 --> 00:03:19,721
+and the journal records every nudge, answer and restart.
+
+39
+00:03:20,571 --> 00:03:23,611
+And the header shows the machine's load at a glance.
+
+40
+00:03:26,511 --> 00:03:29,597
+Getting started is one install, and one command.
+
+41
+00:03:31,111 --> 00:03:34,069
+Open the link it prints and pick a password.
+
+42
+00:03:33,769 --> 00:03:37,634
+A short checklist confirms your tools, and you press Start.
+
+43
+00:03:44,111 --> 00:03:49,009
+No more checking tabs to see who stopped. Give it a job. Crowsnest keeps it going.
+

@@ -352,8 +352,107 @@ Two ways to reach crowsnest from your phone:
 - **`--bind tailnet`.** crowsnest listens on its Tailscale address directly, plain HTTP over
   WireGuard: simpler, but without the secure context, so no microphone or Web Push.
 
-Tailscale serve also sends who is asking (`Tailscale-User-Login` and friends); crowsnest does not
-use those headers for anything yet.
+### Sign in with Tailscale
+
+Off by default. Start crowsnest with `--tailscale-auth` (`CROWSNEST_TAILSCALE_AUTH=true`) and
+`tailscale serve` signs you in by your tailnet identity: no password to type on the phone.
+
+1. Start with `--tailscale-auth` and `tailscale serve --bg 2769` as above.
+2. Open `https://<machine>.<tailnet>.ts.net`, sign in with the password once, open System,
+   **Sign in with Tailscale**, and press **Allow me (you@github)**. Add others by login if you
+   want (`friend@github`); remove them the same way.
+3. From then on a browser that comes through `tailscale serve` as an allowed login is signed in.
+
+crowsnest believes the `Tailscale-User-Login` header only when the request comes from loopback
+(serve runs on this machine), a `tailscale serve` config on this machine proxies that Host to
+crowsnest's port (checked with `tailscale serve status --json`, cached 30 s), and the option is
+on. Serve removes any copy of the header a client sends and sets it only for tailnet users (not
+tagged devices or Funnel). A session made this way stays valid only while each request still
+arrives through serve for that login and the login is still allowed, so removing someone ends
+their sessions at once. Only a browser signed in with the password can change the list. Password
+sign-in always remains. What it does not protect against: any program on this machine can open a
+loopback connection and send the header (it already runs as you; on a shared machine, leave the
+option off). DESIGN.md 4.20 has the threat notes.
+
+## Backup and restore
+
+```sh
+crowsnest backup                         # crowsnest-<session>-<time>.tar.gz here; --out FILE to choose
+crowsnest restore --verify FILE          # check it, write nothing
+crowsnest restore FILE                   # into this machine's data directory; --force over existing data
+```
+
+A backup is one `.tar.gz`: a manifest (crowsnest and schema versions, every file's size and
+SHA-256, and what is not included), a consistent copy of the database made with SQLite's
+`VACUUM INTO` (safe beside a running crowsnest), every attachment, and the files beside the
+config that steer agents (`roles/*.md`, `tasks/*.md`, `risk.yaml`) and the orchestrator's
+`tasks/`. It never holds the password in clear or any token: login sessions, agent tokens, API
+tokens, tokens for other machines, notification action tokens, the Web Push key and
+subscriptions and the notify URL are removed from the copy. Not included: Claude Code's
+transcripts, herdr's state (sessions, panes, scrollback), the repositories and worktrees jobs
+used, and the config file (it may hold the password).
+
+`restore` checks every file against the manifest before writing anything, refuses a backup made
+by a newer schema, refuses a data directory that already holds a database (and a running
+crowsnest) unless `--force`, and then keeps the replaced database beside it
+(`<session>.db.before-restore-<time>`). An existing role, task or risk file is left alone unless
+`--force`. The restored instance **starts paused**: crowsnest first compares the restored jobs
+with the panes herdr really has (the journal says which still have one), and the pause switch
+holds every job start, restart, retry, poke and scheduled task until you resume (account menu,
+or the pause banner). Every browser signs
+in again; every device turns notifications on again.
+
+**Automatic backups** are off by default: `--backup-every 24h` (or Settings, Backups and
+storage) writes `auto-<session>-<time>.tar.gz` into `<data-dir>/backups` and keeps the newest
+`--backup-keep` (7); none is made while crowsnest is paused. **Download backup** (Settings, and the System page's Storage card) streams a
+fresh one to the browser.
+
+**Upgrades.** Migrations only go forward. Before a start that will change the database's schema,
+or the first start of a different crowsnest version, crowsnest copies the database to
+`<data-dir>/backups/pre-migration-<session>-<time>-s<schema>-<version>.db` (the newest three are
+kept). A database written by a newer crowsnest is refused with what to do (run that version
+again, or restore a backup). After an update the System page shows "Updated from vA to vB" with
+a link to the release notes until dismissed.
+
+## Retention
+
+Settled jobs, their timelines, questions, approvals, journal rows, spend detail and attachments
+pile up; crowsnest tidies them once a night (03:00 local, or whenever none ran for two days; not
+while paused):
+
+- **Archive** settled jobs after `--archive-after-days` (14): they leave the boards and stay
+  searchable (`GET /api/v1/jobs?archived=1&q=text`).
+- **Delete** settled history after `--delete-after-days` (180; `0` never): settled jobs with
+  their timelines, questions, approvals and what their agents loaded; settled questions and
+  approvals of no job; journal rows; per-call spend detail (daily totals stay); attachments no
+  longer needed, except evidence (an agent's `result` and `ask` files), which is kept; uploads
+  never sent (after a day); notification devices that keep failing (after 30 days).
+- **Never without asking**: a settled job that worked on its own branch or worktree may hold
+  work nobody has landed. It is listed as held and deleted only when you tick it in **Clean up
+  now**; the nightly run never deletes it. A job that is not settled is never touched.
+- **Job folders** (`<state>/jobs/j_<n>`: the brief and files given to the agent) go once their
+  job is archived or gone. Worktrees are not touched here: the landing sweep removes them, since
+  it knows what landed.
+
+The System page's **Storage** card shows what uses how much (database, attachments, job
+folders, backups), the rows per table with the oldest, the last clean-up, and **Clean up now**,
+which shows exactly what it would do first.
+
+## Machines
+
+Run one crowsnest per machine, each with its own herdr, and give each a name (`--name`). The
+System page's **Machines** card shows the others side by side:
+
+1. On the other machine, open System, Machines, and **Mint a token** (name it after the machine
+   that will read it). Copy it: it is shown once.
+2. Here, add that machine with its address on the tailnet (`https://bedev.tail1234.ts.net`, or
+   plain `http://` to a tailnet address) and the token.
+
+Each row shows what needs you there, its running jobs, whether it is paused, CPU and load, and
+links to it. A read token opens that machine's `GET /api/v1/summary` and nothing else (no
+terminal, job, question or setting); tokens are kept hashed and can be revoked. Summaries are
+fetched by this server (five seconds at most, no redirects), so the browser never sees a token.
+There is no remote control of another instance: sign in there.
 
 ## Container (devbox)
 
@@ -465,6 +564,8 @@ workflow does the same on every `v*` tag.
 | `crowsnest heavy [--status] -- <command…>` | Run a build or test suite through the heavy-command gate (two at a time by default, niced, parallelism capped). Uses an outside `heavy` on PATH when there is one (`CROWSNEST_HEAVY_DEFER=0` turns that off). Exit 75: no slot came free |
 | `crowsnest doctor [--json] [--deep]` | Check this machine can run crowsnest and print the fix for anything missing (Doctor, System and Settings). Read-only; `--deep` makes one tiny real call per agent. Exit 0 nothing failed, 1 something did |
 | `crowsnest open` | Open the running crowsnest in your browser (the same opener rule as `--open`); prints the URL either way |
+| `crowsnest backup [--out FILE]` | Write a backup (see Backup and restore): safe beside a running crowsnest |
+| `crowsnest restore FILE [--force] [--verify]` | Check a backup and put it in this machine's data directory; it starts paused. Refused over existing data or a running crowsnest unless `--force`; `--verify` only checks |
 | `crowsnest update [--check]` | Install the latest release over this binary after verifying its signature and checksum (see Install, Updating); `--check` only reports. Refused for a development build, in a container and for a Homebrew install |
 
 Exit codes: `0` success, `1` runtime error, `2` usage error.
@@ -731,6 +832,12 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host no agent may reach unattended: the guard hook refuses a command that would reach it, and an approval naming it is dangerous. Repeatable; added to the file below |
 | `--protected-hosts-file` | `CROWSNEST_PROTECTED_HOSTS_FILE` | `~/Developer/claude-agent/config/protected-hosts` | File of protected hosts, one per line, `#` comments; read when it exists, `''` for none |
 | `--protected-branch` | `CROWSNEST_PROTECTED_BRANCHES` | none | A branch agents may not commit or push onto, nor force-push (the guard hook). Repeatable |
+| `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | `false` | Let the Terminal view's herdr client show your saved SSH machines (`herdr machine add`). Off, it runs with a state directory of crowsnest's own and sees only this session, so signing in to crowsnest does not reach your other hosts |
+| `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | `false` | Sign in tailnet users the owner allowed (Settings, Sign in with Tailscale) from the identity headers `tailscale serve` on this machine adds. Password login stays. See [Sign in with Tailscale](#sign-in-with-tailscale) |
+| `--backup-every` | `CROWSNEST_BACKUP_EVERY` | `0` (off) | Make an automatic backup this often (at least `1h`), into `<data-dir>/backups`. Also in Settings |
+| `--backup-keep` | `CROWSNEST_BACKUP_KEEP` | `7` | Automatic backups kept |
+| `--archive-after-days` | `CROWSNEST_ARCHIVE_AFTER_DAYS` | `14` | Settled jobs leave the boards after this many days (still searchable); `0` never |
+| `--delete-after-days` | `CROWSNEST_DELETE_AFTER_DAYS` | `180` | Settled jobs and their timelines, settled questions and approvals, journal and spend detail are deleted after this many days; `0` never. Unlanded or unreviewed work is never deleted without asking |
 | `--allowed-host` | `CROWSNEST_ALLOWED_HOSTS` | derived | Extra Host/Origin name (reverse proxy, MagicDNS). Repeatable |
 | `--trusted-proxy` | `CROWSNEST_TRUSTED_PROXY` | none | `loopback`, an IP or a CIDR: a reverse proxy or tunnel whose client-IP header (`--trusted-proxy-header`) is believed, for the login rate limit, the per-client caps and the Secure cookie. Repeatable. Set `loopback` when a tunnel shares crowsnest's network namespace (the compose example) |
 | `--trusted-proxy-header` | `CROWSNEST_TRUSTED_PROXY_HEADER` | `x-forwarded-for` | Which header a trusted proxy names its client in: `x-forwarded-for` (its last hop; tailscale serve, most proxies) or `cf-connecting-ip` (cloudflared only, which overwrites it; any other proxy passes a client's own copy through, R3-L1) |
@@ -810,6 +917,14 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /system/diagnostics` | session | The same as redacted `text/plain` for an issue |
 | `GET /system/stats` | session | The machine: `{latest, history}` (CPU %, cores, memory, load, disk, scope `host`/`container`, working agents); `sys` events carry each new sample |
 | `GET /system/agents` | session | Each agent's process tree: `[{pane_id, name, kind, cpu, rss, processes}]` |
+| `GET /backup` | session | A fresh backup as a download (`application/gzip`) |
+| `GET /updated`, `POST /updated/seen` | session | `{from, to, at, release_url}` after an update until seen, else `null` |
+| `GET /storage` | session | The Storage card: `{areas, tables, policy, last_run, worktrees}` |
+| `POST /storage/cleanup` | session | `{dry_run, confirm: ["j_12"]}` → what it did (or, with `dry_run` true or missing, would do): `{archive, delete_jobs, held, confirmed, sweeps, state_dirs, state_bytes, blobs_freed}` |
+| `GET /summary` | session or a read token (`Authorization: Bearer cnk_…`) | `{name, version, attention, questions, blocking, approvals, needs_you, ready_to_land, review_objects, running, jobs, orchestrator, paused, stats, at}` (attention adds jobs ready to land and those whose reviewer still asks for changes, 6.11): what another machine's Machines card shows |
+| `GET /tokens`, `POST /tokens`, `DELETE /tokens/{id}` | session | Scoped read tokens: list (never the token), mint `{name}` → `201 {token, record}` (the token shown once), revoke |
+| `GET /machines`, `POST /machines`, `DELETE /machines/{id}` | session | Other instances with their summaries or an error; add `{name, url, token}`; remove |
+| `GET /auth/tailscale`, `PUT /auth/tailscale`, `POST /auth/tailscale/allow-me` | session (changes: a password session) | Sign in with Tailscale: `{enabled, serve_configured, current_login, via_tailscale, allowed}`; replace the list `{logins}`; add this request's own tailnet login. `409` with the option off, `403` from a session signed in with Tailscale |
 | `POST /system/demo-state` | session, `--demo` only | `{state}`: switch the scripted machine the demo's doctor sees (`ok`, `herdr-missing`, `claude-signed-out`, `codex-only`, `no-agent`, `both`) |
 | `GET /settings` | session | Every setting the app may change: `{settings: [{name, label, section, kind, value, source, where, locked, apply, …}], bind, bind_command}` |
 | `PUT /settings/{name}` | session | `{value}` or `{clear: true}` → validated by the config loader, saved, journalled, applied; `409` for a setting the app may not change or one a flag or variable sets, `400` with the loader's message |
@@ -847,7 +962,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /attachments/{id}` | session | The file: inline only for PNG, JPEG, GIF, WebP, BMP, PDF and plain text; everything else (SVG, HTML, …) as a download; always `nosniff`, and a sandboxing CSP on all but an inline PDF. `?download=1` forces a download. `/thumb` is a JPEG thumbnail of a picture, `/meta` the record |
 | `GET /attachments?owner=&role=`, `?answer=` | session | An owner's files (`job:j_3`, `question:q_7`, `orchestrator:`), or the files sent with an answer (`answer=q_7`) |
 | `DELETE /attachments/{id}` | session | Remove an upload that was never sent (`409` once sent) |
-| `GET /jobs?state=` | session | The board: every job, newest first (`state` filters, comma-separated), each with its `spend` summary |
+| `GET /jobs?state=` | session | The board: every job, newest first (`state` filters, comma-separated), each with its `spend` summary; archived jobs are left out. `?q=text` searches title, brief and result (newest 100), `?archived=1` lists archived jobs only |
 | `POST /jobs` | session | `{brief, dir?, role?, done_when?, engine?, model?, isolate?, attachments?}` (upload ids, listed in the brief) → the queued job (`201`); the agent starts in the background. No `dir`: the orchestrator takes it |
 | `GET /jobs/{id}` | session | The job with its `timeline` (state changes, progress, nudges, hooks, questions, restarts, retries, messages), `questions`, `spend` and `spend_turns` (its latest model calls, oldest first: `{at, model, tokens, output, cost_usd}`) |
 | `POST /jobs/{id}/message` | session | `{text, force_over_draft, attachments}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
@@ -940,6 +1055,8 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | `~/.local/state/crowsnest/<session>/claude-settings.json` | The orchestrator's `--settings` file: `permissions.allow: ["mcp__crowsnest__*"]` and the supervisor's hooks |
 | `~/.local/state/crowsnest/<session>/jobs/j_<n>/` | A job agent's `prompt.md` (role prompt and job protocol), `brief.md`, `settings.json` (hooks with `--job j_<n>`, the allow rule) `mcp.json` (with the agent's token), `agent-token` (the token, for the hooks) and `guard.json` (the guard hook's rules: the session, protected hosts and branches); each written fresh and read-only (0400). The orchestrator's `guard.json` is beside its `claude-settings.json` |
 | `~/.config/crowsnest/risk.yaml` | Optional: overrides for the approval risk rules (`disable: [ids]`, `rules: [{id, level, tools, field, pattern, reason}]`); an invalid file stops the start (DESIGN.md 8.7) |
+| `~/.local/share/crowsnest/backups/` | Automatic backups (`auto-<session>-<time>.tar.gz`) and the copies taken before an upgrade (`pre-migration-…db`, newest three) |
+| `~/.local/state/crowsnest/<session>/terminal-client/` | The Terminal view's herdr client state (`XDG_STATE_HOME`), so it sees none of your saved SSH machines (`--terminal-machines` turns this off) |
 | `~/.config/crowsnest/roles/*.md` | Optional role prompts that add to or replace the built-in ones |
 | `~/.config/crowsnest/prices.json` | Optional price overrides for the spend estimate (see Spend) |
 | `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server, its `CROWSNEST_SOCKET` and its agent token (`0600`); `agent-token` beside it holds the same start's token for the hooks |

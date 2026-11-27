@@ -248,3 +248,69 @@ func TestIntegrationTakeoverClosesTheFirstController(t *testing.T) {
 	_, _ = second.Write([]byte(command))
 	waitForText(t, second, &seen, want, 10*time.Second)
 }
+
+// fakeMachineLabel is the saved SSH machine planted in a throwaway state directory: herdr's
+// client draws saved machines in its sidebar by label. Its target cannot resolve (.invalid).
+const fakeMachineLabel = "CNFAKEBOX"
+
+// plantSavedMachine writes herdr's saved-machine catalog (the format `herdr machine list --json`
+// reads, found on herdr 0.9.5: a 32-hex id, label, target, session, enabled) under a throwaway
+// "user" state directory and points this test's XDG_STATE_HOME at it, so a client that inherits
+// the environment reads it as the user's own. The real ~/.local/state/herdr is never read or
+// written.
+func plantSavedMachine(t *testing.T) string {
+	t.Helper()
+	userState := t.TempDir()
+	clientDir := userState + "/herdr/client"
+	if err := os.MkdirAll(clientDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"version":1,"ssh":[{"id":"0123456789abcdef0123456789abcdef","label":"` + fakeMachineLabel +
+		`","target":"crowsnest-test@nowhere.invalid","session":"default","enabled":true}]}`
+	if err := os.WriteFile(clientDir+"/endpoints.json", []byte(catalog), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", userState)
+	return userState
+}
+
+// TestIntegrationTUIClientDoesNotSeeSavedMachines is R4 5.5: with a state directory of
+// crowsnest's own (the default) the Terminal view's client attaches to the session but shows
+// none of the user's saved SSH machines; with --terminal-machines (no state directory) it
+// inherits the user's and shows them. The user's catalog is left as it was.
+func TestIntegrationTUIClientDoesNotSeeSavedMachines(t *testing.T) {
+	session, _ := testSession(t)
+	userState := plantSavedMachine(t)
+	before, _ := os.ReadFile(userState + "/herdr/client/endpoints.json")
+
+	own := t.TempDir() + "/terminal-client"
+	isolated := HerdrLauncher{Session: session.Name, ClientStateDir: own}.TUI()
+	if err := isolated.Start(140, 40); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = isolated.Close() })
+	var seen bytes.Buffer
+	waitForText(t, isolated, &seen, "itest", 10*time.Second)
+	dismissOnboarding(t, isolated, &seen)
+	readUntilQuiet(t, isolated, &seen, time.Second, 5*time.Second)
+	if strings.Contains(fleet.StripANSI(seen.String()), fakeMachineLabel) {
+		t.Fatalf("the isolated client shows the user's saved machine %s", fakeMachineLabel)
+	}
+	_ = isolated.Close()
+	waitForEnd(t, isolated, 5*time.Second)
+
+	optIn := HerdrLauncher{Session: session.Name}.TUI()
+	if err := optIn.Start(140, 40); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = optIn.Close() })
+	seen.Reset()
+	waitForText(t, optIn, &seen, fakeMachineLabel, 15*time.Second)
+	_ = optIn.Close()
+	waitForEnd(t, optIn, 5*time.Second)
+
+	after, _ := os.ReadFile(userState + "/herdr/client/endpoints.json")
+	if !bytes.Equal(before, after) {
+		t.Errorf("the user's saved-machine catalog changed:\nbefore %s\nafter  %s", before, after)
+	}
+}

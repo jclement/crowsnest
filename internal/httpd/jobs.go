@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,12 +67,58 @@ func (s *Server) handleJobList(w http.ResponseWriter, r *http.Request) {
 			states = append(states, jobs.State(state))
 		}
 	}
+	query := r.URL.Query()
+	if s.deps.Ops != nil && (query.Get("archived") == "1" || strings.TrimSpace(query.Get("q")) != "") {
+		s.searchJobs(w, r, service, query.Get("q"), query.Get("archived") == "1")
+		return
+	}
 	list, err := service.List(r.Context(), states)
 	if err != nil {
 		s.writeJobError(w, r, err)
 		return
 	}
-	writeList(w, list, ListMeta{Total: len(list)})
+	writeList(w, s.withoutArchived(r.Context(), list), ListMeta{Total: len(list)})
+}
+
+// maxJobSearch bounds a search's results.
+const maxJobSearch = 100
+
+// withoutArchived leaves archived jobs off the board (DESIGN.md 4.19); they stay searchable.
+func (s *Server) withoutArchived(ctx context.Context, list []jobs.Job) []jobs.Job {
+	if s.deps.Ops == nil {
+		return list
+	}
+	archived, err := s.deps.Ops.ArchivedJobs(ctx)
+	if err != nil || len(archived) == 0 {
+		return list
+	}
+	out := make([]jobs.Job, 0, len(list))
+	for _, job := range list {
+		if id, err := strconv.ParseInt(strings.TrimPrefix(job.ID, "j_"), 10, 64); err != nil || !archived[id] {
+			out = append(out, job)
+		}
+	}
+	return out
+}
+
+// searchJobs answers GET /jobs?q=…&archived=1: jobs whose title, brief or result holds q,
+// newest first, archived ones only with archived=1.
+func (s *Server) searchJobs(w http.ResponseWriter, r *http.Request, service *jobs.Service, query string, archivedOnly bool) {
+	ids, err := s.deps.Ops.SearchJobs(r.Context(), query, archivedOnly)
+	if err != nil {
+		s.internalError(w, r, "searching jobs", err)
+		return
+	}
+	out := make([]jobs.Job, 0, len(ids))
+	for _, id := range ids {
+		if len(out) >= maxJobSearch {
+			break
+		}
+		if detail, err := service.Get(r.Context(), "j_"+strconv.FormatInt(id, 10)); err == nil {
+			out = append(out, detail.Job)
+		}
+	}
+	writeList(w, out, ListMeta{Total: len(out)})
 }
 
 func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {

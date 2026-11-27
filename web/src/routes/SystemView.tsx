@@ -2,12 +2,14 @@
 // running server sees them, with Re-check; versions; the agents and which one runs what; the
 // running instance (uptime, orchestrator, hooks seen firing, recent errors); paths; settings
 // not at their default and where they came from; and "Copy diagnostics", a redacted text report
-// for pasting into an issue.
+// for pasting into an issue. Since R4 (day thirty): the update notice, Storage (with Download
+// backup and Clean up now), Machines and Sign in with Tailscale (components/system/OpsCards.tsx).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCopy, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { CheckList, StatusMark } from "../components/system/CheckList";
 import { MachineDetail } from "../components/system/MachineStats";
+import { MachinesCard, StorageCard, TailscaleCard, UpdatedNotice } from "../components/system/OpsCards";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
@@ -56,6 +58,7 @@ export function SystemView() {
           Copy diagnostics
         </Button>
       </header>
+      <UpdatedNotice />
       {report.isPending && <p className="text-xs text-muted">Running the checks…</p>}
       {report.isError && <p className="text-xs text-danger">Could not load the system report. {(report.error as Error).message}</p>}
       {report.data && <SystemBody report={report.data} />}
@@ -130,6 +133,9 @@ function SystemBody({ report }: { report: SystemReport }) {
         </Card>
       </div>
       <MachineDetail />
+      <StorageCard />
+      <MachinesCard />
+      <TailscaleCard />
       {live?.last_errors && live.last_errors.length > 0 && (
         <Card title="Recent warnings and errors">
           <ul className="flex flex-col gap-1">
