@@ -206,6 +206,9 @@ func (c Config) SettingValue(name string) string {
 	if value, ok := c.acceptSettingValue(name); ok {
 		return value
 	}
+	if value, ok := c.tsserveSettingValue(name); ok {
+		return value
+	}
 	switch name {
 	case optModel:
 		return c.Model
@@ -338,6 +341,7 @@ func (c Config) WithSettings(from Config) Config {
 	c.Review, c.MergeMode, c.DigestAt = from.Review, from.MergeMode, from.DigestAt
 	c.Theme = from.Theme
 	c = c.withAcceptSettings(from)
+	c = c.withTailscaleServeSettings(from)
 	c.RequireViewedBeforeLand = from.RequireViewedBeforeLand
 	c.BackupEvery, c.BackupKeep = from.BackupEvery, from.BackupKeep
 	c.ArchiveAfterDays, c.DeleteAfterDays = from.ArchiveAfterDays, from.DeleteAfterDays

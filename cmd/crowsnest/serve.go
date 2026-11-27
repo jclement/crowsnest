@@ -163,6 +163,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	logLoginMode(logger, cfg, mode)
+	if mode == loginSetup && cfg.TailscaleServe {
+		logger.Info("publishing to your tailnet waits until first-run setup has an owner: the setup page is never published")
+	}
 	if mode == loginSetup {
 		if err := runSetupPhase(ctx, cfg, db, logger, hooks); err != nil {
 			return err
@@ -383,6 +386,10 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	deps.Machines = &machines.Service{Store: db}
 	deps.Tailscale = tsauth.New(tsauth.Options{Enabled: cfg.TailscaleAuth, KV: db, Port: cfg.Port})
 	var serverRef atomic.Pointer[httpd.Server]
+	tailnet, waitTailnet := startTailscaleServe(ctx, tailscaleServeWiring{cfg: cfg, db: db, journal: journalLog, server: serverRef.Load, addrs: early.Addrs(), logger: logger})
+	defer waitTailnet() // the published address goes before crowsnest does
+	deps.TailscaleServe = tailnet
+	live.tsserve.Store(tailnet)
 	deps.Stats = startStats(ctx, cfg, events, fleetCache, func() bool {
 		server := serverRef.Load()
 		return server != nil && server.OpenStreams() > 0

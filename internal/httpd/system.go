@@ -5,6 +5,7 @@
 //	POST /api/v1/system/demo-state    --demo only: switch the scripted machine (Playwright)
 //	GET  /api/v1/settings             every setting the app may change, its value and source
 //	PUT  /api/v1/settings/{name}      {value} or {clear:true}; refused when a flag or env var set it
+//	                                  (tailscale-serve: also refused to a session signed in with Tailscale)
 //	GET  /api/v1/onboarding[?recheck=1] the first-run checklist
 //	POST /api/v1/onboarding/start     {engine?}: finish the checklist, start the orchestrator
 //	POST /api/v1/onboarding/shell     {command}: a plain shell pane in the orchestrator's folder
@@ -132,6 +133,9 @@ func (s *Server) handleUpdateSetting(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSettingBody)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, codeValidation, "Send JSON with value, or clear: true.")
 		return
+	}
+	if r.PathValue("name") == tailscaleServeSetting && !s.tailscaleServeEditable(w, r) {
+		return // the card's rule holds in Settings too (tsserve.go)
 	}
 	view, err := service.UpdateSetting(r.Context(), r.PathValue("name"), body.Value, body.Clear)
 	switch {

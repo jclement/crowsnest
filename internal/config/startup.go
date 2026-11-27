@@ -46,6 +46,9 @@ func (c Config) CheckStartup() error {
 			}
 		}
 	}
+	if err := c.checkTailscaleServe(); err != nil {
+		return err
+	}
 	if c.Session == "default" && !c.AllowDefaultSession {
 		return fmt.Errorf("%w: --session default is your main herdr session. Pass another --session name, "+
 			"or --allow-default-session if you really mean it", ErrRefused)

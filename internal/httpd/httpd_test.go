@@ -158,6 +158,8 @@ type harnessOptions struct {
 	requireViewed func() bool
 	// The folder picker (browse_test.go); nil: the /browse routes answer 503
 	browse *browse.Service
+	// Publish to the tailnet (tsserve_test.go); nil: 503
+	tailscaleServe TailscaleServe
 }
 
 var testWeb = fstest.MapFS{
@@ -259,6 +261,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Now:           opts.now,
 		Changes:       opts.changes,
 		RequireViewed: opts.requireViewed,
+
+		TailscaleServe: opts.tailscaleServe,
 	})
 	if err != nil {
 		t.Fatal(err)

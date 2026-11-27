@@ -54,6 +54,29 @@ func (h hostSet) allows(hostname string) bool {
 	return ok
 }
 
+// hostAllowed is the host check: the names fixed at start, or one added since (AllowHost).
+func (s *Server) hostAllowed(hostname string) bool {
+	if s.hosts.allows(hostname) {
+		return true
+	}
+	_, added := s.addedHosts.Load(strings.ToLower(strings.TrimSuffix(hostname, ".")))
+	return added
+}
+
+// AllowHost adds a name to the host check while the server runs. Publishing to the tailnet
+// (internal/tsserve) uses it for the machine's MagicDNS name when start could not detect it
+// (Tailscale came up later); --no-tailscale-detect is honoured by the caller, which then does
+// not add it. Names are only ever added, never removed, for the life of the process.
+func (s *Server) AllowHost(name string) {
+	name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	if name != "" {
+		s.addedHosts.Store(name, struct{}{})
+	}
+}
+
+// HostAllowed reports whether the host check accepts name now.
+func (s *Server) HostAllowed(name string) bool { return s.hostAllowed(name) }
+
 // splitHost returns the hostname part of a Host header value, without port or IPv6 brackets.
 func splitHost(hostport string) string {
 	if host, _, err := net.SplitHostPort(hostport); err == nil {
@@ -67,7 +90,7 @@ func splitHost(hostport string) string {
 // browser still sends that name as Host. It applies with --no-auth too.
 func (s *Server) checkHost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.hosts.allows(splitHost(r.Host)) {
+		if !s.hostAllowed(splitHost(r.Host)) {
 			s.deps.Logger.Warn("rejected request for unknown host", "host", r.Host, "client", clientIP(r))
 			writeError(w, http.StatusForbidden, codeForbidden,
 				"This host name is not allowed. Restart crowsnest with --allowed-host "+splitHost(r.Host)+" if it should be.")
@@ -113,7 +136,7 @@ func (s *Server) originProblem(r *http.Request) string {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return "Malformed Origin header."
 	}
-	if !s.hosts.allows(parsed.Hostname()) {
+	if !s.hostAllowed(parsed.Hostname()) {
 		return "Origin is not an allowed host."
 	}
 	if normalizeAuthority(parsed.Host, parsed.Scheme) != normalizeAuthority(r.Host, parsed.Scheme) {

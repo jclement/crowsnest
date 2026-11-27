@@ -93,6 +93,12 @@ These appear in the **Settings** sheet (account menu → Settings), grouped as t
 | Archive settled jobs after (days) | `--archive-after-days` | at once | hidden from the boards, still searchable; 0 never |
 | Delete settled history after (days) | `--delete-after-days` | at once | jobs and their timelines, settled questions and approvals, journal and spend detail; 0 never. Unlanded work is never deleted without asking |
 
+### Tailnet
+
+| Setting | Flag | Applies | What it does |
+|---|---|---|---|
+| Publish to your tailnet | `--tailscale-serve` | at once | run tailscale serve while crowsnest runs, so https://<machine>.<tailnet>.ts.net reaches it from your devices (the sign-in page first). Needs a login; never public |
+
 ## Every flag
 
 All of them, in `crowsnest --help` order. The config-file key is the flag's name without the dashes.
@@ -160,6 +166,8 @@ All of them, in `crowsnest --help` order. The config-file key is the flag's name
 | `--engine` | `CROWSNEST_ENGINE` | `auto` | Agents → Default engine | agent engine for the orchestrator and for jobs that name none: auto, claude or codex |
 | `--open` | `CROWSNEST_OPEN` | `auto` | no | open a browser at start (the setup link, else the app): auto (only from a desktop terminal), always or never |
 | `--no-tailscale-detect` | `CROWSNEST_NO_TAILSCALE_DETECT` | `false` | no | do not add this machine's Tailscale MagicDNS name to the allowed hosts at start |
+| `--tailscale-serve` | `CROWSNEST_TAILSCALE_SERVE` | `false` | Tailnet → Publish to your tailnet | publish crowsnest to your tailnet while it runs, with a foreground `tailscale serve` (needs a login; never Funnel) |
+| `--tailscale-serve-port` | `CROWSNEST_TAILSCALE_SERVE_PORT` | `0` | no | the tailnet HTTPS port --tailscale-serve publishes on; 0 picks the first free of 443, 8443 and 10000 |
 | `--name` | `CROWSNEST_NAME` | none | no | this instance's name, shown in the header, the page title, notices and Remote Control (default: the short hostname) |
 | `--no-remote-control` | `CROWSNEST_NO_REMOTE_CONTROL` | `false` | Agents → Remote Control | start the orchestrator without Claude Code's Remote Control |
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | `false` | Agents → Remote Control for jobs | start job agents with Remote Control too, named "<name> <job id> <title>" |

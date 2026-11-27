@@ -179,6 +179,8 @@ type Deps struct {
 	Machines *machines.Service
 	// Tailscale is sign in with Tailscale (DESIGN.md 4.20). Nil: off.
 	Tailscale *tsauth.Gate
+	// TailscaleServe publishes crowsnest to the tailnet (DESIGN.md 3.5.1, tsserve.go). Nil: 503.
+	TailscaleServe TailscaleServe
 	// Changes is the live diff and its viewed marks (DESIGN.md 6.21). Nil: those routes answer
 	// 503. RequireViewed reads the "require all files viewed before Land" setting now; DemoTouch
 	// makes a --demo job edit a file at once (the e2e's handle on "the file changes").
@@ -194,10 +196,12 @@ type ActionRedeemer interface {
 
 // Server is the HTTP server. Build it with New, then call Run.
 type Server struct {
-	deps      Deps
-	hosts     hostSet
-	handler   http.Handler
-	heartbeat time.Duration
+	deps  Deps
+	hosts hostSet
+	// addedHosts are names AllowHost added after start (the MagicDNS name, DESIGN.md 3.5.1).
+	addedHosts sync.Map
+	handler    http.Handler
+	heartbeat  time.Duration
 	// sseWriteTimeout is sseWriteTimeout unless a test shortens it.
 	sseWriteTimeout time.Duration
 	// openStreams counts SSE handlers still running, so tests can see one return.
@@ -294,6 +298,7 @@ func (s *Server) routes() http.Handler {
 	s.registerApprovalRoutes(mux)
 	s.registerApprovalRuleRoutes(mux)
 	s.registerSystemRoutes(mux)
+	s.registerTailscaleServeRoutes(mux)
 	s.registerStatsRoutes(mux)
 	s.registerAttentionRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
@@ -435,6 +440,15 @@ func (e *Early) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serveStarting(w, r)
+}
+
+// Addrs are the early listeners' bound addresses (the real port when --port 0).
+func (e *Early) Addrs() []net.Addr {
+	addrs := make([]net.Addr, 0, len(e.listeners))
+	for _, listener := range e.listeners {
+		addrs = append(addrs, listener.Addr())
+	}
+	return addrs
 }
 
 // Close stops serving the early listeners (a start that failed before Run).

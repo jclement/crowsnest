@@ -135,3 +135,14 @@ func (v version) atLeast(min version) bool {
 }
 
 func (v version) String() string { return fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2]) }
+
+// SupportedVersion reads `tailscale version` output: the version it names ("" when unreadable)
+// and whether publishing supports it (MinVersion or newer). doctor uses it.
+func SupportedVersion(output string) (string, bool) {
+	have, ok := parseVersion(output)
+	if !ok {
+		return "", false
+	}
+	minimum, _ := parseVersion(MinVersion)
+	return have.String(), have.atLeast(minimum)
+}

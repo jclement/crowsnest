@@ -107,8 +107,9 @@ func DemoEnv(state string) Env {
 			}
 			return nil, fs.ErrNotExist
 		},
-		InContainer: func() bool { return false },
-		Tailscale:   func(context.Context) tailscale.Info { return tailscale.Info{} },
+		InContainer:      func() bool { return false },
+		Tailscale:        func(context.Context) tailscale.Info { return tailscale.Info{} },
+		TailscaleVersion: func(context.Context) (string, string) { return "", "" },
 		TailscaleServes: func(context.Context, int) ([]tailscale.Serve, error) {
 			return nil, nil
 		},

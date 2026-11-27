@@ -58,6 +58,9 @@ type Env struct {
 	// for proxies to a port. Both read-only.
 	Tailscale       func(ctx context.Context) tailscale.Info
 	TailscaleServes func(ctx context.Context, port int) ([]tailscale.Serve, error)
+	// TailscaleVersion finds the CLI (PATH, then the macOS app bundle) and returns its path and
+	// what `tailscale version` printed ("" when it is not there or did not answer).
+	TailscaleVersion func(ctx context.Context) (path, output string)
 }
 
 func (e Env) withDefaults() Env {
@@ -120,6 +123,16 @@ func (e Env) withDefaults() Env {
 	}
 	if e.Tailscale == nil {
 		e.Tailscale = func(ctx context.Context) tailscale.Info { return tailscale.Status(ctx, tailscale.CLI) }
+	}
+	if e.TailscaleVersion == nil {
+		e.TailscaleVersion = func(ctx context.Context) (string, string) {
+			path, err := tailscale.FindBinary()
+			if err != nil {
+				return "", ""
+			}
+			output, _ := tailscale.RunBinary(ctx, path, "version")
+			return path, string(output)
+		}
 	}
 	if e.TailscaleServes == nil {
 		e.TailscaleServes = func(ctx context.Context, port int) ([]tailscale.Serve, error) {

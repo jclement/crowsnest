@@ -34,6 +34,8 @@ type fakeMachine struct {
 	protocol   int
 	tailscale  tailscale.Info
 	serves     []tailscale.Serve
+	// tailscalePath and tailscaleVersion are what TailscaleVersion answers ("" : 1.104.5 on PATH).
+	tailscalePath, tailscaleVersion string
 }
 
 func healthyMachine() *fakeMachine {
@@ -120,6 +122,12 @@ func (m *fakeMachine) envFor() Env {
 		},
 		InContainer: func() bool { return false },
 		Tailscale:   func(context.Context) tailscale.Info { return m.tailscale },
+		TailscaleVersion: func(context.Context) (string, string) {
+			if m.tailscaleVersion == "" {
+				return "/usr/local/bin/tailscale", "1.104.5\n  tailscale commit: x"
+			}
+			return m.tailscalePath, m.tailscaleVersion
+		},
 		TailscaleServes: func(context.Context, int) ([]tailscale.Serve, error) {
 			return m.serves, nil
 		},
@@ -468,7 +476,33 @@ func TestTailscaleNotServedPrintsTheCommand(t *testing.T) {
 	requireCheck(t, report, "tailscale.name", StatusOK)
 	requireCheck(t, report, "tailscale.https", StatusOK)
 	check := requireCheck(t, report, "tailscale.serve", StatusInfo)
-	if check.Command != "tailscale serve --bg 2769" || !strings.Contains(check.Detail, "https://quark.tail1.ts.net") {
+	if !strings.Contains(check.Fix, "System page") || !strings.Contains(check.Fix, "tailscale serve --bg 2769") || !strings.Contains(check.Detail, "https://quark.tail1.ts.net") {
+		t.Errorf("%+v", check)
+	}
+	requireCheck(t, report, "tailscale.version", StatusOK)
+	on := run(t, machine, func(in *Inputs) { in.Config.TailnetName = "quark.tail1.ts.net"; in.Config.TailscaleServe = true })
+	if check := requireCheck(t, on, "tailscale.serve", StatusInfo); !strings.Contains(check.Detail, "while it runs") {
+		t.Errorf("--tailscale-serve: %+v", check)
+	}
+	refused := run(t, machine, func(in *Inputs) { in.Config.TailscaleServe, in.Config.NoAuth = true, true })
+	requireCheck(t, refused, "tailscale.serve", StatusWarn)
+}
+
+func TestTailscaleVersionAndAppBundle(t *testing.T) {
+	machine := healthyMachine()
+	machine.tailscale = tailscale.Info{Installed: true, Running: true, DNSName: "quark.tail1.ts.net", HTTPS: true}
+	machine.tailscalePath, machine.tailscaleVersion = tailscale.MacAppBinary, "1.48.0"
+	check := requireCheck(t, run(t, machine), "tailscale.version", StatusWarn)
+	if !strings.Contains(check.Detail, "older than 1.52.0") || !strings.Contains(check.Detail, "the Tailscale app's CLI") {
+		t.Errorf("%+v", check)
+	}
+}
+
+func TestTailscaleMagicDNSOff(t *testing.T) {
+	machine := healthyMachine()
+	machine.tailscale = tailscale.Info{Installed: true, Running: true, DNSName: "quark.tail1.ts.net", HTTPS: true, MagicDNS: false, MagicDNSKnown: true}
+	check := requireCheck(t, run(t, machine), "tailscale.name", StatusInfo)
+	if !strings.Contains(check.Fix, "Enable MagicDNS") {
 		t.Errorf("%+v", check)
 	}
 }

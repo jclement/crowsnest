@@ -29,6 +29,7 @@ import (
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/sysstat"
 	"github.com/jclement/crowsnest/internal/system"
+	"github.com/jclement/crowsnest/internal/tsserve"
 )
 
 // envDemoDoctor picks the --demo scripted machine's state (doctor.DemoStates).
@@ -50,6 +51,8 @@ type liveServices struct {
 	// config is the config with the settings changed in the app applied (backups and retention
 	// read it on every pass, ops.go).
 	config liveConfig
+	// tsserve publishes to the tailnet; its setting applies at once (tsserve_wiring.go).
+	tsserve atomic.Pointer[tsserve.Service]
 }
 
 // greet runs the first-run greeting, when it is wired.
@@ -74,6 +77,9 @@ func (l *liveServices) apply(_ config.Config, next config.Config) {
 	applyAcceptConfig(next, l.jobs.Load())
 	if ctl := l.ctl.Load(); ctl != nil {
 		ctl.applyConfig(next, l.jobs.Load())
+	}
+	if publisher := l.tsserve.Load(); publisher != nil && publisher.Enabled() != next.TailscaleServe {
+		publisher.SetEnabled(next.TailscaleServe)
 	}
 }
 

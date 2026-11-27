@@ -71,7 +71,8 @@ func newRootCommand() *cobra.Command {
 	config.RegisterFlags(root.PersistentFlags())
 	root.AddCommand(newServeCommand(), newVersionCommand(), newHealthCommand(),
 		newAskCommand(), newQuestionCommand(), newNotifyCommand(), newSayCommand(), newMCPCommand(), newJobCommand(), newProjectCommand(), newHookCommand(), newUpdateCommand(),
-		newResetPasswordCommand(), newResetSetupCommand(), newDoctorCommand(), newOpenCommand(), newHeavyCommand(), newPauseCommand(), newResumeCommand(), newDigestCommand(), newBackupCommand(), newRestoreCommand())
+		newResetPasswordCommand(), newResetSetupCommand(), newDoctorCommand(), newOpenCommand(), newHeavyCommand(), newPauseCommand(), newResumeCommand(), newDigestCommand(), newBackupCommand(), newRestoreCommand(),
+		newTailscaleServeChildCommand())
 	return root
 }
 
