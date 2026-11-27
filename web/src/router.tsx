@@ -18,6 +18,8 @@ import { NowView } from "./routes/NowView";
 import { ProjectsView } from "./routes/ProjectsView";
 import { TerminalView } from "./routes/views";
 import { SystemView } from "./routes/SystemView";
+import { DiffView } from "./routes/DiffView";
+import { validateDiffSearch } from "./lib/diffSearch";
 import { WelcomePage } from "./routes/WelcomePage";
 
 interface RouterContext {
@@ -189,8 +191,17 @@ const decideRoute = createRoute({
 });
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
+// The standalone diff (DESIGN.md 6.21): full screen, the app's chrome hidden (AppFrame).
+const diffRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/diff",
+  validateSearch: validateDiffSearch,
+  component: function DiffRoute() {
+    return <DiffView search={diffRoute.useSearch()} />;
+  },
+});
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, fleetRoute, terminalRoute, systemRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, fleetRoute, terminalRoute, systemRoute, diffRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

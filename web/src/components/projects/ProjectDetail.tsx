@@ -26,6 +26,8 @@ import { Chip } from "../ui/Chip";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
 import { AcceptCard } from "./AcceptCard";
+import { ProjectChangesCard } from "../changes/ProjectChanges";
+import { useDiffProgress } from "../../lib/changes-queries";
 import { LeadControls } from "./LeadControls";
 import { ArchiveButton, EditProjectSheet } from "./ProjectSheets";
 
@@ -81,6 +83,7 @@ function Detail({ project }: { project: ProjectView }) {
         <Defaults project={project} />
       </header>
       <LeadControls project={project} />
+      <ProjectChangesCard slug={project.slug} />
       <ProjectJobs project={project} />
       <ProjectSchedules project={project} />
       <ApprovalRulesCard projectRef={project.slug} archived={project.archived} />
@@ -115,6 +118,7 @@ function Defaults({ project }: { project: ProjectView }) {
 /** The project's live jobs and the ones finished today; the board has the rest. */
 function ProjectJobs({ project }: { project: ProjectView }) {
   const jobs = useJobs();
+  const progress = useDiffProgress();
   const navigate = useNavigate();
   const mine = (jobs.data ?? []).filter((job) => (job.project_id ?? 0) === project.id);
   const sections = boardSections(mine);
@@ -150,7 +154,7 @@ function ProjectJobs({ project }: { project: ProjectView }) {
       ) : (
         <ul className="divide-y divide-border">
           {shown.map((job) => (
-            <JobCard key={job.id} job={job} onSelect={open} />
+            <JobCard key={job.id} job={job} onSelect={open} progress={progress.data?.[job.id]} />
           ))}
         </ul>
       )}

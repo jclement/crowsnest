@@ -9,8 +9,9 @@
 // unresponsive, j_7 blocked, j_8 done, j_9 failed (older), j_10 queued for the orchestrator (it
 // picks it up); then j_11 and j_15 waiting on questions, j_13, j_14 and j_16 on approvals, j_12 and
 // j_17 running. Then the landing demo (internal/jobs/demo_landing.go): j_18 done and ready to land, j_19 in
-// review (reviewers j_20, j_21), j_22 waiting for a slot, j_23 whose check failed (DESIGN.md 6.15). A job
-// given here is j_24, held by job-24.
+// review (reviewers j_20, j_21), j_22 waiting for a slot, j_23 whose check failed (DESIGN.md 6.15).
+// The diff demo (demo_diff.go): j_24 running, j_25 done and ready to land (DESIGN.md 6.21). A job
+// given here is j_26, held by job-26.
 import type { Page } from "@playwright/test";
 import { detailRegion, expect, isPhone, test } from "../support/fixtures";
 
@@ -38,21 +39,21 @@ test("giving a job with a directory starts an agent, and the card moves from que
   await expect(page.getByRole("button", { name: new RegExp(`To ${app.root.split("/").pop()} · tester`) })).toBeVisible();
   await page.getByRole("button", { name: "Give job" }).click();
 
-  await expect(page.getByText("Job j_24 given")).toBeVisible();
-  await expect(page).toHaveURL(/job=j_24/);
+  await expect(page.getByText("Job j_26 given")).toBeVisible();
+  await expect(page).toHaveURL(/job=j_26/);
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByRole("heading", { name: "Add a health check to the webhook sender" })).toBeVisible();
   await expect(detail.getByText("Done when: the endpoint answers and the README says how")).toBeVisible();
   // The launcher opens a pane, sends the brief and the job is running, all on the timeline.
   const timeline = detail.getByRole("list", { name: "Timeline" });
-  await expect(timeline).toContainText("Brief sent to job-24", { timeout: 15_000 });
+  await expect(timeline).toContainText("Brief sent to job-26", { timeout: 15_000 });
   await expect(timeline).toContainText("queued → running");
   await expect(detail.getByText("Running", { exact: true }).first()).toBeVisible();
 
   // On the board it sits in progress, with its agent.
   if (isPhone(testInfo)) await page.getByRole("button", { name: "Close" }).click();
   const card = page.getByRole("region", { name: "In progress" }).getByRole("button", { name: /Add a health check/ });
-  await expect(card).toContainText("job-24");
+  await expect(card).toContainText("job-26");
   // The text box was cleared for the next job.
   await expect(page.getByLabel("What needs doing?")).toHaveValue("");
 });
@@ -109,7 +110,7 @@ test("the board puts needs-you first, then stuck, then running, then finished to
   // exactly one of the two places, today's list or behind the toggle, never lost. Asserting an
   // exact "Finished today" list made this test fail whenever it ran more than 5 h after midnight.
   // The landing demo adds a job ready to land and the first review round of the job in review.
-  const finished = ["Fix the flaky SSE reconnect test", "Port the TUI to Bubble Tea v2", "Retry widget fetches with back-off", "Review job j_19 (round 1)"];
+  const finished = ["Fix the flaky SSE reconnect test", "Port the TUI to Bubble Tea v2", "Retry widget fetches with back-off", "Review job j_19 (round 1)", "Round prices to the cent"];
   const today = (await page.getByRole("region", { name: "Finished today" }).count()) > 0 ? await sectionTitles(page, "Finished today") : [];
   expect(today.every((title) => finished.includes(title))).toBe(true);
   const behindToggle = finished.filter((title) => !today.includes(title));

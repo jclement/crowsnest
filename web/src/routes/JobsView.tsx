@@ -10,6 +10,7 @@
 // project's jobs, the new-job box gives jobs to it ("to the lead" or "as a job"), and the
 // Schedule and Spend sheets open filtered to it. With every project shown, cards carry a chip
 // naming their project.
+import { useDiffProgress } from "../lib/changes-queries";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CalendarClock, FolderGit2, Gauge, ListTodo, NotebookText, RefreshCw } from "lucide-react";
 import { LimitsSheet } from "../components/control/LimitsSheet";
@@ -177,6 +178,7 @@ function Section({
   onSelect: (id: string) => void;
   nameOf: (job: Job) => string | undefined;
 }) {
+  const progress = useDiffProgress();
   if (jobs.length === 0) return null;
   return (
     <section aria-label={sectionLabels[section]}>
@@ -185,7 +187,7 @@ function Section({
       </h2>
       <ul className="divide-y divide-border">
         {jobs.map((job) => (
-          <JobCard key={job.id} job={job} selected={selected === job.id} onSelect={onSelect} projectName={nameOf(job)} />
+          <JobCard key={job.id} job={job} selected={selected === job.id} onSelect={onSelect} projectName={nameOf(job)} progress={progress.data?.[job.id]} />
         ))}
       </ul>
     </section>

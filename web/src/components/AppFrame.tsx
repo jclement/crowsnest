@@ -83,6 +83,20 @@ export function AppFrame() {
     }
   };
 
+  // The standalone diff is the viewer's full screen: no header, nav, tray or footer (DESIGN.md 6.21).
+  if (pathname === "/diff") {
+    return (
+      <PaletteProvider onSignOut={() => void signOut()}>
+        <div className="flex h-full flex-col">
+          <ConnectionBanner stream={stream} />
+          <main className="min-h-0 flex-1">
+            <Outlet />
+          </main>
+        </div>
+      </PaletteProvider>
+    );
+  }
+
   return (
     <PaletteProvider onSignOut={() => void signOut()}>
     <div className="flex h-full flex-col">

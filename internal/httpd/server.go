@@ -26,6 +26,7 @@ import (
 	"github.com/jclement/crowsnest/internal/attention"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/browse"
+	"github.com/jclement/crowsnest/internal/changes"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/digest"
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -176,6 +177,12 @@ type Deps struct {
 	Machines *machines.Service
 	// Tailscale is sign in with Tailscale (DESIGN.md 4.20). Nil: off.
 	Tailscale *tsauth.Gate
+	// Changes is the live diff and its viewed marks (DESIGN.md 6.21). Nil: those routes answer
+	// 503. RequireViewed reads the "require all files viewed before Land" setting now; DemoTouch
+	// makes a --demo job edit a file at once (the e2e's handle on "the file changes").
+	Changes       *changes.Service
+	RequireViewed func() bool
+	DemoTouch     func(ctx context.Context, jobID string) error
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).
@@ -269,6 +276,7 @@ func (s *Server) routes() http.Handler {
 	s.registerJobRoutes(mux)
 	s.registerBrowseRoutes(mux)
 	s.registerLandingRoutes(mux)
+	s.registerChangesRoutes(mux)
 	s.registerAcceptRoutes(mux)
 	s.registerJournalRoutes(mux)
 	s.registerScheduleRoutes(mux)

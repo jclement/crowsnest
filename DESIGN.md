@@ -1133,7 +1133,8 @@ last mile is now crowsnest's (`internal/landing`, `internal/jobs/land.go`, `revi
   generated code, snapshots) last and marked. Each file is collapsed and its diff fetched only
   when opened (`GET /jobs/{id}/review/diff?path=`, refused for any path the branch did not
   change, cut at 512 KB). Only `+` and `−` lines are coloured; nothing is highlighted; the diff is
-  text nodes only. The Inbox's `DiffView` compares two whole texts; git gives a unified diff,
+  text nodes only. (Since 6.21 the Review tab shows the live, highlighted viewer instead; the
+  route stays for other callers.) The Inbox's `DiffView` compares two whole texts; git gives a unified diff,
   so the Review tab has its own small renderer with the same styling rather than a conversion.
 - **The walkthrough.** `done` takes `walkthrough_md` (MCP and `crowsnest job done
   --walkthrough-file`); the builder role and the protocol ask for it in a worktree (chunk by
@@ -1516,6 +1517,109 @@ the job whose budget ran out.
 | job_create | allowed only under questions, approval_tool and usage_limit (waits crowsnest ends); refused under a human's hold or while checked or reviewed |
 
 - Only the human's actions and crowsnest's own recovery lift holds (`liftHoldLocked`).
+
+### 6.21 A diff at any time, and viewed tracking (built on `wip/diff`)
+
+Jeff, 2026-11-27: "I would definitely like to be able to review a diff with a
+color-syntax-highlighted diff view at any time. I also quite like what Azure has, where I can
+check off as reviewed parts of the diffs. Those files sort of disappear or have a persistent
+checkbox until they change again so I can know what I've seen." And: "could I see diffs of
+changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mode."
+(`internal/landing/changes.go`, `internal/changes`, `internal/httpd/changes.go`,
+`cmd/crowsnest/changes_wiring.go`, `internal/jobs/demo_diff.go`, migration `0020_diff_marks.sql`,
+`web/src/components/changes/`, `web/src/lib/changes*.ts`, `web/src/lib/syntax.ts`,
+`web/src/routes/DiffView.tsx`.)
+
+- **Subjects.** A job (`j_N`: its worktree, or its directory when not isolated), a project's main
+  checkout (`project:<id>`, the lead's), or the orchestrator's folder. `changes.Resolver`
+  (implemented in `cmd`) turns each into a root and a base; the package knows nothing of jobs.
+  A job that was landed or torn down answers `410` ("its review is kept on the job").
+- **Three comparisons, all tree to tree.** committed = base → HEAD; uncommitted = HEAD → the work
+  tree; all = base → the work tree; plus **since viewed** (below). The base: a worktree job's
+  merge base with `refs/heads/<base_branch>`, else its `base_commit`, else HEAD when it started
+  (`rev-list -1 --first-parent --before`). A main checkout's: its upstream's merge base, else
+  `origin/HEAD`'s, else none (uncommitted only); or `session` (HEAD when the lead's conversation
+  started: `agent_layers.started_at` of `lead:<slug>`); or a ref the human picks (validated:
+  no option, no range, no whitespace).
+- **The work tree as a tree, without touching the agent's index.** A copy of the checkout's
+  index in a temp file (`GIT_INDEX_FILE`), `git add --update`, then the untracked files that are
+  not ignored (`ls-files --others --exclude-standard`; regular files and links up to 2 MB, the
+  first 1,000; larger or other ones are listed as "too large", with a size-and-mtime stamp in
+  place of a blob), then `git write-tree`. The real index, HEAD and refs are never written and
+  no lock of the agent's is held; the trace is loose objects that gc collects.
+- **Protection.** Every call carries landing's protective configuration (4.22, R5-S5), and the
+  **clean, smudge and process filters** the configuration defines (at any level) are switched off
+  by name (`filter.<name>.clean=` …, read with `git config --get-regexp`, which runs nothing),
+  because `git add` and even `write-tree` (refreshing racy entries) run a clean filter: found by
+  the test, a marker written by `write-tree`. Bounds: 20 s per git call, 1,500 files listed, a
+  file's diff cut at 512 KB, each side's whole text served only under 256 KB. A file is served
+  only if the comparison lists it.
+- **Content hashes.** Each file's hash is SHA-256 of (old blob, new blob, old path, path, modes),
+  so it is the same change in any comparison that produces it (committing an edit unchanged
+  keeps base → work tree's hash) and changes exactly when the file's diff does.
+- **Viewed marks** (`diff_marks(subject, reviewer, scope, path, hash, old_blob, new_blob,
+  viewed_at)`, keyed by reviewer so a second could be added). A file is **viewed** when any mark
+  on its path holds its current hash; a mark whose hash no longer matches makes it **changed since
+  you viewed it**, and **since viewed** serves `git diff <the blob you saw> <now>` for it (the
+  blob may be gone after gc: "no longer in the repository"). The since-viewed comparison lists
+  every file of "all" that is not viewed. A mark is accepted only with the hash the browser
+  showed (`409 STALE` otherwise), so nothing is marked that was not seen. Mark all, clear.
+  **Retention:** a job's marks go when it lands, is discarded, torn down or deleted (on its `job`
+  event, at start and hourly).
+- **Live, bounded.** One reading per subject (and base) at a time, never more often than every 4 s
+  (a Refresh may halve that); a request inside the window gets the last reading. A subject is
+  **watched** for 2 minutes after a request (the browser refetches every 45 s while open); a
+  watched job is read again 1.5 s after its `job` event (the agent's tool calls make those), and
+  every watched subject on a 10 s tick; a reading whose fingerprint changed publishes `changes`
+  `{subject, revision}`, and the browser refetches the summary. A file's diff is cached in the
+  browser by its hash, so only files that changed are fetched again.
+- **Reading order** as 6.11: files the walkthrough names first, then by group, churn last.
+  Churn and changes over 3,000 lines start collapsed with the reason (a lockfile, generated code,
+  snapshots, vendored code, build output, an image or font, a large change).
+- **Land, lightly.** The Land card says "N of M files not viewed" (the committed comparison: what
+  merges), and the confirmation repeats it. Settings → "Require all files viewed before Land"
+  (`--require-viewed-before-land`, off by default, live) makes merge and push answer `409
+  UNVIEWED`; discard never.
+- **The viewer** (`DiffViewer`, lazily loaded): highlighting with lowlight (highlight.js as a
+  tree, already in the bundle for markdown), the **whole old and new text** highlighted and cut
+  into lines, so a comment or string spanning lines is right on both sides; tokens rendered as
+  text nodes, colours from the theme's `--color-code-*` tokens (axe passes light and dark). Word
+  emphasis on paired removed/added lines (jsdiff's `diffWordsWithSpace`; a rewrite with under 30
+  % in common is not emphasised). Unified and split (split when the viewer is at least 960 px
+  wide and the window is lg; remembered), line numbers both sides, the +/− sign and a spoken
+  "added/removed/unchanged" on every line. Gaps expand 20 lines up or down or whole from the
+  file's text; without it, "More context" re-asks with `-U`. Rows render 300 at a time as they
+  scroll near; a file's body is fetched when its section nears the screen. Keys j/k, n/p, v, f,
+  Esc (in the shortcuts sheet); they wait 1.5 s after a `g`, the app's go-to.
+- **Full screen** is the route `/diff?job=…|project=…|orchestrator=1&scope=&file=&base=&from=`:
+  AppFrame renders it bare (no header, rails, tray, bottom bar or footer; the event stream and
+  palette stay). The fullscreen button and `f` go there with the scope and file, Esc and Back
+  return to `from` (an in-app path only); "Open in a new tab" opens it. The scroll position within
+  the current file is kept in sessionStorage per subject.
+- **Phones**: the route, one file at a time, the file list in a sheet, Previous / Viewed / Next
+  in a bottom bar within thumb reach, a horizontal swipe moves between files.
+- **Places**: a worktree job's Review tab (its old per-file list is replaced by the viewer); a
+  directory job's Changes tab; the project page's Changes card (the main checkout and each job
+  checkout with diffstats) and the lead controls' Changes; the lead's Chat header; the palette's
+  "Changes: <job>" and "Changes: <project>" (found by typing); a job card's "N of M viewed" bar
+  once its diff was read (`GET /changes/progress`, from memory, no git).
+- **Demo**: the Website project's folder is a real storefront repository (Go, TypeScript, CSS,
+  Markdown, a PNG) with the lead's uncommitted edits; a running job whose branch renames a
+  module, deletes a file, changes the PNG and adds a 5,600-line generated file, with uncommitted
+  work on top, and whose `web/src/cart.ts` gains a line every minute (and on `POST
+  /changes/jobs/{id}/demo-touch`, demo only); a done job ready to land.
+
+**Not built: comments on lines.** Specified here, skipped tonight rather than half-built: click
+a line (or shift-click a range) in the viewer to leave a note; a `diff_comments(id, subject,
+path, side old|new, line_start, line_end, quote, body_md, hash, created_at, sent_at)` table; the
+Review tab lists them; **Send N comments to the agent** sends one message through the job's
+message path (`POST /jobs/{id}/message`, termtext-sanitised), each as file:line, the quoted code
+and the note, as an attachment when over 4 KB; a sent comment is marked `sent`, nothing more (no
+threads, no resolution). A comment whose file hash changed shows as outdated.
+
+Also not done: "open in a terminal at this file" (it needs a pane to type into, and typing into an
+agent's pane is a message; the copy-path button is there instead); the comparison of a project's
+jobs to each other.
 
 ## 7. The orchestrator
 
@@ -2890,6 +2994,21 @@ or push, and answers `409 EVIDENCE_HEAD_MOVED` when the branch moved past it (R5
 `held_reason`. Event `limits`. On the agent socket, `job_update` takes `recheck_in`,
 `recheck_at`, `until_job`, `until_human`, and `done` takes `no_commits_reason`.
 
+**Added on `wip/diff`** (6.21): `GET /changes/jobs/{id}`, `/changes/projects/{ref}`,
+`/changes/orchestrator` (`?scope=&base=&refresh=1`) → `{subject, kind, label, root, job_id?,
+job_state?, project_id?, project?, scope, scopes: [{name, label, files, added, deleted}], base,
+base_label, base_ref, base_choices?: [{ref, label}], head, commits, files: [{path, old_path?,
+status, added, deleted, binary, old_blob, new_blob, old_mode?, new_mode?, too_large?, note?,
+hash, group, churn, churn_why?, viewed, viewed_at?, changed_since_viewed, since_available}],
+added, deleted, viewed, total, truncated, computed_at, revision}`; `GET …/file?path=&scope=
+&context=&ws=ignore&since=1` → `{path, old_path?, status, hash, diff, binary, too_large, note?,
+cut, old_text, new_text, since, viewed_at?, context}`; `PUT …/viewed` `{scope, files: [{path,
+hash}], all}` and `DELETE …/viewed` `{scope, paths}` → the summary (`409 STALE`, `404`, `410
+GONE`); `GET /changes/projects/{ref}/jobs`; `GET /changes/progress` → `{j_N: {viewed, total,
+added, deleted, at}}`; `POST /changes/jobs/{id}/demo-touch` (`--demo` only). `POST
+/jobs/{id}/land` answers `409 UNVIEWED` under `--require-viewed-before-land`. Event `changes`
+`{subject, revision}`.
+
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
 - `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host)` (`host` added by migration `0003_session_host.sql`, R1 M2: the `Host:port` the session is valid at)
@@ -2917,6 +3036,9 @@ or push, and answers `409 EVIDENCE_HEAD_MOVED` when the branch moved past it (R5
 - Migration `0015_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
 - Migration `0017_approval_rules.sql` (8.7 Policy): `approval_rules(id, scope project|job, project_id, job_id, kind bash|edit|tool, pattern, max_risk low|elevated, note, created_at, created_via browser|demo, revoked_at)`, revoked rather than deleted; `approvals` gains `rule_ids` (the rules that allowed a `policy` approval). Deleting a job (retention) deletes its rules.
 - Migration `0018_gates.sql` (4.22, R5): `jobs` gains `land_token` (binds a land request to its question) and `land_requested_at` (when it was reserved), with a partial index on `land_request`; new `task_reviews(path, hash, state, question_id, at)` (the human's approval of a task file's exact content; a restore empties it). kv adds `instructions.file-seen.<role>` (the hash of the role file text the human marked read)
+- Migration `0020_diff_marks.sql` (6.21): `diff_marks(subject, reviewer, scope, path, hash,
+  old_blob, new_blob, viewed_at)`, primary key `(subject, reviewer, scope, path)`; a job's rows go
+  when it lands, is discarded or deleted
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -3870,6 +3992,12 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 120. **A spoken job is read back before it exists, and exists durably once confirmed** (23.3; Codex P3/V1). No auto-send for job creation: transcript, project (asked when ambiguous), readback, Create; then a real job id, with Undo for eight seconds that cancels it. The readback uses the browser's own speech, never ElevenLabs: the words are Jeff's, not an agent's, and the server's rule that only agent text is synthesised stands.
 121. **Rescue reuses existing routes; slash commands only at idle** (23.2; Fable 3.2/3.5). Interrupt is the keys route's Esc, Compact and Switch model type `/compact` and `/model …` as a plain prompt, and only while the agent is idle, because Claude queues input typed during a turn and a queued slash command arrives as text. No new server endpoint, nothing the agent can reach.
 122. **The folder picker reads git's metadata files instead of running git, and its roots are an allowlist** (4.23, `wip/picker`). Running `git` in a folder someone picked would run that repository's config (hooks, `fsmonitor`, a pager); reading `HEAD`, `config` and the origin's `HEAD` answers the picker's questions (branch, base branch guess, remote host) in microseconds and runs nothing. The roots are home, `--browse-root` and what projects and the remembered list already use rather than the whole disk, because the picker is for choosing where work runs, and a smaller surface costs nothing there; `/` is one flag away for those who want it. Sorting and the entry cap happen before the per-entry details (git, mtime, access), so a folder of 100,000 entries costs one `ReadDir` and 500 stats, not 100,000; the client floats repositories to the top of what it was given.
+
+122. **The work tree is diffed as a tree through a temporary index** (6.21). Comparing trees gives both blob ids for every file, so a viewed mark can be tied to content and "since viewed" is a blob-to-blob diff; a copy of the agent's index keeps git's stat cache (no rehash of unchanged files) and never takes the agent's index lock. Plain `git diff` against the work tree would have meant no blob for the work side and a second code path for untracked files.
+123. **A viewed mark is the file's content, not a timestamp** (6.21). Azure's behaviour Jeff asked for, "until they change again", falls out of comparing hashes; a mark is accepted only with the hash the browser showed, so a file that changed while being read is not marked as seen.
+124. **The live diff is pulled, throttled and watched, never pushed with content** (6.21). Readings at most every 4 s per subject and only while a browser has the view open (2 minutes after its last request); the event carries only a revision, and the browser refetches. One busy agent cannot make crowsnest run git in a loop, and nothing reads git for a diff nobody is looking at.
+125. **Full screen is a route, not a modal** (6.21; Jeff, 2026-11-27). The same component on `/diff?…` with the frame bare gives fullscreen, a new tab and a deep link in one; the phone's view is that route too. Position travels in the URL (scope, file) and sessionStorage (scroll).
+126. **Comments on lines were specified, not built** (6.21). Viewed tracking, live updates and full screen took the night; a half-built comment feature (notes with no way to send them, or sent without the quoted code) would be worse than none.
 
 ## 18. Milestones
 

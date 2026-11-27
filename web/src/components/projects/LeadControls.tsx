@@ -4,7 +4,7 @@
 // switcher, /chat?target=lead-<slug>) and its terminal (Fleet, ?agent=<pane>). An archived
 // project's lead cannot start.
 import { useNavigate } from "@tanstack/react-router";
-import { BellRing, MessageSquare, MessageSquarePlus, Play, RotateCw, Square, SquareTerminal } from "lucide-react";
+import { BellRing, MessageSquare, MessageSquarePlus, Play, RotateCw, Square, SquareTerminal, FileDiff } from "lucide-react";
 import { useState } from "react";
 import { pokeToast, type PokeResult } from "../../lib/journal";
 import { leadAgentName, leadChip, leadConfirmations, leadRunning, type LeadAction, type ProjectView } from "../../lib/projects";
@@ -80,6 +80,9 @@ export function LeadControls({ project }: { project: ProjectView }) {
           )}
           <Button compact icon={MessageSquare} onClick={() => void navigate({ to: "/chat", search: { target: leadAgentName(project.slug) } })} disabled={project.archived}>
             Chat with lead
+          </Button>
+          <Button compact variant="ghost" icon={FileDiff} onClick={() => void navigate({ to: "/diff", search: { project: project.slug } })}>
+            Changes
           </Button>
           {running && lead.pane_id && (
             <Button compact variant="ghost" icon={SquareTerminal} onClick={() => void navigate({ to: "/fleet", search: { agent: lead.pane_id, view: "terminal" } })}>
