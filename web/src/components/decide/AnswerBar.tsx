@@ -60,7 +60,7 @@ export function AnswerBar({ itemId, jobId, target, onAnswered }: AnswerBarProps)
       role="region"
       aria-label="Answer"
       data-testid="answer-bar"
-      className="sticky bottom-0 z-20 border-t border-border bg-surface-raised/95 px-3 pb-2 pt-2 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] backdrop-blur"
+      className="sticky bottom-0 z-20 border-t border-border bg-surface-raised px-3 pb-2 pt-2 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]"
     >
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
         {error && (

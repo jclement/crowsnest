@@ -59,7 +59,7 @@ function FileDiffCard({ file, mode }: { file: QuestionFile; mode: "unified" | "s
             aria-pressed={wrap}
             onClick={() => setWrap((current) => !current)}
             className={cn(
-              "-my-1 inline-flex min-h-9 items-center gap-1 rounded px-1.5 text-2xs hover:bg-hover md:min-h-6",
+              "-my-1 inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded px-1.5 text-2xs hover:bg-hover md:min-h-6 md:min-w-0",
               wrap ? "text-accent" : "text-muted",
             )}
           >
@@ -71,7 +71,8 @@ function FileDiffCard({ file, mode }: { file: QuestionFile; mode: "unified" | "s
       {stats.added === 0 && stats.removed === 0 ? (
         <p className="px-2.5 py-2 text-xs text-muted">No changes.</p>
       ) : (
-        <div className="overflow-x-auto">
+        // Focusable: unwrapped code scrolls sideways, and a keyboard must reach it (axe's scrollable-region-focusable).
+        <div className="overflow-x-auto" tabIndex={0} role="group" aria-label={`Changes in ${file.filename}`}>
           {mode === "split" ? <SplitTable items={items} onExpand={expand} /> : <UnifiedTable items={items} onExpand={expand} wrap={wrap} />}
         </div>
       )}
