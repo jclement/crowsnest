@@ -109,6 +109,10 @@ type Context struct {
 type Result struct {
 	Level   Level    `json:"level"`
 	Reasons []string `json:"reasons"`
+	// Unrecognised is true when the call is elevated only because it is not a shape crowsnest
+	// knows (an interpreter, an unknown program, a command it cannot read): no rule of the table
+	// says what it does. Such a call is never remembered from a card (R6-S1).
+	Unrecognised bool `json:"unrecognised,omitempty"`
 }
 
 // Classifier holds the rules in force.
@@ -211,6 +215,7 @@ func compile(rule Rule) (Rule, error) {
 type hit struct {
 	level  Level
 	reason string
+	shape  bool // from shapeHits: not a known shape, rather than a rule saying what it does
 }
 
 // Classify rates one tool call. A Bash command is read first (guard.Parse): the table's command
@@ -237,20 +242,20 @@ func (c *Classifier) Classify(tool string, input json.RawMessage, ctx Context) R
 	var hits []hit
 	for _, rule := range c.builtins {
 		if !c.disabled[rule.ID] && rule.matches(tool, fields, plain) {
-			hits = append(hits, hit{rule.Level, rule.Reason})
+			hits = append(hits, hit{rule.Level, rule.Reason, false})
 		}
 	}
 	hits = append(hits, shapeHits(tool, fields, commands, readable)...)
 	if !c.disabled[CheckProtectedHost] {
 		if host := guard.HostNamed(ctx.ProtectedHosts, strings.Join(stringsIn(fields), "\n")); host != "" {
-			hits = append(hits, hit{Dangerous, "Names " + host + ", a protected (production) host"})
+			hits = append(hits, hit{Dangerous, "Names " + host + ", a protected (production) host", false})
 		}
 	}
 	paths := pathsIn(fields)
 	if !c.disabled[CheckOutsideDir] && ctx.JobRoot != "" && writes(tool) {
 		for _, path := range paths {
 			if !inside(ctx.JobRoot, path) {
-				hits = append(hits, hit{Elevated, "Writes outside the job's directory (" + ctx.JobRoot + ")"})
+				hits = append(hits, hit{Elevated, "Writes outside the job's directory (" + ctx.JobRoot + ")", false})
 				break
 			}
 		}
@@ -262,7 +267,7 @@ func (c *Classifier) Classify(tool string, input json.RawMessage, ctx Context) R
 		}
 		for _, path := range candidates {
 			if secretPath.MatchString(strings.Trim(path, `"'`)) {
-				hits = append(hits, hit{Elevated, "Touches a file that may hold secrets (" + filepath.Base(strings.Trim(path, `"'`)) + ")"})
+				hits = append(hits, hit{Elevated, "Touches a file that may hold secrets (" + filepath.Base(strings.Trim(path, `"'`)) + ")", false})
 				break
 			}
 		}
@@ -270,7 +275,11 @@ func (c *Classifier) Classify(tool string, input json.RawMessage, ctx Context) R
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].level.rank() > hits[j].level.rank() })
 	result := Result{Level: Low}
 	seen := map[string]bool{}
+	recognised := false
 	for _, h := range hits {
+		if h.level != Low && !h.shape {
+			recognised = true
+		}
 		if h.level.rank() > result.Level.rank() {
 			result.Level = h.level
 		}
@@ -282,6 +291,7 @@ func (c *Classifier) Classify(tool string, input json.RawMessage, ctx Context) R
 	if result.Reasons == nil {
 		result.Reasons = []string{}
 	}
+	result.Unrecognised = result.Level == Elevated && !recognised
 	return result
 }
 
@@ -334,23 +344,23 @@ func shapeHits(tool string, fields map[string]any, commands []guard.Command, rea
 	var hits []hit
 	switch {
 	case tool == "Bash" && !readable:
-		hits = append(hits, hit{Elevated, "crowsnest cannot read this command with confidence (an unterminated quote, a shell reading a script or stdin, or deep nesting)"})
+		hits = append(hits, hit{Elevated, "crowsnest cannot read this command with confidence (an unterminated quote, a shell reading a script or stdin, or deep nesting)", true})
 	case tool == "Bash":
 		for _, cmd := range commands {
 			if reason := commandShape(cmd); reason != "" {
-				hits = append(hits, hit{Elevated, reason})
+				hits = append(hits, hit{Elevated, reason, true})
 				break
 			}
 		}
 	case !lowTools[tool]:
-		hits = append(hits, hit{Elevated, unlistedTool(tool)})
+		hits = append(hits, hit{Elevated, unlistedTool(tool), true})
 	}
 	text := SummaryText(fields)
 	switch {
 	case termtext.HasBidiControl(strings.Join(stringsIn(fields), "")):
-		hits = append(hits, hit{Elevated, "Contains bidirectional control characters, which can reorder what is shown"})
+		hits = append(hits, hit{Elevated, "Contains bidirectional control characters, which can reorder what is shown", true})
 	case len([]rune(text)) > MaxSummaryRunes:
-		hits = append(hits, hit{Elevated, "Too long to show whole on a lock screen"})
+		hits = append(hits, hit{Elevated, "Too long to show whole on a lock screen", true})
 	}
 	return hits
 }

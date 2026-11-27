@@ -255,11 +255,11 @@ func TestSuggest(t *testing.T) {
 		input string
 		want  Suggestion
 	}{
-		{"Bash", `{"command":"go test ./internal/... -run X"}`, Suggestion{KindBash, "go test *"}},
-		{"Bash", `{"command":"ls"}`, Suggestion{KindBash, "ls"}},
-		{"Edit", `{"file_path":"/work/crow/internal/x/y.go"}`, Suggestion{KindEdit, "internal/x/"}},
-		{"Write", `{"file_path":"/work/crow/README.md"}`, Suggestion{KindEdit, "."}},
-		{"WebFetch", `{"url":"https://example.com"}`, Suggestion{KindTool, "WebFetch"}},
+		{"Bash", `{"command":"go test ./internal/... -run X"}`, Suggestion{Kind: KindBash, Pattern: "go test *"}},
+		{"Bash", `{"command":"ls"}`, Suggestion{Kind: KindBash, Pattern: "ls"}},
+		{"Edit", `{"file_path":"/work/crow/internal/x/y.go"}`, Suggestion{Kind: KindEdit, Pattern: "internal/x/"}},
+		{"Write", `{"file_path":"/work/crow/README.md"}`, Suggestion{Kind: KindEdit, Pattern: "."}},
+		{"WebFetch", `{"url":"https://example.com"}`, Suggestion{Kind: KindTool, Pattern: "WebFetch"}},
 	}
 	for _, tc := range cases {
 		if got := Suggest(tc.tool, json.RawMessage(tc.input), "/work/crow"); got != tc.want {
@@ -333,6 +333,47 @@ func TestRememberRefusals(t *testing.T) {
 		if got, _ := h.service.Get(ctx, id); got.Status != StatusPending {
 			t.Fatalf("%s must stay pending after a refused remember: %s", id, got.Status)
 		}
+	}
+}
+
+// TestElevatedIsRememberedOnlyExactly is R6-S1: remembering an elevated call never makes a
+// prefix rule. An interpreter one-liner (elevated only because crowsnest does not recognise it)
+// offers no remember at all, and is refused; a recognised elevated call offers itself, word for
+// word, and a wider pattern is refused; the exact rule then allows that call and nothing else.
+func TestElevatedIsRememberedOnlyExactly(t *testing.T) {
+	ctx := context.Background()
+	h := newPolicyHarness(t)
+	var refusal *RefusedError
+
+	oneLiner := h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "python3 -c 'print(1)'"})
+	if oneLiner.Risk != risk.Elevated || oneLiner.Remember != nil {
+		t.Fatalf("an unrecognised elevated call offered %+v (%s)", oneLiner.Remember, oneLiner.Risk)
+	}
+	wide := "python3 -c *"
+	if _, err := h.service.Decide(ctx, oneLiner.ID, Decision{Allow: true, Remember: &wide}); !errors.As(err, &refusal) {
+		t.Fatalf("remembering an interpreter one-liner: %v", err)
+	}
+
+	push := h.ask(t, "j_1", "p2", "Bash", map[string]any{"command": "git push origin feature/x"})
+	if push.Risk != risk.Elevated || push.Remember == nil || !push.Remember.Exact || push.Remember.Pattern != "git push origin feature/x" {
+		t.Fatalf("a recognised elevated call offered %+v", push.Remember)
+	}
+	widePush := "git push *"
+	if _, err := h.service.Decide(ctx, push.ID, Decision{Allow: true, Remember: &widePush}); !errors.As(err, &refusal) {
+		t.Fatalf("a wildcard for an elevated call: %v", err)
+	}
+	exact := "git push origin feature/x"
+	if _, err := h.service.Decide(ctx, push.ID, Decision{Allow: true, Remember: &exact}); err != nil {
+		t.Fatal(err)
+	}
+	if again := h.ask(t, "j_1", "p3", "Bash", map[string]any{"command": "git push origin feature/x"}); again.Status != StatusAllowed {
+		t.Fatalf("the exact call again: %s", again.Status)
+	}
+	if other := h.ask(t, "j_1", "p4", "Bash", map[string]any{"command": "git push origin main"}); other.Status != StatusPending {
+		t.Fatalf("another push was allowed by the exact rule: %s", other.Status)
+	}
+	if spoof := h.ask(t, "j_1", "p5", "Bash", map[string]any{"command": "python3 -c 'import shutil;shutil.rmtree(\"/\")'"}); spoof.Status != StatusPending {
+		t.Fatalf("an interpreter call was allowed: %s", spoof.Status)
 	}
 }
 

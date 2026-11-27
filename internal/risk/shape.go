@@ -55,11 +55,74 @@ var buildTools = map[string]map[string]bool{
 // scriptNames are the package.json scripts and mise tasks that count as benign to run.
 var scriptNames = map[string]bool{"test": true, "lint": true, "build": true, "typecheck": true, "check": true, "fmt": true}
 
+// safeEnv are the environment variables a low command may set in front of itself (R6-S2): they
+// change output and build targets, not what runs. Any other assignment (GIT_CONFIG_*, LD_PRELOAD,
+// GIT_EXTERNAL_DIFF, PATH, …) can make a harmless program run something else.
+var safeEnv = map[string]bool{
+	"CI": true, "NO_COLOR": true, "FORCE_COLOR": true, "CLICOLOR": true, "TERM": true, "LANG": true, "LC_ALL": true, "TZ": true,
+	"GOOS": true, "GOARCH": true, "CGO_ENABLED": true, "GOFLAGS": true, "GOWORK": true, "NODE_ENV": true, "RUST_BACKTRACE": true,
+	"PYTHONDONTWRITEBYTECODE": true, "PYTHONUNBUFFERED": true, "VERBOSE": true, "DEBUG": true,
+}
+
+// unsafeEnv returns the first assignment in env that a low command may not carry ("" for none).
+func unsafeEnv(env map[string]string) string {
+	for name, value := range env {
+		if !safeEnv[name] {
+			return name
+		}
+		if name == "GOFLAGS" && (strings.Contains(value, "exec") || strings.Contains(value, "vettool")) {
+			return name
+		}
+	}
+	return ""
+}
+
+// programWrites are options of otherwise benign programs that run another program, write a file
+// or change what runs (R6-S2). A command using one is not low.
+var programWrites = map[string][]string{
+	"fd":    {"-x", "-X", "--exec", "--exec-batch"},
+	"rg":    {"--pre"},
+	"sort":  {"-o", "--output", "--compress-program"},
+	"tree":  {"-o"},
+	"go":    {"-exec", "-toolexec", "-vettool", "-o", "-modfile", "-overlay"},
+	"cargo": {"--config", "-Z"},
+	"date":  {"-s", "--set"},
+}
+
+// optionHit returns the first of opts that args use, as a word or with =value glued on.
+func optionHit(args, opts []string) string {
+	for _, arg := range args {
+		for _, opt := range opts {
+			if arg == opt || strings.HasPrefix(arg, opt+"=") || (len(opt) == 2 && opt[0] == '-' && opt[1] != '-' && strings.HasPrefix(arg, opt) && !strings.HasPrefix(arg, "--")) {
+				return opt
+			}
+		}
+	}
+	return ""
+}
+
+// operands are args that are not options.
+func operands(args []string) []string {
+	var out []string
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			out = append(out, arg)
+		}
+	}
+	return out
+}
+
 // commandShape returns why one simple command is not benign, or "" when it is.
 func commandShape(cmd guard.Command) string {
 	program, args := cmd.Program, cmd.Args
 	if target := outputRedirect(args); target != "" {
 		return "Writes " + target + " through a redirect"
+	}
+	if name := unsafeEnv(cmd.Env); name != "" {
+		return "Sets " + name + " for the command, which can change what it runs"
+	}
+	if opt := optionHit(args, programWrites[program]); opt != "" {
+		return program + " " + opt + " runs another program or writes a file"
 	}
 	switch {
 	case program == "":
@@ -70,6 +133,16 @@ func commandShape(cmd guard.Command) string {
 		return "sed -i edits files in place"
 	case program == "find" && hasAny(args, findWrites...):
 		return "find with an action that deletes, runs or writes (" + firstOf(args, findWrites...) + ")"
+	case program == "uniq" && len(operands(args)) > 1:
+		return "uniq with an output file writes it"
+	case program == "export" || program == "declare" || program == "typeset":
+		for _, arg := range args {
+			name, _, isAssign := strings.Cut(arg, "=")
+			if (isAssign && !safeEnv[name]) || strings.HasPrefix(arg, "-f") {
+				return program + " " + name + " changes the environment of what runs next"
+			}
+		}
+		return ""
 	case benignPrograms[program]:
 		return ""
 	case buildTools[program] != nil && len(args) > 0 && buildTools[program][args[0]]:
@@ -96,10 +169,18 @@ var gitReadOnly = map[string]bool{
 	"count-objects": true, "whatchanged": true, "add": true, "commit": true, "fetch": true,
 }
 
+// gitWrites are options of git's read-only subcommands that write a file or run a program
+// (R6-S2): log/show/diff --output, grep's pager, fetch's upload-pack, an external diff or textconv
+// filter the repository's configuration names.
+var gitWrites = []string{"--output", "-O", "--open-files-in-pager", "--upload-pack", "-u", "--exec", "--receive-pack", "--ext-diff", "--textconv"}
+
 // gitShape returns why a git command is not benign, or "". The dangerous and elevated rules of
 // the table are matched against the plain spelling separately (Classify); this decides only
 // whether the command may stay low.
 func gitShape(g guard.Git) string {
+	if opt := gitOption(g); opt != "" {
+		return "git " + g.Sub + " " + opt + " writes a file or runs another program"
+	}
 	switch {
 	case len(g.Config) > 0:
 		return "git with -c " + g.Config[0] + ": configuration on the command line can change what git runs (an alias, a pager, a hook path)"
@@ -175,4 +256,24 @@ func hasAnyPrefix(args []string, prefixes ...string) bool {
 		}
 	}
 	return false
+}
+
+// gitOption returns the first option of gitWrites a git command uses. -u means --upload-pack only
+// to fetch, pull, clone and ls-remote (add -u and commit -u are harmless).
+func gitOption(g guard.Git) string {
+	for _, arg := range g.Args {
+		for _, opt := range gitWrites {
+			if opt == "-u" {
+				switch g.Sub {
+				case "fetch", "pull", "clone", "ls-remote":
+				default:
+					continue
+				}
+			}
+			if arg == opt || strings.HasPrefix(arg, opt+"=") || (opt == "-O" && strings.HasPrefix(arg, "-O")) {
+				return opt
+			}
+		}
+	}
+	return ""
 }

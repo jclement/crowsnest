@@ -248,6 +248,12 @@ func (s *splitter) step(runes []rune, i int) int {
 		s.inWord = true
 	case strings.ContainsRune(";&|\n`", r):
 		s.endSegment()
+	case r == '>' && s.inWord && strings.Trim(s.word.String(), "0123456789&>") != "":
+		// An unquoted > ends the word before it (R6-S2): `x>>~/.zshrc` is the word x and the
+		// redirection >>~/.zshrc, as the shell reads it. A descriptor number (2>) stays with it.
+		s.endWord()
+		s.word.WriteRune(r)
+		s.inWord = true
 	case r == ' ' || r == '\t' || r == '\r':
 		s.endWord()
 	default:

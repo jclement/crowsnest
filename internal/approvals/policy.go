@@ -114,6 +114,9 @@ type Scope struct {
 type Suggestion struct {
 	Kind    string `json:"kind"`
 	Pattern string `json:"pattern"`
+	// Exact is true for an elevated call (R6-S1): the rule is the call itself, word for word, and
+	// the card shows it to confirm, not to widen.
+	Exact bool `json:"exact,omitempty"`
 }
 
 // FormatRuleID renders a rule id.
