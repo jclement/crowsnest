@@ -28,7 +28,9 @@ async function expectTerminalText(page: Page, text: string | RegExp, timeout = 1
 
 /** Types into the focused terminal. */
 async function typeInTerminal(page: Page, text: string) {
-  await page.locator("[data-terminal]").click();
+  // Near the top-left corner, not the centre: the needs-you tray (bottom-right on a desktop) can
+  // cover the middle of a short terminal, and a click there lands on the tray instead.
+  await page.locator("[data-terminal]").click({ position: { x: 24, y: 24 } });
   await page.keyboard.type(text, { delay: 15 });
   await page.keyboard.press("Enter");
 }
