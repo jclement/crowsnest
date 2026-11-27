@@ -522,4 +522,9 @@ func TestTailscaleServedWithoutTrustedProxyWarns(t *testing.T) {
 		in.Config.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}
 	})
 	requireCheck(t, trusted, "tailscale.serve", StatusOK)
+	// A serve config in front of a crowsnest with no login is a shell for the tailnet.
+	open := run(t, machine, func(in *Inputs) { in.Config.NoAuth = true })
+	if check := requireCheck(t, open, "tailscale.serve", StatusFail); !strings.Contains(check.Detail, "--no-auth") {
+		t.Errorf("%+v", check)
+	}
 }

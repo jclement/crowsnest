@@ -76,8 +76,32 @@ HTTP on a network address, so the browser offers no microphone."
 
 **Why**: browsers allow the microphone only on HTTPS or localhost.
 
-**Fix**: use `tailscale serve` ([Reach it from your phone](../how-to/phone.md)), or `--tls-cert`
+**Fix**: publish it to your tailnet from System ([Reach it from your phone](../how-to/phone.md)), or `--tls-cert`
 and `--tls-key`. Spoken replies (speak mode) work over plain HTTP; only the mic needs it.
+
+## Publish to your tailnet does not work
+
+The card on System says what is wrong and what to switch. The usual ones:
+
+- **Tailscale is logged out / not running / not connected**: sign in (`tailscale up`, or the
+  Tailscale app). crowsnest tries again by itself every half minute.
+- **MagicDNS is off** or **HTTPS certificates are off**: Tailscale admin console → DNS → enable
+  MagicDNS, and under HTTPS Certificates, Enable HTTPS. Both are tailnet-wide switches only an
+  admin of the tailnet can flip.
+- **Serve is not turned on for your tailnet yet**: Tailscale wants an admin to allow Serve once;
+  the card shows Tailscale's own link. crowsnest waits, and publishes as soon as it is allowed.
+- **Ports 443, 8443 and 10000 all serve something else**: crowsnest never takes over another serve
+  config. Free one, or pick a port with `--tailscale-serve-port`.
+- **Already published by a serve config crowsnest did not start**: you (or an old setup) ran
+  `tailscale serve` by hand for this port. It works as it is; to let crowsnest manage it instead,
+  remove yours with the command the card shows (`tailscale serve --https=443 off`).
+- **Tailscale refused to let this user change its serve config** (Linux): make your user the
+  operator once, `sudo tailscale set --operator=$USER`.
+- **Older than 1.52**: update Tailscale.
+- **--no-auth**: crowsnest will not publish a server with no login. Start it with one.
+
+To see what Tailscale itself holds: `tailscale serve status` (read-only). While crowsnest
+publishes it shows one foreground session for crowsnest's port; once crowsnest stops it is gone.
 
 ## "Host not allowed" (403)
 

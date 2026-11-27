@@ -285,8 +285,9 @@ agents in every state and two dialogs), and a "fixtures" chip shows in the heade
 turns it off. Fixtures mode exists only in development builds; it is compiled out of
 `mise run build`.
 
-On a phone over Tailscale, bind the tailnet address, or keep localhost and use `tailscale serve`,
-which also gives the HTTPS secure context the microphone needs for talk mode:
+On a phone over Tailscale, publish it from the System page ([Publish to your
+tailnet](#publish-to-your-tailnet)), which also gives the HTTPS secure context the microphone
+needs for talk mode, or bind the tailnet address:
 
 ```sh
 ./bin/crowsnest --bind tailnet --username jeff --password-file ~/.config/crowsnest/password
@@ -335,7 +336,8 @@ the container's.
 **Settings** (account menu → Settings) changes what makes sense to change while crowsnest runs:
 the orchestrator's model, the job model, the default engine, the permission mode, Remote Control
 (the orchestrator's and jobs'), the poke interval, compaction and the daily fresh start,
-attachment limits, the notify URL (write-only), protected hosts and branches. Each says where its
+attachment limits, the notify URL (write-only), protected hosts and branches, and whether to
+publish to your tailnet. Each says where its
 value comes from and when a change applies (at once, when the orchestrator restarts, or when
 crowsnest restarts); every change is journalled. A setting given by a flag or an environment
 variable is read-only there ("set by the environment: change it there"): precedence is flag,
@@ -353,33 +355,83 @@ from anywhere outside a text field or terminal. Adding a theme is one file in `w
 
 ## On your tailnet with Tailscale
 
-Two ways to reach crowsnest from your phone:
+Three ways to reach crowsnest from your phone, best first.
 
-- **`tailscale serve` (recommended).** crowsnest stays on localhost and Tailscale gives it an
-  HTTPS address on your tailnet, which the microphone (talk mode), Web Push and the installable
-  app all need:
+### Publish to your tailnet
 
-  ```sh
-  tailscale serve --bg 2769                 # once; crowsnest prints this, it never runs it
-  export CROWSNEST_TRUSTED_PROXY=loopback   # so the login limiter sees each client, not one proxy
-  crowsnest
-  ```
+crowsnest can run `tailscale serve` for you. When Tailscale is installed and signed in on the
+machine, the **System** page (and the first-run checklist, under *Reach it from your phone*) shows
+a **Publish to your tailnet** card with the exact address it will create,
+`https://<machine>.<tailnet>.ts.net`, and what that means: anyone on your tailnet who can reach
+this machine gets crowsnest's sign-in page there; the login still stands in front of everything.
+Press **Publish** and the card shows the address as a link, a QR code for the phone (drawn by
+crowsnest from the address, nothing fetched), **Stop publishing**, and the state: publishing,
+stopped, or failed with the reason and the fix.
 
-  Open `https://<machine>.<tailnet>.ts.net` on the phone (`crowsnest doctor` and the checklist
-  print the exact URL). crowsnest finds that MagicDNS name at start (`tailscale status --json`, two
-  seconds at most) and allows it as a host, so nothing else is needed (`--no-tailscale-detect`
-  turns that off). HTTPS certificates must be enabled for the tailnet (admin console, DNS). For
-  notifications on an iPhone, open the page in Safari, Share → **Add to Home Screen**, open it
-  from there, then turn notifications on in the account menu.
-- **`--bind tailnet`.** crowsnest listens on its Tailscale address directly, plain HTTP over
-  WireGuard: simpler, but without the secure context, so no microphone or Web Push.
+```sh
+crowsnest --tailscale-serve                # or CROWSNEST_TAILSCALE_SERVE=true, or Settings → Tailnet
+export CROWSNEST_TRUSTED_PROXY=loopback    # so the login limiter sees each client, not one proxy
+```
+
+- **Remembered.** Publishing is the `tailscale-serve` setting: the card saves it, every start
+  publishes again, and the start-up log (and the terminal) print the address. Flag, environment,
+  app, file: the usual precedence. A flag or variable that holds it on makes the card read-only;
+  Stop publishing then stops it until crowsnest restarts.
+- **Lives exactly as long as crowsnest.** It runs `tailscale serve --https=<port>
+  http://127.0.0.1:<port>` in the foreground, as a supervised child in its own process group,
+  never `--bg`. A stop, a crash or a `kill -9` of crowsnest ends it (a watchdog notices crowsnest
+  is gone through a pipe only crowsnest holds), and Tailscale then drops the address: nothing
+  persistent is left in Tailscale's config. If it stops by itself while publishing is on, crowsnest
+  restarts it with backoff.
+- **Never clobbers.** It reads `tailscale serve status --json` first and never touches a port
+  another serve config uses: 443, else 8443, else 10000 (or the one `--tailscale-serve-port`
+  names); if none is free it refuses and says why. A serve config that already proxies to
+  crowsnest (one you made by hand) is reported and left alone.
+- **Never public.** It never uses Funnel, `reset` or `off`: every Tailscale command line it can
+  run is on an allowlist of four (`version`, `status --json`, `serve status --json`, the
+  foreground serve).
+- **Needs a login.** With `--no-auth` it refuses (the flag is a startup error), because a
+  localhost crowsnest with no login would become a shell for the whole tailnet. A fresh instance
+  in first-run setup publishes only once the owner exists: the setup link is never on the tailnet.
+- **When it cannot**, the card says exactly what to switch: Tailscale logged out or not running,
+  MagicDNS or HTTPS certificates off (Tailscale admin console → DNS), Serve not yet enabled for the
+  tailnet (with Tailscale's own link), a CLI older than 1.52, or (on Linux) a user that is not the
+  Tailscale operator (`sudo tailscale set --operator=$USER`). On macOS the app's CLI is found in
+  `/Applications/Tailscale.app` when `tailscale` is not on `PATH`.
+
+Then, on an iPhone, open the address in Safari, Share → **Add to Home Screen**, open it from
+there, and turn notifications on in the account menu.
+
+To look at it, or undo it, by hand: `tailscale serve status` shows the foreground session while
+crowsnest publishes; stopping crowsnest (or Stop publishing) removes it. crowsnest never needs
+`tailscale serve reset`, and you should not need it either.
+
+### `tailscale serve` by hand
+
+The manual way still works, and is what to use if you want the address to outlive crowsnest:
+
+```sh
+tailscale serve --bg 2769                 # once; a persistent config Tailscale keeps
+export CROWSNEST_TRUSTED_PROXY=loopback
+crowsnest
+```
+
+crowsnest finds the MagicDNS name at start (`tailscale status --json`, two seconds at most) and
+allows it as a host (`--no-tailscale-detect` turns that off). Undo it with `tailscale serve
+--https=443 off`. While such a config proxies to crowsnest, the card says so and does not publish
+a second copy.
+
+### `--bind tailnet`
+
+crowsnest listens on its Tailscale address directly, plain HTTP over WireGuard: simpler, but
+without the secure context, so no microphone or Web Push.
 
 ### Sign in with Tailscale
 
 Off by default. Start crowsnest with `--tailscale-auth` (`CROWSNEST_TAILSCALE_AUTH=true`) and
 `tailscale serve` signs you in by your tailnet identity: no password to type on the phone.
 
-1. Start with `--tailscale-auth` and `tailscale serve --bg 2769` as above.
+1. Start with `--tailscale-auth`, and publish (the card above, or `tailscale serve` by hand).
 2. Open `https://<machine>.<tailnet>.ts.net`, sign in with the password once, open System,
    **Sign in with Tailscale**, and press **Allow me (you@github)**. Add others by login if you
    want (`friend@github`); remove them the same way.

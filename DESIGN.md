@@ -106,6 +106,8 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--protected-branch` | `CROWSNEST_PROTECTED_BRANCHES` | none | A branch agents may not commit or push onto, nor force-push: the guard hook (8.7). Repeatable |
 | `--browse-root` | `CROWSNEST_BROWSE_ROOTS` | none | A directory the folder picker may browse besides the home directory and the directories projects and the remembered list use (`/srv`, `/Volumes`); `/` only when named here (4.23). Repeatable; never editable from a browser |
 | `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | false | Let the Terminal view's herdr client read the user's saved SSH machines; off, it runs with `XDG_STATE_HOME=<state>/terminal-client` (10, 20). Never editable from a browser |
+| `--tailscale-serve` | `CROWSNEST_TAILSCALE_SERVE` | false | Publish crowsnest to the tailnet while it runs: a supervised foreground `tailscale serve` (3.5.1). Editable in the app; refused with `--no-auth` |
+| `--tailscale-serve-port` | `CROWSNEST_TAILSCALE_SERVE_PORT` | `0` (the first free of 443, 8443, 10000) | The tailnet HTTPS port `--tailscale-serve` uses; one another serve config uses is refused (3.5.1) |
 | `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | false | Sign in allowed tailnet logins from `tailscale serve`'s identity headers (4.20). Never editable from a browser |
 | `--backup-every` | `CROWSNEST_BACKUP_EVERY` | `0` (off) | Automatic backup interval, at least `1h` (4.17); editable in Settings |
 | `--backup-keep` | `CROWSNEST_BACKUP_KEEP` | `7` | Automatic backups kept (4.17); editable |
@@ -173,7 +175,8 @@ sheet (12.9): `model`, `job-model`, `engine`, `permission-mode`, `no-remote-cont
 "Remote Control" on/off), `job-remote-control`, `poke-interval`, `compact-at`, `fresh-at`,
 `attachment-max-mb`, `attachment-quota-mb`, `notify-url` (write-only), `protected-host`,
 `protected-branch`, and since R4 `backup-every`, `backup-keep`, `archive-after-days`,
-`delete-after-days` (section "Backups and storage", all live); the instance name stays in the Account sheet, voice and notifications in
+`delete-after-days` (section "Backups and storage", all live), and since `wip/tsserve`
+`tailscale-serve` (section "Tailnet", live: 3.5.1); the instance name stays in the Account sheet, voice and notifications in
 theirs. They are kept in `kv` as `settings.<option>` in the text form a flag would take.
 
 **Precedence, decided deliberately: flag, then environment, then the app (database), then the
@@ -185,7 +188,11 @@ and a forgotten file must not silently undo it. `internal/config` applies the or
 `Options.Stored`), records where every value came from (`Config.Sources`: `--model`,
 `CROWSNEST_MODEL`, `database`, `config.yaml`, `default`), and is the validator: a change is checked
 by loading the whole config again with it, so the app accepts exactly what a flag would and
-reports the loader's own message. serve reads the saved settings read-only before the config is
+reports the loader's own message. That reload reads the secret variables (the password among
+them) from a snapshot serve keeps in memory before it scrubs its environment
+(`config.SecretEnvSnapshot`); before `wip/tsserve` it read the scrubbed environment, so an
+instance whose login came from `CROWSNEST_PASSWORD` refused every change ("--username and
+--password must be given together"). serve reads the saved settings read-only before the config is
 final (the database path never comes from the database) and loads once more with them.
 
 **Never editable from a browser**, whatever the database holds: the login (username, password,
@@ -289,12 +296,147 @@ login limiter is taken from a forwarding header only with `--trusted-proxy`; cro
 silently trust headers, so doctor (and the README) say to set `CROWSNEST_TRUSTED_PROXY=loopback`
 when a serve config points at crowsnest's port. Doctor's Tailscale section: installed and
 connected, the MagicDNS name and whether it is allowed, HTTPS certificates enabled, and whether
-`tailscale serve status --json` already proxies to the port; if not, the command
-(`tailscale serve --bg <port>`, the syntax of `tailscale serve --help` in 1.104). crowsnest never
-runs a state-changing Tailscale command; it prints them. Tailscale serve also sends identity
+`tailscale serve status --json` already proxies to the port (foreground sessions included); if
+not, it points at publishing from the System page (3.5.1), with the manual command (`tailscale
+serve --bg <port>`, the syntax of `tailscale serve --help` in 1.104) as the alternative.
+crowsnest runs no state-changing Tailscale command except the foreground serve of 3.5.1, which
+the owner turns on. Tailscale serve also sends identity
 headers (`Tailscale-User-Login`, `-Name`, `-Profile-Pic`); since R4 `--tailscale-auth` signs in
 an allowed login from them, only from a loopback peer and only for a Host a serve config on this
 machine proxies to crowsnest's port (4.20).
+
+### 3.5.1 Publishing to the tailnet (`wip/tsserve`)
+
+Jeff, 2026-11-27: "crazy to have it offer to tailscale serve on startup if tailscale is there?"
+The answer built here: an **offer in the app**, not a terminal prompt (crowsnest often starts
+unattended). `internal/tsserve`, `internal/httpd/tsserve.go`, `cmd/crowsnest/tsserve_wiring.go`,
+`web/src/components/system/PublishCard.tsx`. It is the only code in crowsnest that changes
+Tailscale's state, and the 3.5 rule ("crowsnest never runs a state-changing Tailscale command")
+now reads: never, except this one foreground serve, which the owner turns on.
+
+**The offer.** The System page's **Publish to your tailnet** card, and the same card in the
+first-run checklist's optional step *Reach it from your phone*, shown when the CLI is found and
+Tailscale is logged in (or when publishing is on, to say why it cannot). Before Publish it shows
+the exact URL it will create (`https://<machine>.<tailnet>.ts.net`, with `:<port>` unless 443)
+and what that means: anyone on the tailnet who can reach this machine gets the sign-in page;
+nothing goes on the internet. After: the URL as a link, a QR code (rsc.io/qr on the server, from
+the URL alone; a `data:` PNG, which the CSP already allows), **Stop publishing**, and the state:
+`off`, `starting`, `publishing`, `stopped`, `failed` (reason, fix, next retry), `refused` (why it
+cannot, with the exact switch), `external` (a serve config crowsnest did not make already proxies
+here: reported, never duplicated).
+
+**Remembered.** Accepting saves the `tailscale-serve` setting (`--tailscale-serve`,
+`CROWSNEST_TAILSCALE_SERVE`, an app setting under *Tailnet*; off by default; the usual
+precedence), so every start publishes. Unlike `--tailscale-auth` it is editable in the app: it
+does not change who may sign in, and the owner turning it on from the System page is the point.
+`--tailscale-serve-port` (flag, environment, file; 0 = automatic) is not. A flag or variable that
+holds it on makes the card read-only; Stop then stops it for this run only and says so (stopping
+only narrows). The start-up log, and the terminal when there is one, print the URL each time
+publishing is confirmed. Its HTTP API: `GET`/`POST`/`DELETE /api/v1/tailscale/serve` (section 10).
+
+**Lifetime tied to crowsnest.** `tailscale serve --https=<port> http://127.0.0.1:<port>` runs in
+the **foreground** (never `--bg`), as a child of a watchdog (`crowsnest tailscale-serve-child`,
+hidden) that crowsnest starts in a process group of its own. The watchdog's stdin is a pipe whose
+only write end crowsnest holds (close-on-exec, so no herdr pane or other child inherits it). However
+crowsnest ends (a clean stop, a crash, SIGKILL, a self-update exec), the kernel closes that end,
+the watchdog reads EOF and interrupts tailscale (SIGINT, what Ctrl+C sends, then SIGTERM, then
+SIGKILL, two seconds apart). Linux's parent-death signal was rejected: in Go it fires when the
+forking OS *thread* exits, which would unpublish at random; macOS has none. A clean stop also
+waits: `serve` defers the publisher's end, so crowsnest exits after its child. While publishing is
+on, a child that exits by itself is restarted with backoff (2 s doubling to a minute, reset after a
+minute of health); the setting going off stops it at once. **What Tailscale does when the
+foreground client dies:** a foreground serve session lives in tailscaled's `ServeConfig` under
+`Foreground[<session id>]`, tied to the CLI's watch connection to tailscaled, and tailscaled
+deletes that entry when the connection closes, whether the CLI exited cleanly or was killed. That
+is from Tailscale's source and documentation, and is what the fake models; **it was not observed
+against a real tailscaled here** (no real `tailscale serve` was run). So nothing persistent is
+written. The one thing crowsnest keeps is its own record of the watchdog (kv `tsserve.child`: pid,
+process group, port, target); at the next start, a live process with that pid whose command line
+still carries crowsnest's exact serve argv is crowsnest's own orphan and is stopped (journalled);
+any other process, and any serve config without that record, is someone else's and is left alone
+and reported.
+
+**Never clobber.** The plan reads `tailscale serve status --json` first (background and
+foreground handlers alike: `internal/tailscale.ServeConfig`). A port any of them listens on is
+never touched: 443, else 8443, else 10000 (the card names the port it took and why), or exactly
+`--tailscale-serve-port`; with none free it refuses with the reason. A handler that already
+proxies exactly to crowsnest's target is `external`. crowsnest never runs `reset` or `off`.
+
+**Never Funnel.** Every tailscale command line goes through one allowlist (`tsserve.CheckArgs`):
+`version`, `status --json`, `serve status --json`, and `serve --https=<1..65535>
+http://127.0.0.1:<port>` (or `[::1]`). Anything mentioning funnel is refused first; `--bg`,
+`reset`, `off`, other targets and other flags are refused. The service, the read-only runner and
+the watchdog all check it before exec, and every test's fake records argv and fails on funnel,
+`--bg` or reset.
+
+**Refuse without auth.** `--no-auth` with `--tailscale-serve` from a flag, the environment or the
+file is a startup refusal (config `checkTailscaleServe`): a loopback-only crowsnest with no login,
+which 3's startup rules allow because only local users reach it, would become a shell for every
+tailnet peer. Saved in the app it is not a start error (that would leave an instance that cannot
+start): the publisher refuses and the card says why; `POST` answers 409. **In locked first-run
+setup** nothing is published: the publisher is wired in the normal phase only, after an owner
+exists, and the log says it waits. Decided because publishing the setup page would let every
+tailnet peer try the token and spend the global attempt budget (forcing rotations), and would
+put a tailnet peer behind a loopback TCP peer while the loopback-only setup handoff (3.3) exists;
+the owner is at the machine to read the link anyway.
+
+**Explaining failures** (`tsserve/problems.go`): from `tailscale status --json` before anything
+runs (logged out, stopped, tailscaled not running, MagicDNS off from
+`CurrentTailnet.MagicDNSEnabled`, HTTPS certificates off from empty `CertDomains`: each names the
+admin-console switch, DNS page), from `tailscale version` (older than **1.52**, the first with
+this `serve --https=<port> <target>` foreground form: from Tailscale's changelog, not checked
+against a 1.52 binary), and from what serve printed (Serve not yet enabled for the tailnet, in
+which case serve waits and crowsnest shows Tailscale's own `login.tailscale.com` link and carries
+on once it is enabled; a Linux user that is not the operator; another config taking the port).
+Tailscale's text is matched, never shown (4.9); unknown output goes to the log. The CLI is found
+on `PATH`, else (macOS) `/Applications/Tailscale.app/Contents/MacOS/Tailscale`, the App Store and
+standalone app's CLI; doctor names which and its version.
+
+**Hosts.** The MagicDNS name must pass the host check, with any port (the check ignores the port;
+the Origin check compares host and port, and serve keeps `:8443` in both). Start's detection (3.5)
+usually has it; when Tailscale came up later, the publisher adds it to the running server
+(`httpd.Server.AllowHost`), unless `--no-tailscale-detect`, which it honours by refusing.
+
+**Works on a localhost bind**: the target is crowsnest's own loopback listener (127.0.0.1, else
+[::1], the real port). A bind with no loopback address is refused with the reason.
+
+**--demo** uses a fake tailscale named by `CROWSNEST_DEMO_TAILSCALE` and never looks the real one
+up; without it Tailscale is "not installed" there. Under `go test` the publisher never looks the
+real CLI up either (`testing.Testing()`), whatever it is told.
+
+**Trust: what a request through serve is, and what that widens (audited).** A request through
+serve arrives from 127.0.0.1 with Host the MagicDNS name, `X-Forwarded-Proto: https` and, for a
+tailnet user, `Tailscale-User-*`. Every place that treats a loopback peer specially, and what
+publishing does to it:
+
+- *Host check* (any loopback IP literal is allowed): not involved; serve's Host is the name.
+- *`isHTTPS`* (X-Forwarded-Proto believed from loopback): gives the Secure `__Host-` cookie. Only
+  adds Secure; not widened.
+- *Connection limits* (4.11: loopback exempt from the per-address cap): every tailnet client
+  shares the exemption, as with a hand-made serve; the global cap holds, and
+  `--trusted-proxy loopback` caps each client at the HTTP layer. Same as before; doctor and the
+  card's docs say to set it.
+- *Login limiter and voice limits* (keyed by TCP peer): all tailnet clients share one bucket unless
+  `--trusted-proxy loopback`; fails safe (a peer can lock the owner out for a minute). Same as a
+  hand-made serve.
+- *Sign in with Tailscale* (4.20: the header believed from loopback only when a serve config on
+  this machine proxies the Host to crowsnest's port): crowsnest's own foreground session now counts
+  as such a config (`ServesPort` reads foreground sessions too; before, a foreground serve someone
+  ran by hand did not). That is intended, and the rule is unchanged; but while publishing and
+  `--tailscale-auth` are both on, the 4.20 caveat (any local process can open a loopback connection
+  and send the header) applies whenever crowsnest runs, not only while someone has run serve.
+- *The setup handoff* (3.3, a loopback peer may redeem an opener id): exists only on the locked
+  setup server, which is never published.
+- *`--no-auth` and `SUPPRESS_AUTH` on a loopback-only bind* (allowed because only local users reach
+  it): publishing would break that premise, so it is refused (above). A serve config made by hand
+  in front of such a crowsnest is now a doctor **fail**.
+- *Auto-open, the setup link's loopback base, presence*: not peer-based, or local URLs only; not
+  affected. Outbound loopback rules (machines, push, ElevenLabs) are about where crowsnest
+  connects, not who connects to it.
+- *Who may turn it on or off*: a password (or setup-owner) session. A session signed in with
+  Tailscale gets 403 on the card's POST and DELETE and on `PUT /settings/tailscale-serve`, the
+  4.20 rule that a tailnet login must not widen how crowsnest is reached. Origin and `X-Crowsnest`
+  apply as to every change.
 
 ## 4. Security model
 
@@ -305,7 +447,7 @@ rebinding against `--no-auth` on localhost); secrets leaking into logs; agent ou
 1. **Bind**: loopback by default. Never `0.0.0.0` unless the user types it (the container image does, with auth required).
 2. **Login**: one user, from one of two places. **A configured login** (flags, environment, config file) arrives as plain text at every start: the password is compared in constant time over SHA-256 digests (username and password both always compared, so timing does not say which was wrong). 5 failures per minute per client IP then `429` with `Retry-After`; a global cap of 20 per minute as well. Admission and counting are one step: an admitted attempt is counted as a failure at once and taken back if the credentials match, so a burst of parallel guesses cannot slip past either cap before the first failure is recorded (R1-C10/M1). Success creates a server-side session: 32 random bytes, stored hashed in SQLite, cookie `crowsnest_session` over plain HTTP and `__Host-crowsnest_session` over HTTPS (Secure, `Path=/`, no `Domain`, so nothing on another subdomain can set or shadow it; over HTTPS only the prefixed name is read), `HttpOnly`, `SameSite=Strict`, `Secure` when the request is HTTPS, 30 days sliding. Each session is bound to the `Host:port` it was issued for (lower-cased, default port filled in) and is refused anywhere else: browsers send a host's cookies to every port on it, so this stops a cookie that reached a sibling port from working here, though not a replay that forges `Host` (R1 M2; see residual risk). Logout deletes it. Changing the password invalidates every session (sessions are keyed to a digest of the credentials). That digest is PBKDF2-SHA256 (200k iterations, computed once at start) salted with a random per-install value kept in `kv`, so a leaked database does not carry a fast-to-crack password hash. **A stored login** (chosen at first-run setup, 4.14) must survive restarts, so the database holds a real password hash: argon2id (RFC 9106's second recommended option: 64 MiB, 3 passes, one lane; a 16-byte random salt per hash) as a PHC string in `kv` `auth.owner`, with its username. Hashes run one at a time across the process (a burst of logins, already capped by the limiter, cannot multiply the 64 MiB), and a stored hash's parameters are bounded when read, so a tampered database cannot make a login allocate gigabytes. A stored login compares the username over SHA-256 digests in constant time and always runs argon2 (against a dummy hash when there is no owner), so timing says neither which half was wrong nor whether setup is done. Its sessions carry SHA-256 of the username and PHC string as their credential digest; the salt is new with every password, so a change or reset signs every session out by the same mechanism, and the owner is read on every request, so `crowsnest reset-password` run beside a live server takes effect at once. The login limiter applies to stored logins exactly as to configured ones, and also to a wrong current password in the Account sheet's password change. The sliding expiry is written at most once a minute per session. The client IP for rate limiting is the TCP peer; forwarding headers are not trusted (anyone could pick their own bucket), so behind a local proxy all clients share one bucket, which fails safe. The exception is opt-in (R2-L2): with `--trusted-proxy` (`loopback`, an IP or a CIDR), a request whose TCP peer is a trusted proxy is attributed to the client it names in the one header `--trusted-proxy-header` chooses: the last `X-Forwarded-For` hop (the default) or `CF-Connecting-IP` (only for cloudflared, which overwrites it at Cloudflare's edge; `tailscale serve` and most proxies pass a client's own copy through, so believing it there let a client pick a fresh bucket on every attempt, R3-L1), and that address keys the login limiter, the voice limits and the log, and caps that client at 32 requests in flight (the TCP cap of 4.11 cannot see past the proxy). The compose example's tunnel shares crowsnest's network namespace, so every internet client arrives from 127.0.0.1 and one attacker's failures would lock the owner out; it sets `CROWSNEST_TRUSTED_PROXY=loopback` and, for the cloudflared layout only, `CROWSNEST_TRUSTED_PROXY_HEADER=cf-connecting-ip`. A trusted loopback proxy is trusted from every local process too, which can then pick its own bucket; those run as the user already. `X-Forwarded-Proto: https` is honoured only from loopback or a trusted proxy (the TCP peer), and only to add `Secure` to the cookie.
 3. **Host check** on every request: `Host` must be loopback, a bound IP, the machine hostname (only when a non-loopback address is bound: on loopback it adds nothing but DNS-rebinding surface, R1 I4), a detected MagicDNS name, or an `--allowed-host`. This is what stops DNS rebinding, and it applies with `--no-auth` too.
-4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host` (host and port, default ports normalised). `null` counts as missing. Non-GET calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set). A failed host check is `403` with a message naming `--allowed-host`. MagicDNS names are not auto-detected yet (M1); pass them with `--allowed-host`.
+4. **Origin check** on every non-GET request and every WebSocket upgrade: `Origin` must be present and its host must pass the host check and equal `Host` (host and port, default ports normalised). `null` counts as missing. Non-GET calls must also carry `X-Crowsnest: 1` (a header a cross-site form cannot set). A failed host check is `403` with a message naming `--allowed-host`. The MagicDNS name is detected at start (3.5) and, when publishing to the tailnet, added at run time (3.5.1).
 5. **WebSockets** authenticate with the same cookie at upgrade, check Origin, and are closed when the session is revoked. No tokens in URLs.
 6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions decide who may connect (this user's processes); it serves only the agent API (ask, say, notify, job, hook), never terminals. **Who is calling** comes from a token, never from what the caller says (R1b N2, N7): crowsnest mints a random token (`cnt_…`, 32 bytes) for each agent it starts, puts it in that agent's pane environment (`CROWSNEST_TOKEN`), in its MCP server's environment (`mcp.json`) and in a 0600 `agent-token` file its hook command lines name (`--token-file`), and keeps only the token's SHA-256 in `kv`, mapped to the pane and job (`internal/agentid`). A caller with no known token is unidentified: it may ask (the answer reaches it only through `--wait`), nothing is ever typed into a pane on its behalf, and it may not withdraw questions, create jobs or act on one. Job verbs work only on the token's job or the job held in the token's pane (the orchestrator's tokens name no job). Quotas per caller cap the rate of asks, says and job creations, open questions (10 for a job agent, 30 for the orchestrator and for the shared bucket of callers without a token; 200 in all, the orchestrator not counted against it, R2-L5) and concurrent long-polls (8), and an expiry is at least five minutes. `say` needs a token (R2-I4). Tokens end with the work (R2-L1): a job's tokens are revoked when it reaches done, failed or cancelled, and a sweeper revokes, once a minute, the tokens of panes herdr no longer lists (bindings younger than two minutes are spared, and nothing is revoked while herdr cannot be read). Replacing a pane's tokens is one locked, transactional step, and a start token for a pane now held by another job is refused (R2-C15). Token files are 0600 in a 0700 per-job directory, and tokens are never logged. Since R3-L4 every file crowsnest writes there (`brief.md`, `prompt.md`, `settings.json`, `mcp.json`, `agent-token`) is removed and created afresh, exclusively and without following a link, read-only (0400), and a job directory that is a link is refused; that stops a planted link from redirecting crowsnest's write and an accidental overwrite, not a same-uid agent, which can chmod or recreate the file.
 
@@ -2945,6 +3087,7 @@ times under one page.
 | `GET`/`POST /tokens`, `DELETE /tokens/{id}` | Scoped tokens; `POST {name}` → `201 {token, record}` (4.21) |
 | `GET`/`POST /machines`, `DELETE /machines/{id}` | Other instances with their summaries or an error (4.21) |
 | `GET`/`PUT /auth/tailscale`, `POST /auth/tailscale/allow-me` | Sign in with Tailscale: state, replace the list, add this request's login; changes need a password session (4.20) |
+| `GET /tailscale/serve`, `POST /tailscale/serve` (`{}`), `DELETE /tailscale/serve` | Publish to your tailnet (3.5.1): the card's state `{show, state, reason, fix, fix_url, url, port, port_note, target, name, version, enabled, since, retry_at, note, locked, qr}`; publish (saves `tailscale-serve` on; 409 with the reason when the plan cannot, or with `--no-auth`); stop (saves it off; with a flag holding it on, stops for this run). Changes need a password session |
 
 **Addressing and the TypeScript mirror.** The table rows above are the authority for every shape.
 The web app addresses an agent by its **pane id** (`w1:p1`, URL-encoded as `w1%3Ap1`) even though
@@ -4109,6 +4252,8 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 124. **The live diff is pulled, throttled and watched, never pushed with content** (6.21). Readings at most every 4 s per subject and only while a browser has the view open (2 minutes after its last request); the event carries only a revision, and the browser refetches. One busy agent cannot make crowsnest run git in a loop, and nothing reads git for a diff nobody is looking at.
 125. **Full screen is a route, not a modal** (6.21; Jeff, 2026-11-27). The same component on `/diff?…` with the frame bare gives fullscreen, a new tab and a deep link in one; the phone's view is that route too. Position travels in the URL (scope, file) and sessionStorage (scroll).
 126. **Comments on lines were specified, not built** (6.21). Viewed tracking, live updates and full screen took the night; a half-built comment feature (notes with no way to send them, or sent without the quoted code) would be worse than none.
+127. **Publishing to the tailnet is a supervised foreground `tailscale serve`, not `--bg`** (3.5.1; Jeff, 2026-11-27: "love it. yes do that"). A background config would outlive crowsnest and is Tailscale's to keep; the foreground session is tied to crowsnest by a watchdog and a lifeline pipe, so the address cannot be left published by a crash. The cost is a child process, a restart loop, and a session that ends when tailscaled restarts (crowsnest starts it again). Funnel, `reset` and `off` are outside an argv allowlist, so no code path can publish to the internet or remove anyone's config.
+128. **Publishing is an app setting, and needs a login** (3.5.1). The owner turning it on from the System page is the feature, and it does not change who may sign in, so it is editable in the app, unlike `--tailscale-auth`; a Tailscale-signed-in session may not change it. With `--no-auth` it is refused (a start error from a flag), and a locked first-run setup is never published.
 
 ## 18. Milestones
 
@@ -4147,6 +4292,8 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 10. **Scheduled tasks, passkeys, Codex conversation view, multi-session**: after v1. Scheduled tasks were built on `wip/upkeep` (7.8).
 
 ## 20. Known limitations (kept honest as the build proceeds)
+
+- **Publishing to the tailnet (3.5.1, `wip/tsserve`).** Verified only against a fake `tailscale`; no real `tailscale serve` has run from crowsnest, so the real CLI's foreground output, its exact error texts (matched to explain failures), and tailscaled dropping the foreground session when the CLI dies are from Tailscale's source and docs, not observed. The minimum version (1.52) is from the changelog. A session ends when tailscaled restarts; crowsnest notices the child exit and starts it again, but a tailscaled restart that keeps the CLI alive and silently drops its session is not detected (it is checked when starting, not while running). The QR code is the URL only, so the phone must already be on the tailnet. On Linux, a user who is not Tailscale's operator gets a clear refusal, not a fix.
 
 - **The folder picker (4.23).** A read stuck on a dead network mount holds its slot until the kernel gives up; with four stuck, the picker answers "busy" until one returns. Repositories are floated to the top of the first 500 entries only (the cap is applied in name order before git is looked at). The base-branch guess is the origin's `HEAD`, else `main`, else `master`, else the current branch: a repository whose base is `develop` without an origin `HEAD` is guessed wrong. Claude's folder trust is read from its global config only (a managed or project-level trust setting is not seen). Recent choices are per browser (`localStorage`), not per account. The home folder is refused as a project only by the projects service's own rule on the real `$HOME`; under `--demo` the picker's home is the demo tree, which the projects service does not know as home (the picker still warns).
 

@@ -102,6 +102,9 @@ func (r *runner) tailscaleServe(ctx context.Context, info tailscale.Info) {
 	switch {
 	case err != nil:
 		check.Status, check.Detail = StatusSkip, "could not read `tailscale serve status`"
+	case len(serves) > 0 && cfg.NoAuth:
+		check.Status, check.Detail = StatusFail, serves[0].URL+" proxies to this crowsnest, which runs with --no-auth: every device on your tailnet that can reach this machine has a shell"
+		check.Fix = "Start crowsnest with a login, or remove that serve config: `tailscale serve status` shows it"
 	case len(serves) > 0:
 		check.Status, check.Detail = StatusOK, "open "+serves[0].URL+" on your phone"
 		if serves[0].Foreground && cfg.TailscaleServe {

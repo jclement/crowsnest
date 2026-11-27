@@ -1,34 +1,52 @@
 # Reach it from your phone
 
 crowsnest listens on `localhost` by default. To use it from a phone, put it on your tailnet. The
-recommended way is `tailscale serve`, because the phone then gets HTTPS, which three things need:
-the microphone, Web Push notifications, and installing the app to the Home Screen.
+recommended way is to let crowsnest publish itself with `tailscale serve`, because the phone then
+gets HTTPS, which three things need: the microphone, Web Push notifications, and installing the
+app to the Home Screen.
 
-## With `tailscale serve` (recommended)
+## Publish to your tailnet (recommended)
 
-1. On the machine running crowsnest, once:
+1. Install Tailscale on the machine running crowsnest and sign in.
+2. Open **System** ([Open System](app:/system)). The **Publish to your tailnet** card shows the
+   exact address it will create, such as `https://quark.tail1234.ts.net`, and what that means:
+   anyone on your tailnet who can reach this machine gets the sign-in page there. The first-run
+   checklist shows the same card under *Reach it from your phone*.
+3. Press **Publish**. The card shows the address as a link and a QR code.
+4. On the phone (signed in to the same tailnet), scan the QR code with the camera, or type the
+   address, and sign in.
 
-   ```sh
-   tailscale serve --bg 2769
-   ```
+crowsnest remembers the choice and publishes again at every start, until you press **Stop
+publishing** (or turn *Publish to your tailnet* off in Settings, or start it with
+`--tailscale-serve=false`). The address lasts exactly as long as crowsnest runs: it is a
+foreground `tailscale serve` that crowsnest supervises, so stopping or killing crowsnest takes it
+away, and nothing is left in Tailscale's config. It never uses Funnel: nothing goes on the public
+internet.
 
-   crowsnest prints this command (in `crowsnest doctor`, the first-run checklist and System); it
-   never runs a Tailscale command that changes anything itself.
-2. Tell crowsnest the proxy is local, so the login limiter counts each client separately, then
-   start it:
+The address is `https://<machine>.<tailnet>.ts.net` when port 443 is free on this machine's
+Tailscale; if another serve config uses 443, crowsnest takes 8443, then 10000, and the card says
+which (`--tailscale-serve-port` picks one). It never changes anyone else's serve config.
 
-   ```sh
-   export CROWSNEST_TRUSTED_PROXY=loopback
-   crowsnest
-   ```
+Set `CROWSNEST_TRUSTED_PROXY=loopback` as well, so the login limiter counts each phone separately
+rather than everything arriving through serve as one client.
 
-3. On the phone open `https://<machine>.<tailnet>.ts.net`. crowsnest finds that name at start
-   (`tailscale status --json`) and allows it; nothing else is needed. HTTPS certificates must be
-   enabled for your tailnet (Tailscale admin console → DNS).
-4. Sign in.
+It will not publish without a login (`--no-auth`): every device on the tailnet would get a shell.
+
+### By hand instead
+
+If you want the address to outlive crowsnest, run `tailscale serve` yourself:
+
+```sh
+tailscale serve --bg 2769
+export CROWSNEST_TRUSTED_PROXY=loopback
+crowsnest
+```
+
+crowsnest finds the MagicDNS name at start and allows it; the card then says the address is
+already published and leaves it alone. Undo it with `tailscale serve --https=443 off`.
 
 **Optional: sign in with Tailscale.** Start with `--tailscale-auth`, sign in once with the password
-through serve, open **System**, **Sign in with Tailscale**, and press **Allow me**. From then on the
+at the published address, open **System**, **Sign in with Tailscale**, and press **Allow me**. From then on the
 phone is signed in by its tailnet identity. Leave it off on a machine other people use.
 
 ## Add it to the Home Screen

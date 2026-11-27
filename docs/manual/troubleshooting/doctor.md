@@ -60,8 +60,9 @@ Exit 0 when nothing failed (warnings included), 1 when something did, 2 for a us
 |---|---|---|
 | **Tailscale** | Installed and connected. Optional. | Install Tailscale, or ignore. |
 | **Tailnet name allowed** | The MagicDNS name is on the host allowlist (detected at start). | Restart without `--no-tailscale-detect`, or `--allowed-host`. |
-| **Tailscale HTTPS certificates** | Enabled for the tailnet. | Tailscale admin console → DNS → HTTPS. |
-| **Served on the tailnet over HTTPS** | `tailscale serve` already proxies to the port. | `tailscale serve --bg 2769` (printed; crowsnest never runs it). |
+| **Tailscale CLI** | Which `tailscale` crowsnest would run (on `PATH`, or the macOS app's in `/Applications/Tailscale.app`) and whether it is 1.52 or newer, which publishing needs. | Update Tailscale. |
+| **Tailscale HTTPS certificates** | Enabled for the tailnet. | Tailscale admin console → DNS → HTTPS Certificates. |
+| **Published on the tailnet over HTTPS** | Something (crowsnest itself, or a `tailscale serve` you ran) already proxies to the port. | Publish from System ([Publish to your tailnet](../how-to/phone.md)), or `tailscale serve --bg 2769` by hand. |
 
 ## Optional features
 
