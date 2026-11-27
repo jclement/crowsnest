@@ -117,3 +117,15 @@ test("the worktree sweep lists what is still around and discards after a confirm
   await confirm.getByRole("button", { name: "Yes, discard them" }).click();
   await expect(page.getByText("1 discarded")).toBeVisible({ timeout: 20_000 });
 });
+
+test("throttling and review are Settings, and the System page shows the heavy slots", async ({ page }, testInfo) => {
+  await page.goto("/system");
+  await expect(page.getByRole("region", { name: "Heavy commands" })).toContainText("Heavy commands (2 slots");
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings.getByText("Throttling and review")).toBeVisible();
+  await expect(settings.getByText("Running jobs at once")).toBeVisible();
+  await expect(settings.getByText("Daily digest at")).toBeVisible();
+  await shot(page, testInfo, "settings");
+});
