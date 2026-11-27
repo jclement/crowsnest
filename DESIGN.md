@@ -3203,7 +3203,7 @@ times under one page.
 | `DELETE /approval-rules/{id}`, `GET /jobs/{id}/approval-rules` | Revoke a project or job rule (404 when already removed); a job's remembered rules |
 | `POST /push/action` | A notification's button (8.7): `{token, action}` with the single-use action token alone (no session) → `{item, message}`; `403` for an unknown, used, expired or out-of-scope token, or an elevated or dangerous approval |
 | `GET /inbox/summary` | `{open, blocking}`: open questions only (added in M6); the web app's badge is the attention queue's count since R4 |
-| `GET /attention`, `POST /attention/snooze` `{id, until?}`, `/attention/unsnooze` `{id}`, `/attention/dismiss` `{id}` | The one attention queue (22): `{items, counts: {total, blocking, can_wait, snoozed, by_project}, revision, at, partial?}`; snooze (10 minutes, every device), bring back, dismiss a failed job (`409` for anything else, `404` for an item resolved meanwhile). An `attention` SSE event carries the whole snapshot when it changes |
+| `GET /attention`, `POST /attention/snooze` `{id, until?}`, `/attention/unsnooze` `{id}`, `/attention/dismiss` `{id}` | The one attention queue (22): `{items, counts: {total, blocking, approval, can_wait, snoozed, by_project}, revision, at, partial?}` (each item with its `urgency` and its `label`, R8); snooze (10 minutes, every device), bring back, dismiss a failed job (`409` for anything else, `404` for an item resolved meanwhile). An `attention` SSE event carries the whole snapshot when it changes |
 | `GET /now`, `GET /now/since?browser=`, `POST /now/beat` `{browser}`, `POST /now/seen` `{browser}` | The Now view (22): `{rows, counts}`; what finished, failed, was cancelled or asked since this browser left (`{since, first, events, counts}`); this browser is in use; mark all seen. A browser id is 8 to 64 of `[A-Za-z0-9_-]` |
 | `POST /orchestrator/poke` | "Poke now" (M8) → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}` (7.7) |
 | `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated (`task`, a scheduled job started, 7.8; `upkeep`, compaction and hand-over, 7.9); `limit` 50 by default, at most 200 |
@@ -4854,8 +4854,19 @@ browser, from my phone".
 - **Urgency and order.** Two bands (Fable 1.1): **blocking** (work has stopped: approvals, dialogs,
   blocking questions or ones the asker waits on or whose job declared it is waiting, jobs that will
   not recover by themselves, standing agents) and **can wait** (a non-blocking question, a job
-  retrying a limit by itself, a failure to look at, a worktree ready to land). Within a band by
-  rank (dangerous approvals first), then the longest wait first (Fable 1.9).
+  retrying a limit by itself, a failure to look at, a worktree ready to land).
+- **The label (R8: "Blocking" means blocking).** Urgency is the fact; `LabelOf` (`model.go`, the one
+  ranking function) gives the word every surface shows and counts by: **dangerous** (a dangerous
+  approval), **blocking** (work stopped and no approval rule could have answered it:
+  `approvals.RuleAnswerable` is false for a dangerous call, a Bash line `SimpleCommands` refuses or
+  an edit with no path; elevated approvals are blocking too, since a rule allows them only when
+  opted in), **approval** (a low-risk call a rule could have allowed: routine) and **can wait**.
+  The queue is ordered dangerous and blocking, then approval, then can wait; within a label by
+  rank (dangerous approvals first), then the longest wait first (Fable 1.9). `counts.blocking` is
+  dangerous plus blocking, `counts.approval` the routine approvals; Now's sentence and the Inbox's
+  count line read them ("15 need you: 5 blocking, 3 approvals, 7 can wait"). The lock screen's
+  "blocking question" is `attention.QuestionLabel`, the same rule for a question (23.4). The web
+  app's `lib/attention.ts` `labelOf` falls back to the urgency for a server before R8.
 - **One number.** `counts.total` is every unsnoozed item; `blocking`, `can_wait`, `snoozed` and
   `by_project` beside it. The nav badge, the tab title, the tray, the palette's "Needs you", the
   Inbox's Open list and its count line, the Now view, the project switcher and the project pages

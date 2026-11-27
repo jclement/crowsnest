@@ -49,6 +49,71 @@ const (
 	CanWait  Urgency = "can_wait"
 )
 
+// Label is the queue's word for an item, what every surface shows and counts by (R8: "Blocking"
+// had come to mean nearly everything, so a routine `npm run test:links` approval and a force push
+// to main wore the same word). Urgency stays the fact underneath (has work stopped?); the label
+// adds whether the human was truly needed.
+type Label string
+
+// Labels, in the queue's order.
+const (
+	// LabelDangerous: a dangerous approval. Work has stopped, no rule may ever allow it.
+	LabelDangerous Label = "dangerous"
+	// LabelBlocking: work has stopped on it and no approval rule could have answered it (a
+	// question that stops its job, a terminal dialog, a job only the human can fix, an elevated or
+	// unmatchable call).
+	LabelBlocking Label = "blocking"
+	// LabelApproval: a routine approval, a call a rule could have allowed. Work waits on it, but it
+	// is the kind of tap a project rule exists to save.
+	LabelApproval Label = "approval"
+	// LabelCanWait: work carries on meanwhile (an ordinary question, a job retrying by itself, a
+	// failure to look at, a worktree ready to land).
+	LabelCanWait Label = "can_wait"
+)
+
+// band orders the labels: dangerous and blocking together (rank puts dangerous first), then
+// routine approvals, then what can wait.
+func (l Label) band() int {
+	switch l {
+	case LabelDangerous, LabelBlocking:
+		return 0
+	case LabelApproval:
+		return 1
+	}
+	return 2
+}
+
+// LabelOf is the one ranking function (R8): the label an item carries, from its urgency and, for an
+// approval, its risk and whether a rule could have allowed it (approvals.RuleAnswerable). The
+// queue's order, its counts, Now's sentence and the lock screen's "blocking question" all follow
+// it.
+func LabelOf(item Item) Label {
+	if item.Kind == KindApproval && item.Approval != nil {
+		switch {
+		case item.Approval.Risk == risk.Dangerous:
+			return LabelDangerous
+		case item.Approval.Risk == risk.Low && approvals.RuleAnswerable(item.Approval.Risk, item.Approval.ToolName, item.Approval.ToolInput):
+			return LabelApproval
+		}
+		return LabelBlocking
+	}
+	if item.Urgency == Blocking {
+		return LabelBlocking
+	}
+	return LabelCanWait
+}
+
+// QuestionLabel is the label an open question carries, given whether its job declared that it has
+// stopped on its questions: the same rule LabelOf applies to a question's item, for a surface (a
+// push) that holds the question and not the queue.
+func QuestionLabel(question questions.Question, jobStopped bool) Label {
+	urgency, _ := questionUrgency(question, nil)
+	if urgency == Blocking || jobStopped {
+		return LabelBlocking
+	}
+	return LabelCanWait
+}
+
 // Action is what resolves an item, so every surface offers the same verb.
 type Action struct {
 	Kind  string `json:"kind"`  // decide, answer, dialog, terminal, nudge, retry, restart, open
@@ -69,7 +134,8 @@ type Item struct {
 	ID      string      `json:"id"` // approval:ap_3, question:q_7, dialog:<pane>, job:j_4, agent:<name>
 	Kind    Kind        `json:"kind"`
 	Urgency Urgency     `json:"urgency"`
-	Rank    int         `json:"rank"`  // higher first within an urgency
+	Label   Label       `json:"label"` // the word the queue shows and counts by (LabelOf)
+	Rank    int         `json:"rank"`  // higher first within a label's band
 	Since   time.Time   `json:"since"` // how long the human has been the bottleneck
 	Title   string      `json:"title"`
 	Detail  string      `json:"detail,omitempty"`
@@ -183,17 +249,21 @@ func Build(src Sources, now time.Time) []Item {
 	b.addLimits()
 	b.addJobs()
 	b.addViolations()
+	for i := range b.items {
+		b.items[i].Label = LabelOf(b.items[i])
+	}
 	sortItems(b.items)
 	return b.items
 }
 
-// sortItems orders blocking before can-wait, then by rank, then the longest wait first, so the
-// item that has held work up longest is on top of its band (R4 Fable 1.9).
+// sortItems orders by the label's band (dangerous and blocking, then routine approvals, then what
+// can wait), then by rank, then the longest wait first, so the item that has held work up longest
+// is on top of its band (R4 Fable 1.9).
 func sortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, c := items[i], items[j]
-		if a.Urgency != c.Urgency {
-			return a.Urgency == Blocking
+		if a.Label.band() != c.Label.band() {
+			return a.Label.band() < c.Label.band()
 		}
 		if a.Rank != c.Rank {
 			return a.Rank > c.Rank
@@ -551,8 +621,11 @@ func (b *builder) firstSeen(id string) time.Time {
 
 // Counts is the one number (and its split) every surface shows.
 type Counts struct {
-	Total    int `json:"total"` // every item not snoozed: the badge, the title, the tray
+	Total int `json:"total"` // every item not snoozed: the badge, the title, the tray
+	// Blocking counts the dangerous and blocking labels: work stopped and only the human can move
+	// it. Approval counts routine approvals (a rule could have allowed them); CanWait the rest.
 	Blocking int `json:"blocking"`
+	Approval int `json:"approval"`
 	CanWait  int `json:"can_wait"`
 	Snoozed  int `json:"snoozed"`
 	// ByProject counts unsnoozed items per project id ("0" is unfiled work).
@@ -568,9 +641,12 @@ func Count(items []Item) Counts {
 			continue
 		}
 		counts.Total++
-		if item.Urgency == Blocking {
+		switch item.Label {
+		case LabelDangerous, LabelBlocking:
 			counts.Blocking++
-		} else {
+		case LabelApproval:
+			counts.Approval++
+		default:
 			counts.CanWait++
 		}
 		key := "0"

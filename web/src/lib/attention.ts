@@ -13,6 +13,12 @@ import type { Agent } from "./types";
 
 export type AttentionKind = "approval" | "question" | "dialog" | "job" | "agent" | "limit" | "wait";
 export type Urgency = "blocking" | "can_wait";
+/**
+ * The queue's word for an item (internal/attention LabelOf, R8): "blocking" only when work has
+ * stopped and no approval rule could have answered it; a dangerous approval its own; a routine
+ * approval (a rule could have allowed it) "approval"; the rest "can_wait".
+ */
+export type AttentionLabel = "dangerous" | "blocking" | "approval" | "can_wait";
 
 export interface ProjectRef {
   id: number;
@@ -39,6 +45,8 @@ export interface AttentionItem {
   id: string;
   kind: AttentionKind;
   urgency: Urgency;
+  /** Absent from a server before R8: labelOf falls back to the urgency. */
+  label?: AttentionLabel;
   rank: number;
   since: string;
   title: string;
@@ -61,7 +69,10 @@ export interface AttentionItem {
 
 export interface AttentionCounts {
   total: number;
+  /** Dangerous and blocking items: work stopped and only the human can move it. */
   blocking: number;
+  /** Routine approvals, a tap a rule could have saved (R8). Absent before R8. */
+  approval?: number;
   can_wait: number;
   snoozed: number;
   by_project: Record<string, number>;
@@ -75,7 +86,35 @@ export interface AttentionSnapshot {
   partial?: string[];
 }
 
-export const emptyCounts: AttentionCounts = { total: 0, blocking: 0, can_wait: 0, snoozed: 0, by_project: {} };
+export const emptyCounts: AttentionCounts = { total: 0, blocking: 0, approval: 0, can_wait: 0, snoozed: 0, by_project: {} };
+
+/** An item's label: the server's, or its urgency's from a server before R8. */
+export function labelOf(item: Pick<AttentionItem, "label" | "urgency">): AttentionLabel {
+  return item.label ?? (item.urgency === "blocking" ? "blocking" : "can_wait");
+}
+
+/** True for the labels that mean work has stopped and only the human can move it. */
+export function isBlocking(item: Pick<AttentionItem, "label" | "urgency">): boolean {
+  const label = labelOf(item);
+  return label === "blocking" || label === "dangerous";
+}
+
+/** The label in words and its tone, the same on every surface. */
+export const labelWords: Record<AttentionLabel, { text: string; tone: "danger" | "warning" | "neutral" }> = {
+  dangerous: { text: "Dangerous", tone: "danger" },
+  blocking: { text: "Blocking", tone: "danger" },
+  approval: { text: "Approval", tone: "warning" },
+  can_wait: { text: "Can wait", tone: "neutral" },
+};
+
+/** "16 need you: 4 blocking, 3 approvals, 9 can wait." without the parts that are zero (the total aside). */
+export function countsSentence(counts: AttentionCounts): string {
+  if (counts.total === 0) return "Nothing needs you.";
+  const parts = [`${counts.blocking} blocking`];
+  if (counts.approval) parts.push(`${counts.approval} ${counts.approval === 1 ? "approval" : "approvals"}`);
+  parts.push(`${counts.can_wait} can wait`);
+  return `${counts.total} need you: ${parts.join(", ")}.`;
+}
 
 /** True when data has the shape of a snapshot (the `attention` event's payload). */
 export function isSnapshot(data: unknown): data is AttentionSnapshot {
@@ -108,7 +147,7 @@ export function kindLabel(item: AttentionItem): string {
       return level === "dangerous" ? "Dangerous approval" : level === "elevated" ? "Approval (elevated)" : "Approval";
     }
     case "question":
-      return item.urgency === "blocking" ? "Blocking question" : "Question";
+      return isBlocking(item) ? "Blocking question" : "Question";
     case "dialog":
       return "Terminal dialog";
     case "agent":

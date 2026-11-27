@@ -23,7 +23,7 @@ import { cn } from "../lib/cn";
 import { relativeTime } from "../lib/format";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { notificationState, requestNotifications, type NotificationState } from "../lib/notifications";
-import { activeItems, itemLink, kindLabel, snoozedItems, whereLine, type AttentionItem } from "../lib/attention";
+import { activeItems, countsSentence, itemLink, kindLabel, labelOf, labelWords, snoozedItems, whereLine, type AttentionItem } from "../lib/attention";
 import { useAgentScreen, useApproval, useApprovals, useAttention, useAttentionAction, useFleet, useQuestions } from "../lib/queries";
 import { outcome, requester, riskLabels, type Approval } from "../lib/approvals";
 import { ApprovalCard } from "../components/approvals/ApprovalCard";
@@ -122,7 +122,7 @@ function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: st
   return (
     <>
       <p className="border-b border-border px-3 py-1.5 text-xs text-muted" data-attention-count={attention.data.counts.total}>
-        {attention.data.counts.total} need you: {attention.data.counts.blocking} blocking, {attention.data.counts.can_wait} can wait
+        {countsSentence(attention.data.counts).replace(/\.$/, "")}
       </p>
       <ul aria-label="Needs you" className="divide-y divide-border">
         {items.map((item) => (
@@ -198,7 +198,7 @@ function AttentionRow({ item, selected, onOpen }: { item: AttentionItem; selecte
         </span>
         <span className="block w-full truncate text-xs text-body">{whereLine(item)}</span>
         <span className="flex flex-wrap items-center gap-1">
-          <Chip tone={item.urgency === "blocking" ? "danger" : "neutral"}>{item.urgency === "blocking" ? "Blocking" : "Can wait"}</Chip>
+          <Chip tone={labelWords[labelOf(item)].tone}>{labelWords[labelOf(item)].text}</Chip>
           <Chip>{kindLabel(item)}</Chip>
           {item.agent && <Chip mono>{item.agent}</Chip>}
           {item.detail && <span className="min-w-0 truncate text-xs text-muted">{item.detail}</span>}

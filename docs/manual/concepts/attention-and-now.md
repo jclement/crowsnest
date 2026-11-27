@@ -23,15 +23,21 @@ waited, and what resolves it.
 
 ## Order: blocking first
 
-Two bands:
+Every item carries one of four labels, in this order:
 
-- **Blocking**: work has stopped. Approvals, dialogs, blocking questions, jobs that will not
-  recover by themselves, standing agents in trouble.
-- **Can wait**: a non-blocking question, a job retrying a usage limit by itself, a failure to look
-  at, a worktree ready to land.
+- **Dangerous**: a dangerous approval (a force push to `main`, say). Work has stopped and no rule
+  may ever allow it. Counted as blocking.
+- **Blocking**: work has stopped on it and no [approval rule](questions-approvals-dialogs.md#approvals) could have
+  answered it: a question its job stopped on, a terminal dialog, a job only you can fix, a
+  standing agent in trouble, an elevated call, or a command no rule can match.
+- **Approval**: a routine, low-risk call a rule could have allowed (`npm run test:links`). The
+  agent waits on it, but a project rule would save you the tap next time.
+- **Can wait**: work carries on meanwhile: an ordinary question, a job retrying a usage limit by
+  itself, a failure to look at, a worktree ready to land.
 
-Within a band, dangerous approvals come first, then the longest wait. The count line reads, for
-example, "15 need you: 9 blocking, 6 can wait".
+Within a label, dangerous approvals come first, then the longest wait. The count line reads, for
+example, "15 need you: 5 blocking, 3 approvals, 7 can wait". A notification on your lock screen
+says "blocking question" by the same rule.
 
 ## Snooze and dismiss
 

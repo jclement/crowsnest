@@ -91,7 +91,7 @@ func TestServicePublishesOnChange(t *testing.T) {
 	w.mu.Unlock()
 	events.Publish(hub.Event{Type: "approval", Data: nil})
 	second := next(t, sub)
-	if second.Counts.Total != 1 || second.Counts.Blocking != 1 || second.Revision != 2 || second.Items[0].ID != "approval:ap_1" {
+	if second.Counts.Total != 1 || second.Counts.Approval != 1 || second.Revision != 2 || second.Items[0].ID != "approval:ap_1" {
 		t.Fatalf("second snapshot %+v", second)
 	}
 	events.Publish(hub.Event{Type: "fleet", Data: nil}) // nothing changed: no event

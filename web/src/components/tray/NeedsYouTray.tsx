@@ -24,7 +24,10 @@ import { cn } from "../../lib/cn";
 import { DESKTOP_QUERY, LARGE_QUERY } from "../../lib/media";
 import { relativeTime } from "../../lib/format";
 import { FOCUS_TRAY_EVENT, trayTitle, type TrayItem } from "../../lib/needsYou";
-import { itemLink, kindLabel, plainPreview, whereLine } from "../../lib/attention";
+import { isBlocking, itemLink, kindLabel, labelOf, labelWords, plainPreview, whereLine } from "../../lib/attention";
+
+/** The label's ink on a row. */
+const labelTextClass = { danger: "text-danger", warning: "text-warning", neutral: "text-body" } as const;
 import { useSnooze, useTrayItems } from "./useTrayItems";
 import { useAgentScreen, useAnswerQuestion } from "../../lib/queries";
 import type { Question } from "../../lib/questions";
@@ -283,7 +286,7 @@ export function TrayRow({
   return (
     // Blocking rows carry an edge in the needs-you colour (the word says it too): the eye finds
     // what stops an agent before what can wait.
-    <li className={cn(fresh && "animate-tray-pulse", item.item.urgency === "blocking" && "shadow-[inset_2px_0_0_var(--color-status-blocked)]")} data-tray-item={item.id}>
+    <li className={cn(fresh && "animate-tray-pulse", isBlocking(item.item) && "shadow-[inset_2px_0_0_var(--color-status-blocked)]")} data-tray-item={item.id}>
       <div className="flex items-start gap-1 pr-1">
         <button
           type="button"
@@ -301,7 +304,9 @@ export function TrayRow({
                 {whereLine(item.item)}
               </span>
               {" · "}
-              <span className={cn("font-medium", item.item.urgency === "blocking" ? "text-danger" : "text-body")}>{item.item.urgency === "blocking" ? "Blocking" : "Can wait"}</span>
+              <span className={cn("font-medium", labelTextClass[labelWords[labelOf(item.item)].tone])} data-label={labelOf(item.item)}>
+                {labelWords[labelOf(item.item)].text}
+              </span>
               {" · "}
               {kindLabel(item.item)}
               {who && ` · ${who}`}

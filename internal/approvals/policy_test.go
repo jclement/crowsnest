@@ -560,3 +560,30 @@ func TestEditRuleDoesNotFollowALinkOut(t *testing.T) {
 		t.Fatalf("a new file inside internal/: %s", got.Status)
 	}
 }
+
+// RuleAnswerable: whether any rule could ever allow a call (R8's "blocking" test).
+func TestRuleAnswerable(t *testing.T) {
+	cases := []struct {
+		name  string
+		level risk.Level
+		tool  string
+		input string
+		want  bool
+	}{
+		{"a plain command", risk.Low, "Bash", `{"command":"npm run test:links"}`, true},
+		{"a chain of plain commands", risk.Low, "Bash", `{"command":"go vet ./... && go test ./..."}`, true},
+		{"command substitution", risk.Low, "Bash", `{"command":"echo $(whoami)"}`, false},
+		{"a redirect to a file", risk.Low, "Bash", `{"command":"echo hi > out.txt"}`, false},
+		{"eval", risk.Low, "Bash", `{"command":"eval ls"}`, false},
+		{"an elevated plain command (a rule may opt in)", risk.Elevated, "Bash", `{"command":"git push origin feature"}`, true},
+		{"dangerous, never", risk.Dangerous, "Bash", `{"command":"git push --force origin main"}`, false},
+		{"an edit", risk.Low, "Edit", `{"file_path":"/src/app.go"}`, true},
+		{"an edit with no path", risk.Low, "Edit", `{}`, false},
+		{"another tool", risk.Low, "WebFetch", `{"url":"https://example.com"}`, true},
+	}
+	for _, c := range cases {
+		if got := RuleAnswerable(c.level, c.tool, []byte(c.input)); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+}

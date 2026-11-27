@@ -22,7 +22,8 @@ var crow = projects.Project{ID: 1, Slug: "crowsnest", Name: "Crowsnest"}
 var site = projects.Project{ID: 2, Slug: "website", Name: "Website"}
 
 func approval(id, pane, job string, level risk.Level, at time.Duration) approvals.Approval {
-	return approvals.Approval{ID: id, PaneID: pane, JobID: job, Risk: level, Status: approvals.StatusPending, CreatedAt: ago(at), Summary: "Bash: " + id}
+	return approvals.Approval{ID: id, PaneID: pane, JobID: job, Risk: level, Status: approvals.StatusPending, CreatedAt: ago(at), Summary: "Bash: " + id,
+		ToolName: "Bash", ToolInput: []byte(`{"command":"npm run test:links"}`)}
 }
 
 func question(id, pane, job string, urgency questions.Urgency, at time.Duration) questions.Question {
@@ -272,7 +273,9 @@ func TestBuildOrdersByUrgencyRankAndWait(t *testing.T) {
 		},
 	}
 	got := ids(Build(src, testNow))
-	want := []string{"approval:ap_danger", "question:q_block", "approval:ap_low", "job:j_2", "question:q_old", "question:q_new", "job:j_1"}
+	// Dangerous and blocking first, then the routine approval (a rule could have allowed it: R8),
+	// then what can wait.
+	want := []string{"approval:ap_danger", "question:q_block", "job:j_2", "approval:ap_low", "question:q_old", "question:q_new", "job:j_1"}
 	if !equal(got, want) {
 		t.Fatalf("got  %v\nwant %v", got, want)
 	}
@@ -282,15 +285,17 @@ func TestBuildOrdersByUrgencyRankAndWait(t *testing.T) {
 func TestCount(t *testing.T) {
 	until := testNow.Add(time.Minute)
 	items := []Item{
-		{ID: "a", Urgency: Blocking, Project: &ProjectRef{ID: 1}},
-		{ID: "b", Urgency: CanWait},
-		{ID: "c", Urgency: Blocking, SnoozedUntil: &until},
+		{ID: "a", Urgency: Blocking, Label: LabelBlocking, Project: &ProjectRef{ID: 1}},
+		{ID: "b", Urgency: CanWait, Label: LabelCanWait},
+		{ID: "c", Urgency: Blocking, Label: LabelBlocking, SnoozedUntil: &until},
+		{ID: "d", Urgency: Blocking, Label: LabelDangerous},
+		{ID: "e", Urgency: Blocking, Label: LabelApproval},
 	}
 	counts := Count(items)
-	if counts.Total != 2 || counts.Blocking != 1 || counts.CanWait != 1 || counts.Snoozed != 1 {
+	if counts.Total != 4 || counts.Blocking != 2 || counts.Approval != 1 || counts.CanWait != 1 || counts.Snoozed != 1 {
 		t.Fatalf("counts %+v", counts)
 	}
-	if counts.ByProject["1"] != 1 || counts.ByProject["0"] != 1 {
+	if counts.ByProject["1"] != 1 || counts.ByProject["0"] != 3 {
 		t.Fatalf("by project %+v", counts.ByProject)
 	}
 }
@@ -318,6 +323,62 @@ func TestQuestionUrgency(t *testing.T) {
 	for _, tc := range cases {
 		if got, _ := questionUrgency(tc.q, tc.job); got != tc.want {
 			t.Errorf("%s: got %s want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+// LabelOf (R8): "blocking" only when work has stopped and no approval rule could have answered it.
+func TestLabelOf(t *testing.T) {
+	low := approval("ap_1", "w1:p1", "", risk.Low, time.Minute)
+	unmatchable := approval("ap_2", "w1:p2", "", risk.Low, time.Minute)
+	unmatchable.ToolInput = []byte(`{"command":"echo $(cat secrets)"}`)
+	elevated := approval("ap_3", "w1:p3", "", risk.Elevated, time.Minute)
+	dangerous := approval("ap_4", "w1:p4", "", risk.Dangerous, time.Minute)
+	edit := approval("ap_5", "w1:p5", "", risk.Low, time.Minute)
+	edit.ToolName, edit.ToolInput = "Edit", []byte(`{"file_path":"/src/app.go"}`)
+	cases := []struct {
+		name string
+		item Item
+		want Label
+	}{
+		{"a routine low-risk call a rule could allow", Item{Kind: KindApproval, Urgency: Blocking, Approval: &low}, LabelApproval},
+		{"a low-risk edit a rule could allow", Item{Kind: KindApproval, Urgency: Blocking, Approval: &edit}, LabelApproval},
+		{"a low-risk line no rule can match", Item{Kind: KindApproval, Urgency: Blocking, Approval: &unmatchable}, LabelBlocking},
+		{"an elevated call (rules allow it only when opted in)", Item{Kind: KindApproval, Urgency: Blocking, Approval: &elevated}, LabelBlocking},
+		{"a dangerous call, never allowed by a rule", Item{Kind: KindApproval, Urgency: Blocking, Approval: &dangerous}, LabelDangerous},
+		{"a question that stops its work", Item{Kind: KindQuestion, Urgency: Blocking}, LabelBlocking},
+		{"an ordinary question", Item{Kind: KindQuestion, Urgency: CanWait}, LabelCanWait},
+		{"a terminal dialog", Item{Kind: KindDialog, Urgency: Blocking}, LabelBlocking},
+		{"a job only the human can fix", Item{Kind: KindJob, Urgency: Blocking}, LabelBlocking},
+		{"a worktree ready to land", Item{Kind: KindJob, Urgency: CanWait}, LabelCanWait},
+		{"a usage limit", Item{Kind: KindLimit, Urgency: CanWait}, LabelCanWait},
+	}
+	for _, c := range cases {
+		if got := LabelOf(c.item); got != c.want {
+			t.Errorf("%s: %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+// The push's "blocking question" and the queue agree (QuestionLabel is LabelOf for a question).
+func TestQuestionLabelAgreesWithTheQueue(t *testing.T) {
+	waiting := job("j_1", 1, "w9:p9", jobs.StateNeedsYou, false, jobs.CauseQuestions)
+	for _, q := range []questions.Question{
+		question("q_1", "w1:p1", "", questions.UrgencyBlocking, time.Minute),
+		question("q_2", "w1:p2", "", questions.UrgencyNormal, time.Minute),
+		question("q_3", "w1:p3", "", questions.UrgencyLow, time.Minute),
+		question("q_4", "w9:p9", "j_1", questions.UrgencyNormal, time.Minute),
+	} {
+		items := Build(Sources{Questions: []questions.Question{q}, Jobs: []jobs.Job{waiting}}, testNow)
+		var item Item
+		for _, candidate := range items {
+			if candidate.ID == "question:"+q.ID {
+				item = candidate
+			}
+		}
+		stopped := q.JobID == "j_1"
+		if got := QuestionLabel(q, stopped); got != item.Label {
+			t.Errorf("%s: push says %s, the queue %s", q.ID, got, item.Label)
 		}
 	}
 }

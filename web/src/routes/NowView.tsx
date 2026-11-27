@@ -84,6 +84,11 @@ function NowHeader() {
                 <StateMark state="needs" className="mx-0.5 align-[-1px]" />
               </span>
               <span className="font-mono tabular-nums text-heading">{counts.blocking}</span> blocking,{" "}
+              {!!counts.approval && (
+                <>
+                  <span className="font-mono tabular-nums text-heading">{counts.approval}</span> {counts.approval === 1 ? "approval" : "approvals"},{" "}
+                </>
+              )}
               <span className="font-mono tabular-nums text-heading">{counts.can_wait}</span> can wait.
             </>
           )}

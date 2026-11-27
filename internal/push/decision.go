@@ -78,7 +78,7 @@ func (w Where) jobLead() string {
 type QuestionDetails struct {
 	Kind      string
 	Multi     bool
-	Urgency   string
+	Urgency   string // the queue's label for it (attention.QuestionLabel): "blocking" or "can_wait"
 	Recommend string // the recommended option's key
 	Options   []NoticeAction
 	Context   map[string]string

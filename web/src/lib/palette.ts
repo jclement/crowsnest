@@ -6,7 +6,7 @@
 // Sources are the queries the app already keeps live through the event stream (jobs, open
 // questions, the fleet, the orchestrator's status), so the palette never asks the server to search.
 import { requester, riskLabels, type Approval } from "./approvals";
-import { itemLink, kindLabel, whereLine, type AttentionItem } from "./attention";
+import { isBlocking, itemLink, kindLabel, whereLine, type AttentionItem } from "./attention";
 import { chipText } from "./spend";
 import { fuzzyMatch, PERFECT_CHAR_SCORE, queryTokens } from "./fuzzy";
 import { relaunchConfirmations } from "./conversation";
@@ -425,7 +425,7 @@ function needsItem(entry: AttentionItem): PaletteItem | null {
     subtitle: [whereLine(entry), entry.detail ?? ""].filter(Boolean).join(" · "),
     keywords: [entry.id, entry.kind, entry.job_id ?? "", entry.agent ?? "", entry.project?.slug ?? "", kindLabel(entry)].filter(Boolean),
     icon: entry.kind === "job" ? "jobs" : "dialog",
-    chip: { label: kindLabel(entry), tone: entry.urgency === "blocking" ? "danger" : "warning" },
+    chip: { label: kindLabel(entry), tone: isBlocking(entry) ? "danger" : "warning" },
     command: open,
     verb: "Open",
     actions,

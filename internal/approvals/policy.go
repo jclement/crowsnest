@@ -493,6 +493,33 @@ func toolMatches(pattern, tool string) bool {
 	return pattern == tool
 }
 
+// RuleAnswerable reports whether any rule the human could keep would ever allow this call: never a
+// dangerous one (the risk table wins), never a Bash line no rule can match (command or process
+// substitution, eval, a redirect to a file, bidi controls: SimpleCommands refuses it), never an
+// edit with no path; anything else a rule of its kind could match. The attention queue uses it to
+// keep the word "blocking" for what truly needs the human (R8): a call a rule could have allowed
+// is routine, the kind of tap a rule exists to save.
+func RuleAnswerable(level risk.Level, tool string, input json.RawMessage) bool {
+	if level == risk.Dangerous {
+		return false
+	}
+	var fields map[string]any
+	_ = json.Unmarshal(input, &fields)
+	switch KindFor(tool) {
+	case KindBash:
+		command, _ := fields["command"].(string)
+		_, ok := SimpleCommands(command)
+		return ok
+	case KindEdit:
+		path, _ := fields["file_path"].(string)
+		if path == "" {
+			path, _ = fields["notebook_path"].(string)
+		}
+		return path != ""
+	}
+	return tool != ""
+}
+
 // Suggest is the rule "Allow and remember for this job" proposes for a call: for Bash the first
 // two words of its first command plus ` *` (the one word alone when there is only one); for an
 // edit the file's directory relative to root; otherwise the tool's name.

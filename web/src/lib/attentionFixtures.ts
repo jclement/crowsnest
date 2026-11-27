@@ -18,7 +18,9 @@ export function fixtureSnapshot(approvals: Approval[], questions: Question[]): A
   for (const approval of approvals) {
     if (approval.status !== "pending") continue;
     items.push({
-      id: `approval:${approval.id}`, kind: "approval", urgency: "blocking", rank: riskRank[approval.risk], since: approval.created_at,
+      // The label as LabelOf gives it, simplified: a low-risk call is taken as one a rule could allow.
+      id: `approval:${approval.id}`, kind: "approval", urgency: "blocking", label: approval.risk === "dangerous" ? "dangerous" : approval.risk === "low" ? "approval" : "blocking",
+      rank: riskRank[approval.risk], since: approval.created_at,
       title: approval.summary, detail: `${approval.risk} risk`, project: crowsnest, job_id: approval.job_id, job_title: approval.job_id ? `Job ${approval.job_id}` : undefined,
       agent: approval.agent_name, pane_id: approval.pane_id, action: { kind: "decide", label: "Allow or deny" }, approval,
     });
@@ -27,16 +29,18 @@ export function fixtureSnapshot(approvals: Approval[], questions: Question[]): A
     if (question.status !== "open" || question.kind === "notice") continue;
     const blocking = question.urgency === "blocking";
     items.push({
-      id: `question:${question.id}`, kind: "question", urgency: blocking ? "blocking" : "can_wait", rank: blocking ? 50 : question.urgency === "low" ? 20 : 30,
+      id: `question:${question.id}`, kind: "question", urgency: blocking ? "blocking" : "can_wait", label: blocking ? "blocking" : "can_wait", rank: blocking ? 50 : question.urgency === "low" ? 20 : 30,
       since: question.created_at, title: question.title, project: question.context.repo === "website" ? website : crowsnest,
       job_id: question.job_id, pane_id: question.source_pane, action: { kind: "answer", label: "Answer" }, question,
     });
   }
-  items.sort((a, b) => (a.urgency === b.urgency ? b.rank - a.rank || a.since.localeCompare(b.since) : a.urgency === "blocking" ? -1 : 1));
-  const blocking = items.filter((item) => item.urgency === "blocking").length;
+  const band = (item: AttentionItem) => (item.label === "approval" ? 1 : item.label === "can_wait" ? 2 : 0);
+  items.sort((a, b) => band(a) - band(b) || b.rank - a.rank || a.since.localeCompare(b.since));
+  const blocking = items.filter((item) => band(item) === 0).length;
+  const approvalCount = items.filter((item) => band(item) === 1).length;
   const byProject: Record<string, number> = {};
   for (const item of items) byProject[String(item.project?.id ?? 0)] = (byProject[String(item.project?.id ?? 0)] ?? 0) + 1;
-  return { items, counts: { total: items.length, blocking, can_wait: items.length - blocking, snoozed: 0, by_project: byProject }, revision: 1, at: new Date().toISOString() };
+  return { items, counts: { total: items.length, blocking, approval: approvalCount, can_wait: items.length - blocking - approvalCount, snoozed: 0, by_project: byProject }, revision: 1, at: new Date().toISOString() };
 }
 
 /** The Now view's rows for fixtures mode. */

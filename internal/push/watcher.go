@@ -19,6 +19,7 @@ package push
 
 import (
 	"context"
+	"github.com/jclement/crowsnest/internal/attention"
 	"log/slog"
 	"sync"
 	"time"
@@ -173,7 +174,9 @@ func (w *Watcher) QuestionAsked(question questions.Question) {
 	}
 	ctx := context.Background()
 	notice = DecorateQuestion(notice, question.ID, question.Title, QuestionDetails{
-		Kind: string(question.Kind), Multi: question.Multi, Urgency: string(question.Urgency), Recommend: question.Recommend,
+		// The lock screen says "blocking question" by the queue's own rule (attention.QuestionLabel,
+		// R8), so a push and the Inbox never disagree about what blocks.
+		Kind: string(question.Kind), Multi: question.Multi, Urgency: string(attention.QuestionLabel(question, false)), Recommend: question.Recommend,
 		Options: options, Context: question.Context, HasFiles: len(question.Files) > 0 || question.FileCount > 0, BodyChars: len(question.BodyMD),
 	}, w.where(ctx, question.JobID, question.SourcePane))
 	w.notify(ctx, notice)
