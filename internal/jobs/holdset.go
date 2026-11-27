@@ -352,7 +352,7 @@ func agentGateLocked(r store.JobRecord, q store.JobQuestionSummary, verb AgentVe
 func (s *Service) agentGateByIDLocked(ctx context.Context, id int64, verb AgentVerb) error {
 	r, err := s.opts.Store.GetJob(ctx, id)
 	if err != nil {
-		return nil // the caller's own lookups report a missing job
+		return fmt.Errorf("reading job %s for its holds: %w", FormatID(id), err) // fail closed
 	}
 	q, err := s.opts.Store.SummarizeJobQuestions(ctx, FormatID(id))
 	if err != nil {
