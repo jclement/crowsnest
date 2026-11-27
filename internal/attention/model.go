@@ -128,6 +128,8 @@ const (
 	rankJobRecover   = 15
 	rankJobFailed    = 10
 	rankJobHeldStart = 12
+	rankReviewObject = 36
+	rankReadyToLand  = 25
 )
 
 // FailedWindow is how long a failed job stays in the queue (unless dismissed): long enough to be
@@ -351,6 +353,10 @@ func (b *builder) addJobs() {
 // jobDisposition says whether a job is an item by itself, and how urgent.
 func (b *builder) jobDisposition(job jobs.Job) (Urgency, int, Action, bool) {
 	switch {
+	case readyToLand(job):
+		return CanWait, rankReadyToLand, Action{Kind: "land", Label: "Review and land"}, true
+	case job.State == jobs.StateNeedsYou && job.Cause == jobs.CauseReview:
+		return Blocking, rankReviewObject, Action{Kind: "land", Label: "Land, message the builder or discard"}, true
 	case job.State == jobs.StateFailed:
 		recent := job.SettledAt != nil && b.now.Sub(*job.SettledAt) < FailedWindow
 		if !recent || b.src.Dismissed["job:"+job.ID] {
@@ -381,8 +387,18 @@ func (b *builder) jobDisposition(job jobs.Job) (Urgency, int, Action, bool) {
 	return "", 0, Action{}, false
 }
 
+// readyToLand: a finished builder's worktree waits to be merged, opened as a pull request or
+// discarded (DESIGN.md 6.11). It stays in the queue until the human lands or discards it.
+func readyToLand(job jobs.Job) bool {
+	return job.State == jobs.StateDone && job.WorktreeBranch != "" && job.ReviewOf == "" && job.LandState == "" && job.TornDownAt == nil
+}
+
 func jobDetail(job jobs.Job) string {
 	switch {
+	case readyToLand(job):
+		return "Ready to land: " + job.WorktreeBranch
+	case job.State == jobs.StateNeedsYou && job.Cause == jobs.CauseReview:
+		return "Reviewer still objects: " + job.CauseDetail
 	case job.State == jobs.StateFailed:
 		return "Failed: " + job.FailReason
 	case job.State == jobs.StateQueued && job.Cause == jobs.CauseApproval:

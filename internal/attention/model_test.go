@@ -172,6 +172,32 @@ func TestBuildDeduplicates(t *testing.T) {
 			want: []string{"dialog:w0:p0"},
 		},
 		{
+			name: "a builder's finished worktree is ready to land until it is landed; a reviewer's done job is not",
+			src: Sources{Jobs: []jobs.Job{
+				func() jobs.Job {
+					j := job("j_20", 1, "", jobs.StateDone, false, "")
+					j.WorktreeBranch = "job/20-x"
+					return j
+				}(),
+				func() jobs.Job {
+					j := job("j_21", 1, "", jobs.StateDone, false, "")
+					j.WorktreeBranch, j.LandState = "job/21-x", "merged"
+					return j
+				}(),
+				func() jobs.Job {
+					j := job("j_22", 1, "", jobs.StateDone, false, "")
+					j.WorktreeBranch, j.ReviewOf = "job/20-x", "j_20"
+					return j
+				}(),
+			}},
+			want: []string{"job:j_20"},
+		},
+		{
+			name: "a reviewer that still objects after the last round puts the job in front of the human",
+			src:  Sources{Jobs: []jobs.Job{job("j_23", 1, "", jobs.StateNeedsYou, false, jobs.CauseReview)}},
+			want: []string{"job:j_23"},
+		},
+		{
 			name: "a lead that needs its terminal is an item",
 			src: Sources{
 				Projects: []projects.Project{crow},

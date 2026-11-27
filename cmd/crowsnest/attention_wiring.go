@@ -61,8 +61,9 @@ func startAttention(ctx context.Context, deps attentionDeps) (*attention.Service
 			if err != nil {
 				return nil, err
 			}
-			failed, err := deps.jobs.List(ctx, []jobs.State{jobs.StateFailed})
-			return append(live, failed...), err
+			// Failed jobs (recent ones count) and done ones (a worktree waiting to be landed counts).
+			settled, err := deps.jobs.List(ctx, []jobs.State{jobs.StateFailed, jobs.StateDone})
+			return append(live, settled...), err
 		},
 		Standing: standing,
 		Projects: listProjects,

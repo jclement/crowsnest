@@ -21,7 +21,7 @@ export interface ProjectRef {
 }
 
 export interface AttentionAction {
-  kind: "decide" | "answer" | "dialog" | "terminal" | "nudge" | "retry" | "restart" | "open";
+  kind: "decide" | "answer" | "dialog" | "terminal" | "nudge" | "retry" | "restart" | "open" | "land";
   label: string;
 }
 
@@ -112,6 +112,7 @@ export function kindLabel(item: AttentionItem): string {
     case "agent":
       return item.standing?.name === "orchestrator" ? "Orchestrator" : "Lead";
     case "job":
+      if (item.action.kind === "land") return item.job?.state === "done" ? "Ready to land" : "Reviewer objects";
       if (item.job?.state === "failed") return "Failed job";
       if (item.job?.state === "queued") return "Waiting to start";
       return item.job?.stuck ? "Stuck job" : "Job needs you";
