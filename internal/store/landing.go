@@ -80,6 +80,25 @@ func (s *Store) ListUnlandedWorktrees(ctx context.Context, limit int) ([]JobReco
 		AND torn_down_at = 0 AND review_of = 0 ORDER BY id LIMIT ?`, limit)
 }
 
+// ListLandRequests returns jobs holding an agent's land request (land_request set), oldest first:
+// the reconciler's list (R5-C09). There are few: one request per job at a time.
+func (s *Store) ListLandRequests(ctx context.Context, limit int) ([]JobRecord, error) {
+	return s.queryJobs(ctx, jobSelect+` WHERE land_request != '' ORDER BY id LIMIT ?`, limit)
+}
+
+// FindLandQuestion returns the newest question whose context binds it to job jobID's land
+// request with token, or ErrNotFound. It repairs a request whose question id was never stored.
+func (s *Store) FindLandQuestion(ctx context.Context, jobID, token string) (QuestionRecord, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+questionColumns+` FROM questions
+		WHERE json_extract(context_json, '$.land_for') = ? AND json_extract(context_json, '$.land_token') = ?
+		ORDER BY id DESC LIMIT 1`, jobID, token)
+	q, err := scanQuestion(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return QuestionRecord{}, ErrNotFound
+	}
+	return q, err
+}
+
 // JobsSettledBetween returns jobs that settled in [from, to), oldest first: the digest's facts.
 func (s *Store) JobsSettledBetween(ctx context.Context, from, to time.Time) ([]JobRecord, error) {
 	return s.queryJobs(ctx, jobSelect+` WHERE settled_at >= ? AND settled_at < ? ORDER BY settled_at, id LIMIT 500`,

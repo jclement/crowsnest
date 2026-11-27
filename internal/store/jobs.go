@@ -94,6 +94,9 @@ type JobRecord struct {
 	LandRequest    string
 	LandQuestionID int64
 	StartAnyway    bool
+	// LandToken binds a land request to its question (migration 0016, R5-C01).
+	LandToken       string
+	LandRequestedAt time.Time
 }
 
 // JobEventRecord is one row of job_events.
@@ -143,6 +146,7 @@ func jobColumns(r *JobRecord) []column {
 		textCol("land_state", &r.LandState), textCol("land_detail", &r.LandDetail), timeCol("landed_at", &r.LandedAt),
 		timeCol("torn_down_at", &r.TornDownAt), textCol("land_request", &r.LandRequest),
 		int64Col("land_question_id", &r.LandQuestionID), boolCol("start_anyway", &r.StartAnyway),
+		textCol("land_token", &r.LandToken), timeCol("land_requested_at", &r.LandRequestedAt),
 	}
 	return cols
 }

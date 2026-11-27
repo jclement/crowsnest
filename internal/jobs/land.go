@@ -13,7 +13,6 @@ package jobs
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -22,7 +21,6 @@ import (
 
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/landing"
-	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -397,7 +395,8 @@ func (s *Service) recordLanded(ctx context.Context, id, state, detail, by string
 				r.Cause, r.CauseDetail = "", ""
 			}
 		}
-		r.LandState, r.LandDetail, r.LandedAt, r.LandRequest = state, oneLine(detail, 500), s.opts.Now(), ""
+		r.LandState, r.LandDetail, r.LandedAt = state, oneLine(detail, 500), s.opts.Now()
+		clearLandRequest(r) // a request still waiting is moot; its question's token now matches nothing
 		c.event(EventLand, landWord(state)+" by "+firstNonEmptyDir(by, "you")+": "+oneLine(detail, 200), map[string]any{"state": state})
 		return nil
 	})
@@ -568,55 +567,6 @@ func (s *Service) Sweep(ctx context.Context) ([]SweepItem, error) {
 	return out, nil
 }
 
-// ---- A lead's request ----------------------------------------------------------------------
-
-// ErrLandRequested is returned to an agent: its request is with the human.
-var ErrLandRequested = errors.New("requested")
-
-// RequestLand turns an agent's land request into a question for the human. Only their Allow runs
-// it (LandRequestSettled); the agent gets the outcome typed back like any answer.
-func (s *Service) RequestLand(ctx context.Context, id, action string, caller questions.Caller, reason string) (questions.Question, error) {
-	if !ValidLandAction(action) {
-		return questions.Question{}, invalid("unknown land action %q: give merge, pr or discard", action)
-	}
-	if s.opts.AskHuman == nil {
-		return questions.Question{}, invalid("land requests are not available on this server")
-	}
-	detail, err := s.Get(ctx, id)
-	if err != nil {
-		return questions.Question{}, err
-	}
-	job := detail.Job
-	if why := s.landBlocked(job, action, nil); why != "" {
-		return questions.Question{}, invalid("%s", why)
-	}
-	if job.LandRequest != "" {
-		return questions.Question{}, invalid("a land request for job %s is already waiting for the human", job.ID)
-	}
-	body := fmt.Sprintf("An agent asks to **%s** job %s, %q.\n\n%s\n\n", landVerb(action), job.ID, job.Title,
-		confirmText(job, action, firstNonEmptyDir(s.landing().MergeMode, landing.ModeMerge)))
-	if reason = strings.TrimSpace(reason); reason != "" {
-		body += "Its reason (written by the agent, not crowsnest):\n\n" + indent(oneLine(reason, 600)) + "\n\n"
-	}
-	body += "Open the job's Review tab to see the change before you allow it."
-	question, err := s.opts.AskHuman(ctx, questions.AskInput{
-		Title: fmt.Sprintf("Land job %s: %s?", job.ID, landVerb(action)), BodyMD: body, Kind: "confirm", Urgency: "normal",
-		Options: []questions.Option{{Key: "allow", Label: "Allow: " + landVerb(action)}, {Key: "deny", Label: "Deny"}},
-		Context: map[string]string{"land_for": job.ID, "land_action": action},
-	}, caller)
-	if err != nil {
-		return questions.Question{}, err
-	}
-	qid, _ := strings.CutPrefix(question.ID, "q_")
-	numeric, _ := parseInt64(qid)
-	_, _ = s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
-		r.LandRequest, r.LandQuestionID = action, numeric
-		c.event(EventLand, "An agent asked to "+landVerb(action)+" it; waiting for you ("+question.ID+")", map[string]any{"question": question.ID})
-		return nil
-	})
-	return question, nil
-}
-
 func landVerb(action string) string {
 	switch action {
 	case LandMerge:
@@ -625,30 +575,6 @@ func landVerb(action string) string {
 		return "push it and open a pull request"
 	default:
 		return "discard it"
-	}
-}
-
-// LandRequestSettled applies the human's answer to a land request: Allow (with no note: a note
-// is a condition crowsnest cannot follow, as for delegation) runs it; anything else drops it.
-func (s *Service) LandRequestSettled(ctx context.Context, jobID string, question questions.Question) {
-	detail, err := s.Get(ctx, jobID)
-	if err != nil || detail.LandRequest == "" {
-		return
-	}
-	action := detail.LandRequest
-	allowed := question.Status == "answered" && answerKey(question.AnswerValue) == "allow" && strings.TrimSpace(question.AnswerNote) == ""
-	_, _ = s.mutate(ctx, jobID, func(r *store.JobRecord, c *change) error {
-		r.LandRequest, r.LandQuestionID = "", 0
-		if !allowed {
-			c.event(EventLand, "You did not allow the request to "+landVerb(action), nil)
-		}
-		return nil
-	})
-	if !allowed {
-		return
-	}
-	if _, err := s.Land(ctx, jobID, action, "you, as an agent asked"); err != nil {
-		_ = s.Journal(ctx, jobID, EventLand, "The land you allowed was refused: "+oneLine(err.Error(), 240), nil)
 	}
 }
 
@@ -664,10 +590,4 @@ func answerKey(value any) string {
 		}
 	}
 	return ""
-}
-
-func parseInt64(text string) (int64, error) {
-	var n int64
-	_, err := fmt.Sscan(text, &n)
-	return n, err
 }

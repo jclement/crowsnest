@@ -6,10 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -294,47 +292,6 @@ func TestLandRefusals(t *testing.T) {
 			t.Fatalf("discard: %+v %v", result, err)
 		}
 	})
-}
-
-// TestLandRequestBecomesApproval: an agent's request is a question; only the human's Allow lands.
-func TestLandRequestBecomesApproval(t *testing.T) {
-	var mu sync.Mutex
-	var asked []questions.AskInput
-	r := newLandRig(t, LandingOptions{}, func(o *Options) {
-		o.AskHuman = func(_ context.Context, input questions.AskInput, _ questions.Caller) (questions.Question, error) {
-			mu.Lock()
-			defer mu.Unlock()
-			asked = append(asked, input)
-			return questions.Question{ID: "q_9"}, nil
-		}
-	})
-	ctx := context.Background()
-	repo := landRepo(t)
-	job := landedJob(t, r, repo)
-	if _, err := r.svc.RequestLand(ctx, job.ID, LandMerge, questions.Caller{}, "tests pass"); err != nil {
-		t.Fatal(err)
-	}
-	if len(asked) != 1 || asked[0].Context["land_for"] != job.ID || !strings.Contains(asked[0].BodyMD, "Merge job/1") {
-		t.Fatalf("asked %+v", asked)
-	}
-	if d := r.get(job.ID); d.LandRequest != LandMerge || d.LandState != "" {
-		t.Fatal("the request landed by itself")
-	}
-	if _, err := r.svc.RequestLand(ctx, job.ID, LandMerge, questions.Caller{}, ""); err == nil {
-		t.Fatal("a second request while one waits must be refused")
-	}
-	// Allow with a note is a condition: nothing runs.
-	r.svc.LandRequestSettled(ctx, job.ID, questions.Question{Status: "answered", AnswerValue: "allow", AnswerNote: "only after lunch"})
-	if d := r.get(job.ID); d.LandState != "" || d.LandRequest != "" {
-		t.Fatalf("a qualified allow landed: %+v", d.Job)
-	}
-	if _, err := r.svc.RequestLand(ctx, job.ID, LandMerge, questions.Caller{}, ""); err != nil {
-		t.Fatal(err)
-	}
-	r.svc.LandRequestSettled(ctx, job.ID, questions.Question{Status: "answered", AnswerValue: "allow"})
-	if d := r.get(job.ID); d.LandState != LandedMerged || d.TornDownAt == nil {
-		t.Fatalf("allowed request did not land: %+v", d.Job)
-	}
 }
 
 // storeRecord is store.JobRecord, named here to keep the defaults table short.

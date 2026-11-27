@@ -655,3 +655,27 @@ func TestBrokenBodyIsRetryable(t *testing.T) {
 		t.Fatalf("a broken body is not retryable: %v", err)
 	}
 }
+
+// TestAskRefusesReservedContext is R5-S1: an agent's own question may not carry the context keys
+// that make crowsnest act on an answer (a land, a held job, a task review), in any spelling.
+func TestAskRefusesReservedContext(t *testing.T) {
+	f := startSocket(t)
+	ctx := context.Background()
+	client := NewClient(f.socket, f.token(t, "w1:p2", "j_9"))
+	for _, key := range []string{"land_for", "land_action", "land_token", "approval_for", "requested_by", "task_review", "task_hash", "crowsnest_gate", "Land_For", " approval_for "} {
+		_, err := client.Ask(ctx, questions.AskInput{
+			Title: "Tests pass. Continue with the docs?", Kind: questions.KindConfirm, Recommend: "allow",
+			Options: []questions.Option{{Key: "allow", Label: "Yes, continue"}, {Key: "deny", Label: "No"}},
+			Context: map[string]string{key: "j_5"},
+		})
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.Status != 400 || !strings.Contains(apiErr.Message, "reserved") {
+			t.Fatalf("context key %q: want a 400 refusal, got %v", key, err)
+		}
+	}
+	fresh := NewClient(f.socket, f.token(t, "w1:p3", "j_10")) // the refusals above spent the first pane's quota
+	if _, err := fresh.Ask(ctx, questions.AskInput{Title: "Ship?", Kind: questions.KindConfirm, Recommend: "yes",
+		Context: map[string]string{"ticket": "42"}}); err != nil {
+		t.Fatalf("an ordinary context key must still pass: %v", err)
+	}
+}

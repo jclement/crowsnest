@@ -330,6 +330,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, questions.MaxRequestBytes, &input) {
 		return
 	}
+	// Every agent ask arrives here (the CLI and the MCP tool both use this route): the keys that
+	// mark crowsnest's own gates are refused, so an agent's question can never approve a land or a
+	// held job (R5-S1).
+	if err := questions.CheckAgentContext(input); err != nil {
+		s.writeQuestionError(w, r, err)
+		return
+	}
 	if message := s.openQuota(r, caller); message != "" {
 		writeQuota(w, time.Minute, message)
 		return

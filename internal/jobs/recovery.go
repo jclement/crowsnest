@@ -77,6 +77,7 @@ func (s *Service) Tick(ctx context.Context) {
 		return
 	}
 	s.DispatchStanding(ctx)
+	s.ReconcileLandRequests(ctx) // R5-C09: requests sit on finished jobs, which the live pass skips
 	if err := s.eachLive(ctx, liveStates, func(record store.JobRecord) { s.tickJob(ctx, record) }); err != nil && ctx.Err() == nil {
 		s.opts.Logger.Warn("supervisor: listing jobs", "err", err)
 	}
