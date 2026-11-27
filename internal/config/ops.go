@@ -66,12 +66,14 @@ func (l *loader) loadOps(cfg *Config) error {
 	if cfg.TailscaleAuth, err = l.boolean(optTailscaleAuth); err != nil {
 		return err
 	}
-	if cfg.TailscaleAuth && len(cfg.TrustedProxies) > 0 {
+	if cfg.TailscaleAuth && cfg.TrustedProxyHeader == HeaderCFConnectingIP {
 		// tailscale serve proves nothing about itself: from crowsnest's side its request is a
-		// loopback connection with a header, exactly like any other local proxy's (cloudflared,
-		// Caddy) passing on a client's forged one (R5-S6). With another proxy configured, the
-		// header cannot be trusted, so the two are not allowed together.
-		return fmt.Errorf("--tailscale-auth cannot be combined with --trusted-proxy: another proxy on this machine could pass on a forged Tailscale-User-Login; " +
+		// loopback connection with a header, exactly like any other local proxy's (cloudflared)
+		// passing on a client's forged one (R5-S6). Reading CF-Connecting-IP says Cloudflare is in
+		// front, so the identity header cannot be trusted. (--trusted-proxy loopback alone is how
+		// serve itself is set up, so it is allowed; the per-request check refuses a request that
+		// carries another proxy's headers.)
+		return fmt.Errorf("--tailscale-auth cannot be combined with --trusted-proxy-header cf-connecting-ip: a Cloudflare tunnel on this machine could pass on a forged Tailscale-User-Login; " +
 			"use one or the other (DESIGN.md 4.20)")
 	}
 	if cfg.BackupEvery, err = l.duration(optBackupEvery); err != nil {

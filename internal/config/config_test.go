@@ -665,12 +665,15 @@ func TestNameExplicit(t *testing.T) {
 	}
 }
 
-// R5-S6: Sign in with Tailscale and a trusted proxy cannot both be on: the proxy could pass on a
-// forged identity header that looks exactly like tailscale serve's.
-func TestTailscaleAuthRefusesATrustedProxy(t *testing.T) {
-	_, err := newHarness(t, "--no-auth", "--tailscale-auth", "--trusted-proxy", "loopback").load()
-	assertErrorContains(t, err, "--tailscale-auth cannot be combined with --trusted-proxy")
-	if _, err := newHarness(t, "--no-auth", "--tailscale-auth").load(); err != nil {
-		t.Fatalf("--tailscale-auth alone: %v", err)
+// R5-S6: Sign in with Tailscale cannot be on while a Cloudflare tunnel is declared in front: it
+// could pass on a forged identity header that looks exactly like tailscale serve's. Loopback as
+// the trusted proxy is serve's own setup (README) and stays allowed.
+func TestTailscaleAuthRefusesACloudflareFront(t *testing.T) {
+	_, err := newHarness(t, "--no-auth", "--tailscale-auth", "--trusted-proxy", "loopback", "--trusted-proxy-header", "cf-connecting-ip").load()
+	assertErrorContains(t, err, "--tailscale-auth cannot be combined with --trusted-proxy-header cf-connecting-ip")
+	for _, args := range [][]string{{"--no-auth", "--tailscale-auth"}, {"--no-auth", "--tailscale-auth", "--trusted-proxy", "loopback"}} {
+		if _, err := newHarness(t, args...).load(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
 	}
 }
