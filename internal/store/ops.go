@@ -33,7 +33,7 @@ func (s *Store) InsertAPIToken(ctx context.Context, token APIToken, hash string)
 	return result.LastInsertId()
 }
 
-const apiTokenColumns = `id, name, scope, hint, created_at, last_used_at, revoked_at`
+const apiTokenColumns = `id, name, scope, hint, created_at, last_used_at, revoked_at` //nolint:gosec // column names, not a credential
 
 func scanAPIToken(row interface{ Scan(...any) error }) (APIToken, error) {
 	var token APIToken

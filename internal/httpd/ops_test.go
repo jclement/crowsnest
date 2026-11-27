@@ -150,8 +150,8 @@ func TestReadTokenOpensOnlyTheSummary(t *testing.T) {
 	}
 }
 
-// fakeOps records what clean-up was asked.
-type fakeOps struct{ lastDryRun *bool }
+// fakeOps answers the ops routes with fixed data.
+type fakeOps struct{}
 
 func (fakeOps) BackupName() string { return "crowsnest-test.tar.gz" }
 func (fakeOps) WriteBackup(_ context.Context, w io.Writer) error {
