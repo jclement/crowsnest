@@ -610,8 +610,10 @@ the Terminal view; it is held to the same standard as everything else anyway:
   opened. The facts call reads a handful of metadata files (`.git/HEAD`, `.git/config`,
   `commondir`, `refs/remotes/origin/HEAD`, `packed-refs`, a `mise.toml`, Claude's `~/.claude.json`)
   and returns conclusions only. Git's state is read from those files, never by running git, so a
-  repository's own config (hooks, `fsmonitor`, aliases) cannot run anything. A remote URL has any
-  credentials (`https://user:token@…`) removed before it is returned.
+  repository's own config (hooks, `fsmonitor`, aliases) cannot run anything. A worktree's `.git`
+  file can name a git directory anywhere: one outside the roots is not read (the folder shows as a
+  repository of unknown branch and remote). A remote URL has any credentials
+  (`https://user:token@…`) removed before it is returned.
 - **Roots.** A path is browsable only under a root: the home directory, every `--browse-root`, and
   every directory a live project or the remembered job list already uses (read on every call, so
   a new project's directory is browsable at once). `/` is never a root unless `--browse-root /`

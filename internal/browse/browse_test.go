@@ -311,6 +311,21 @@ func TestFactsOfARepository(t *testing.T) {
 		t.Fatalf("worktree facts = %+v", wt)
 	}
 
+	// A .git file naming a git directory outside the roots is not followed.
+	planted := filepath.Join(tr.home, "Developer/planted")
+	mkdir(t, planted)
+	mkdir(t, filepath.Join(tr.outside, "gitdir"))
+	write(t, filepath.Join(tr.outside, "gitdir/HEAD"), "ref: refs/heads/secret-branch\n")
+	write(t, filepath.Join(tr.outside, "gitdir/config"), "[remote \"origin\"]\n\turl = https://secret.example/x\n")
+	write(t, filepath.Join(planted, ".git"), "gitdir: "+filepath.Join(tr.outside, "gitdir")+"\n")
+	out, err := service.Facts(ctx, planted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Git || !out.Worktree || out.Branch != "" || out.Remote != "" {
+		t.Fatalf("planted gitdir facts = %+v: nothing outside the roots may be read", out)
+	}
+
 	sub, err := service.Facts(ctx, "~/Developer/repo/sub")
 	if err != nil {
 		t.Fatal(err)

@@ -81,7 +81,16 @@ func (s *Service) Facts(ctx context.Context, path string) (Facts, error) {
 			homeResolved, homeErr := s.opts.FS.EvalSymlinks(s.opts.Home)
 			facts.IsHome = cleaned == s.opts.Home || (homeErr == nil && resolved == homeResolved)
 		}
-		s.gitFacts(resolved, holder.resolved, &facts)
+		roots := s.roots(ctx)
+		inRoots := func(path string) bool {
+			resolved, err := s.opts.FS.EvalSymlinks(path)
+			if err != nil {
+				return false
+			}
+			_, ok := rootOf(roots, resolved)
+			return ok
+		}
+		s.gitFacts(resolved, holder.resolved, inRoots, &facts)
 		facts.AgentsMD = s.isFile(filepath.Join(resolved, "AGENTS.md"))
 		facts.ClaudeMD = s.isFile(filepath.Join(resolved, "CLAUDE.md")) || s.isFile(filepath.Join(resolved, ".claude", "CLAUDE.md"))
 		if s.opts.CheckCommand != nil {
@@ -102,8 +111,10 @@ func (s *Service) isFile(path string) bool {
 }
 
 // gitFacts fills the repository facts of dir, or GitTop when dir is inside a repository below
-// its root (nothing above the root is looked at).
-func (s *Service) gitFacts(dir, rootDir string, facts *Facts) {
+// its root (nothing above the root is looked at). A worktree's .git file may name a git directory
+// anywhere; one outside the roots is not read (the folder is still a repository, of unknown
+// branch and remote), so a planted .git file cannot make the picker read outside them.
+func (s *Service) gitFacts(dir, rootDir string, inRoots func(string) bool, facts *Facts) {
 	gitDir, worktree, ok := s.gitDir(dir)
 	if !ok {
 		for current := dir; current != rootDir && within(current, rootDir); {
@@ -116,9 +127,15 @@ func (s *Service) gitFacts(dir, rootDir string, facts *Facts) {
 		return
 	}
 	facts.Git, facts.Worktree = true, worktree
+	if !inRoots(gitDir) {
+		return
+	}
 	commonDir := gitDir
 	if body, err := s.opts.FS.ReadFile(filepath.Join(gitDir, "commondir"), metadataLimit); err == nil {
 		commonDir = joinIfRelative(gitDir, strings.TrimSpace(string(body)))
+	}
+	if !inRoots(commonDir) {
+		commonDir = gitDir
 	}
 	if body, err := s.opts.FS.ReadFile(filepath.Join(gitDir, "HEAD"), metadataLimit); err == nil {
 		head := strings.TrimSpace(string(body))
