@@ -17,6 +17,7 @@ function sections(mac: boolean): Array<{ title: string; shortcuts: Shortcut[] }>
       shortcuts: [
         { keys: [`${mod} K`], what: mac ? "Command palette (also from inside a terminal)" : "Command palette (not inside a terminal, where Ctrl K is the shell's)" },
         { keys: ["?"], what: "This sheet" },
+        { keys: ["T"], what: "Next theme (Settings → Appearance has them all)" },
         ...viewKeys.map((view) => ({ keys: ["g", view.key], what: `Go to ${view.label}` })),
         { keys: ["g", "n"], what: "Focus the needs-you tray (then y or n answers the approval you open)" },
       ],

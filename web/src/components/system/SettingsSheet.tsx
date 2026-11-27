@@ -20,7 +20,7 @@ interface SettingsSheetProps {
   open: boolean;
   onClose: () => void;
   /** Opens one of the other sheets this one links to. */
-  onOpen?: (sheet: "account" | "voice" | "notifications") => void;
+  onOpen?: (sheet: "account" | "voice" | "notifications" | "appearance") => void;
 }
 
 export function SettingsSheet({ open, onClose, onOpen }: SettingsSheetProps) {
@@ -45,6 +45,9 @@ export function SettingsBody({ page, onOpen }: { page: SettingsPage; onOpen?: Se
         <div className="flex flex-wrap gap-2">
           <Button compact onClick={() => onOpen?.("account")}>
             Account and name ({page.name})
+          </Button>
+          <Button compact onClick={() => onOpen?.("appearance")}>
+            Appearance
           </Button>
           <Button compact onClick={() => onOpen?.("notifications")}>
             Notifications

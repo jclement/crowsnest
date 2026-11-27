@@ -193,6 +193,18 @@ describe("buildItems", () => {
     expect(items.find((item) => item.id === "theme:dark")?.subtitle).toBe("Current");
     expect(items.find((item) => item.id === "theme:light")?.subtitle).toBeUndefined();
   });
+
+  it("offers every named theme, marks the current one, and Next theme", () => {
+    const themes = [
+      { id: "crowsnest", name: "Crowsnest", description: "house" },
+      { id: "phosphor", name: "Phosphor", description: "green" },
+    ];
+    const items = buildItems(sources({ themes, themeName: "phosphor" }));
+    expect(items.find((item) => item.id === "theme-name:phosphor")).toMatchObject({ title: "Theme: Phosphor", subtitle: "Current", command: { kind: "themeName", id: "phosphor" } });
+    expect(items.find((item) => item.id === "theme-name:crowsnest")?.subtitle).toBeUndefined();
+    expect(items.find((item) => item.id === "theme-name:next")?.command).toEqual({ kind: "themeName", id: "next" });
+    expect(items.find((item) => item.id === "sheet:appearance")?.title).toBe("Appearance");
+  });
 });
 
 describe("scoreItem", () => {
@@ -272,7 +284,7 @@ describe("rankItems", () => {
 
   it("orders within a group by score and gives recents a nudge", () => {
     const theme = rankItems(all(), "theme", []).find((group) => group.id === "navigate");
-    expect(theme?.items.length).toBe(3);
+    expect(theme?.items.length).toBe(4); // the three modes and Appearance
     const boosted = rankItems(all(), "theme", ["theme:dark"]).find((group) => group.id === "navigate");
     expect(boosted?.items[0]?.item.id).toBe("theme:dark");
   });
