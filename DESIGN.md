@@ -2438,12 +2438,15 @@ visibility per job."
   detail; `GET /spend?from=&to=&group=job|model|day` and `GET /spend/summary`; a `spend` event
   (`{at}`) after any read that added something, which refreshes the jobs and spend queries.
   `job_get` (the MCP tool and `crowsnest job get`) ends with "## Spend so far" (`SpendBlock`).
-- **UI**: a chip on each card (cost, tokens when unpriced, "not measured"); the detail's Spend
-  card (the breakdown, a cache-hit meter, a bar per model call with a tooltip on hover and
+- **UI** (R8: one figure per job and per day; the estimate is not a bill, so the detail is a
+  click away and the API is unchanged): a chip on each card (cost, tokens when unpriced, "not
+  measured"); the detail's Spend card, its cost, with a closed **Details** holding the breakdown,
+  a cache-hit meter, a bar per model call with a tooltip on hover and
   focus, built to the dataviz skill: one hue from the accent token, chosen per theme, a baseline,
   2 px gaps, the peak labelled once; more than 80 calls are grouped into 80 bars); today and this
-  week above the board, opening the Spend sheet (today / this week / 30 days; by job, model or
-  day; sortable; CSV with a BOM, formulas defused); the orchestrator's line in the Chat menu;
+  week above the board, opening the Spend sheet (today / this week / 30 days; name and cost by
+  job or by day, sortable; its **Details** switch adds by model, the token and call columns and
+  CSV with a BOM, formulas defused); the orchestrator's line in the Chat menu;
   "Spend" in the palette, and each job row's spend as secondary text.
 - **`--demo`** seeds plausible spend through `Meter.Record` (the same counting path) for every
   started job, a week of orchestrator use and a morning for each running lead (`lead:<slug>`); the

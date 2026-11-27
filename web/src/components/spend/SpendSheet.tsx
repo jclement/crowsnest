@@ -1,6 +1,7 @@
-// The Spend sheet (DESIGN.md 7.11): today's, this week's or the last 30 days' spend broken down by
-// job (the orchestrator is its own row), by model or by day, as a sortable table with CSV export,
-// and the header button that opens it showing today's and this week's totals. Every figure is
+// The Spend sheet (DESIGN.md 7.11): today's, this week's or the last 30 days' spend, one figure per
+// job (the orchestrator is its own row) or per day, as a sortable table, and the button that
+// opens it showing today's and this week's totals. R8: the figures are estimates, not a bill, so
+// the rest (the by-model breakdown, the token and call columns, the CSV) is behind "Details". Every figure is
 // marked an estimate, with the price table's date and the note that subscriptions are not billed
 // per token. Reached from the Jobs view, the Chat menu and the command palette.
 //
@@ -62,6 +63,8 @@ export function SpendSheet({ open, onClose, projectId }: { open: boolean; onClos
 
 const rangeLabels: Record<SpendRange, string> = { today: "Today", week: "This week", "30d": "30 days" };
 const groupLabels: Record<SpendGroup, string> = { job: "By job", model: "By model", day: "By day" };
+/** The groupings shown without Details: one figure per job or per day. */
+const plainGroups: SpendGroup[] = ["job", "day"];
 
 /** "" every project, "0" unfiled, else a project id. */
 type ProjectChoice = string;
@@ -70,9 +73,10 @@ export function SpendPanel({ projectId }: { projectId?: number } = {}) {
   const [range, setRange] = useState<SpendRange>("week");
   const [chosenGroup, setGroup] = useState<SpendGroup>("job");
   const [project, setProject] = useState<ProjectChoice>(projectId === undefined ? "" : String(projectId));
+  const [details, setDetails] = useState(false);
   const projects = useProjects();
   const jobs = useJobs();
-  const group: SpendGroup = project ? "job" : chosenGroup;
+  const group: SpendGroup = project ? "job" : !details && !plainGroups.includes(chosenGroup) ? "job" : chosenGroup;
   const summary = useSpendSummary();
   const { from, to } = rangeDates(range, summary.data);
   const report = useSpendReport(group, from, to, !!summary.data);
@@ -88,8 +92,12 @@ export function SpendPanel({ projectId }: { projectId?: number } = {}) {
       <div className="flex flex-wrap items-center gap-2">
         <Tabs<SpendRange> id="spend-range" label="Range" className="w-full whitespace-nowrap sm:w-auto" value={range} onChange={setRange} items={(["today", "week", "30d"] as const).map((value) => ({ value, label: rangeLabels[value] }))} />
         {!project && (
-          <Tabs<SpendGroup> id="spend-group" label="Group by" className="w-full whitespace-nowrap sm:w-auto" value={group} onChange={setGroup} items={(["job", "model", "day"] as const).map((value) => ({ value, label: groupLabels[value] }))} />
+          <Tabs<SpendGroup> id="spend-group" label="Group by" className="w-full whitespace-nowrap sm:w-auto" value={group} onChange={setGroup} items={(details ? (["job", "model", "day"] as const) : plainGroups).map((value) => ({ value, label: groupLabels[value] }))} />
         )}
+        <label className="ml-auto flex min-h-11 items-center gap-1.5 text-xs text-muted md:min-h-7">
+          <input type="checkbox" checked={details} onChange={(event) => setDetails(event.target.checked)} className="h-4 w-4 accent-accent" />
+          Details
+        </label>
         {projectList.length > 0 && (
           <label className="flex items-center gap-1.5 text-xs text-muted">
             Project
@@ -109,11 +117,11 @@ export function SpendPanel({ projectId }: { projectId?: number } = {}) {
       <TabPanel id="spend-range" value={range} className="flex min-h-0 flex-col">
         {project ? (
           <div className="flex min-h-0 flex-col gap-2">
-            <ReportBody report={shown} pending={report.isPending || summary.isPending} error={report.error ?? summary.error} retry={() => void report.refetch()} />
+            <ReportBody details={details} report={shown} pending={report.isPending || summary.isPending} error={report.error ?? summary.error} retry={() => void report.refetch()} />
           </div>
         ) : (
           <TabPanel id="spend-group" value={group} className="flex min-h-0 flex-col gap-2">
-            <ReportBody report={shown} pending={report.isPending || summary.isPending} error={report.error ?? summary.error} retry={() => void report.refetch()} />
+            <ReportBody details={details} report={shown} pending={report.isPending || summary.isPending} error={report.error ?? summary.error} retry={() => void report.refetch()} />
           </TabPanel>
         )}
       </TabPanel>
@@ -121,7 +129,7 @@ export function SpendPanel({ projectId }: { projectId?: number } = {}) {
   );
 }
 
-function ReportBody({ report, pending, error, retry }: { report: SpendReport | undefined; pending: boolean; error: Error | null; retry: () => void }) {
+function ReportBody({ details, report, pending, error, retry }: { details: boolean; report: SpendReport | undefined; pending: boolean; error: Error | null; retry: () => void }) {
   if (error && !report) {
     return (
       <Banner tone="danger" role="alert" action={<Button compact icon={RefreshCw} onClick={retry}>Retry</Button>}>
@@ -136,20 +144,22 @@ function ReportBody({ report, pending, error, retry }: { report: SpendReport | u
         <span>
           <span className="font-mono text-sm font-semibold text-heading">{costText(report.total)}</span>{" "}
           <span className="text-muted">
-            · {formatTokens(report.total.total_tokens)} tokens · {report.total.turns} model calls ·{" "}
+            {details && <>· {formatTokens(report.total.total_tokens)} tokens · {report.total.turns} model calls </>}·{" "}
             <span className="whitespace-nowrap">{report.from === report.to ? report.from : `${report.from} to ${report.to}`}</span>
           </span>
         </span>
-        <Button compact variant="secondary" icon={Download} onClick={() => download(report)} disabled={report.rows.length === 0}>
-          CSV
-        </Button>
+        {details && (
+          <Button compact variant="secondary" icon={Download} onClick={() => download(report)} disabled={report.rows.length === 0}>
+            CSV
+          </Button>
+        )}
       </div>
       {report.rows.length === 0 ? (
         <EmptyState icon={Coins} title="Nothing spent in this range">
           Spend is read from each job's Claude transcript as the agent works.
         </EmptyState>
       ) : (
-        <SpendTable report={report} />
+        <SpendTable report={report} details={details} />
       )}
       <p className="text-2xs text-muted">
         {SPEND_NOTE} Prices checked {report.prices_checked}
@@ -159,20 +169,21 @@ function ReportBody({ report, pending, error, retry }: { report: SpendReport | u
   );
 }
 
-/** Columns: the label, then numbers; the narrow ones hide on a phone. */
-const columns: { key: SpendSortKey; label: string; numeric: boolean; wide?: boolean; value: (row: SpendRow) => string }[] = [
+/** Columns: the label, then numbers; the narrow ones hide on a phone; the detail ones only show with Details. */
+const allColumns: { key: SpendSortKey; label: string; numeric: boolean; wide?: boolean; detail?: boolean; value: (row: SpendRow) => string }[] = [
   { key: "label", label: "Name", numeric: false, value: (row) => row.label },
   { key: "cost", label: "Est. cost", numeric: true, value: (row) => (row.cost_usd === null ? "unknown" : `${row.cost_partial ? "≥" : ""}${formatUSD(row.cost_usd)}`) },
-  { key: "total", label: "Tokens", numeric: true, value: (row) => formatTokens(row.total_tokens) },
-  { key: "input", label: "In", numeric: true, wide: true, value: (row) => formatTokens(row.input_tokens) },
-  { key: "output", label: "Out", numeric: true, wide: true, value: (row) => formatTokens(row.output_tokens) },
-  { key: "cache_write", label: "Cache w", numeric: true, wide: true, value: (row) => formatTokens(row.cache_write_tokens) },
-  { key: "cache_read", label: "Cache r", numeric: true, wide: true, value: (row) => formatTokens(row.cache_read_tokens) },
-  { key: "turns", label: "Calls", numeric: true, wide: true, value: (row) => String(row.turns) },
-  { key: "tool_calls", label: "Tools", numeric: true, wide: true, value: (row) => String(row.tool_calls) },
+  { key: "total", label: "Tokens", numeric: true, detail: true, value: (row) => formatTokens(row.total_tokens) },
+  { key: "input", label: "In", numeric: true, wide: true, detail: true, value: (row) => formatTokens(row.input_tokens) },
+  { key: "output", label: "Out", numeric: true, wide: true, detail: true, value: (row) => formatTokens(row.output_tokens) },
+  { key: "cache_write", label: "Cache w", numeric: true, wide: true, detail: true, value: (row) => formatTokens(row.cache_write_tokens) },
+  { key: "cache_read", label: "Cache r", numeric: true, wide: true, detail: true, value: (row) => formatTokens(row.cache_read_tokens) },
+  { key: "turns", label: "Calls", numeric: true, wide: true, detail: true, value: (row) => String(row.turns) },
+  { key: "tool_calls", label: "Tools", numeric: true, wide: true, detail: true, value: (row) => String(row.tool_calls) },
 ];
 
-export function SpendTable({ report }: { report: SpendReport }) {
+export function SpendTable({ report, details = true }: { report: SpendReport; details?: boolean }) {
+  const columns = allColumns.filter((column) => details || !column.detail);
   const [sort, setSort] = useState<SpendSort>(report.group === "day" ? { key: "label", descending: false } : { key: "cost", descending: true });
   const rows = sortRows(report.rows, sort);
   const press = (key: SpendSortKey) => setSort((current) => (current.key === key ? { key, descending: !current.descending } : { key, descending: key !== "label" }));

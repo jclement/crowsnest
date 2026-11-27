@@ -913,10 +913,11 @@ job that is restarted under a new Claude session keeps counting.
 - **Not measured**: Codex jobs (crowsnest does not read Codex's usage records), shown as "not
   measured" rather than zero. Jobs the orchestrator holds itself are counted on the
   orchestrator's line.
-- **Where it shows**: a chip on each job card; a Spend section in the job's detail (the
-  breakdown, the share of the prompt read from cache, and a small chart of tokens per model
-  call); today's and this week's totals above the board, which open the Spend sheet (by job, by
-  model or by day; today, this week or 30 days; sortable, CSV export); the orchestrator's line in
+- **Where it shows**: a chip on each job card; a Spend section in the job's detail (one figure;
+  its Details has the breakdown, the share of the prompt read from cache, and a small chart of
+  tokens per model call); today's and this week's totals above the board, which open the Spend
+  sheet (one figure by job or by day; today, this week or 30 days; sortable; Details adds by
+  model, the token columns and CSV export; the API is unchanged); the orchestrator's line in
   the Chat menu; "Spend" in the command palette. `crowsnest job get` and the `job_get` tool show
   a job its own spend.
 

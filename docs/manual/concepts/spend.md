@@ -29,13 +29,15 @@ says "(estimated)".
 ## Where you see it
 
 - **On each job card**: "Spend: $0.81 (estimate)".
-- **In a job's Overview**: the **Spend** section with the breakdown, the share of the prompt read
-  from the cache, and a small chart of tokens per model call (point at a bar for that call).
+- **In a job's Overview**: the **Spend** section, one figure; its **Details** has the breakdown
+  (tokens, calls, wall time), the share of the prompt read from the cache, the models, and a small
+  chart of tokens per model call (point at a bar for that call).
 - **Above the Jobs board**: today's and this week's totals ("Spend: $31.16 today · $32.11 wk
   (estimates)"); press it for the Spend sheet.
 - **On Now**: each project's estimated spend today.
 - **The Spend sheet** ([Open Spend](app:sheet/spend)): **Today**, **This week** or **30 days**;
-  **By job**, **By model** or **By day**; a **Project** filter; sortable columns and **CSV**.
+  one figure **By job** or **By day**; a **Project** filter; sortable. Tick **Details** for **By
+  model**, the token and call columns and **CSV**.
 - **Chat's menu**: the standing agent's own line.
 
 Days are the server's local calendar days; weeks start on Monday.

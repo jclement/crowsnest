@@ -22,17 +22,19 @@ test("cards carry an estimated cost; the job held by the orchestrator does not",
   await openBoard(page);
   const running = page.getByRole("region", { name: "In progress" }).getByRole("button", { name: /Add retry back-off/ });
   await expect(running.getByTestId("spend-chip")).toHaveText(money);
-  const held = page.getByRole("button", { name: /Decide the release date/ });
+  const held = page.getByRole("region", { name: "Needs you or stuck" }).getByRole("button", { name: /Decide the release date/ });
   await expect(held).toBeVisible();
   await expect(held.getByTestId("spend-chip")).toHaveCount(0);
 });
 
-test("a job's Spend section breaks the cost down, charts its calls and says it is an estimate", async ({ page }, testInfo) => {
+test("a job's Spend section is one figure; Details breaks it down, charts its calls and says it is an estimate", async ({ page }, testInfo) => {
   await openBoard(page, "?job=j_1");
   const detail = detailRegion(page, testInfo, "Selected job");
   const section = detail.getByRole("region", { name: "Spend" });
   await expect(section).toBeVisible();
   await expect(section.getByText(/est\.$/).first()).toHaveText(new RegExp(`^${money.source} est\\.$`));
+  await expect(section.getByText("Model calls")).toBeHidden();
+  await section.getByText("Details").click();
   await expect(section.getByText("Model calls")).toBeVisible();
   await expect(section.getByRole("meter", { name: /from the cache/ })).toHaveAttribute("aria-valuenow", /\d+/);
   const bars = section.getByRole("list", { name: /Tokens per model call/ }).getByRole("listitem");
@@ -45,7 +47,7 @@ test("a job's Spend section breaks the cost down, charts its calls and says it i
   await expect(detailRegion(page, testInfo, "Selected job").getByText(/Counted on the orchestrator's line/)).toBeVisible();
 });
 
-test("the header's totals open a breakdown by job, model and day that sorts and exports CSV", async ({ page }) => {
+test("the header's totals open one figure by job or day; Details adds by model, tokens and CSV", async ({ page }) => {
   await openBoard(page);
   const button = page.getByRole("button", { name: /^Spend: \$\S+ today · \$\S+ wk \(estimates\)$/ });
   await expect(button).toBeVisible();
@@ -57,6 +59,11 @@ test("the header's totals open a breakdown by job, model and day that sorts and 
   await expect(sheet.getByRole("columnheader", { name: /Est. cost/ })).toHaveAttribute("aria-sort", "descending");
   await sheet.getByRole("button", { name: "Name", exact: true }).click();
   await expect(sheet.getByRole("columnheader", { name: /Name/ })).toHaveAttribute("aria-sort", "ascending");
+  // One figure per row until Details: no by-model tab, no token columns, no CSV.
+  await expect(sheet.getByRole("columnheader")).toHaveCount(2);
+  await expect(sheet.getByRole("tab", { name: "By model" })).toHaveCount(0);
+  await expect(sheet.getByRole("button", { name: "CSV" })).toHaveCount(0);
+  await sheet.getByRole("checkbox", { name: "Details" }).check();
   // By model.
   await sheet.getByRole("tab", { name: "By model" }).click();
   await expect(sheet.getByRole("cell", { name: "claude-opus-5-5" })).toBeVisible();
@@ -112,6 +119,7 @@ for (const size of [
     await page.evaluate(() => document.fonts.ready);
     const phone = size.width < 768 || isPhone(testInfo);
     const scope = phone ? page.getByRole("dialog") : page.getByRole("region", { name: "Selected job" });
+    await scope.getByRole("region", { name: "Spend" }).getByText("Details").click();
     const chart = scope.getByRole("list", { name: /Tokens per model call/ });
     await chart.scrollIntoViewIfNeeded();
     await chart.getByRole("listitem").nth(10).hover();
