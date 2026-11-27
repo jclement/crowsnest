@@ -2713,7 +2713,10 @@ the fallback that is always there.
     rule first, allows this call once, stores the job rule (`max_risk` the approval's risk), then
     allows by policy every other pending call of the job the rule now matches. The job's page
     lists its remembered rules with Remove. R6-S1: an **elevated** call is remembered only as
-    itself, its exact command or tool name, shown read-only (`exact`); a wider pattern is refused;
+    itself, its exact command, shown read-only (`exact`), and only a Bash command (R7-S1: an
+    elevated MCP call or a `Read` of a secret is not remembered, because a tool rule matches the
+    name alone and would allow that tool with any input; the card says the exact command runs
+    "whatever the scripts or files it runs say at the time", R7-I1); a wider pattern is refused;
     a command with a glob character is not remembered; an edit outside the job's directory is not;
     and a call that is elevated only because crowsnest does not recognise it (an interpreter, an
     unknown program, a command it cannot read: `risk.Result.Unrecognised`) offers no remember at

@@ -2,7 +2,8 @@
 // (DESIGN.md 8.7, Policy). It shows the job rule the server proposed (for Bash the command's first
 // two words and *, for an edit the file's directory, otherwise the tool), editable, and says in one
 // sentence what it will do until the job ends. Never offered for a dangerous call. For an elevated
-// call the server offers only the call itself (exact, R6-S1): shown read-only, never a prefix.
+// call the server offers only the call itself (exact, R6-S1), and only for Bash (R7-S1: a tool rule
+// would match any input): shown read-only, never a prefix.
 import { BookmarkCheck } from "lucide-react";
 import { useId, useState } from "react";
 import type { Approval } from "../../lib/approvals";
@@ -53,8 +54,9 @@ export function RememberForJob({ approval, busy, onConfirm, onCancel }: Remember
       <p data-testid="remember-sentence" className="text-xs text-body">
         {exact ? (
           <>
-            Until {approval.job_id} ends, crowsnest will allow exactly this {suggestion.kind === "bash" ? "command" : "tool"}, word for word, without asking. Every other
-            elevated call (an unrecognised program, an interpreter, a different command) and every dangerous call is still asked.
+            Until {approval.job_id} ends, crowsnest will allow exactly this command, word for word, without asking, whatever the scripts or files it runs say
+            at the time. Every other elevated call (an unrecognised program, an interpreter, a different command, any other tool) and every dangerous call is
+            still asked.
           </>
         ) : (
           <>

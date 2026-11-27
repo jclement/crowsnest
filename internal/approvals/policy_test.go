@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -391,6 +392,40 @@ func TestElevatedIsRememberedOnlyExactly(t *testing.T) {
 	}
 	if spoof := h.ask(t, "j_1", "p5", "Bash", map[string]any{"command": "python3 -c 'import shutil;shutil.rmtree(\"/\")'"}); spoof.Status != StatusPending {
 		t.Fatalf("an interpreter call was allowed: %s", spoof.Status)
+	}
+}
+
+// TestElevatedToolCallsAreNotRemembered is R7-S1: a tool rule matches the tool's name alone, so
+// remembering an elevated MCP call or a Read of a secret would allow that tool with any input for
+// the rest of the job. Neither is offered, and asking for it anyway is refused.
+func TestElevatedToolCallsAreNotRemembered(t *testing.T) {
+	ctx := context.Background()
+	h := newPolicyHarness(t)
+	var refusal *RefusedError
+	cases := []struct {
+		name, tool string
+		input      map[string]any
+		later      map[string]any
+	}{
+		{"mcp", "mcp__github__merge_pull_request", map[string]any{"pr": 12}, map[string]any{"pr": 13, "repo": "other"}},
+		{"secret read", "Read", map[string]any{"file_path": ".env"}, map[string]any{"file_path": "/home/u/.ssh/id_ed25519"}},
+	}
+	for i, tc := range cases {
+		pane := fmt.Sprintf("p%d", i+10)
+		call := h.ask(t, "j_1", pane, tc.tool, tc.input)
+		if call.Risk != risk.Elevated {
+			t.Fatalf("%s: risk %s, want elevated", tc.name, call.Risk)
+		}
+		if call.Remember != nil {
+			t.Fatalf("%s: offered %+v", tc.name, call.Remember)
+		}
+		pattern := tc.tool
+		if _, err := h.service.Decide(ctx, call.ID, Decision{Allow: true, Remember: &pattern}); !errors.As(err, &refusal) {
+			t.Fatalf("%s: remembering the tool name: %v, want a refusal", tc.name, err)
+		}
+		if later := h.ask(t, "j_1", pane+"b", tc.tool, tc.later); later.Status != StatusPending {
+			t.Fatalf("%s: a later call with other input was %s", tc.name, later.Status)
+		}
 	}
 }
 
