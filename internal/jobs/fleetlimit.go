@@ -31,6 +31,9 @@ const (
 	// limitGuess is the first guess when the reset time cannot be read; limitGuessMax caps the doubling.
 	limitGuess    = 30 * time.Minute
 	limitGuessMax = 2 * time.Hour
+	// limitMax caps a reset time read from a message (R6-S3): no plan window is longer than a day,
+	// and the message is text an agent can write.
+	limitMax = 24 * time.Hour
 	// resumeEvery spaces the resumed jobs after a reset, so they do not all start at once.
 	resumeEvery = 20 * time.Second
 	// LimitsEvent is the hub event published when the fleet's limits change.
@@ -50,8 +53,16 @@ type LimitState struct {
 	Held int `json:"held"`
 	// Resuming: the reset has passed and the waiting jobs are being resumed one by one.
 	Resuming bool `json:"resuming"`
-	guess    time.Duration
+	// Reporters are the jobs that reported this limit, with when (R6-S3). The engine is held
+	// fleet-wide only once two different jobs have: one agent's word holds only itself.
+	Reporters map[string]time.Time `json:"reporters,omitempty"`
+	// Fleet: two jobs agree, so every agent of the engine is held.
+	Fleet bool `json:"fleet"`
+	guess time.Duration
 }
+
+// fleetReporters is how many different jobs must report a limit before it holds the fleet.
+const fleetReporters = 2
 
 // FleetLimits holds the fleet's usage limits. Build with NewFleetLimits.
 type FleetLimits struct {
@@ -104,6 +115,9 @@ func (f *FleetLimits) saveLocked(ctx context.Context) {
 func (f *FleetLimits) listLocked() []LimitState {
 	out := make([]LimitState, 0, len(f.state))
 	for _, state := range f.state {
+		if !state.Fleet {
+			continue // one job's report is on that job's card, not a fleet banner
+		}
 		copied := *state
 		copied.Resuming = !f.now().Before(state.ResetAt)
 		out = append(out, copied)
@@ -123,7 +137,8 @@ func (f *FleetLimits) Note(ctx context.Context, engine, jobID, detail string) Li
 	switch {
 	case state == nil:
 		reset, guessed := ParseLimitReset(detail, now)
-		state = &LimitState{Engine: engine, Since: now, ResetAt: reset, Guessed: guessed, Job: jobID, Detail: oneLine(detail, 300), guess: limitGuess}
+		state = &LimitState{Engine: engine, Since: now, ResetAt: reset, Guessed: guessed, Job: jobID, Detail: oneLine(detail, 300), guess: limitGuess,
+			Reporters: map[string]time.Time{}}
 		f.state[engine] = state
 	case !now.Before(state.ResetAt):
 		// Hit again after the reset: a new limit (or the guess was short).
@@ -133,11 +148,48 @@ func (f *FleetLimits) Note(ctx context.Context, engine, jobID, detail string) Li
 			reset = now.Add(state.guess)
 		}
 		state.ResetAt, state.Guessed, state.Detail, state.Job = reset, guessed, oneLine(detail, 300), jobID
-	default:
-		return *state
+		state.Since, state.Reporters, state.Fleet = now, map[string]time.Time{}, false
+	}
+	if state.Reporters == nil {
+		state.Reporters = map[string]time.Time{}
+	}
+	if _, seen := state.Reporters[jobID]; !seen {
+		state.Reporters[jobID] = now
+		if !state.Fleet && len(state.Reporters) >= fleetReporters {
+			state.Fleet = true
+		}
 	}
 	f.saveLocked(ctx)
 	return *state
+}
+
+// clear forgets engine's limit at the human's word (R6-S3), returning whether there was one.
+func (f *FleetLimits) clear(ctx context.Context, engine string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loadLocked(ctx)
+	if _, ok := f.state[engine]; !ok {
+		return false
+	}
+	delete(f.state, engine)
+	f.resumeAt[engine] = time.Time{}
+	f.saveLocked(ctx)
+	return true
+}
+
+// all lists every recorded limit, fleet-wide or not (the tick's cleanup).
+func (f *FleetLimits) all(ctx context.Context) []LimitState {
+	if f == nil {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loadLocked(ctx)
+	out := make([]LimitState, 0, len(f.state))
+	for _, state := range f.state {
+		out = append(out, *state)
+	}
+	return out
 }
 
 // Held reports whether engine is under a usage limit now, and the limit.
@@ -149,7 +201,7 @@ func (f *FleetLimits) Held(ctx context.Context, engine string) (bool, LimitState
 	defer f.mu.Unlock()
 	f.loadLocked(ctx)
 	state := f.state[engine]
-	if state == nil {
+	if state == nil || !state.Fleet {
 		return false, LimitState{}
 	}
 	return f.now().Before(state.ResetAt), *state
@@ -192,7 +244,7 @@ func (f *FleetLimits) resuming(ctx context.Context, engine string) bool {
 	defer f.mu.Unlock()
 	f.loadLocked(ctx)
 	state := f.state[engine]
-	return state != nil && !f.now().Before(state.ResetAt)
+	return state != nil && state.Fleet && !f.now().Before(state.ResetAt)
 }
 
 // Clear forgets engine's limit (nothing waits on it any more).
@@ -225,10 +277,16 @@ func ParseLimitReset(message string, now time.Time) (time.Time, bool) {
 		if strings.HasPrefix(strings.ToLower(match[2]), "h") {
 			unit = time.Hour
 		}
+		if amount > int(limitMax/time.Minute) {
+			return now.Add(limitMax), true // past any real window: capped, and said to be a guess (R6-S3)
+		}
 		at := now.Add(time.Duration(amount) * unit)
 		if match[3] != "" {
 			extra, _ := strconv.Atoi(match[3])
 			at = at.Add(time.Duration(extra) * time.Minute)
+		}
+		if at.Sub(now) > limitMax {
+			return now.Add(limitMax), true
 		}
 		return at, false
 	}
@@ -327,9 +385,47 @@ func (s *Service) tickLimits(ctx context.Context) {
 	if s.opts.Limits == nil {
 		return
 	}
+	held := map[string]int{}
 	for _, state := range s.FleetLimitsNow(ctx) {
-		if !s.opts.Now().Before(state.ResetAt) && state.Held == 0 {
+		held[state.Engine] = state.Held
+	}
+	for _, state := range s.opts.Limits.all(ctx) {
+		if !s.opts.Now().Before(state.ResetAt) && held[state.Engine] == 0 {
 			s.opts.Limits.Clear(ctx, state.Engine)
 		}
 	}
+}
+
+// ClearLimit is the human's "Clear hold" on an engine's usage limit (R6-S3): the limit is
+// forgotten, and every job it held is let go: queued starts start, and each held agent is resumed
+// by crowsnest's paced retry ("continue", one at a time).
+func (s *Service) ClearLimit(ctx context.Context, engine string) (int, error) {
+	if s.opts.Limits == nil || !s.opts.Limits.clear(ctx, engine) {
+		return 0, invalid("no usage limit is recorded for %s", engine)
+	}
+	released := 0
+	err := s.eachLive(ctx, liveStates, func(r store.JobRecord) {
+		if r.Engine != engine {
+			return
+		}
+		id := FormatID(r.ID)
+		_, err := s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
+			switch {
+			case liftHoldLocked(rec, c, HoldUsageLimit, LiftHuman, nil):
+				rec.Stuck, rec.Cause, rec.CauseDetail, rec.RetryAt = true, string(CauseLimit), "You cleared the usage limit; crowsnest resumes it", s.opts.Now()
+			case rec.Stuck && Cause(rec.Cause) == CauseLimit:
+				rec.RetryAt = s.opts.Now()
+			case Cause(rec.Cause) == CauseHeld && strings.HasPrefix(rec.CauseDetail, limitHoldPrefix):
+				rec.Cause, rec.CauseDetail = "", ""
+			default:
+				return errSkip
+			}
+			c.event(EventRetry, "You cleared "+engine+"'s usage limit", nil)
+			return nil
+		})
+		if err == nil {
+			released++
+		}
+	})
+	return released, err
 }

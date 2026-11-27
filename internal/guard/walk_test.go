@@ -81,7 +81,7 @@ func TestNestedShellCdStaysInside(t *testing.T) {
 		{`sh -c 'cd /other && sh -c "cd /" && git commit -m x'`, ""},
 		{`sh -c 'cd /other && git commit -m x'`, ""},
 		{`cd /other && sh -c 'git commit -m x'`, ""},
-		{`eval 'cd /other' && git commit -m x`, ""}, // eval runs in the caller's shell
+		{`eval 'cd /other' && git commit -m x`, ""},                             // eval runs in the caller's shell
 		{`cd /other && bash script.sh && git commit -m x`, RuleProtectedBranch}, // a line not read with confidence: its directory is not trusted
 	}
 	for _, c := range cases {

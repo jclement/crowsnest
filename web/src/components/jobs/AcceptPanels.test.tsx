@@ -83,6 +83,19 @@ describe("LimitBanner", () => {
     expect(banner).toHaveTextContent("resets in 23 min");
     expect(banner).toHaveTextContent("3 jobs waiting");
   });
+
+  it("has a Clear hold the human can always use (R6-S3)", async () => {
+    const calls = stubApi((call) => {
+      if (call.path === "/limits") {
+        return { body: { data: [{ engine: "claude", since: new Date().toISOString(), reset_at: new Date(Date.now() + 23 * 60_000).toISOString(), guessed: true, job: "j_4", detail: "", held: 2, resuming: false, fleet: true }] } };
+      }
+      if (call.path === "/limits/claude/clear") return { body: { data: { engine: "claude", released: 2 } } };
+      return undefined;
+    });
+    renderWithClient(<LimitBanner />);
+    await userEvent.click(await screen.findByRole("button", { name: "Clear hold" }));
+    await waitFor(() => expect(calls.some((call) => call.method === "POST" && call.path === "/limits/claude/clear")).toBe(true));
+  });
 });
 
 describe("answer receipt", () => {

@@ -65,6 +65,8 @@ export interface FleetLimit {
   detail: string;
   held: number;
   resuming: boolean;
+  /** Two jobs agree, so every agent of the engine is held (R6-S3). */
+  fleet?: boolean;
 }
 
 export interface Violation {

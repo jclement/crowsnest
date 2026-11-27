@@ -107,13 +107,56 @@ func TestFleetLimitAllowsStops(t *testing.T) {
 	r := newRig(t, func(o *Options) { o.Limits = NewFleetLimits(o.Store, nil, o.Now) })
 	ctx := context.Background()
 	limited := r.create(CreateInput{Brief: "Limited", Dir: t.TempDir()})
+	also := r.create(CreateInput{Brief: "Also limited", Dir: t.TempDir()})
 	busy := r.create(CreateInput{Brief: "Busy", Dir: t.TempDir()})
+	// R6-S3: one job's report holds only that job; a second job agreeing holds the fleet.
 	_, _ = r.svc.HandleHook(ctx, HookStopFailure, limited.ID, "", HookInput{Error: "rate_limit", ErrorDetails: "resets 11pm"})
+	if held, _ := r.svc.limitHeld(ctx, EngineClaude); held {
+		t.Fatal("one job's report held the whole fleet")
+	}
+	_, _ = r.svc.HandleHook(ctx, HookStopFailure, also.ID, "", HookInput{Error: "rate_limit", ErrorDetails: "resets 11pm"})
 	if reply := r.stop(busy.ID); reply != "" {
 		t.Fatalf("a stop under the fleet's limit was nudged: %s", reply)
 	}
-	if !hasEvent(r.get(busy.ID), EventHook, "usage limit") {
+	d := r.get(busy.ID)
+	if !hasEvent(d, EventHook, "usage limit") {
 		t.Fatal("the timeline does not say why the stop was allowed")
+	}
+	// R6-C08: that stop is registered for the reset: held by the usage limit, retried after it.
+	if !hasHold(r.record(busy.ID), HoldUsageLimit) || !d.Stuck || d.Cause != CauseLimit || d.RetryAt == nil {
+		t.Fatalf("a stop during the fleet's limit was not registered for the reset: %+v", d.Job)
+	}
+}
+
+// TestLimitResetIsCappedAndClearable (R6-S3): a reset time past a day is capped and called a
+// guess, and the human's Clear forgets the limit and lets its jobs go.
+func TestLimitResetIsCappedAndClearable(t *testing.T) {
+	now := time.Now()
+	at, guessed := ParseLimitReset("usage limit reached, try again in 2000000 hours", now)
+	if !guessed || at.Sub(now) > limitMax {
+		t.Fatalf("an absurd reset was believed: %s guessed %v", at.Sub(now), guessed)
+	}
+	r := newRig(t, func(o *Options) { o.Limits = NewFleetLimits(o.Store, nil, o.Now) })
+	ctx := context.Background()
+	first := r.create(CreateInput{Brief: "First", Dir: t.TempDir()})
+	second := r.create(CreateInput{Brief: "Second", Dir: t.TempDir()})
+	for _, job := range []Detail{first, second} {
+		_, _ = r.svc.HandleHook(ctx, HookStopFailure, job.ID, "", HookInput{Error: "rate_limit", ErrorDetails: "try again in 2000000 hours"})
+	}
+	if held, state := r.svc.limitHeld(ctx, EngineClaude); !held || state.ResetAt.Sub(r.clock.Now()) > limitMax {
+		t.Fatalf("held %v until %s", held, state.ResetAt)
+	}
+	released, err := r.svc.ClearLimit(ctx, EngineClaude)
+	if err != nil || released != 2 {
+		t.Fatalf("clear: %d %v", released, err)
+	}
+	if held, _ := r.svc.limitHeld(ctx, EngineClaude); held {
+		t.Fatal("still held after the human cleared it")
+	}
+	for _, job := range []Detail{first, second} {
+		if hasHold(r.record(job.ID), HoldUsageLimit) {
+			t.Fatalf("%s still held", job.ID)
+		}
 	}
 }
 
