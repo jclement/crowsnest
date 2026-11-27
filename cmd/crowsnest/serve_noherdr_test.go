@@ -45,7 +45,9 @@ func TestServeStartsWithoutHerdrAndRecovers(t *testing.T) {
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	waitFor := func(what string, ok func(orchestratorView) bool) orchestratorView {
 		t.Helper()
-		deadline := time.Now().Add(20 * time.Second)
+		// Alone this takes about 7 s; under a loaded machine (several agents running suites)
+		// 20 s was not enough and the gate failed for timing, not behaviour.
+		deadline := time.Now().Add(90 * time.Second)
 		for {
 			var view orchestratorView
 			if code := getJSON(base+"/api/v1/orchestrator", nil, &view); code == 200 && ok(view) {
