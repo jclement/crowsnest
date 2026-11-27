@@ -85,6 +85,9 @@ type AcceptOptions struct {
 	// Heavy is the command a check runs under, the heavy gate: e.g. ["/path/crowsnest", "heavy",
 	// "--"]. Empty runs the check directly (tests).
 	Heavy []string
+	// DefaultCommand is the check used when a project names none and the checkout has no mise
+	// check task (--demo and tests; empty: finished, unverified).
+	DefaultCommand string
 }
 
 func (o AcceptOptions) timeout() time.Duration {
@@ -182,6 +185,9 @@ func (s *Service) checkCommandFor(ctx context.Context, r store.JobRecord) (comma
 	}
 	if command := AutoCheckCommand(workDirOf(r)); command != "" {
 		return command, "the checkout's mise check task"
+	}
+	if command := s.accept().DefaultCommand; command != "" {
+		return command, "the server's default check"
 	}
 	return "", "no check command (no mise check task, and none set on a project)"
 }

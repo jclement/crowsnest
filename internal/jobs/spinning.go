@@ -149,7 +149,7 @@ func ParseSteps(r io.Reader) []Step {
 }
 
 var (
-	digitRun   = regexp.MustCompile(`[0-9]+`)
+	digitRun   = regexp.MustCompile(`[0-9]{4,}`)
 	hexRun     = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)
 	spaceRun   = regexp.MustCompile(`\s+`)
 	commitCall = regexp.MustCompile(`\bgit\s+(-C\s+\S+\s+)?commit\b`)
@@ -159,8 +159,8 @@ var (
 	pyFail     = regexp.MustCompile(`(?m)^FAILED\s+(\S+)`)
 )
 
-// normaliseInput reduces a tool input to what makes two calls "the same": numbers, hashes and
-// whitespace do not count.
+// normaliseInput reduces a tool input to what makes two calls "the same": hashes, long numbers
+// (ids, timestamps) and whitespace do not count; short numbers do (pkg3 and pkg14 differ).
 func normaliseInput(input json.RawMessage) string {
 	var fields map[string]any
 	if json.Unmarshal(input, &fields) != nil {
