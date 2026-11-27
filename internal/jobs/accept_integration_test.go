@@ -43,8 +43,10 @@ func TestIntegrationClaudeAcceptance(t *testing.T) {
 		o.Accept = jobs.AcceptOptions{Enabled: true, DefaultCommand: acceptCheck, MaxRounds: 3, Timeout: 2 * time.Minute}
 		o.DefaultModel = "haiku"
 	})
-	t.Run("a_failed_check_goes_back_and_is_fixed", r.testCheckFixed)
-	t.Run("b_tiny_budget_stops_and_asks", r.testTinyBudget)
+	if os.Getenv("CROWSNEST_ACCEPT_ONLY") != "c" {
+		t.Run("a_failed_check_goes_back_and_is_fixed", r.testCheckFixed)
+		t.Run("b_tiny_budget_stops_and_asks", r.testTinyBudget)
+	}
 	t.Run("c_prose_question_becomes_ask", r.testProseQuestion)
 	if path := os.Getenv("CROWSNEST_ACCEPT_TEST_OUT"); path != "" {
 		_ = os.WriteFile(path, []byte(r.out.String()), 0o600)
@@ -124,16 +126,19 @@ func turnEndedAfterBudget(d jobs.Detail) bool {
 }
 
 func (r *stopRig) testProseQuestion(t *testing.T) {
-	job := r.create(t, "You will write a greeting file, but the human must choose its word first. Do not create any file yet. "+
-		"Write your question to the human as plain text in your reply (whether the file should say hello or hi), without calling any tool, and end your turn. "+
-		"If crowsnest then tells you how to ask, follow its instructions.")
+	job := r.create(t, "Your first reply must be exactly this one sentence, with no tool call before it, and then end your turn: "+
+		"Should I write hello or hi in the greeting file? "+
+		"After that, if crowsnest sends you a message about it, do what that message says.")
 	question := r.waitForQuestion(t, job.ID)
 	detail := r.get(t, job.ID)
 	r.record(t, "(c) prose question", detail)
 	prose := false
 	for _, event := range detail.Timeline {
-		if event.Kind == jobs.EventNudge && event.Detail != nil && event.Detail["rule"] == string(jobs.RuleProseQuestion) {
-			prose = true
+		if event.Kind == jobs.EventNudge && event.Detail != nil {
+			t.Logf("nudge %v; its last message: %q", event.Detail["rule"], event.Detail["last_message"])
+			if event.Detail["rule"] == string(jobs.RuleProseQuestion) {
+				prose = true
+			}
 		}
 	}
 	if !prose {

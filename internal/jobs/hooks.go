@@ -224,7 +224,11 @@ func (s *Service) applyDecisionLocked(r *store.JobRecord, c *change, decision De
 	now := s.opts.Now()
 	r.Nudges++
 	r.LastNudgeAt = now
-	c.event(EventNudge, fmt.Sprintf("Nudged (%d of %d): the turn ended with nothing declared", decision.Streak, MaxNudges),
+	why := "the turn ended with nothing declared"
+	if decision.Rule == RuleProseQuestion {
+		why = "it asked the human a question in prose; told to call ask"
+	}
+	c.event(EventNudge, fmt.Sprintf("Nudged (%d of %d): %s", decision.Streak, MaxNudges, why),
 		map[string]any{"rule": decision.Rule, "streak": decision.Streak, "stop_hook_active": input.StopHookActive, "last_message": oneLine(input.LastAssistant, 300)})
 	body, _ := json.Marshal(map[string]string{"decision": "block", "reason": decision.Reason})
 	return HookReply{Stdout: string(body)}

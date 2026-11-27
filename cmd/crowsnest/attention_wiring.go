@@ -159,6 +159,7 @@ func sinceSources(ctx context.Context, deps attentionDeps) (attention.SinceSourc
 	if err != nil {
 		return attention.SinceSources{}, err
 	}
+	deps.questions.FillReceipts(ctx, asked) // answers given in the window carry how far they got (6.19)
 	names := map[int64]attention.ProjectRef{}
 	if all, err := deps.projects.List(ctx, true); err == nil {
 		for _, project := range all {

@@ -97,3 +97,12 @@ func (s *Service) MarkReceived(ctx context.Context, numeric int64) {
 	}
 	s.publish(question, "received")
 }
+
+// FillReceipts fills the receipt of each settled question in list (a list does not carry it).
+func (s *Service) FillReceipts(ctx context.Context, list []Question) {
+	for i := range list {
+		if list[i].Status != StatusOpen {
+			s.withReceipt(ctx, &list[i])
+		}
+	}
+}

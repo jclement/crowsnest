@@ -192,7 +192,7 @@ export interface NowResponse {
 }
 
 export interface SinceEvent {
-  kind: "done" | "failed" | "cancelled" | "asked";
+  kind: "done" | "failed" | "cancelled" | "asked" | "answered";
   at: string;
   title: string;
   detail?: string;

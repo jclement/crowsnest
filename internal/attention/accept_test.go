@@ -6,6 +6,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/projects"
+	"github.com/jclement/crowsnest/internal/questions"
 )
 
 // TestAcceptanceBudgetAndWaitItems: the states of DESIGN.md 6.15 to 6.18 are items in the one
@@ -63,5 +64,15 @@ func TestAcceptanceBudgetAndWaitItems(t *testing.T) {
 	}
 	if counts := Count(items); counts.Total != len(items) {
 		t.Errorf("counts %+v for %d items", counts, len(items))
+	}
+}
+
+func TestSinceListsAnswersWithTheirReceipt(t *testing.T) {
+	settled := ago(5 * time.Minute)
+	answered := questions.Question{ID: "q_9", Title: "Ship it?", Kind: questions.KindConfirm, Status: questions.StatusAnswered,
+		CreatedAt: ago(time.Hour), SettledAt: &settled, Receipt: questions.ReceiptUncertain}
+	events := SinceEvents(SinceSources{Questions: []questions.Question{answered}}, ago(30*time.Minute))
+	if len(events) != 1 || events[0].Kind != "answered" || events[0].Ref != "q_9" || events[0].Detail != "delivery uncertain: check whether it arrived" {
+		t.Fatalf("events %+v", events)
 	}
 }
