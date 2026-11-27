@@ -366,7 +366,15 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
     </Sheet>
   );
   const selectionBar = selection && !editor && (
-    <div role="status" className="flex flex-wrap items-center gap-2 border-b border-accent/30 bg-accent/10 px-2 py-1 text-xs text-body">
+    <div
+      role="status"
+      aria-label="Selected lines"
+      // Floating, so it appearing never moves the rows under a pointer that is still dragging.
+      className={cn(
+        "z-20 flex flex-wrap items-center gap-2 border border-accent/40 bg-surface-raised px-2 py-1 text-xs text-body shadow-lg",
+        phone ? "border-x-0 border-b-0" : "absolute bottom-3 left-1/2 w-[min(42rem,calc(100%-1.5rem))] -translate-x-1/2 rounded",
+      )}
+    >
       <span className="min-w-0 flex-1 truncate">
         {whereText({ side: selection.side, line_start: selectionRange(selection).start, line_end: selectionRange(selection).end })} of{" "}
         <span className="font-mono">{selection.path}</span> selected
@@ -476,11 +484,11 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
   }
 
   return (
-    <section ref={sectionRef} aria-label={`Changes: ${summary.label}`} className={cn("flex min-h-0 flex-col overflow-hidden rounded border border-border bg-surface", fullscreen ? "h-full rounded-none border-0" : "h-[78vh] min-h-[28rem]", className)}>
+    <section ref={sectionRef} aria-label={`Changes: ${summary.label}`} className={cn("relative flex min-h-0 flex-col overflow-hidden rounded border border-border bg-surface", fullscreen ? "h-full rounded-none border-0" : "h-[78vh] min-h-[28rem]", className)}>
       {title}
       {toolbar}
-      {selectionBar}
       {commentsSheetEl}
+      {selectionBar}
       <div className="flex min-h-0 flex-1">
         {listShown && <aside aria-label="Changed files" className="flex w-64 shrink-0 flex-col border-r border-border bg-surface-raised xl:w-72">{list}</aside>}
         <div ref={scroller} onScroll={onScroll} className="min-w-0 flex-1 overflow-auto" data-diff-scroller>
@@ -627,7 +635,7 @@ function CommentsButton({ comments, onClick, phone }: { comments?: CommentList; 
   const total = comments?.comments.length ?? 0;
   const label = drafts > 0 ? `Comments: ${drafts} to send` : total > 0 ? `Comments: ${total}, none to send` : "Comments";
   return (
-    <Button compact variant={drafts > 0 ? "secondary" : "ghost"} icon={MessageSquare} aria-label={label} title={label} onClick={onClick} className={cn(drafts > 0 && "border-accent")}>
+    <Button compact variant={drafts > 0 ? "secondary" : "ghost"} icon={MessageSquare} aria-label={label} title={label} onClick={onClick} className={cn("min-w-11", drafts > 0 && "border-accent")}>
       {phone ? (drafts > 0 ? String(drafts) : "") : drafts > 0 ? `${drafts} to send` : "Comments"}
     </Button>
   );
@@ -828,7 +836,7 @@ function FileSection(props: FileSectionProps) {
         )}
         <StatBar file={file} />
         <IconButton icon={Copy} label={`Copy path ${file.path}`} onClick={() => void copy()} />
-        <Button compact variant="ghost" icon={MessageSquarePlus} aria-label={`Ask for change here: the whole of ${file.path}`} onClick={() => props.onEdit({ path: file.path, side: "file", start: 0, end: 0 })}>
+        <Button compact variant="ghost" icon={MessageSquarePlus} aria-label={`Ask for change here: the whole of ${file.path}`} className={cn(props.phone && "w-11")} onClick={() => props.onEdit({ path: file.path, side: "file", start: 0, end: 0 })}>
           {props.phone ? "" : "Ask for change here"}
         </Button>
         {!props.phone && <ViewedBox file={file} onToggle={props.onToggleViewed} big />}

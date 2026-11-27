@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -181,11 +182,37 @@ func makeDiffWorktree(ctx context.Context, s *Service, repo string, id int64, br
 	if err := work(path); err != nil {
 		return err
 	}
+	// The pane gets an agent of its own (with a session, so the demo keeps its transcript): a
+	// message or review comments typed to the job reach it and show in its Conversation.
+	agent := "job-demo"
+	if adder, ok := s.opts.Herdr.(demoAgentAdder); ok {
+		agent = "job-" + strconv.FormatInt(id, 10)
+		status := herdr.StatusIdle
+		if id == demoDiffRunning() {
+			status = herdr.StatusWorking
+		}
+		if err := adder.AddAgent(created.RootPane.ID, agent, "claude", status, fmt.Sprintf("demo-diff-%d", id)); err != nil {
+			return fmt.Errorf("putting an agent in a demo worktree: %w", err)
+		}
+	}
 	_, err = s.mutate(ctx, FormatID(id), func(r *store.JobRecord, _ *change) error {
-		r.PaneID, r.WorkspaceID = created.RootPane.ID, created.Workspace.ID
+		r.PaneID, r.WorkspaceID, r.AgentName = created.RootPane.ID, created.Workspace.ID, agent
 		return nil
 	})
 	return err
+}
+
+// demoAgentAdder is the fake herdr's way to put an agent in a pane (the demo's client has it).
+type demoAgentAdder interface {
+	AddAgent(paneID, name, kind string, status herdr.AgentStatus, sessionID string) error
+}
+
+// demoDiffRunning is the running demo job's numeric id (0 before it is seeded).
+func demoDiffRunning() int64 {
+	demoDiff.mu.Lock()
+	defer demoDiff.mu.Unlock()
+	id, _ := ParseID(demoDiff.jobID)
+	return id
 }
 
 // insertDiffJob writes a diff demo job's row (its worktree comes later, from buildDemoDiffs).

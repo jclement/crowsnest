@@ -38,8 +38,8 @@ export function ReviewPanel({ job }: { job: JobDetail }) {
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <LandCard job={job} view={view} />
-      {view.produced && !view.land.state && <ReviewComments job={job} />}
       {view.produced && <EmbeddedDiff who={{ kind: "job", id: job.id }} />}
+      {view.produced && !view.land.state && <ReviewComments job={job} />}
       <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex min-w-0 flex-col gap-3">
           <Summary view={view} />
@@ -85,7 +85,7 @@ function ReviewComments({ job }: { job: JobDetail }) {
   if (!comments.data || comments.data.comments.length === 0) {
     return (
       <p className="flex items-center gap-1 text-2xs text-muted">
-        Comment on a line, a range, a change or a file in the diff below (select a line number, then c), and send them to the agent as one message.
+        Comment on a line, a range, a change or a file in the diff above (select a line number, then c), and send them to the agent as one message.
         <HelpButton topic="how-to/review-changes#comments" what="line comments" />
       </p>
     );

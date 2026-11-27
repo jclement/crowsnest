@@ -61,7 +61,7 @@ func leaveDemoComments(ctx context.Context, service *changes.Service, jobID, dir
 	if handler == 0 {
 		return fmt.Errorf("the demo handler has no func Checkout")
 	}
-	if _, err := add("server/checkout.go", changes.SideNew, handler, handler+2, "A GET should get 405 with an `Allow: POST` header, not a 400; the test should say so too."); err != nil {
+	if _, err := add("server/checkout.go", changes.SideNew, handler, handler+2, "Set an `Allow: POST` header on the 405, and have the test check for it."); err != nil {
 		return err
 	}
 	if _, err := add("web/src/styles/cart.css", changes.SideFile, 0, 0, "Use the theme's spacing variables here rather than raw pixel values."); err != nil {

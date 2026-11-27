@@ -171,7 +171,7 @@ describe("DiffViewer line comments", () => {
     await user.keyboard("{Shift>}");
     await user.click(screen.getByRole("button", { name: "Line 2, new side" }));
     await user.keyboard("{/Shift}");
-    expect(screen.getByRole("status")).toHaveTextContent("lines 1–2 of web/cart.ts selected");
+    expect(screen.getByRole("status", { name: "Selected lines" })).toHaveTextContent("lines 1–2 of web/cart.ts selected");
     expect(screen.getByRole("button", { name: "Line 1, new side" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.keyDown(window, { key: "c" });
     const editor = await screen.findByRole("form", { name: "Comment on lines 1–2 of web/cart.ts" });
@@ -242,7 +242,7 @@ describe("DiffViewer line comments", () => {
     await screen.findByRole("table", { name: "Diff of web/cart.ts" });
     await userEvent.click(screen.getByRole("button", { name: "Line 1, new side" }));
     await userEvent.click(screen.getByRole("button", { name: "Line 2, new side" }));
-    expect(screen.getByRole("status")).toHaveTextContent("lines 1–2 of web/cart.ts selected; tap another line number to extend");
+    expect(screen.getByRole("status", { name: "Selected lines" })).toHaveTextContent("lines 1–2 of web/cart.ts selected; tap another line number to extend");
     await userEvent.click(screen.getByRole("button", { name: "Comment" }));
     expect(await screen.findByRole("form", { name: "Comment on lines 1–2 of web/cart.ts" })).toBeInTheDocument();
   });

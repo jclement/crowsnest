@@ -147,7 +147,7 @@ export function FileDiff({ view, split, wrap, onMoreContext, comments }: FileDif
         extra.push(
           <tr key={`notes-${index}-${side}`} data-comment-row="">
             <td colSpan={columns} className="bg-surface px-2 py-1.5 font-sans">
-              {comments.renderComments(notes)}
+              <div className={stayInView}>{comments.renderComments(notes)}</div>
             </td>
           </tr>,
         );
@@ -156,7 +156,7 @@ export function FileDiff({ view, split, wrap, onMoreContext, comments }: FileDif
         extra.push(
           <tr key={`editor-${index}-${side}`} data-comment-row="">
             <td colSpan={columns} className="bg-surface px-2 py-1.5 font-sans">
-              {comments.renderEditor()}
+              <div className={stayInView}>{comments.renderEditor()}</div>
             </td>
           </tr>,
         );
@@ -325,6 +325,10 @@ function rowTone(kind: DiffLine["kind"]): string {
 function LineNumber({ n, className }: { n: number; className?: string }) {
   return <td className={cn("w-10 select-none px-1 text-right align-top text-muted", className)}>{n > 0 ? n : ""}</td>;
 }
+
+/** A note's row spans a table that may be wider than the screen (long lines, no wrap): its card
+ * stays at the visible left edge and no wider than the screen, so its buttons are never off it. */
+const stayInView = "sticky left-2 max-w-[min(48rem,calc(100vw-2.5rem))]";
 
 /** The selected lines' code: a bar down the left edge, so the selection reads without colour too. */
 const selectedCode = "shadow-[inset_3px_0_0_var(--color-accent)] bg-accent/10";
