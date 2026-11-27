@@ -36,7 +36,7 @@ func ManualMarkdown() string {
 	b.WriteString("Codex jobs offer the models the installed Codex lists in its own picker (`codex debug models`, those marked to be listed), read when the form opens.\n\n")
 	b.WriteString("## How Codex is supervised\n\n")
 	b.WriteString("A Codex job starts with `--ask-for-approval on-request --sandbox workspace-write` and the sandbox's network on (`sandbox_workspace_write.network_access`: the only way its shell reaches crowsnest's agent socket; a Claude job has the network too, and the guard still refuses protected hosts), and with crowsnest's own hooks (Stop, SessionStart, PreToolUse, PostToolUse and PermissionRequest) handed to that one session with `-c hooks.…` and `--dangerously-bypass-hook-trust`, which runs them without Codex's per-hook review. ")
-	b.WriteString("That flag also runs any hooks the repository itself declares in `.codex/hooks.json` without review, as Claude Code runs a trusted folder's own hooks. Nothing is written into `~/.codex/config.toml` for this. ")
+	b.WriteString("Codex keeps `.git` read-only inside its sandbox (`writable_roots` does not lift it; checked with `codex sandbox`), so each `git commit` is an escalation, which reaches you as an approval: a project approval rule for `git commit` answers them. That flag also runs any hooks the repository itself declares in `.codex/hooks.json` without review, as Claude Code runs a trusted folder's own hooks. Nothing is written into `~/.codex/config.toml` for this. ")
 	b.WriteString("Run `mise run test:codex` to check these against the Codex installed here.\n")
 	return b.String()
 }

@@ -4687,8 +4687,12 @@ usage (fresh input is input minus cached; cached is a cache read; the running to
 message id). The network switch is on because it is the only way the sandboxed shell reaches the
 agent socket (`codex sandbox` probes: `network.unix_sockets` and `network.allow_unix_sockets` did
 not open it); without it every `crowsnest job …` call became an approval card. A Claude job has
-the network too, and the guard still refuses protected hosts. Nothing is written into
-`~/.codex/config.toml` for any of this. A Codex job with no agent token keeps the old start
+the network too, and the guard still refuses protected hosts. Codex keeps `.git` read-only inside
+its sandbox (`sandbox_workspace_write.writable_roots` naming the git directory does not lift it,
+checked with `codex sandbox`), so every `git commit` in a Codex job is an escalation and reaches the
+human as an approval (seen in `test:codex`); a project approval rule for `git commit` answers them.
+(Before `wip/trust`, with approvals off, such a commit was simply refused.) Nothing is written
+into `~/.codex/config.toml` for any of this. A Codex job with no agent token keeps the old start
 (approvals never) and the herdr backstop. `mise run test:codex` (opt-in, a few cents on
 `gpt-5.6-luna`) proves each "yes": a job ends done with its SessionStart hook on the timeline, its
 thread learned and its spend measured with no cost; an undeclared stop is refused by the Stop

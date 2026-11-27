@@ -29,6 +29,7 @@ package jobs_test
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -376,7 +377,11 @@ func (r *codexRig) noProtocolApprovals(t *testing.T, jobID string) {
 	for _, a := range pending {
 		if a.JobID == jobID {
 			r.decide(t, a.ID, "allow", "")
-			if strings.Contains(string(a.ToolInput), "crowsnest ") {
+			var input struct {
+				Command string `json:"command"`
+			}
+			_ = json.Unmarshal(a.ToolInput, &input)
+			if strings.HasPrefix(strings.TrimSpace(input.Command), "crowsnest ") && !strings.ContainsAny(input.Command, "&|;") {
 				t.Errorf("a crowsnest protocol call needed approval: %s", a.Summary)
 			} else {
 				t.Logf("approval %s allowed: %s", a.ID, a.Summary)

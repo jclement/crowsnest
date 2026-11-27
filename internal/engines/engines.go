@@ -143,7 +143,7 @@ func CodexEngine(installed bool, models []Model) Engine {
 		Summary: "The stop guarantee, approvals from the browser and the guard (through Codex's hooks), and spend in tokens; no answer receipts, usage-limit or spinning detection, and no restart, compact or model switch in Rescue.",
 		Capabilities: []Capability{
 			capability(CapStop, true, "Codex's Stop hook, handed to the job for its session (--dangerously-bypass-hook-trust, the hooks crowsnest wrote)"),
-			capability(CapApprovals, true, "Codex asks on request inside its workspace-write sandbox (writes outside the workspace; the network is on, as for a Claude job, so the shell reaches crowsnest); its PermissionRequest hook brings each request to the browser, and an unanswered one falls back to Codex's own dialog, shown as a card"),
+			capability(CapApprovals, true, "Codex asks on request inside its workspace-write sandbox (writes outside the workspace; the network is on, as for a Claude job, so the shell reaches crowsnest); its PermissionRequest hook brings each request to the browser, and an unanswered one falls back to Codex's own dialog, shown as a card. Codex keeps .git read-only in its sandbox, so every commit asks: a project approval rule for git commit answers those"),
 			{ID: CapGuard, Label: labels[CapGuard], Available: true, Partial: true, Note: "shell commands are checked by the PreToolUse hook; apply_patch edits are held while crowsnest checks the worktree but not otherwise inspected"},
 			{ID: CapSpend, Label: labels[CapSpend], Available: true, Partial: true, Note: "tokens from Codex's session log; no cost estimate (crowsnest has no prices for OpenAI's models)"},
 			capability(CapReceipts, false, "receipts read Claude's transcript; a Codex answer stops at \"delivered\""),
