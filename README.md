@@ -24,57 +24,24 @@ see every agent in the fleet.
 > review gates arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
 > [STATUS.md](STATUS.md).
 
-**Now, and one queue of what needs you** (DESIGN.md 22). Home is **Now**: what needs you
-(approvals, questions, terminal dialogs, stuck, failed or ready-to-land jobs, a lead or the
-orchestrator at its terminal), each labelled with its project and job, de-duplicated (an approval
-and its dialog are one item) and answerable in place; then one row per project (its lead, what it
-is doing, running / waiting on you / done today, spend today, who owns the work), unfiled work and
-the orchestrator; then **since you left**, kept per browser (Mark all seen); then the job box. The
-server builds that queue once (`GET /attention`, an `attention` event), and the badge, the tab
-title, the tray, the palette and the Inbox all show its one number; a snooze holds on every
-device. On a phone the bottom bar is Now, Projects, Inbox, Chat and **More** (Jobs, Fleet,
-Terminal, System); the desktop rail has the same order. The Jobs board is at `/jobs`. A job in a
-project is its lead's: the lead hears when it finishes, gets stuck or asks; the orchestrator hears
-only outcomes of work it handed over and what a lead could not resolve (DESIGN.md 7.4).
+**The manual.** How to use crowsnest, and the ideas behind it, are in the built-in manual:
+[docs/manual](docs/manual/README.md), the same pages the app shows under **Help** (on a phone
+under More, `g` then `m`, or a question typed into the command palette, such as "how do I land a
+job"), with a **?** beside each view and confusing card. Start with [Start
+here](docs/manual/start-here.md). This README is the reference for installing, configuring and
+building it; the manual explains using it:
 
-**Approvals and the needs-you tray** (DESIGN.md 8.7). When a Claude agent crowsnest started is
-about to ask for a permission, a `PermissionRequest` hook turns the request into an approval card:
-a Bash command with its directory, an edit as a diff, a URL, an MCP call, rated low, elevated or
-dangerous. Allow it once or deny it with a note from a tray that sits on every view (bottom-right
-on a desktop, a bar above the bottom nav on a phone; `g` then `n` focuses it), from the Inbox, or,
-for low-risk ones, from a notification's buttons. **Low** means the call matched a list of
-known-harmless shapes (reading files, read-only git, `go test`, the test and lint scripts…), read
-after quoting, wrappers, `sh -c` strings and git's global options are taken apart. Anything else
-is at least elevated, and so is a summary too long to show whole. Questions that grant something
-(a land request, a held job, any allow or approve) are never answered from a notification
-(DESIGN.md 4.22). The agent waits on the hook and goes on with no
-terminal dialog to answer; the dialog is still on its terminal meanwhile, and whichever is
-answered first wins. A dangerous call needs a second confirmation, "always allow" is only in the
-terminal, and anything that goes wrong falls back to Claude's own dialog, never to an allow.
-
-So the phone is not a tap per test run, crowsnest keeps **approval rules** of its own (DESIGN.md
-8.7, Policy): on a project's page, "Allow Bash commands matching `go test *`", "Allow edits under
-`internal/`", "Allow the tool `WebSearch`", each shown with what it would have matched in the
-project's last week before you save it; "Allow and remember for this job" on a card, gone when the
-job ends; and "Allow N low-risk calls from <agent>" for one job's waiting calls. A matching call is
-allowed by the hook at once and journalled on the job's timeline. A dangerous call is never allowed
-by a rule, and a rule allows an elevated call only when you said so. Pending approvals survive a
-crowsnest restart for 150 s, enough for their hooks to come back. A `PreToolUse` guard refuses outright a few commands no agent should run unattended (reaching a
-protected host, pushing onto a protected branch, `herdr server stop`, another herdr session).
-
-**On a phone** (DESIGN.md 23). Every question, approval or terminal dialog opens as a **decision
-packet** (`/decide?item=…`): the project and job, the ask, what each choice does, the
-recommendation, then the evidence (the diff behind a file list, the command, the agent's last
-message), with the answer in a bar at the bottom under your thumb. Your note survives rotating the
-phone or switching apps; a decision someone already took says so. Notifications say the project,
-the job, the question and the recommendation, and open the packet; where the phone shows buttons, a
-routine question offers its recommended option and Snooze, a low-risk call whose command fits
-offers Allow and Deny, and anything that widens what agents may do offers nothing. A stuck job has
-**Rescue** buttons (interrupt, continue, nudge, restart on the same conversation, compact, switch
-model, the dialog's own options), so a 44-column terminal is the last resort; when you do need
-it, the key bar fits the screen and has Copy and ^C. With talk mode on, Now's job box has a mic:
-hold, speak ("Website: fix the checkout validation"), check the readback, Create, and Undo for a
-few seconds. `docs/PHONE-CHECK.md` is the checklist for a real iPhone.
+- [Now and the attention queue](docs/manual/concepts/attention-and-now.md): one queue of what
+  needs you, one number everywhere, answerable in place (DESIGN.md 22).
+- [Jobs](docs/manual/concepts/jobs.md) and [the supervisor](docs/manual/concepts/supervisor.md):
+  states, nudges, stuck causes and the one action each needs (DESIGN.md 6).
+- [Questions, approvals and terminal dialogs](docs/manual/concepts/questions-approvals-dialogs.md),
+  risk levels and receipts, and [answering them](docs/manual/how-to/answer.md) from Now, the tray,
+  the decision packet or the lock screen (DESIGN.md 8.7, 23).
+- [Approval rules](docs/manual/how-to/projects.md#approval-rules), [rescue without a
+  terminal](docs/manual/how-to/rescue.md), [landing](docs/manual/how-to/review-and-land.md) and
+  [acceptance](docs/manual/concepts/acceptance.md).
+- [What crowsnest protects, and what it does not](docs/manual/safety.md).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
 default, serves nothing but a token-gated setup page until a login exists (or an explicit
@@ -263,21 +230,10 @@ Note that herdr's TUI shows every machine your herdr config names, remote ones i
 Terminal view reaches those too.
 
 **Command palette.** ⌘K on a Mac (Ctrl K elsewhere), or the "Search or run…" field in the
-header (a search icon on a phone, which opens it full screen with the keyboard up). One box
-searches everything the app already has live: jobs (by title, id, state, agent or directory, with
-their state), open questions and agents at a dialog, agents and shell panes, the views,
-Notifications, Journal, Keyboard shortcuts, the theme and Sign out, and actions (Poke now, New
-conversation, Restart orchestrator, Send test notification, New job form). Whatever you type is
-also offered as **Give job: …** (Enter gives it to the orchestrator; ⌘/Ctrl Enter opens the full
-form with it filled in) and **Send to orchestrator: …** (a Chat prompt); start with `>` or `job `
-to offer only Give job. → (or Tab) shows an item's other actions: nudge, message or cancel a job,
-open an agent's conversation or terminal, and answer a confirm or single-choice question from its
-options. Restart, New conversation and Cancel ask first, in the same words as the views. Esc goes
-back a level, then closes and puts focus back where it was. With an empty box, recently used
-items come first (kept in localStorage, `crowsnest-palette-recent`). Inside a terminal only ⌘K
-opens it: Ctrl K belongs to the shell. `?` lists every shortcut, and `g` then `h`, `p`, `j`, `c`,
-`i`, `f` or `t` goes to Now, Projects, Jobs, Chat, Inbox, Fleet or Terminal; neither fires while you type in a field or a
-terminal.
+header: jobs, questions, agents, views, sheets, actions and the manual in one box; whatever you
+type is also offered as **Give job: …** and **Send to orchestrator: …**. Every shortcut is in the
+manual's [keyboard shortcuts](docs/manual/reference/keyboard-shortcuts.md), generated from the
+app's own table (`?` in the app shows the same list).
 
 For development, `mise run dev` builds the single binary and runs the real thing on one port
 (http://localhost:2769) against its own herdr session. `mise run dev:hot` adds Vite with hot reload
@@ -298,48 +254,18 @@ which also gives the HTTPS secure context the microphone needs for talk mode:
 ```
 
 **Notifications on your phone (Web Push).** Account menu → **Notifications** → *Turn on for this
-device*. From then on the phone (or laptop) gets a notification when an agent asks a question
-(blocking or normal), waits at a terminal dialog, a job gets stuck, fails or finishes, or the
-orchestrator needs the terminal, with no crowsnest tab open; tapping it opens the item. The sheet
-switches each kind on or off, sends a test, and lists and removes devices (at most 20). Push needs
-a **secure context**: `localhost` works as is; on a tailnet use `tailscale serve` (HTTPS on your
-MagicDNS name) or `--tls-cert`/`--tls-key`, since a plain `http://100.x.y.z` page cannot subscribe.
-On **iPhone and iPad** Web Push works only for the app added to the Home Screen (Safari, Share,
-Add to Home Screen; iOS 16.4 or later), opened from there. When something is missing the sheet
-says which. The server makes its VAPID key pair on first start and keeps it in the database; it
-POSTs only to public `https://` push-service addresses, and notices carry a title, one line and a
-link, nothing more (the same scrubbing and rate limits as `--notify-url`).
+device*. Push needs a **secure context** (`localhost`, `tailscale serve`, or
+`--tls-cert`/`--tls-key`), and on an iPhone the app added to the Home Screen. The server makes its
+VAPID key pair on first start and keeps it in the database; it POSTs only to public `https://`
+push-service addresses. The manual's [Reach it from your phone](docs/manual/how-to/phone.md) and
+[Notifications](docs/manual/reference/notifications.md) cover the kinds, the buttons and routing.
 
-**Talk mode.** Start crowsnest with an ElevenLabs API key (`ELEVENLABS_API_KEY`; prefer the
-environment to the flag, which `ps` shows) and two things appear:
-
-- **The microphone**, a mic button beside Send in Chat, always there. Hold it and speak (or tap
-  it to lock recording on and tap again to stop); on a desktop, **hold Space** anywhere outside a
-  text field, or **Option+Space** (Ctrl+Space off a Mac) while typing in the box. A recording can
-  run **five minutes**: the elapsed time shows as you speak, a warning comes in the last 30 s, and
-  at the cap it stops and is sent. A press too short to hold any speech sends nothing. What you
-  said is transcribed by ElevenLabs, shown for 1.5 s with Cancel, then sent to the orchestrator
-  under a `[crowsnest voice: …]` header. The first press asks for the microphone; nothing needs
-  switching on first.
-- **Speak mode**, the speaker switch in the header of every view, remembered per browser. The
-  orchestrator begins **every** reply with `SAY: <one sentence>` (its `CROWSNEST.md` says so,
-  the Earshot contract), then the detail; Chat always shows that sentence as the reply's caption,
-  with a play button. With speak mode on, each new reply's sentence (and anything an agent says
-  with `crowsnest say`) is spoken wherever you are in the app, with a now-playing strip under the
-  header; `SAY: -` and `noop` are silent, a reply with no SAY line chimes. Speech is made only
-  when a browser asks to hear it, and cached, so with speak mode off nothing is spent.
-
-**Voice** in the account menu picks the ElevenLabs voice (the account's voices, with a Preview),
-the speed (0.8× to 1.5×: ElevenLabs speaks up to 1.2×, the rest is played faster in the browser
-with the pitch kept) and the model (fast, `eleven_flash_v2_5`, or higher quality,
-`eleven_multilingual_v2`, which takes about three times as long to start). The choice is stored
-in crowsnest's database and applies from the next reply; `--elevenlabs-voice` is only the default
-until one is chosen, and the sheet says where the current voice comes from. In the Inbox, a
-question can be read aloud and its note dictated. The key never leaves the server: the browser
-can only ask to hear texts the server holds (by id), never arbitrary text. The microphone needs a
-secure context (`https://` or `localhost`); over plain HTTP on a tailnet address the mic explains
-that when pressed, and spoken replies still work. Without a key every `/voice` route is a 404 and
-nothing changes.
+**Talk mode.** Start crowsnest with an ElevenLabs API key (`ELEVENLABS_API_KEY`, or
+`--elevenlabs-api-key-file`; prefer either to the flag, which `ps` shows) and Chat gets a
+microphone and speak mode (each reply's `SAY:` sentence spoken). The key never leaves the server;
+the browser can only ask to hear texts the server holds (by id). Without a key every `/voice`
+route is a 404. How to use it, and speak mode vs the mic: [Talk and
+listen](docs/manual/how-to/voice.md).
 
 ## Doctor, System and Settings
 
@@ -1131,6 +1057,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run screenshots:inbox` | (The three `screenshots:*` tasks run `web/e2e/screenshots` in the `screenshots` Playwright project, a fresh demo instance per test.) Builds, then Playwright against `./bin/crowsnest --demo`: the Inbox list and a question (mermaid and a diff) at 375×812 and 1440×900, light and dark, a multi-select, the 375 px checks, and an answer round trip |
 | `mise run screenshots:jobs` | Builds, then Playwright against `./bin/crowsnest --demo`: the Jobs board (light and dark), the new-job form, a running, a stuck and a done job at 375×812 and 1440×900, the 375 px checks, and giving a job |
 | `mise run screenshots:palette` | Builds, then Playwright against `./bin/crowsnest --demo`: the command palette open, with a query (highlights, Give job), and a job's actions at 375×812 and 1440×900 in light and dark, plus the keyboard shortcuts sheet |
+| `mise run screenshots:manual` | Builds, then Playwright against `./bin/crowsnest --demo`: the built-in manual's pictures (`docs/manual/img`, light theme, 1x, JPEG): Now at 1440 and 390, the board, a project, a decision packet and rescue on a phone, the Land tab, the Schedule sheet and Chat. Run it after a UI change the manual's pictures show |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
 | `mise run e2e:voice` | Talk mode alone (also part of `e2e`). Builds, then Playwright against `./bin/crowsnest --demo` with talk mode on and a fake ElevenLabs (`web/e2e/support/fake-elevenlabs.mjs`, never the real API), Chromium's fake microphone (and WebKit's mock device for the keyboard cases): the mic, the transcript sent, the SAY reply fetched from `/voice/tts` and played with speak mode on and not synthesised with it off, the play button; hold Space with real key events (3 s and 30 s with auto-repeat, a focused button, a quick tap, Option+Space in the composer, blur mid-hold); the Voice sheet (voices, preview, a saved voice and speed); screenshots of Chat recording at 375×812 and 1440×900 |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives, `checksums.txt` and the Homebrew cask (`dist/homebrew/Casks/crowsnest.rb`); nothing signed, nothing published |

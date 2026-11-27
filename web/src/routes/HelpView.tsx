@@ -179,10 +179,10 @@ function ContentsPanel({ manual, index, current, onNavigate }: { manual: Manual;
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search the manual"
-            className="h-11 w-full rounded border border-border bg-surface pl-7 pr-8 text-sm text-heading placeholder:text-muted md:h-8"
+            className="h-11 w-full rounded border border-border bg-surface pl-7 pr-11 text-sm text-heading placeholder:text-muted md:h-8"
           />
           {query && (
-            <button type="button" onClick={() => setQuery("")} aria-label="Clear the search" className="absolute right-0 top-0 inline-flex h-11 w-9 items-center justify-center text-muted md:h-8">
+            <button type="button" onClick={() => setQuery("")} aria-label="Clear the search" className="absolute right-0 top-0 inline-flex h-11 w-11 items-center justify-center text-muted md:h-8 md:w-8">
               <X className="h-3.5 w-3.5" aria-hidden />
             </button>
           )}

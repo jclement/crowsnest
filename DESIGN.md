@@ -2754,9 +2754,9 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 | **Terminal** | Full-screen xterm on the herdr TUI, with a key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Full-height xterm, font size in the status line |
 
 Since R4 (section 22) the nav has four primary destinations, Now, Projects, Inbox and Chat, which
-are the phone's bottom bar, plus **More** (a sheet: Jobs, Fleet, Terminal, System); the desktop
-rail shows the same order with Jobs, Fleet and Terminal under a "More" heading (`components/nav.ts`
-is the one list). Now is the default route (`/`, `g h`); a link made before it (`/?job=j_12`,
+are the phone's bottom bar, plus **More** (a sheet: Jobs, Fleet, Terminal, Help, System); the
+desktop rail shows the same order with Jobs, Fleet, Terminal and Help under a "More" heading
+(`components/nav.ts` is the one list; Help is the manual, 12.10). Now is the default route (`/`, `g h`); a link made before it (`/?job=j_12`,
 `/?project=<slug>`) is redirected to the board at `/jobs` (`g j`); the others are `/projects`
 (`/projects/<slug>` a project), `/chat` (`?target=lead-<slug>` a project's lead), `/inbox`, `/fleet` (`?agent=<pane id>`
 selects an agent, so links and reloads land on it) and `/terminal`. A web app manifest and icons
@@ -2989,6 +2989,72 @@ both; checked by building darwin and linux, amd64 and arm64), and in a container
 limits memory or CPU it reports the cgroup's usage and limits instead (`scope: container`, memory
 less inactive page cache as `docker stats` does). Each sample is a `sys` event; the client appends
 it to the last minute.
+
+### 12.10 The built-in manual and contextual help (`wip/manual`)
+
+Jeff, 2026-11-27, meeting about twenty features at once: "we probably also need a built-in user
+manual that describes how to use this and concepts."
+
+**Where the text lives.** `docs/manual/**/*.md`, plain GitHub markdown, so the same pages read on
+GitHub. `docs/manual/README.md` is the contents and the one list of pages: its `## Part` headings
+and `- [Title](page.md)` links give the sidebar and the previous/next order. Pictures are
+`docs/manual/img/*.jpg`, taken from `--demo` by `mise run screenshots:manual`
+(`web/e2e/screenshots/manual.spec.ts`; light theme, 1x, JPEG at quality 80, each under 250 KB).
+
+**How it gets into the binary.** `web/src/manual/content.ts` imports every page with Vite's
+`import.meta.glob(…, { query: "?raw" })` and every picture as an asset URL. The module is only
+ever imported dynamically (`lib/manual-queries.ts`, a React Query with infinite stale time), so
+the manual is its own chunk, fetched the first time Help, a "?" or a palette search needs it, and
+embedded with the rest of `web/dist`. Decision: no server endpoint. The manual is static and
+public to the signed-in user, the bundle already ships through the same CSP-clean asset path, and
+a client-side index needs every page anyway.
+
+**The model** (`lib/manual.ts`, pure): GitHub's heading anchors (lower case, punctuation dropped,
+spaces to dashes, `-1` for repeats), the contents, link classification (a relative `.md` link is
+a page and anchor; `app:/jobs?project=…` or `app:sheet/settings` is an **open-the-thing** button,
+checked against the router's views and the palette's sheets; `http(s)` opens a new tab; anything
+else, such as `../../DESIGN.md`, is plain text in the app and a link on GitHub), a section's
+markdown (from a heading to the next of its depth) and the search: the pages cut into sections at
+every h2 and h3, a query reduced to its terms (stop words such as "how do I" dropped, a crude
+stem), every term required, heading and title hits weighted over body hits.
+
+**The views.** `/help` (the contents page) and `/help/<page>#<heading>` (a splat route,
+`routes/HelpView.tsx`): the contents and a search on the left, a **Contents and search** sheet on
+a phone, a breadcrumb, an "On this page" list of h2s, the page through the app's `Markdown`
+component (extended with optional `components`, `extraRehypePlugins` and `urlTransform` props for
+trusted callers; raw HTML stays dropped), previous and next. Help is in `moreNav` (the phone's More
+sheet and the desktop rail), a palette view, and `g` then `m`; the `?` shortcuts sheet links to it.
+The palette searches the manual on the same query: its group comes first when the query reads as a
+question ("how…", "what…", ending in "?"), else last (`withManual`).
+
+**Contextual help.** `components/help/HelpButton.tsx` is a small "?" (44 px to a finger, drawn at
+24 px from `md`) that calls `PaletteApi.openHelp(topic)`; `PaletteProvider` renders
+`HelpSheet`, one section in a sheet over whatever is open, with "Read the whole page". It sits
+beside view titles (Now, Projects, System, Jobs' toolbar, the Inbox, Fleet), in the sheets'
+headers (Settings, Schedule, Instructions, Pause, Limits, Voice), and on the cards the brief named:
+a job's stuck or needs-you banner (`causeHelpTopic` maps the cause), crowsnest's check, the budget,
+the wait owner, an approval's risk level, an answer's receipt, the review rounds, the Land actions,
+the Rescue panel, and Chat's speak switch. Because help stacks over a sheet, `Sheet` now closes
+only the topmost sheet on Escape (before, every open sheet closed). **First-visit hints**
+(`Hint.tsx`): three one-line strips (Now, Jobs, Projects) with Read more and Got it, remembered in
+localStorage `crowsnest-hint:<id>`; never modal.
+
+**Kept honest.** Two generated pages: `reference/keyboard-shortcuts.md` from `lib/shortcuts.ts`
+(the table the `?` sheet shows; `UPDATE_MANUAL=1 npx vitest run src/manual` rewrites it) and
+`reference/settings.md` from `internal/config`'s option and editable-settings tables
+(`UPDATE_MANUAL=1 go test ./internal/config -run Manual`); each test fails when the committed page
+differs. `src/manual/manual.test.ts` also checks that every page is in the contents and has one
+title, every page link and anchor resolves, every `app:` target is a real view or sheet, every
+repository file a page links to exists, every picture is used and small, every topic string in the
+app's source (`topic="…"`, maps) names an existing heading, every `--flag` in the prose is a real
+flag or a known subcommand's, and that "how do I land a job" finds the landing page.
+`e2e/hermetic/help.spec.ts` walks Help from the nav, a search, a deep link, an open button, the
+palette answering a question, the "?" on a stuck job at 390 and 1440 (Escape closing only the help
+sheet), a hint, and axe.
+
+**Stubs.** Two features were being built on other branches when the manual was written (the
+live diff viewer, `wip/diff`; the folder picker, `wip/picker`). Their pages carry a visible "Coming
+soon" note and an HTML comment `STUB(wip/…)`; whoever merges them replaces both.
 
 ## 13. Talk mode
 
