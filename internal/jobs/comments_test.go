@@ -171,3 +171,26 @@ func timelineText(detail Detail) string {
 	}
 	return out.String()
 }
+
+// TestAFixJobLeavesAnUnverifiedJobUnverified: with no check to run, the fix job's end does not
+// start a check that cannot run (it showed "Check failed" in the real-Claude journey).
+func TestAFixJobLeavesAnUnverifiedJobUnverified(t *testing.T) {
+	r := newAcceptRig(t, "true", LandingOptions{MergeMode: "merge"})
+	ctx := context.Background()
+	repo := landRepo(t)
+	job := r.create(CreateInput{Brief: "Add a widget", Dir: repo})
+	commitIn(t, job.WorkDir, "widget.go", "package widget\n")
+	r.edit(job.ID, func(rec *store.JobRecord) { rec.State, rec.AcceptState = string(StateDone), AcceptUnverified })
+	fix, err := r.svc.AskChanges(ctx, job.ID, reviewBody, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.edit(fix.ID, func(rec *store.JobRecord) { rec.State = string(StateDone) })
+	r.svc.fixSettled(ctx, r.get(fix.ID).Job)
+	if d := r.get(job.ID); d.AcceptState != AcceptUnverified || d.State != StateDone {
+		t.Fatalf("after the fix: %s, %s (%s)", d.State, d.AcceptState, d.AcceptDetail)
+	}
+	if checks, _ := r.db.ListChecks(ctx, mustParse(job.ID), 10); len(checks) != 0 {
+		t.Fatalf("a check ran: %+v", checks)
+	}
+}

@@ -303,8 +303,11 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       }
       event.preventDefault();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // In the capture phase: a sheet closes itself on Escape from a document listener, and by the
+    // time the key bubbled up to the window the sheet would be gone, so its Escape would also have
+    // left full screen. Here the open sheet is still seen, and the key left to it.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [files, index, goToFile, toggleViewed, fullscreen, onFullscreen, fullscreenToggle, commentOnSelection, editor, selection]);
 
   if (summaryQuery.isPending) return <SkeletonRows rows={8} label="Reading the diff" />;

@@ -113,7 +113,10 @@ test("comment on lines in two files, send them, the agent gets one message with 
   await sheet.getByRole("button", { name: "Send 4 comments to the agent" }).click();
   await expect(page.getByText("Comments sent")).toBeVisible();
   await expect(sheet.getByText(/0 to send · 5 sent · 1 outdated/)).toBeVisible();
+  // Escape closes the sheet only: the viewer stays (on a phone it is the full-screen page).
   await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
+  await expect(viewer).toBeVisible();
 
   // The agent's conversation shows one message holding both.
   await page.goto(`/jobs?job=${id}`);
