@@ -150,6 +150,9 @@ func (o *Orchestrator) paneEnv() (map[string]string, string, error) {
 	if o.opts.BinDir != "" {
 		env["PATH"] = o.opts.BinDir + string(os.PathListSeparator) + o.opts.BasePath
 	}
+	for key, value := range o.opts.ExtraEnv {
+		env[key] = value
+	}
 	if o.opts.Identity == nil || o.opts.AgentSocket == "" {
 		return env, "", nil
 	}

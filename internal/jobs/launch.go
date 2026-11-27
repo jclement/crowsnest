@@ -67,6 +67,8 @@ type LaunchOptions struct {
 	// Guard, when set, is written to each job's guard.json and named on its PreToolUse guard hook
 	// (DESIGN.md 8.7). nil: no guard hook.
 	Guard *guard.Rules
+	// ExtraEnv is added to every job agent's pane environment (CROWSNEST_HEAVY_DIR, 6.12).
+	ExtraEnv map[string]string
 }
 
 func (o LaunchOptions) shellWait() time.Duration {
@@ -423,6 +425,9 @@ func (s *Service) paneEnv(jobID string) (map[string]string, string, error) {
 	}
 	if s.opts.Launch.BinDir != "" {
 		env["PATH"] = s.opts.Launch.BinDir + string(os.PathListSeparator) + s.opts.Launch.BasePath
+	}
+	for key, value := range s.opts.Launch.ExtraEnv {
+		env[key] = value
 	}
 	if s.opts.Launch.Identity == nil || s.opts.Launch.AgentSocket == "" {
 		return env, "", nil

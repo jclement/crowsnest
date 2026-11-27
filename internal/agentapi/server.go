@@ -138,6 +138,12 @@ type Server struct {
 	subjectOf    func(ctx context.Context, paneID string) string
 	projects     ProjectReader
 	pause        *pause.Switch
+	digest       DigestSubmitter
+}
+
+// DigestSubmitter takes the orchestrator's digest (internal/digest).
+type DigestSubmitter interface {
+	Submit(ctx context.Context, day, body string) error
 }
 
 // ServerOptions configure a Server. Questions is required.
@@ -146,6 +152,8 @@ type ServerOptions struct {
 	Jobs      *jobs.Service // nil: the job routes answer 503
 	// Pause is the automation's pause switch (DESIGN.md 6.13); nil: the pause routes answer 503.
 	Pause *pause.Switch
+	// Digest takes `crowsnest digest submit` (DESIGN.md 7.12); nil: 503.
+	Digest DigestSubmitter
 	// Identity resolves callers' tokens. nil: every caller is unidentified.
 	Identity *agentid.Registry
 	Hub      *hub.Hub // nil: say is accepted and dropped
@@ -199,7 +207,7 @@ func NewServer(opts ServerOptions) *Server {
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext,
 		attachments: opts.Attachments, attachRoots: opts.AttachRoots, approvals: opts.Approvals,
-		instructions: opts.Instructions, subjectOf: opts.SubjectOf, projects: opts.Projects, pause: opts.Pause,
+		instructions: opts.Instructions, subjectOf: opts.SubjectOf, projects: opts.Projects, pause: opts.Pause, digest: opts.Digest,
 		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
 		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
 		creates: ratelimit.New(createBurst, createRefill, opts.Now),

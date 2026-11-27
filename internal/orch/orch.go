@@ -148,6 +148,8 @@ type Options struct {
 	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): an agent
 	// that exits meanwhile is not restarted automatically (Restart still works). Nil: never.
 	Paused func() bool
+	// ExtraEnv is added to the agent's pane environment (CROWSNEST_HEAVY_DIR, DESIGN.md 6.12).
+	ExtraEnv map[string]string
 
 	// ---- A standing agent other than the session's orchestrator (DESIGN.md 21.2) ----
 	// The lifecycle is the same for every standing agent: the orchestrator, and each project's

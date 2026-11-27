@@ -122,6 +122,8 @@ type leadDeps struct {
 	logger      *slog.Logger
 	// onStatus is told every status change of every lead (serve pins its conversation).
 	onStatus func(project projects.Project, status orch.Status)
+	// ctl are the pause and presence (landing_wiring.go); nil: neither.
+	ctl *controls
 }
 
 // leadRemoteControl is a lead's Remote Control name, "<instance> <project>", or "" when off.
@@ -148,7 +150,9 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 			BinDir:            binDir, Executable: executable, AgentSocket: deps.agentSocket, BasePath: os.Getenv("PATH"),
 			ClaudeConfigDir: claudeConfigDir(deps.cfg), Identity: deps.identity, Guard: deps.guard,
 			AgentName: projects.AgentName(project.Slug), Workspace: "lead " + project.Slug, KVPrefix: "lead." + project.Slug,
-			Render: func() (string, error) { return w.leadInstructions(deps.cfg.Session, project) },
+			Render:   func() (string, error) { return w.leadInstructions(deps.cfg.Session, project) },
+			Paused:   deps.ctl.paused,
+			ExtraEnv: deps.ctl.heavyEnv(),
 			OnStatus: func(status orch.Status) {
 				if deps.onStatus != nil {
 					deps.onStatus(project, status)
@@ -159,6 +163,9 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 			Client: deps.client, KV: deps.db, Journal: deps.journal, Hub: deps.events, Logger: deps.logger.With("lead", project.Slug),
 			Status: agent.Status, ManualOnly: deps.cfg.Demo, NoAgentReasons: true,
 			StateKey: "lead." + project.Slug + ".poke.state", Label: "the lead of " + project.Name,
+		}
+		if deps.ctl != nil {
+			options.Paused, options.Held, options.Presence = deps.ctl.paused, deps.ctl.held, deps.ctl.presenceWord
 		}
 		if source := w.taskSource.Load(); source != nil {
 			options.Tasks = (*source)(project.ID)

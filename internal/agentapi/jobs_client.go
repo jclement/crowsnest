@@ -157,3 +157,8 @@ func (c *Client) PauseState(ctx context.Context) (pause.State, error) {
 	err := c.do(ctx, http.MethodGet, "/api/v1/pause", nil, &out)
 	return out, err
 }
+
+// SubmitDigest delivers the digest the orchestrator was asked to write (DESIGN.md 7.12).
+func (c *Client) SubmitDigest(ctx context.Context, day, body string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/digest", DigestRequest{Day: day, BodyMD: body}, nil)
+}

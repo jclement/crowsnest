@@ -31,6 +31,35 @@ func (s *Server) registerLandingRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/pause", s.handlePauseState)
 	mux.HandleFunc("POST /api/v1/pause", s.handlePause)
 	mux.HandleFunc("POST /api/v1/resume", s.handleResume)
+	mux.HandleFunc("POST /api/v1/digest", s.handleDigestSubmit)
+}
+
+// DigestRequest is the body of POST /digest.
+type DigestRequest struct {
+	Day    string `json:"day,omitempty"`
+	BodyMD string `json:"body_md"`
+}
+
+// handleDigestSubmit takes the digest the orchestrator was asked to write. It needs an agent
+// token, and only a day crowsnest asked for is taken, once.
+func (s *Server) handleDigestSubmit(w http.ResponseWriter, r *http.Request) {
+	if s.digest == nil {
+		writeError(w, http.StatusServiceUnavailable, codeInternal, "The digest is not available on this server.")
+		return
+	}
+	if s.callerOf(r).PaneID == "" {
+		writeError(w, http.StatusForbidden, codeForbidden, "Only an agent crowsnest started can submit the digest.")
+		return
+	}
+	var input DigestRequest
+	if !decodeBody(w, r, 64<<10, &input) {
+		return
+	}
+	if err := s.digest.Submit(r.Context(), input.Day, input.BodyMD); err != nil {
+		writeError(w, http.StatusBadRequest, codeValidation, err.Error())
+		return
+	}
+	writeData(w, http.StatusOK, map[string]string{"status": "delivered"})
 }
 
 func (s *Server) handleLandRequest(w http.ResponseWriter, r *http.Request) {

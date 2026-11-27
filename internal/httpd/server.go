@@ -22,6 +22,7 @@ import (
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/digest"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/hub"
@@ -29,6 +30,8 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/pause"
+	"github.com/jclement/crowsnest/internal/presence"
 	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
@@ -37,6 +40,7 @@ import (
 	"github.com/jclement/crowsnest/internal/setup"
 	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/term"
+	"github.com/jclement/crowsnest/internal/throttle"
 	"github.com/jclement/crowsnest/internal/transcript"
 	"github.com/jclement/crowsnest/internal/voice"
 )
@@ -127,6 +131,16 @@ type Deps struct {
 	Updater Updater
 	// Instructions serves /instructions and /agents-instructions (DESIGN.md 21.3). Nil: 503.
 	Instructions *instructions.Service
+	// Landing, throttling, the pause, presence and the digest (DESIGN.md 6.11 to 6.14, 7.12).
+	// Each may be nil; its routes then answer 503.
+	Pause    *pause.Switch
+	Throttle *throttle.Throttle
+	Presence *presence.Service
+	Digest   *digest.Service
+	// HeavyDir is the instance's heavy directory (<state>/heavy); HeavyDeferred names an outside
+	// `heavy` that `crowsnest heavy` hands commands to ("" when none).
+	HeavyDir      string
+	HeavyDeferred string
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).
@@ -216,6 +230,7 @@ func (s *Server) routes() http.Handler {
 	s.registerConversationRoutes(mux)
 	s.registerQuestionRoutes(mux)
 	s.registerJobRoutes(mux)
+	s.registerLandingRoutes(mux)
 	s.registerJournalRoutes(mux)
 	s.registerScheduleRoutes(mux)
 	s.registerProjectRoutes(mux)

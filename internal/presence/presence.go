@@ -119,6 +119,14 @@ func New(opts Options) *Service {
 	return &Service{opts: opts, browsers: map[string]beat{}, delivered: map[string]delivery{}}
 }
 
+// SetOnDNDEnd sets Options.OnDNDEnd after construction (serve builds presence before the
+// notifier it reports to).
+func (s *Service) SetOnDNDEnd(fn func(held int)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opts.OnDNDEnd = fn
+}
+
 // Heartbeat records one browser's beat. client is the browser's own random id; an empty one is
 // ignored.
 func (s *Service) Heartbeat(client string, b Beat) State {
@@ -256,8 +264,11 @@ func (s *Service) SetDND(ctx context.Context, until time.Time) (State, error) {
 			return State{}, fmt.Errorf("saving do not disturb: %w", err)
 		}
 	}
-	if held > 0 && s.opts.OnDNDEnd != nil {
-		s.opts.OnDNDEnd(held)
+	s.mu.Lock()
+	onEnd := s.opts.OnDNDEnd
+	s.mu.Unlock()
+	if held > 0 && onEnd != nil {
+		onEnd(held)
 	}
 	state := s.State(ctx)
 	s.publish(state)
