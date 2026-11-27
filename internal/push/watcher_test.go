@@ -58,10 +58,10 @@ func TestQuestionNotices(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("low questions are not pushed; got %+v", got)
 	}
-	if got[0].Urgency != UrgencyHigh || got[0].URL != "/inbox?q=q_1" || got[0].Tag != "q_1" || got[0].Body != "Ship it?" {
+	if got[0].Urgency != UrgencyHigh || got[0].URL != "/decide?item=question%3Aq_1" || got[0].Tag != "q_1" || got[0].Body != "Ship it?" || got[0].Title != "Unfiled: blocking question" {
 		t.Fatalf("blocking: %+v", got[0])
 	}
-	if got[1].Urgency != UrgencyNormal || got[1].Title != "An agent asks" {
+	if got[1].Urgency != UrgencyNormal || got[1].Title != "Unfiled: question" {
 		t.Fatalf("normal: %+v", got[1])
 	}
 }
@@ -175,7 +175,7 @@ func TestDialogsAreHeldThenPushedOnceUntilCleared(t *testing.T) {
 	watcher.CheckDialogs(ctx)
 	watcher.CheckDialogs(ctx)
 	got := sender.got()
-	if len(got) != 1 || got[0].URL != "/inbox?q=dialog%3Aw2%3Ap1" || got[0].Kind != KindDialog || !strings.Contains(got[0].Body, "job-3") {
+	if len(got) != 1 || got[0].URL != "/decide?item=dialog%3Aw2%3Ap1" || got[0].Kind != KindDialog || !strings.Contains(got[0].Body, "job-3") {
 		t.Fatalf("got %+v", got)
 	}
 	// Cleared, then a new dialog in the same pane: pushed again after the hold.

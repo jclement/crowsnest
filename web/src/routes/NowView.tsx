@@ -5,7 +5,8 @@
 //      place with the tray's row (an approval's card, a question's options, a dialog's digits).
 //   2. Projects: one row per project (lead state, what it is doing in a line, running / waiting on
 //      you / done today, spend today, last activity, who owns the work), then unfiled work and
-//      the orchestrator. A row opens its project (unfiled: the board; the orchestrator: Chat).
+//      the orchestrator. A row opens its project (unfiled: the board; the orchestrator: Chat);
+//      beside a standing agent's row, "Open in Claude" when its Remote Control link is known.
 //   3. Since you left: what finished, failed or was asked since this browser was last in use,
 //      kept per browser on the server, with "Mark all seen".
 //   4. Give a job, with the project it goes to.
@@ -16,6 +17,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Bot, CheckCheck, CheckCircle2, ChevronRight, CircleAlert, Clock, FolderKanban, Gauge, HelpCircle, Inbox, MessageSquareReply, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { NewJobForm } from "../components/jobs/NewJobForm";
+import { VoiceJob } from "../components/jobs/VoiceJob";
+import { OpenInClaude } from "../components/remote/OpenInClaude";
 import { TrayList } from "../components/tray/NeedsYouTray";
 import { useTrayItems } from "../components/tray/useTrayItems";
 import { Banner } from "../components/ui/Banner";
@@ -27,7 +30,10 @@ import { browserId, type NowRow, type SinceEvent } from "../lib/attention";
 import { endpoints } from "../lib/api";
 import { cn } from "../lib/cn";
 import { relativeTime } from "../lib/format";
+import { useOrchestrator } from "../lib/conversation-queries";
+import { leadRunning } from "../lib/projects";
 import { findProject, useAttention, useNow, useNowSince, useProjects } from "../lib/queries";
+import type { RemoteControlFields } from "../lib/remote";
 import { formatUSD } from "../lib/spend";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../lib/api";
@@ -148,17 +154,28 @@ const leadTone: Record<string, "success" | "warning" | "danger" | "neutral" | "a
   stopped: "neutral",
 };
 
+/** The Remote Control fields of a row's standing agent: the orchestrator's, or its project's lead's. */
+function useRowRemote(row: NowRow): RemoteControlFields | undefined {
+  const orchestrator = useOrchestrator();
+  const projects = useProjects();
+  if (row.kind === "orchestrator") return orchestrator.data;
+  if (row.kind !== "project") return undefined;
+  const lead = findProject(projects.data?.projects, row.project?.slug)?.lead;
+  return lead && leadRunning(lead) ? lead : undefined;
+}
+
 function ProjectRow({ row }: { row: NowRow }) {
   const navigate = useNavigate();
   const target = rowTarget(row);
   const name = rowName(row);
   const leadLabel = row.kind === "orchestrator" ? "orchestrator" : row.kind === "project" ? "lead" : null;
+  const remote = useRowRemote(row);
   return (
-    <li data-now-row={row.project?.slug ?? row.kind}>
+    <li data-now-row={row.project?.slug ?? row.kind} className="flex items-start">
       <button
         type="button"
         onClick={() => void navigate({ to: target.to, params: target.params, search: target.search } as never)}
-        className="flex w-full min-h-14 items-start gap-2 px-3 py-2.5 text-left hover:bg-hover focus-visible:bg-hover"
+        className="flex min-h-14 min-w-0 flex-1 items-start gap-2 px-3 py-2.5 text-left hover:bg-hover focus-visible:bg-hover"
       >
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-1.5">
@@ -190,6 +207,8 @@ function ProjectRow({ row }: { row: NowRow }) {
         </span>
         <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted" aria-hidden />
       </button>
+      {/* Beside the row's button, not in it: a link inside a button is not allowed. */}
+      <OpenInClaude status={remote} variant="icon" noFallback className="shrink-0 py-2.5 pr-2" />
     </li>
   );
 }
@@ -306,6 +325,7 @@ function GiveJobSection() {
           </select>
         </label>
       </SectionHeader>
+      <VoiceJob projects={live} chosen={slug} />
       <NewJobForm project={project} />
     </section>
   );

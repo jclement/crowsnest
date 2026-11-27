@@ -22,6 +22,10 @@ export interface Approval {
   decided_via?: string;
   note?: string;
   status_reason?: string;
+  /** The policy rules that allowed it, when decided_via is "policy" (8.7 Policy). */
+  rule_ids?: string[];
+  /** What "Allow and remember for this job" proposes; only on a pending, non-dangerous call of a live job. */
+  remember?: { kind: "bash" | "edit" | "tool"; pattern: string };
   created_at: string;
   settled_at?: string | null;
   expires_at: string;
@@ -34,6 +38,8 @@ export interface DecideRequest {
   note?: string;
   /** The explicit second confirmation a dangerous allow needs. */
   confirm?: boolean;
+  /** "Allow and remember for this job": also store a job rule with this pattern. */
+  remember?: { pattern: string };
 }
 
 /** The data of an `approval` SSE event. */
@@ -138,7 +144,9 @@ export function compareApprovals(a: Approval, b: Approval): number {
 export function outcome(approval: Approval): string {
   switch (approval.status) {
     case "allowed":
-      return approval.decided_via === "notification" ? "Allowed from a notification" : "Allowed";
+      if (approval.decided_via === "policy") return approval.status_reason || "Allowed by a rule";
+      if (approval.decided_via === "notification") return "Allowed from a notification";
+      return approval.status_reason || "Allowed";
     case "denied":
       return approval.note ? `Denied: ${approval.note}` : "Denied";
     case "expired":

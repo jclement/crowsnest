@@ -45,9 +45,31 @@ on a desktop, a bar above the bottom nav on a phone; `g` then `n` focuses it), f
 for low-risk ones, from a notification's buttons. The agent waits on the hook and goes on with no
 terminal dialog to answer; the dialog is still on its terminal meanwhile, and whichever is
 answered first wins. A dangerous call needs a second confirmation, "always allow" is only in the
-terminal, and anything that goes wrong falls back to Claude's own dialog, never to an allow. A
-`PreToolUse` guard refuses outright a few commands no agent should run unattended (reaching a
+terminal, and anything that goes wrong falls back to Claude's own dialog, never to an allow.
+
+So the phone is not a tap per test run, crowsnest keeps **approval rules** of its own (DESIGN.md
+8.7, Policy): on a project's page, "Allow Bash commands matching `go test *`", "Allow edits under
+`internal/`", "Allow the tool `WebSearch`", each shown with what it would have matched in the
+project's last week before you save it; "Allow and remember for this job" on a card, gone when the
+job ends; and "Allow N low-risk calls from <agent>" for one job's waiting calls. A matching call is
+allowed by the hook at once and journalled on the job's timeline. A dangerous call is never allowed
+by a rule, and a rule allows an elevated call only when you said so. Pending approvals survive a
+crowsnest restart for 150 s, enough for their hooks to come back. A `PreToolUse` guard refuses outright a few commands no agent should run unattended (reaching a
 protected host, pushing onto a protected branch, `herdr server stop`, another herdr session).
+
+**On a phone** (DESIGN.md 23). Every question, approval or terminal dialog opens as a **decision
+packet** (`/decide?item=…`): the project and job, the ask, what each choice does, the
+recommendation, then the evidence (the diff behind a file list, the command, the agent's last
+message), with the answer in a bar at the bottom under your thumb. Your note survives rotating the
+phone or switching apps; a decision someone already took says so. Notifications say the project,
+the job, the question and the recommendation, and open the packet; where the phone shows buttons, a
+routine question offers its recommended option and Snooze, a low-risk call whose command fits
+offers Allow and Deny, and anything that widens what agents may do offers nothing. A stuck job has
+**Rescue** buttons (interrupt, continue, nudge, restart on the same conversation, compact, switch
+model, the dialog's own options), so a 44-column terminal is the last resort; when you do need
+it, the key bar fits the screen and has Copy and ^C. With talk mode on, Now's job box has a mic:
+hold, speak ("Website: fix the checkout validation"), check the readback, Create, and Undo for a
+few seconds. `docs/PHONE-CHECK.md` is the checklist for a real iPhone.
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
 default, serves nothing but a token-gated setup page until a login exists (or an explicit
@@ -183,6 +205,14 @@ with Claude Code's Remote Control on, named `<name> crowsnest` (plus the session
 cannot use Remote Control (an API key, a plan without it, an organisation policy) just starts
 without it; the orchestrator's status says whether it came up. `--no-remote-control` turns it
 off; `--job-remote-control` turns it on for job agents too (`<name> <job id> <title>`).
+
+Crowsnest captures each standing agent's Remote Control session link (from Claude's banner, or its
+transcript) and shows **Open in Claude** on Chat's header, a lead's card and Now's rows whenever a
+current link is known; otherwise a short line says which session name to look for in the Claude
+app. Its "?" explains the split: crowsnest for the overview, decisions, approvals, many projects
+and landing; the Claude app for a long conversation with one agent. Work you give an agent in the
+app is recorded as a crowsnest job (the agent calls `job_adopt` and says the job id), so it is on
+the board and supervised. Under `--demo` the links are made up and lead nowhere.
 
 **Keeping the orchestrator small.** Every turn re-reads the whole conversation, and an
 orchestrator poked all day grows past a few hundred thousand tokens. Once its context passes
@@ -600,7 +630,7 @@ withdraw questions. Without `CROWSNEST_SOCKET`, or with no server answering, the
 | `crowsnest question <id>` | Print a question with its whole answer, `{id, status, title, answer_value, answer_labels, answer_note}`; never shortened |
 | `crowsnest notify "text" [--urgency low\|normal\|blocking]` | A notice (no answer needed); the first line is its title. Prints the id |
 | `crowsnest say "sentence"` | Speak one sentence in every browser with speak mode on; a no-op without an ElevenLabs key. Only an agent crowsnest started (with its `CROWSNEST_TOKEN`) may speak |
-| `crowsnest mcp` | A stdio MCP server exposing `ask`, `get_question`, `say`, `job_update`, `done`, `fail`, `job_create` and `job_get`, proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes. `ask` with `wait=true` returns the whole answer and note; `ask` with `job_id` (the orchestrator, for the job it holds) files the question under that job, and the socket refuses a job the caller does not hold |
+| `crowsnest mcp` | A stdio MCP server exposing `ask`, `get_question`, `say`, `job_update`, `done`, `fail`, `job_adopt` (the orchestrator or a lead records work given in conversation as a job it holds, and gets its id), `job_create` and `job_get`, proxied to the socket. Claude starts it from the `mcp.json` crowsnest writes. `ask` with `wait=true` returns the whole answer and note; `ask` with `job_id` (the orchestrator, for the job it holds) files the question under that job, and the socket refuses a job the caller does not hold |
 | `crowsnest project list`, `crowsnest project get <slug>` | The projects with their leads and job counts; one project with its defaults and live jobs |
 | `crowsnest job update "doing now" [--state blocked --reason "…"] [--waiting]` | The job protocol for agents without MCP (Codex) and scripts: a heartbeat with a progress line; `--state blocked` with a reason, or `running`; `--waiting` declares that nothing is left the open questions do not block (refused with no open question). The job is `--job j_<n>` or `CROWSNEST_JOB` |
 | `crowsnest job done --result "…" --verified "…" --not-verified "…" [--attach file]` | The job is finished, with evidence (repeat the list flags; `none` for an empty list; `--result-file` reads the result; `--attach`, repeatable, attaches a file from your working or job directory to the result) |
@@ -991,7 +1021,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
 | `GET /agents/{target}/messages?after=&limit=` | session | A page of the agent's conversation from its Claude transcript: `{source, session_id, cursor, reset, earlier, more, messages}`. Without `after` (or with a stale cursor) the newest `limit` (200) messages and `reset: true`; with it, only what changed since. No transcript: one `pane` message with the pane's recent text |
 | `POST /agents/{target}/prompt` | session | `{text, force_over_draft, voice, attachments}` (`attachments`: upload ids, copied into the agent's inbox and named on `Attached:` lines after the text) (`voice: true` adds the voice header; 404 when talk mode is off) → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
-| `GET /orchestrator` | session | `{state, pane_id, session_id, dir, model, detail, restarts, remote_control, remote_control_note}`; `model` is the one Claude was started with (empty: Claude's default); `remote_control` is the Remote Control name Claude was started with, `remote_control_note` `active` once Claude said so, or a sentence when it did not within 45 s; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed`, `disabled` or `waiting` (the start gate: the first-run checklist unfinished, herdr not connected, or no agent; `detail` says which); `engine` is `claude` or `codex` |
+| `GET /orchestrator` | session | `{state, pane_id, session_id, dir, model, detail, restarts, remote_control, remote_control_note, remote_control_url}`; `remote_control_url` is the session's `https://claude.ai/code/session_…` link once captured (absent until then and after every start); `model` is the one Claude was started with (empty: Claude's default); `remote_control` is the Remote Control name Claude was started with, `remote_control_note` `active` once Claude said so, or a sentence when it did not within 45 s; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed`, `disabled` or `waiting` (the start gate: the first-run checklist unfinished, herdr not connected, or no agent; `detail` says which); `engine` is `claude` or `codex` |
 | `POST /orchestrator/restart`, `POST /orchestrator/new` | session | Restart Claude on the same conversation (`--resume`), or with a fresh one |
 | `POST /orchestrator/poke` | session | "Poke now" → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}`. Skips the two-minute limit between agent pokes; `skipped` with `reason` "nothing is due" when there is nothing to say, or why the orchestrator cannot take one (working, a dialog, a draft) |
 | `GET /orchestrator/context` | session | The orchestrator's context: `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}` (`known` is false before the first reading and right after a compaction that recorded no size) |
@@ -1011,10 +1041,15 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /inbox/summary` | session | `{open, blocking}`: open questions (the badge is the attention count) |
 | `GET /attention`; `POST /attention/snooze`, `/unsnooze`, `/dismiss` `{id}` | session | The one queue of what needs you, with its counts; snooze an item for ten minutes on every device; dismiss a failed job |
 | `GET /now`, `GET /now/since?browser=`, `POST /now/beat`, `POST /now/seen` | session | The Now view's rows; what happened since this browser left; this browser is in use; mark all seen |
-| `GET /approvals?status=` | session | Tool-call approvals (`pending`, the default; `all`; or one status), newest first: `{id, job_id, pane_id, agent_name, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, created_at, settled_at, expires_at, summary}` |
+| `GET /approvals?status=` | session | Tool-call approvals (`pending`, the default; `all`; or one status), newest first: `{id, job_id, pane_id, agent_name, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, rule_ids, remember, created_at, settled_at, expires_at, summary}` (`decided_via` is `browser`, `notification` or `policy`) |
 | `GET /approvals/{id}` | session | One approval |
-| `POST /approvals/{id}/decide` | session | `{decision: "allow"\|"deny", note?, confirm?}` → the approval. `409 CONFLICT` when it is no longer pending; `409 CONFIRM_REQUIRED` for a dangerous allow without `confirm: true`. The note is the deny message the agent gets |
-| `POST /push/action` | action token | A notification's button: `{token, action}` with the single-use, item-scoped, 15-minute token the push carried (never the session cookie) → `{item, message}`; `403` for a used, expired, forged or out-of-scope token, and for any elevated or dangerous approval |
+| `POST /approvals/{id}/decide` | session | `{decision: "allow"\|"deny", note?, confirm?, remember?: {pattern}}` → the approval. `409 CONFLICT` when it is no longer pending, or a remember is refused (a deny, a dangerous call, no job, the job ended); `400` for a bad pattern; `409 CONFIRM_REQUIRED` for a dangerous allow without `confirm: true`. The note is the deny message the agent gets. `remember` also stores a rule for the job and allows its other pending calls the rule matches |
+| `POST /approvals/batch-allow` | session | `{ids}` → the approvals, allowed once each, when all are pending, low risk and from the same job; else `409` with the reason and nothing allowed |
+| `GET /projects/{ref}/approval-rules` | session | The project's live approval rules, each `{id, scope, kind, pattern, max_risk, note, created_at, created_via, sentence, recent}` (`recent`: what it matched in the project's last week) |
+| `POST /projects/{ref}/approval-rules` | session | `{kind: "bash"\|"edit"\|"tool", pattern, max_risk?: "low"\|"elevated", note?}` → `201` the rule; `400` with a sentence when it is not valid |
+| `POST /projects/{ref}/approval-rules/preview` | session | The same body → `{considered, allowed, above_max_risk, dangerous}`: the project's recent calls (last 7 days, at most 50) the pattern matches; dangerous ones are never auto-allowed |
+| `DELETE /approval-rules/{id}`, `GET /jobs/{id}/approval-rules` | session | Remove a project or job rule; a job's remembered rules. None of the rule routes exists on the agent socket |
+| `POST /push/action` | action token | A notification's button: `{token, action}` with the single-use, item-scoped, 15-minute token the push carried (never the session cookie) → `{item, message}`; `403` for a used, expired, forged or out-of-scope token, and for any elevated or dangerous approval. Action `snooze` hides the item from the queue for ten minutes and decides nothing |
 | `POST /attachments` | session | One file: the raw body with its name in `X-Filename` (URL-encoded), or multipart `file` → `201` the pending attachment `{id, name, type, size, sha256, image, thumb, inline, …}`. The type is sniffed from the bytes. `413 TOO_LARGE` past `--attachment-max-mb`, `507 QUOTA_FULL` when the quota cannot be freed |
 | `GET /attachments/{id}` | session | The file: inline only for PNG, JPEG, GIF, WebP, BMP, PDF and plain text; everything else (SVG, HTML, …) as a download; always `nosniff`, and a sandboxing CSP on all but an inline PDF. `?download=1` forces a download. `/thumb` is a JPEG thumbnail of a picture, `/meta` the record |
 | `GET /attachments?owner=&role=`, `?answer=` | session | An owner's files (`job:j_3`, `question:q_7`, `orchestrator:`), or the files sent with an answer (`answer=q_7`) |

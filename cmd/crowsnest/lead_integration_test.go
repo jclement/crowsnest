@@ -10,7 +10,7 @@
 //     demonstrably in effect);
 //   - the lead takes a job given "to the project" and declares it done through crowsnest's MCP
 //     tools, under the Stop hook's supervision;
-//   - Remote Control comes up under "<instance> <project>";
+//   - Remote Control comes up under "<instance> <project>", with its session link captured;
 //   - the InstructionsLoaded hook recorded the scratch repository's CLAUDE.md for lead:<slug>.
 //
 // It costs a few cents: -tags integration and CROWSNEST_E2E_CLAUDE=1 (`mise run test:claude`).
@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/orch"
 )
 
 var leadTestSession = regexp.MustCompile(`^crowsnest-test-[a-z0-9]+$`)
@@ -172,6 +173,7 @@ func TestIntegrationClaudeProjectLead(t *testing.T) {
 		Name              string `json:"name"`
 		RemoteControl     string `json:"remote_control"`
 		RemoteControlNote string `json:"remote_control_note"`
+		RemoteControlURL  string `json:"remote_control_url"`
 	}
 	var lead leadStatus
 	if code := rig.call(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/lead/start", project.ID), nil, &lead); code != http.StatusOK {
@@ -249,6 +251,11 @@ func TestIntegrationClaudeProjectLead(t *testing.T) {
 	lead = waitLead(func(s leadStatus) bool { return s.RemoteControlNote != "" }, "noted for Remote Control", time.Minute)
 	if lead.RemoteControlNote != "active" {
 		t.Fatalf("Remote Control: %q", lead.RemoteControlNote)
+	}
+	// Active Remote Control carries its session link (DESIGN.md 7.10), as GET /leads serves it.
+	lead = waitLead(func(s leadStatus) bool { return s.RemoteControlURL != "" }, "given its Remote Control link", time.Minute)
+	if !orch.ValidRemoteControlURL(lead.RemoteControlURL) {
+		t.Fatalf("Remote Control link %q", lead.RemoteControlURL)
 	}
 
 	var record struct {

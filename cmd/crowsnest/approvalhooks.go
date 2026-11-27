@@ -5,7 +5,8 @@
 // decision JSON. It fails open to the existing behaviour, never to an allow: if crowsnest cannot
 // be reached, refuses the request, or the approval expires or is superseded, it prints nothing
 // and exits 0, and Claude's own terminal dialog (drawn at the same moment the hook started) is
-// what the human answers. It never hangs forever: it gives up a minute after the server's expiry,
+// what the human answers. A call a policy rule allows is settled in the create reply, and the
+// allow is printed at once. It never hangs forever: it gives up a minute after the server's expiry,
 // and after two minutes of failed polls.
 //
 // pre-tool-use decides from the rules file alone (no server round trip), so it adds a few
@@ -57,6 +58,13 @@ func runPermissionRequest(ctx context.Context, stdout io.Writer, input []byte, c
 	cancelCreate()
 	if err != nil || created.ID == "" {
 		return // crowsnest is down or refused: Claude's own dialog
+	}
+	if created.Status != "" && created.Status != string(approvals.StatusPending) {
+		// Settled at once (a policy rule allowed it): print the decision without polling.
+		if created.HookOutput != "" {
+			_, _ = io.WriteString(stdout, created.HookOutput)
+		}
+		return
 	}
 	var failingSince time.Time
 	for ctx.Err() == nil {

@@ -131,17 +131,15 @@ export function kindLabel(item: AttentionItem): string {
 }
 
 /**
- * Where an item opens in full: the Inbox for approvals, questions and dialogs; the job for a job;
- * the agent's terminal for a standing agent.
+ * Where an item opens in full: its decision packet (`/decide`, routes/DecideView.tsx) for
+ * approvals, questions and dialogs; the job for a job; the agent's terminal for a standing agent.
  */
 export function itemLink(item: AttentionItem): { to: string; search: Record<string, string> } {
   switch (item.kind) {
     case "approval":
-      return { to: "/inbox", search: { q: `approval:${item.approval?.id ?? item.id.slice("approval:".length)}` } };
     case "question":
-      return { to: "/inbox", search: { q: item.question?.id ?? item.id.slice("question:".length) } };
     case "dialog":
-      return { to: "/inbox", search: { q: item.id } };
+      return { to: "/decide", search: { item: item.id } };
     case "job":
     case "wait":
       return { to: "/jobs", search: { job: item.job_id ?? "" } };

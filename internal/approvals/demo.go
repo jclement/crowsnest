@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/demostory"
+	"github.com/jclement/crowsnest/internal/store"
 )
 
 // DemoPanes is how the demo finds the job agents its approvals come from, and tells the fake
@@ -91,6 +92,9 @@ func SeedDemo(ctx context.Context, service *Service, panes DemoPanes) error {
 				return err
 			}
 		}
+		if err := seedDemoPolicy(ctx, service, panes); err != nil {
+			return err
+		}
 	}
 	pending, err := service.List(ctx, []Status{StatusPending}, 50)
 	if err != nil || panes.Asked == nil {
@@ -98,6 +102,47 @@ func SeedDemo(ctx context.Context, service *Service, panes DemoPanes) error {
 	}
 	for _, approval := range pending {
 		panes.Asked(approval)
+	}
+	return nil
+}
+
+// DemoRulePattern is the demo's one project rule (Crowsnest: Bash `go test *`).
+const DemoRulePattern = "go test *"
+
+// seedDemoPolicy gives the reviewer's project (Crowsnest) the rule "Allow Bash commands matching
+// `go test *`" and has the reviewer make a call it allows (ap_4), so the project page lists a
+// rule with a recent match, the Inbox History shows a call allowed by policy, and j_13's timeline
+// shows the auto-allow entry.
+func seedDemoPolicy(ctx context.Context, service *Service, panes DemoPanes) error {
+	if panes.Askers == nil {
+		return nil
+	}
+	asker := panes.Askers(demostory.LimiterReviewer)
+	scope := service.scopeOf(ctx, asker.JobID, asker.PaneID)
+	if scope.ProjectID == 0 {
+		return nil
+	}
+	if _, err := service.addRule(ctx, store.ApprovalRuleRecord{Scope: ScopeProject, ProjectID: scope.ProjectID},
+		RuleInput{Kind: KindBash, Pattern: DemoRulePattern, Note: "Tests are safe to run unattended.", Via: ViaDemo}); err != nil {
+		return err
+	}
+	_, err := service.Request(ctx, panes.request(demoCall{demostory.LimiterReviewer, "Bash",
+		fixed(`{"command":"go test ./internal/ratelimit/... -run TestLimiter","description":"Run the limiter's tests"}`)}))
+	return err
+}
+
+// SeedDemoParallel adds two more low-risk calls from Website's link fixer (j_14), beside its ap_1,
+// as a subagent's parallel calls would arrive, so "Allow 3 low-risk calls from job-14" has
+// something to batch. Only when CROWSNEST_DEMO_PARALLEL is set (the policy e2e spec): the plain
+// demo keeps one call per agent, as its story and the other specs expect.
+func SeedDemoParallel(ctx context.Context, service *Service, panes DemoPanes) error {
+	for _, command := range []string{
+		`{"command":"npx linkinator ./dist/blog --recurse","description":"Check the blog's links"}`,
+		`{"command":"ls dist/changelog","description":"See which release pages were built"}`,
+	} {
+		if _, err := service.Request(ctx, panes.request(demoCall{demostory.LinkFixer, "Bash", fixed(command)})); err != nil {
+			return err
+		}
 	}
 	return nil
 }

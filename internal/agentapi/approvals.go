@@ -1,13 +1,15 @@
 // Structured approvals and the guard on the agent socket (DESIGN.md 8.7): what
 // `crowsnest hook permission-request` and `crowsnest hook pre-tool-use` call.
 //
-//	POST /api/v1/approvals            a PermissionRequest hook's input; answers {id, status}
+//	POST /api/v1/approvals            a PermissionRequest hook's input; answers {id, status, hook_output}
+//	                                  (hook_output set when a policy rule allowed it at once)
 //	GET  /api/v1/approvals/{id}?wait= long-poll (at most 60 s); answers {id, status, hook_output}
 //	POST /api/v1/guard/denied         the guard refused a command; journalled on the job
 //
 // Only an identified caller (a token crowsnest gave an agent) may request an approval, and only
 // the pane that requested one may poll it: anyone else gets 403 or 404, and their hook prints
-// nothing, which leaves Claude's own terminal dialog.
+// nothing, which leaves Claude's own terminal dialog. The approval rules (DESIGN.md 8.7, Policy)
+// have no route here at all: an agent must not be able to widen its own policy.
 
 package agentapi
 
@@ -83,7 +85,9 @@ func (s *Server) handleApprovalRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, err.Error())
 		return
 	}
-	writeData(w, http.StatusCreated, ApprovalReply{ID: approval.ID, Status: string(approval.Status)})
+	// An approval a policy rule allowed is settled already: the reply carries the allow, so the
+	// hook prints it at once without a poll.
+	writeData(w, http.StatusCreated, ApprovalReply{ID: approval.ID, Status: string(approval.Status), HookOutput: approvals.HookOutput(approval)})
 }
 
 func (s *Server) handleApprovalWait(w http.ResponseWriter, r *http.Request) {

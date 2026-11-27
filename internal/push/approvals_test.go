@@ -40,8 +40,8 @@ func TestOnlyLowApprovalsCarryActions(t *testing.T) {
 		if len(notice.Actions) != 0 || notice.ActionToken != "" {
 			t.Fatalf("an elevated or dangerous approval must never carry actions: %+v", notice)
 		}
-		if notice.URL != "/inbox?q=approval%3A"+notice.Tag[len("approval:"):] {
-			t.Fatalf("a tap opens the card: %s", notice.URL)
+		if notice.URL != "/decide?item=approval%3A"+notice.Tag[len("approval:"):] {
+			t.Fatalf("a tap opens the decision packet: %s", notice.URL)
 		}
 	}
 	if len(minter.minted) != 1 || minter.minted[0] != "approval:ap_low" {
@@ -60,17 +60,17 @@ func TestNoMinterNoActions(t *testing.T) {
 func TestQuestionActions(t *testing.T) {
 	watcher, sender, minter, _ := approvalWatcher()
 	options := []questions.Option{{Key: "yes", Label: "Ship it"}, {Key: "no", Label: "Not yet"}, {Key: "later", Label: "Later"}}
-	watcher.QuestionAsked(questions.Question{ID: "q_1", Title: "Ship?", Kind: questions.KindChoice, Options: options, Urgency: questions.UrgencyBlocking, SourcePane: "a"})
+	watcher.QuestionAsked(questions.Question{ID: "q_1", Title: "Ship?", Kind: questions.KindChoice, Options: options, Recommend: "no", Urgency: questions.UrgencyBlocking, SourcePane: "a"})
 	watcher.QuestionAsked(questions.Question{ID: "q_2", Title: "Which?", Kind: questions.KindChoice, Multi: true, Options: options, Urgency: questions.UrgencyBlocking, SourcePane: "b"})
 	watcher.QuestionAsked(questions.Question{ID: "q_3", Title: "Explain", Kind: questions.KindManual, Urgency: questions.UrgencyBlocking, SourcePane: "c"})
 	got := sender.got()
-	if len(got[0].Actions) != 2 || got[0].Actions[0].Action != "yes" || got[0].Actions[1].Title != "Not yet" {
-		t.Fatalf("a choice carries its first two options: %+v", got[0].Actions)
+	if len(got[0].Actions) != 2 || got[0].Actions[0].Action != "no" || got[0].Actions[0].Title != "Not yet" || got[0].Actions[1].Action != ActionSnooze {
+		t.Fatalf("a routine choice carries its recommended option and Snooze: %+v", got[0].Actions)
 	}
-	if len(got[1].Actions) != 0 || len(got[2].Actions) != 0 {
-		t.Fatalf("multi-select and manual questions carry none: %+v %+v", got[1].Actions, got[2].Actions)
+	if len(got[1].Actions) != 1 || got[1].Actions[0].Action != ActionSnooze || len(got[2].Actions) != 1 || got[2].Actions[0].Action != ActionSnooze {
+		t.Fatalf("multi-select and manual questions carry Snooze alone: %+v %+v", got[1].Actions, got[2].Actions)
 	}
-	if len(minter.minted) != 1 || minter.minted[0] != "question:q_1" {
+	if len(minter.minted) != 3 || minter.minted[0] != "question:q_1" {
 		t.Fatalf("minted %v", minter.minted)
 	}
 }

@@ -13,6 +13,7 @@ import { FleetView } from "./routes/FleetView";
 import { ChatView } from "./routes/ChatView";
 import { InboxView } from "./routes/InboxView";
 import { JobsView } from "./routes/JobsView";
+import { DecideView } from "./routes/DecideView";
 import { NowView } from "./routes/NowView";
 import { ProjectsView } from "./routes/ProjectsView";
 import { TerminalView } from "./routes/views";
@@ -165,10 +166,19 @@ const fleetRoute = createRoute({
   }),
   component: FleetView,
 });
+// The decision packet: ?item=<attention item id> (question:q_7, approval:ap_3, dialog:<pane>).
+const decideRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/decide",
+  validateSearch: (search: Record<string, unknown>): { item?: string } => ({
+    item: typeof search.item === "string" && search.item ? search.item : undefined,
+  }),
+  component: DecideView,
+});
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute, systemRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, fleetRoute, terminalRoute, systemRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

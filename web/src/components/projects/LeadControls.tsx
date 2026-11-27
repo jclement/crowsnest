@@ -1,5 +1,5 @@
 // LeadControls: a project's lead, as a card on the project page (DESIGN.md 21.2): its state, model
-// and Remote Control note, and what can be done with it: Start or Stop, Restart and New
+// and Remote Control (Open in Claude, or where to find it, 7.10), and what can be done with it: Start or Stop, Restart and New
 // conversation (both confirmed, as the orchestrator's are), Poke now, Chat with it (Chat's target
 // switcher, /chat?target=lead-<slug>) and its terminal (Fleet, ?agent=<pane>). An archived
 // project's lead cannot start.
@@ -9,6 +9,7 @@ import { useState } from "react";
 import { pokeToast, type PokeResult } from "../../lib/journal";
 import { leadAgentName, leadChip, leadConfirmations, leadRunning, type LeadAction, type ProjectView } from "../../lib/projects";
 import { useLeadAction } from "../../lib/queries";
+import { OpenInClaude } from "../remote/OpenInClaude";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Chip } from "../ui/Chip";
@@ -66,11 +67,7 @@ export function LeadControls({ project }: { project: ProjectView }) {
           )}
         </p>
         {lead.detail && <p className="text-warning">{lead.detail}</p>}
-        {lead.remote_control_note && (
-          <p className="text-muted" data-testid="remote-control-note">
-            Remote Control{lead.remote_control ? ` (${lead.remote_control})` : ""}: {lead.remote_control_note}
-          </p>
-        )}
+        {running && <OpenInClaude status={lead} className="self-start" />}
         <div className="flex flex-wrap gap-1.5">
           {running ? (
             <Button compact icon={Square} onClick={() => setConfirming("stop")} disabled={action.isPending}>

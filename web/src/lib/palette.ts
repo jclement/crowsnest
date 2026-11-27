@@ -20,7 +20,7 @@ import type { ChipTone } from "../components/ui/Chip";
 
 // ---- Commands -------------------------------------------------------------------------------
 
-export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal" | "/system";
+export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/fleet" | "/terminal" | "/system";
 export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions" | "settings" | "digests" | "worktrees" | "limits" | "pause";
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */

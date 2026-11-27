@@ -6,12 +6,14 @@
 //
 // A dangerous call has no one-tap allow: Allow opens a second confirmation that names what is
 // dangerous, and only "Yes, allow" sends it (the server refuses an unconfirmed one too). There is
-// no "always allow" here: widening an agent's permanent permissions is a terminal action.
+// no "always allow" here: widening an agent's permanent permissions is a terminal action. "Allow and
+// remember for this job" (not for a dangerous call) is narrower: a crowsnest rule for one job,
+// gone when it ends (RememberForJob).
 //
 // Keyboard: y allows and n denies, but only while the card itself has focus (tab to it, or the
 // tray's shortcut). A key pressed anywhere else, or inside the note, never answers anything; y
 // on a dangerous card opens the confirmation, it does not allow.
-import { AlertTriangle, Check, FileDiff, Globe, Plug, ShieldAlert, SquareTerminal, Terminal, Wrench, X } from "lucide-react";
+import { AlertTriangle, BookmarkPlus, Check, FileDiff, Globe, Plug, ShieldAlert, SquareTerminal, Terminal, Wrench, X } from "lucide-react";
 import { forwardRef, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ApiError } from "../../lib/api";
 import {
@@ -34,6 +36,7 @@ import { DiffView } from "../inbox/DiffView";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Chip, type ChipTone } from "../ui/Chip";
+import { RememberForJob } from "./RememberForJob";
 import { useToast } from "../ui/toast-context";
 
 interface ApprovalCardProps {
@@ -58,16 +61,20 @@ export const ApprovalCard = forwardRef<HTMLElement, ApprovalCardProps>(function 
   const titleId = useId();
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [remembering, setRemembering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = approval.status === "pending";
   const dangerous = approval.risk === "dangerous";
 
-  const send = (allow: boolean, confirm = false) => {
+  const send = (allow: boolean, confirm = false, remember?: string) => {
     setError(null);
-    decide.mutateAsync({ decision: allow ? "allow" : "deny", note: note.trim() || undefined, confirm: confirm || undefined }).then(
+    const request = { decision: allow ? "allow" : "deny", note: note.trim() || undefined, confirm: confirm || undefined, remember: remember ? { pattern: remember } : undefined } as const;
+    decide.mutateAsync(request).then(
       (decided) => {
-        toast.show({ tone: allow ? "success" : "info", title: allow ? "Allowed" : "Denied", description: decided.summary });
+        const title = remember ? `Allowed, and remembered for ${decided.job_id}` : allow ? "Allowed" : "Denied";
+        toast.show({ tone: allow ? "success" : "info", title, description: decided.summary });
         setConfirming(false);
+        setRemembering(false);
         onDecided?.(decided);
       },
       (failure: unknown) => {
@@ -152,6 +159,8 @@ export const ApprovalCard = forwardRef<HTMLElement, ApprovalCardProps>(function 
               </Button>
             </div>
           </div>
+        ) : remembering ? (
+          <RememberForJob approval={approval} busy={decide.isPending} onConfirm={(pattern) => send(true, false, pattern)} onCancel={() => setRemembering(false)} />
         ) : (
           <>
             <div className="flex flex-col gap-1">
@@ -172,6 +181,11 @@ export const ApprovalCard = forwardRef<HTMLElement, ApprovalCardProps>(function 
               <Button variant={dangerous ? "warning" : "primary"} icon={Check} disabled={decide.isPending} onClick={allow}>
                 {dangerous ? "Allow…" : "Allow once"}
               </Button>
+              {!dangerous && approval.remember && approval.job_id && (
+                <Button variant="secondary" icon={BookmarkPlus} disabled={decide.isPending} onClick={() => setRemembering(true)}>
+                  Allow and remember for this job
+                </Button>
+              )}
               <Button variant="secondary" icon={X} disabled={decide.isPending} onClick={() => send(false)}>
                 Deny
               </Button>
@@ -235,7 +249,8 @@ function Code({ children, label, compact }: { children: ReactNode; label: string
   );
 }
 
-function CallBody({ approval, compact }: { approval: Approval; compact?: boolean }) {
+/** The call itself (command, diff, URL, arguments), as the card shows it; the decision packet reuses it. */
+export function CallBody({ approval, compact }: { approval: Approval; compact?: boolean }) {
   const input = approval.tool_input;
   switch (toolKind(approval.tool_name)) {
     case "bash":

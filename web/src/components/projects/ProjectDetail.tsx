@@ -1,8 +1,8 @@
 // ProjectDetail: one project in full (DESIGN.md 21): what and where it is, its lead
 // (LeadControls), its jobs, its schedules (GET /schedule?project=id, with Run now and the Schedule
 // sheet filtered to it), its own instruction layer (edited in place) and what its lead was
-// started with. Opening it tells the server once (?open=1), which starts a lead set to start
-// "when I open the project".
+// started with, and its approval rules (ApprovalRulesCard, 8.7 Policy). Opening it tells the
+// server once (?open=1), which starts a lead set to start "when I open the project".
 import { useNavigate } from "@tanstack/react-router";
 import { CalendarClock, ListTodo, Pencil, Play, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -14,6 +14,7 @@ import { relativeTime } from "../../lib/format";
 import { leadRunning, type ProjectView } from "../../lib/projects";
 import { useJobs, useProject, useSchedule, useScheduleAction } from "../../lib/queries";
 import { nextDueText, targetOf } from "../../lib/schedule";
+import { ApprovalRulesCard } from "../approvals/ApprovalRulesCard";
 import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
 import { LayerEditor } from "../instructions/LayerEditor";
 import { JobCard } from "../jobs/JobCard";
@@ -82,6 +83,7 @@ function Detail({ project }: { project: ProjectView }) {
       <LeadControls project={project} />
       <ProjectJobs project={project} />
       <ProjectSchedules project={project} />
+      <ApprovalRulesCard projectRef={project.slug} archived={project.archived} />
       <AcceptCard projectId={project.id} />
       <Card title="Project instructions" aria-label="Project instructions">
         <LayerEditor scope="project" apiKey={String(project.id)} hint="The lead and every job agent of this project get this, after the global and role layers." />
@@ -193,7 +195,7 @@ function ProjectSchedules({ project }: { project: ProjectView }) {
               <span className="text-2xs text-muted">
                 last {task.last_run_at ? relativeTime(task.last_run_at) : "never"} · next {nextDueText(task, relativeTime)}
               </span>
-              <Button compact variant="ghost" icon={Play} onClick={() => void run(task.name, task.as === "job")} disabled={action.isPending || task.run_now} aria-label={`Run ${task.name} now`}>
+              <Button compact variant="ghost" icon={Play} onClick={() => void run(task.name, task.as === "job")} disabled={action.isPending || task.run_now} aria-label={`Run now: ${task.name}`}>
                 Run now
               </Button>
             </li>

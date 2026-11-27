@@ -87,10 +87,13 @@ type Status struct {
 	// --no-remote-control). Claude turns Remote Control off by itself when the login cannot use
 	// it (an API key, a plan without it, an organisation policy) and the session starts anyway;
 	// RemoteControlNote says so when crowsnest saw it.
-	RemoteControl     string    `json:"remote_control,omitempty"`
-	RemoteControlNote string    `json:"remote_control_note,omitempty"`
-	Restarts          int       `json:"restarts"` // automatic restarts in the last hour
-	UpdatedAt         time.Time `json:"updated_at"`
+	RemoteControl     string `json:"remote_control,omitempty"`
+	RemoteControlNote string `json:"remote_control_note,omitempty"`
+	// RemoteControlURL is the session's https://claude.ai/code/session_… link, once Claude has
+	// shown it (remote_control.go); "" until then, after every start, and when it is off.
+	RemoteControlURL string    `json:"remote_control_url,omitempty"`
+	Restarts         int       `json:"restarts"` // automatic restarts in the last hour
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // KV is the small persistent store the orchestrator keeps its session id in (store.Store).
@@ -156,6 +159,10 @@ type Options struct {
 	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): an agent
 	// that exits meanwhile is not restarted automatically (Restart still works). Nil: never.
 	Paused func() bool
+	// DemoRemoteControl, under --demo, is a made-up Remote Control name and session URL the
+	// status shows after every start, so the UI has a link to draw; Claude is never started with
+	// Remote Control for it (DESIGN.md 7.10). Nil: none.
+	DemoRemoteControl *DemoRemoteControl
 	// ExtraEnv is added to the agent's pane environment (CROWSNEST_HEAVY_DIR, DESIGN.md 6.12).
 	ExtraEnv map[string]string
 
@@ -218,8 +225,8 @@ type Orchestrator struct {
 	// across New conversation (which clears the status) so it can be recognised as stale.
 	launch       launchBaseline
 	knownSession string
-	// rcCheckUntil is how long after a start the watch looks for Remote Control's banner.
-	rcCheckUntil time.Time
+	// rcLook schedules the watch's looks for Remote Control's URL (remote_control.go).
+	rcLook rcLook
 	// kick wakes a waiting orchestrator to ask its gate again (Kick).
 	kick chan struct{}
 	// launching is the pane a start is launching Claude in, before the status names it: hooks
@@ -404,7 +411,9 @@ func (o *Orchestrator) ensureLocked(ctx context.Context, resume bool) (Status, e
 // adopt takes over a live agent: its pane and session id become the orchestrator's.
 func (o *Orchestrator) adopt(ctx context.Context, agent herdr.Agent) Status {
 	o.remember(ctx, agent.PaneID, sessionOf(agent, ""))
-	return o.follow(agent)
+	status := o.follow(agent)
+	o.restoreRemoteControl(ctx, status.SessionID)
+	return o.Status()
 }
 
 // follow maps herdr's view of the agent onto the status.

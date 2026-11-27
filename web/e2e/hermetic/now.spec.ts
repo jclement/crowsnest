@@ -126,8 +126,20 @@ test("answering from Now: a question's option and a low approval, in place", asy
   expect(question).toBeDefined();
   const questionRow = queue(page).locator(`[data-tray-item="${question!.id}"]`);
   await questionRow.getByRole("button", { expanded: false }).first().click();
-  await questionRow.getByRole("list", { name: "Options" }).getByRole("button").first().click();
-  await expect(questionRow).toHaveCount(0);
+  // A routine question answers in the row; one with evidence (a diff, a long body) opens its
+  // decision packet, answered from the packet's bar (R4 Codex P2).
+  const review = questionRow.getByRole("button", { name: "Review the decision" });
+  const options = questionRow.getByRole("list", { name: "Options" });
+  await expect(review.or(options)).toBeVisible();
+  if (await review.isVisible()) {
+    await review.click();
+    await expect(page.getByTestId("decision-packet")).toBeVisible();
+    await page.getByTestId("answer-bar").getByRole("group", { name: "Choices" }).getByRole("button").first().click();
+    await page.goto("/");
+  } else {
+    await options.getByRole("button").first().click();
+  }
+  await expect(queue(page).locator(`[data-tray-item="${question!.id}"]`)).toHaveCount(0);
   await expect.poll(async () => (await snapshot(page)).counts.total).toBeLessThan(before.counts.total);
 
   const middle = await snapshot(page);

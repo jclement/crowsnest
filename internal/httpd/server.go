@@ -273,6 +273,7 @@ func (s *Server) routes() http.Handler {
 	s.registerAttachmentRoutes(mux)
 	s.registerInstructionRoutes(mux)
 	s.registerApprovalRoutes(mux)
+	s.registerApprovalRuleRoutes(mux)
 	s.registerSystemRoutes(mux)
 	s.registerStatsRoutes(mux)
 	s.registerAttentionRoutes(mux)

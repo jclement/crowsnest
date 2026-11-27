@@ -46,6 +46,9 @@ func (l Level) rank() int {
 	return 0
 }
 
+// AtMost reports whether l is no riskier than limit (the approval policy's max_risk check).
+func (l Level) AtMost(limit Level) bool { return l.rank() <= limit.rank() }
+
 // Valid reports whether l is one of the three levels.
 func (l Level) Valid() bool { return l == Low || l == Elevated || l == Dangerous }
 

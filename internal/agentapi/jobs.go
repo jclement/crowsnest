@@ -2,6 +2,7 @@
 // `crowsnest hook …` and the job MCP tools call.
 //
 //	POST /api/v1/jobs                    job_create (the caller's job, if any, is the parent)
+//	POST /api/v1/jobs/adopt              job_adopt (a standing agent records work it holds; adopt.go)
 //	GET  /api/v1/jobs?state=             list
 //	GET  /api/v1/jobs/{id}               the job with its timeline and questions
 //	GET  /api/v1/jobs/{id}/context       job_get: the job as text for an agent
@@ -51,6 +52,7 @@ type ContextResponse struct {
 
 func (s *Server) registerJobRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/jobs", s.handleJobCreate)
+	mux.HandleFunc("POST /api/v1/jobs/adopt", s.handleJobAdopt)
 	mux.HandleFunc("GET /api/v1/jobs", s.handleJobList)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleJobGet)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/context", s.handleJobContext)

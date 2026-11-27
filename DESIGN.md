@@ -560,6 +560,7 @@ protocol through the CLI and their prompt; they have no hooks, so they rely on t
 | `fail(reason)` | Declares it cannot be finished |
 | `job_create(brief, role, dir, …)` | Delegates a child job: inside the caller's own directory it starts at once; anything wider waits for the human's approval (6.10) |
 | `job_get()` | The agent's own job, its open questions and their answers: what it reads after a compaction or restart |
+| `job_adopt(title, brief)` | Standing agents only: records work the human gave in conversation (Chat or the Claude app) as a job the caller holds itself, and returns its id (7.10.1) |
 
 ### 6.3 The supervisor: declared state, enforced
 
@@ -1629,7 +1630,85 @@ door's `frontdoor-poke`, with its lessons:
   up and why it may not have. The name is not shown on the screen; it is the title in
   claude.ai/code and the app.
 - **Job agents**: off by default; `--job-remote-control` adds `--remote-control "<name> <job id>
-  <title, cleaned, 40 characters>"` to Claude job agents (Codex has no such flag).
+  <title, cleaned, 40 characters>"` to Claude job agents (Codex has no such flag). Their session
+  links are not captured (a gap, kept so on purpose: it would need the job launcher's own watch in
+  `internal/jobs`, and ten jobs would flood the Claude app's session list anyway).
+
+**7.10.1 The session link, "Open in Claude", and work given in conversation** (built on
+`wip/phone`; `internal/orch/remote_url.go`, `remote_control.go`, `internal/jobs/adopt.go`,
+`internal/agentapi/mcp_job_adopt.go`, `web/src/components/remote/OpenInClaude.tsx`).
+
+- **What a Remote Control session exposes** (Claude Code docs read 2026-11-27, and an experiment
+  with Claude Code 2.1.332 and herdr 0.9.5 in a throwaway `crowsnest-test-*` session, haiku, panes
+  at 44 and 80 columns; the recorded pane texts, with made-up ids of the same shape, are
+  `internal/orch/testdata/remote_control`):
+  - The banner `/remote-control is active · Continue here, on your phone, or at
+    https://claude.ai/code/session_<id>` (the id is `01` and 22 more letters and digits). Claude
+    wraps it to the pane's width and breaks the URL anywhere: at 44 columns it was `…or at
+    https://claude.ai/co` then `de/session_…` on the next line, indented two spaces.
+  - `/remote-control` opens a panel repeating the URL (ending in a full stop). The footer's `/rc`
+    indicator links to the session but is hidden when the terminal is narrow.
+  - The **transcript** records it: a line `{"type":"system","subtype":"bridge_status","url":
+    "https://claude.ai/code/session_…"}` each time Remote Control connects, and
+    `{"type":"bridge-session","bridgeSessionId":"cse_…"}` lines. No file outside the transcript,
+    no hook input and no status-line field carries it.
+  - `--resume` of the same conversation reconnects to the **same** session URL (the docs say so;
+    seen). A new conversation (a new `--session-id`) gets a **new** URL.
+- **Capture**: after every start (Restart and New conversation included) the status's
+  `remote_control_url` is cleared and the watch looks again: for 45 s on every tick it reads the
+  pane (`recent`, 200 lines) from the last `Claude Code v` header on, so a previous conversation's
+  banner left above it is never taken; then, while it is still unknown, once every two minutes
+  for an hour, also scanning the transcript's `bridge_status` lines (skipped without decoding when
+  they do not mention it; at most 64 MB read). A URL is taken only when it is exactly
+  `https://claude.ai/code/session_[A-Za-z0-9]{20,64}` (a query string is dropped, a look-alike
+  host or path refused); a URL that runs to the end of a line while still shorter than that shape
+  is continued with the first word of the next line. The newest one wins. Nothing is ever built
+  from a display name. The banner without a readable URL still sets the note `active`.
+- **Persistence**: kv `orchestrator.remote_control` (a lead's `lead.<slug>.remote_control`) holds
+  `{session, name, url}`. A crowsnest restart that adopts the running agent restores the name and
+  link when the record's session is the adopted agent's (else it assumes the name the launch
+  settings would give now and looks again); when the conversation changes under a running agent
+  (a `/clear`) the link is dropped and looked for again.
+- **Fields**: `remote_control` (the name started with), `remote_control_note` (`active`, or the
+  sentence after 45 s without it) and `remote_control_url` on the orchestrator's and every lead's
+  status (`GET /orchestrator`, `GET /leads`, `GET /projects`, the `orchestrator` and `lead` events).
+- **Open in Claude** (the web app): a link button (`target=_blank`, `rel="noopener noreferrer"`,
+  44 px on touch, the session name in its title) on Chat's header for the agent it talks to, a
+  lead's card on its project page, and beside Now's orchestrator and running leads' rows (beside
+  the row's button, never inside it). It is shown only with a current link. When Remote Control
+  was asked for but no link is known, a muted line instead (on the lead's card and under Chat's
+  header): `Remote Control: find "quark crowsnest" in the Claude app.` plus the note's reason when
+  it did not come up. Off: nothing. The browser re-checks the same strict shape before drawing a
+  link. A "?" beside the button opens **Crowsnest or the Claude app?**, the table below in short.
+- **When to use which**: crowsnest for the overview, decisions, approvals, many projects and
+  landing; Remote Control (the Claude app) for a long conversation with one agent.
+
+  | | Claude app (Remote Control) | Crowsnest |
+  |---|---|---|
+  | Sees | One agent's conversation | Every project, job, question, approval, spend |
+  | Good at | A long back-and-forth with one agent; native app and notifications | The queue across projects; supervision; approvals; landing |
+  | Blind to | Jobs, other projects, the supervisor | Nothing in the session, but its chat is a plainer client |
+  | Reach | Anywhere | The tailnet |
+- **Work given in conversation is a job** (`job_adopt`, R4 Codex P5): the MCP tool `job_adopt(title,
+  brief)` (socket `POST /api/v1/jobs/adopt`) records work a standing agent was given in Chat or in
+  the Claude app as a crowsnest job it holds itself: no agent is started and nothing is typed; the
+  job is born exactly as `dispatchTo` leaves a job it gave a standing agent (its pane and name,
+  `running`, brief sent), so the supervisor, `job_update`, `done` and `fail` treat it like any held
+  job. The orchestrator's is Unfiled, a lead's is in its project. It returns the id. Refused for a
+  job agent (it has its job), for a caller that is not a standing agent, and while the agent
+  already holds a live job (one at a time, 6.1: finish it, or hand the new work out with
+  `job_create`). It shares `job_create`'s per-caller rate limit. Its launch event says "Recorded
+  from conversation" (detail `from: conversation`); the board card does not say so yet (a gap: it
+  would need a column). CROWSNEST.md (the orchestrator's and every lead's) tells the agent to
+  record such work first with `job_adopt` or `job_create` and say the job id in its reply, and the
+  rule above.
+- **Demo**: `--demo` never starts Remote Control. The orchestrator and each lead show a made-up
+  name (`<instance> crowsnest`, `<instance> <project>`) and a made-up link of the real shape,
+  `https://claude.ai/code/session_demo…`, which leads nowhere: it exists so the UI and the hermetic
+  tests (`web/e2e/hermetic/remote.spec.ts`) can show the button.
+- **Not verified**: a permission answered in the Claude app superseding crowsnest's card, crowsnest
+  typing a poke while the human types in the app, and a link after Remote Control is disconnected
+  with `/remote-control` (the status keeps the last link until the next start).
 
 **7.11 Spend** (built on `wip/spend`; `internal/transcript/usage_meter.go`, `internal/spend`,
 `internal/store/spend.go`, migration `0011_spend.sql`, `internal/httpd/spend.go`,
@@ -2115,7 +2194,8 @@ the fallback that is always there.
 - **The hook.** Every Claude agent crowsnest starts (orchestrator and jobs) gets `PermissionRequest`
   → `crowsnest hook permission-request` with `"timeout": 86400` (`agentcfg.PermissionRequestTimeout`).
   It posts the hook's input to `POST /api/v1/approvals` on the agent socket (token-identified like
-  every hook; a caller without a known token gets 403 and the hook prints nothing), then long-polls
+  every hook; a caller without a known token gets 403 and the hook prints nothing; a call a policy
+  rule allows comes back settled with its `hook_output`, printed at once), then long-polls
   `GET /api/v1/approvals/{id}?wait=50` (only the pane that asked may poll it). Allowed → `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`;
   denied → `behavior: deny` with `message` "The human denied this tool call in crowsnest. Their
   note: …" (or, with no note, "do not retry it as it was; carry on, or ask"). Anything else
@@ -2134,8 +2214,13 @@ the fallback that is always there.
   too); (b) its PostToolUse reports the same tool with the same input (a "Yes" in the terminal);
   (c) the pane has shown no dialog on two looks in a row, 5 s apart, once the approval is 15 s
   old (the fleet's dialog detection, 8.2); (d) nobody has polled it for 45 s (the hook was killed
-  at its timeout, or the agent went away); (e) crowsnest restarted (the hooks' long-polls died
-  with it). A superseded approval leaves the tray and its hook prints nothing.
+  at its timeout, or the agent went away); (e) crowsnest restarted and its hook did not poll again
+  within the restart grace (150 s from the start; since `wip/phone`, Fable R4 2.11). A restart no
+  longer supersedes on its own: the hook retries failed polls every 2 s for 2 minutes, agent
+  tokens survive restarts (`internal/agentid`), so `RecoverAtStart` gives each hooked pending
+  approval the grace, the first poll ends it, and a decision after the restart reaches the hook
+  as before; only one never polled again is superseded ("crowsnest restarted and the agent's hook
+  did not come back"). A superseded approval leaves the tray and its hook prints nothing.
 - **The job.** While one is pending the job is `needs_you` with cause `approval-tool` ("A tool
   call is waiting for your approval", the call as the detail); when none is, it goes back to
   `running`. The approvals service's change callback does this; the tick re-checks it with
@@ -2166,6 +2251,78 @@ the fallback that is always there.
 - **No "always allow" from the browser.** A browser allow is once. Widening an agent's permanent
   permissions (Claude's options 2 and 3, `permission_suggestions`) is a terminal action: it
   outlives the request, and a phone tap should not be able to grant it. The card says so.
+- **Policy: rules crowsnest keeps, so a tap is not needed for every test run** (built on
+  `wip/phone`; Fable R4 2.6; `internal/approvals/policy.go`, `internal/store/approval_rules.go`,
+  migration `0017_approval_rules.sql`, `internal/httpd/approval_rules.go`, the web app's
+  `lib/policy.ts`, `components/approvals/ApprovalRulesCard.tsx`, `RememberForJob.tsx`,
+  `BatchAllow.tsx`, `JobRulesCard.tsx`). Narrower than "always allow": a rule lives in crowsnest,
+  not in the agent's Claude settings, is scoped to one project or one live job, is journalled
+  every time it allows, and is removed with one tap.
+  - **Where it runs**: in `approvals.Service.Request`, after the risk classification and before
+    anything is stored as pending. A call a rule allows is stored already `allowed`, `decided_via
+    = "policy"`, `rule_ids` naming the rules and `status_reason` saying it in words ("Allowed by
+    rule r_3 (project Crowsnest): Bash commands matching `go test *`"); it is announced as
+    `allowed` (never `requested`, so no push and no tray row), and `POST /api/v1/approvals` on the
+    agent socket answers with its `hook_output`, which the hook prints at once without polling.
+  - **Precedence, fixed**: a dangerous call is never allowed by a rule (the risk table wins,
+    always); then the job's remembered rules; then the project's rules. A rule applies only when
+    the call's risk is at or below its `max_risk`: `low` by default, `elevated` only when the
+    human turned on "also when elevated" for a project rule, or a job rule remembered from an
+    elevated approval. No match: a human is asked, as before. R5's narrowing of "low" (an
+    allowlist of known shapes, unrecognised calls elevated) makes more calls elevated; nothing
+    here loosens to compensate.
+  - **Kinds**. `bash`: a glob over a whole simple command, `*` any run of characters, anchored
+    (`go test *` matches `go test ./...`, not `sudo go test`). A compound command (`&&`, `||`,
+    `;`, `|`, newlines, `&`) matches only when every simple command in it matches some rule.
+    Command or process substitution (`$(`, backticks, `<(`, `>(`), `eval`, a redirect to a file
+    (anything but an fd duplication such as `2>&1` and `/dev/null`) and bidi control characters
+    never match. Matching reads the whole `command` in the tool input, never the 160-character
+    summary (R5-S7). The splitter is the guard's (`guard.Segments`). `edit`: Edit, Write,
+    MultiEdit and NotebookEdit whose `file_path`/`notebook_path` is absolute and, cleaned, inside
+    `<root>/<pattern>`; the pattern is a relative directory (`.` the whole root; no `..`, not
+    absolute, no glob); the root is the job's working root (its worktree when isolated, else its
+    directory), or the project's directory for a lead's own calls; the orchestrator's calls have
+    no root. `tool`: a tool name, exact or a trailing-`*` prefix (`mcp__github__*`); a tool rule
+    never covers Bash or the edit tools (they have kinds that look inside the call), and `*`
+    alone and a bash pattern of only `*` are refused. Every refusal is a sentence saying what is
+    wrong.
+  - **Scope**: a project rule applies to the calls of the project's jobs and its lead; a job rule
+    only while its job is live (not done, failed or cancelled). A revoked rule never applies; it
+    stays listed with `?all` so the approvals it allowed still name it. The wiring
+    (`approvalWiring.scope`) gives the policy the job's project, whether it is live and its root,
+    or for a lead's pane holding no job, the lead's project.
+  - **Seen before it is trusted** (R5): the add form previews, as the human types, what the
+    pattern would have matched among the project's approvals of the last 7 days (at most 50,
+    settled or pending): "Would have matched 4 recent calls: go test ./a, …", the elevated ones it
+    matches that stay asked unless "also when elevated" is on, and any dangerous one it matches,
+    flagged "never auto-allowed". Each listed rule shows the same. A compound command counts in a
+    preview only when that one rule matches every part of it.
+  - **Project rules** are managed on the project page (the Approval rules card) through
+    `GET|POST /projects/{ref}/approval-rules`, `POST …/preview` and `DELETE
+    /approval-rules/{id}`, with the browser session only: none of these exists on the agent
+    socket, so an agent cannot widen its own policy.
+  - **"Allow and remember for this job"** on a card (not offered for a dangerous call, nor for a
+    call with no job): an inline confirm with the proposed pattern, editable (for Bash the first
+    two words of the first command plus ` *`, the one word alone when there is one; for an edit
+    the file's directory relative to the root; otherwise the tool), and "Until j_12 ends,
+    crowsnest will allow …". `POST /approvals/{id}/decide` with `remember: {pattern}` checks the
+    rule first, allows this call once, stores the job rule (`max_risk` the approval's risk), then
+    allows by policy every other pending call of the job the rule now matches. The job's page
+    lists its remembered rules with Remove.
+  - **Batch allow**: when two or more low-risk approvals from one job are pending, the tray row
+    (which Now and the Inbox render too) offers "Allow N low-risk calls from <agent>", which lists
+    the N calls and needs one confirming tap. `POST /approvals/batch-allow {ids}` refuses the
+    whole batch with 409 and the reason (nothing allowed) unless every id is pending, low risk and
+    from the same job.
+  - **Journalled**: every auto-allow on the job's timeline (`hook` kind: "Auto-allowed by rule
+    r_3: Bash: go test ./...", with the approval, rule ids, patterns and reason) and in the global
+    journal (new kind `approval`), both written by the wiring's change callback; every rule added,
+    removed or remembered (`approval`), and every batch (`answer`). A settled approval says how
+    it ended: for `policy`, the rule sentence, on its card and in the Inbox History.
+  - **`--demo`**: Crowsnest has the rule Bash `go test *` (created via `demo`), and the reviewer
+    j_13 makes a call it allows (ap_4), so the project page, the History and j_13's timeline show
+    it. `CROWSNEST_DEMO_PARALLEL=1` adds two more low calls from Website's j_14 (ap_5, ap_6) for
+    the batch e2e; the plain demo keeps one call per agent.
 - **The card** (`ApprovalCard`): by tool. Bash: the command in a code block, the description, the
   directory; Edit, Write, MultiEdit: a diff (the Inbox's `DiffView`; Write against nothing:
   crowsnest does not read the file on the browser's behalf); WebFetch: the URL and the prompt; MCP:
@@ -2194,7 +2351,9 @@ the fallback that is always there.
   which lists approvals first (`?q=approval:ap_3`) and keeps settled ones in History; the palette's
   "Needs you" group lists them too (opening the card; the palette allows nothing itself). The nav
   badge and the tab title count pending approvals as well.
-- **Answering from a notification.** A Web Push for a low-risk approval carries Allow and Deny
+- **Answering from a notification.** (Narrowed on `wip/phone`, 23.4: a cut summary gets no Allow,
+  a question only its recommended option and only when routine and not a gate, everything else
+  Snooze or nothing; the text below is the mechanism.) A Web Push for a low-risk approval carries Allow and Deny
   buttons, and one for a confirm or choice question (not multi-select) its first two options, with
   a single-use action token minted for that one notice (`internal/actions`): 32 random bytes
   (`cna_…`), kept only as its SHA-256, scoped to one item (`approval:ap_3`, `question:q_7`) and
@@ -2239,7 +2398,15 @@ the fallback that is always there.
 - **Tests**: `internal/risk` and `internal/guard` tables; `internal/approvals` (allow wakes the
   waiter, deny with the note, the dangerous confirmation, notification only for low, expiry, a
   hook that stops polling, an active waiter kept, demo ones kept, supersession by pane, by the tool
-  having run, by the screen, at restart, the change callback); `internal/actions` (single use,
+  having run, by the screen, restart survival within the grace and supersession after it, the
+  change callback; `policy_test.go`: precedence, dangerous never, max_risk, compound commands,
+  substitution, redirects, eval, edit containment with `..` and outside paths, tool prefixes,
+  revoked rules, a settled job's rules, a lead's calls with no job, the full command not the
+  summary, bidi, the preview, remember and its refusals, batch); `internal/httpd/approval_rules_test.go`
+  (session, CSRF and X-Crowsnest, validation sentences, preview, add, list, remove, remember,
+  batch); `internal/agentapi/approval_rules_test.go` (none of the rule routes on the agent socket);
+  Vitest (`ApprovalRulesCard`, `RememberForJob`, `BatchAllow`); Playwright
+  (`e2e/hermetic/policy.spec.ts`, desktop and mobile WebKit); `internal/actions` (single use,
   racing redeems, expiry, scope); the hook CLI (`cmd/crowsnest/approvalhooks_test.go`: holds then
   allows, deny with the note, expiry and supersession print nothing, crowsnest down at the start
   and gone mid-wait print nothing, no token prints nothing, the guard); `internal/httpd`
@@ -2269,7 +2436,7 @@ The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identif
 | `crowsnest heavy [--status] [--timeout 1h] -- <command…>` | Run a build, suite or typecheck through the heavy-command gate (6.12); defers to an outside `heavy`; exit 75 when no slot came free |
 | `crowsnest pause [--until HH:MM] [--reason] \| pause --status \| resume` | The pause switch (6.13), from an agent's pane or the human's shell (the socket of `--session`); `resume` refused to an agent; with the server down `pause` writes `~/.config/crowsnest/paused` |
 | `crowsnest digest submit --file f.md [--day]` | The orchestrator delivers the digest it was asked for (7.13) |
-| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done` (with `walkthrough_md`), `fail`, `job_land` (a request, 6.11), `job_create` (with `project` and `to` for the orchestrator, 21.2), `job_get`, `project_list`, `project_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
+| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done` (with `walkthrough_md`), `fail`, `job_land` (a request, 6.11), `job_create` (with `project` and `to` for the orchestrator, 21.2), `job_get`, `job_adopt` (standing agents: work given in conversation becomes a job they hold, 7.10.1), `project_list`, `project_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
 
 ## 10. HTTP API
 
@@ -2308,20 +2475,23 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
 | `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}[?open=1]`, `PUT /projects/{ref}` | Projects (21.1): `{projects: [Project + {lead, counts: {needs_you, running, total}}], unfiled: counts}`; create `{name, dir, slug?, description?, default_role?, default_engine?, default_model?, default_isolate?: -1\|0\|1, permission_mode?, lead_start?}` (`400` with the reason: not a directory, too wide, overlapping); `{ref}` is the id or slug; `?open=1` applies `lead_start=open`; `PUT` edits or `{archived}` (archiving stops the lead). A `project` event `{id, change}` |
-| `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | Project leads (21.2): the running leads' statuses (the orchestrator's status shape plus `project_id`, `slug`, `running`; state `off` when not running, `stopped` after Stop); the lead's controls (`poke` answers as `POST /orchestrator/poke`). A `lead` event carries a lead's status |
+| `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | Project leads (21.2): the running leads' statuses (the orchestrator's status shape plus `project_id`, `slug`, `running`; state `off` when not running, `stopped` after Stop; Remote Control's `remote_control`, `remote_control_note` and `remote_control_url` as the orchestrator's, 7.10.1); the lead's controls (`poke` answers as `POST /orchestrator/poke`). A `lead` event carries a lead's status |
 | `POST /jobs/{id}/restart-agent` | Restart the job's agent on the same conversation with its start-up files and instruction layers written afresh (21.3); refused for a job a standing agent holds (restart that agent) |
 | `GET /voice/agents`, `PUT /voice/agents/{agent}` | Each standing agent's voice (13.5): `{agents: [{agent, label, voice_id}], default_voice}`; `{voice_id}` (`""`: the instance's). 404 when talk mode is off |
 | `GET /instructions` | Instruction layers (21.3): `{global: Layer, roles: [Layer], projects: [Layer], max_bytes}`; a `Layer` is `{scope, key, name, source: none\|builtin\|db\|file, effective_md, saved_md, builtin_md, file_path, editable, revision, updated_at, size}` |
 | `GET /instructions/{scope}/{key}`, `PUT` the same `{body_md}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` `{revision}` | One layer with its revisions `{layer: Layer, revisions: [{revision, body_md, deleted, created_at, size}]}` (newest first), which every write also answers. Key `-` is the global layer. `400` bad scope, key, body (over 32 KB, an empty role), `404` unknown role, project or revision, `409` a role that comes from a file. An `instructions` event (`{at}`) says a layer changed |
 | `GET /agents-instructions/{subject}` | `{subject, started_at, hash, layers: [{layer, scope, key, revision, source, size, hash}], changed, changes: [{layer, scope, key, was_source, now_source, was_revision, now_revision}], loaded: [{path, memory_type, load_reason, size, at}], skills_note}` for `j_<n>`, `orchestrator` or `lead:<slug>` (21.3) |
 | `GET /spend?from=&to=&group=job\|model\|day`, `GET /spend/summary` | Spend for a range of local days, grouped; today, this week and the orchestrator's line (7.11). Jobs carry `spend` on `/jobs` and `/jobs/{id}` (with `spend_turns` there) |
-| `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control` and `remote_control_note` (7.10) |
+| `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control`, `remote_control_note` and `remote_control_url` (the session's `https://claude.ai/code/session_…` link once captured, else absent; 7.10.1) |
 | `GET /orchestrator/context`, `POST /orchestrator/compact` | The orchestrator's context size and upkeep `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}`; Compact now (409 when it cannot take it) (7.9) |
 | `GET /schedule?project=`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md (app only), shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs:[{at, outcome, job_id}]}], problems:[{path, name, error}], dirs}`, `project=<id>` keeping one project's tasks (0: the orchestrator's and unfiled); Run now; `{enabled}` for any task and/or every field of an app schedule (a full replacement; a task file's edit is `409` "read-only: edit the file") (7.8). A `schedule` event (`{at}`) says a stamp, switch or app schedule changed |
 | `POST /schedule`, `DELETE /schedule/{name}` | An app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list (`400` invalid, `409` a taken name); delete one (`409` for a task file, `404` unknown) → the list (7.8) |
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
-| `GET /approvals?status=pending\|all\|<status>`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` | Tool-call approvals (8.7): `{id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, created_at, settled_at, expires_at, summary}`; decide `{decision: allow\|deny, note, confirm}` → the approval, `409 CONFLICT` when no longer pending, `409 CONFIRM_REQUIRED` for an unconfirmed dangerous allow |
+| `GET /approvals?status=pending\|all\|<status>`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` | Tool-call approvals (8.7): `{id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, rule_ids, remember, created_at, settled_at, expires_at, summary}` (`decided_via` `browser`, `notification` or `policy`; `remember` `{kind, pattern}` is the job rule proposed for a pending, non-dangerous call of a live job); decide `{decision: allow\|deny, note, confirm, remember?: {pattern}}` → the approval, `409 CONFLICT` when no longer pending or a remember is refused (a deny, dangerous, no job, the job ended), `400` for a bad pattern, `409 CONFIRM_REQUIRED` for an unconfirmed dangerous allow |
+| `POST /approvals/batch-allow` | `{ids}` (1 to 50): allows them all, once each, when every one is pending, low risk and from the same job; else `409` with the reason and nothing allowed (8.7 Policy) |
+| `GET /projects/{ref}/approval-rules`, `POST /projects/{ref}/approval-rules`, `POST /projects/{ref}/approval-rules/preview` | A project's live rules, each `{id, scope, project_id, job_id, kind, pattern, max_risk, note, created_at, created_via, revoked_at, sentence, recent}` with `recent` its preview; add `{kind: bash\|edit\|tool, pattern, max_risk?: low\|elevated, note?}` → `201` the rule (400 with a sentence when invalid); preview (same body) → `{considered, allowed, above_max_risk, dangerous}`, each a list of `{approval_id, summary, risk, status, created_at}` from the project's last 7 days (at most 50). Browser session only; not on the agent socket (8.7 Policy) |
+| `DELETE /approval-rules/{id}`, `GET /jobs/{id}/approval-rules` | Revoke a project or job rule (404 when already removed); a job's remembered rules |
 | `POST /push/action` | A notification's button (8.7): `{token, action}` with the single-use action token alone (no session) → `{item, message}`; `403` for an unknown, used, expired or out-of-scope token, or an elevated or dangerous approval |
 | `GET /inbox/summary` | `{open, blocking}`: open questions only (added in M6); the web app's badge is the attention queue's count since R4 |
 | `GET /attention`, `POST /attention/snooze` `{id, until?}`, `/attention/unsnooze` `{id}`, `/attention/dismiss` `{id}` | The one attention queue (22): `{items, counts: {total, blocking, can_wait, snoozed, by_project}, revision, at, partial?}`; snooze (10 minutes, every device), bring back, dismiss a failed job (`409` for anything else, `404` for an item resolved meanwhile). An `attention` SSE event carries the whole snapshot when it changes |
@@ -2453,6 +2623,7 @@ or push, and answers `409 EVIDENCE_HEAD_MOVED` when the branch moved past it (R5
 - `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings; the attention queue's snoozes and dismissals (`attention.snoozed`, `attention.dismissed`: id → unix time) and each browser's "since you left" record (`browser.<id>`: last beat and window start; 22). The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
 - Migration `0015_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
+- Migration `0017_approval_rules.sql` (8.7 Policy): `approval_rules(id, scope project|job, project_id, job_id, kind bash|edit|tool, pattern, max_risk low|elevated, note, created_at, created_via browser|demo, revoked_at)`, revoked rather than deleted; `approvals` gains `rule_ids` (the rules that allowed a `policy` approval). Deleting a job (retention) deletes its rules.
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -3289,6 +3460,17 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 108. **Spinning is conservative** (6.17): a false alarm costs Jeff a look at a healthy agent; it needs repetition, time, no change in the tree and no change in the failing tests together.
 109. **A prose question is refused with its own words, not converted by crowsnest** (6.18): crowsnest cannot write the options or the recommendation; the agent can, once told.
 110. **Received means seen in the transcript** (6.19): typing an answer twice is worse than late, so reconciliation looks before anything is typed again.
+111. **Link to Remote Control, do not compete with it; work given there becomes a job** (7.10.1; R4 Fable 3.7, Codex P5). The Claude app is the better client for a long conversation with one agent, and crowsnest the only place that sees every project, question and approval. So crowsnest links to the agent's real session (captured from Claude's own banner or transcript, never built from a name, shown only while current) rather than growing its chat, and the agents are told to record conversational work with `job_adopt` so nothing given in the app escapes supervision or the board. `job_adopt` reuses the held-job lifecycle of a dispatched job instead of a new one, and keeps one live job per standing agent, so the supervisor's rules need no exception.
+112. **Approval policy lives in crowsnest, never in the agent's settings** (8.7 Policy; Fable R4 2.6). A project rule or a rule remembered for one job is evaluated in the hook path, journalled at every use and removable with a tap; it outlives nothing it should not (a job rule dies with the job) and is invisible to the agent, which cannot reach the rule routes. Claude's own "always allow" stays a terminal action.
+113. **Dangerous is never auto-allowed, and elevated is opt-in per rule** (8.7 Policy; R5-S7). The risk table wins over every rule; `max_risk` defaults to low, so a rule written for `go test *` does not start allowing pushes when R5 reclassifies unrecognised calls as elevated.
+114. **A bash rule matches every simple command or nothing** (8.7 Policy). A chain is allowed only when each part matches some rule, and anything whose real effect cannot be read from the line (substitution, eval, a redirect to a file, bidi controls) never matches. It matches the full command, never the cut summary. Fail closed: the cost is a tap.
+115. **A rule is shown with what it would have matched** (8.7 Policy; R5 review). The add form previews the project's last week of calls as the pattern is typed, and flags any dangerous match as never auto-allowed; each listed rule keeps that line, so a too-broad rule is visible before and after it is saved.
+116. **Pending approvals survive a restart for a grace, not forever** (8.7 (e); Fable R4 2.11). 150 s from the start covers the hook's two minutes of poll retries; one polled again is kept and still answered from the card, one never polled again is superseded, so an upgrade no longer drops every card back to the terminal.
+117. **Batch allow is one job's low-risk calls only** (8.7 Policy). Mixing jobs or risks in one tap would hide which agent got what; the server refuses the whole batch rather than allowing part of it.
+118. **One decision packet per decision, keyed by the queue's item id** (23.1; R4 Codex P1, Fable 3.3). A push, the tray, Now, the palette and a phone's Inbox open the same `/decide?item=…`, so the evidence is never a different shape depending on where Jeff came from. Brief first, evidence second, the answer in a sticky bar: a phone reads top down and answers at the bottom.
+119. **A consequential choice never gets a shorter path than its evidence** (23.1, 23.4; Codex P2, R5-S2). Only a routine question (one choice, no files, a body under 400 characters, not gate-shaped) is answered from a row or a notification button; anything else opens the packet, and a gate's granting choice there takes a second tap. A gate, an elevated or a dangerous approval carries no action token at all, not even Snooze.
+120. **A spoken job is read back before it exists, and exists durably once confirmed** (23.3; Codex P3/V1). No auto-send for job creation: transcript, project (asked when ambiguous), readback, Create; then a real job id, with Undo for eight seconds that cancels it. The readback uses the browser's own speech, never ElevenLabs: the words are Jeff's, not an agent's, and the server's rule that only agent text is synthesised stands.
+121. **Rescue reuses existing routes; slash commands only at idle** (23.2; Fable 3.2/3.5). Interrupt is the keys route's Esc, Compact and Switch model type `/compact` and `/model …` as a plain prompt, and only while the agent is idle, because Claude queues input typed during a turn and a queued slash command arrives as text. No new server endpoint, nothing the agent can reach.
 
 ## 18. Milestones
 
@@ -3804,4 +3986,145 @@ ownership chain), and Playwright `e2e/hermetic/now.spec.ts` at 390x844 (Chromium
 1440: the busy-day walk without Chat, one number across badge, title, Now, Inbox and tray,
 answering a question and an approval from Now, since-you-left per browser, the phone nav and an
 old `/?job=` link; axe on Now; screenshots `web/screenshots/now-*.png`.
+
+## 23. The phone: decisions, rescue, voice, the lock screen
+
+Built on `wip/phone` (2026-11-27) from the R4 product reviews (Fable 2.6, 2.11, 3 and 4; Codex P1
+to P5, V1, top-ten rows 6, 7 and 9) and the R5 security review's S2 and S7. Jeff wants to run many
+projects "from my phone using Claude Remote". The approval policy is 8.7 (Policy) and Remote
+Control is 7.10.1; this section is the rest. Nothing here has run on a real iPhone:
+`docs/PHONE-CHECK.md` is the ten-minute pass that does.
+
+### 23.1 The decision packet
+
+`/decide?item=<attention item id>` (`routes/DecideView.tsx`, `components/decide/`,
+`lib/decision.ts`): one screen per question, approval or terminal dialog, top to bottom:
+
+1. **Where it belongs**: kind, project, the job (a link), its title, the agent, how long it has
+   waited.
+2. **The ask** in a line (the question's title, "Allow Bash: …?", "job-5 is stopped at a terminal
+   dialog"), and what stays blocked.
+3. **If you choose**: each choice with its consequence in a line (the option's `detail`, else a
+   default: "The agent goes ahead", "It runs once, now, in <dir>", "Presses 2 in the agent's
+   terminal"; a warning on a dialog option says so).
+4. **The recommendation**: the agent's recommended option with its detail; for a low-risk approval
+   "Low risk: a routine call".
+5. **The evidence**: context chips, the body, the change (`DiffNavigator`: a file list with counts
+   first; collapsed by default past 3 files or 120 changed lines; a tap jumps to a file and opens
+   it; each file folds), attachments; the call (`ApprovalCard`'s `CallBody`); the screen; and the
+   agent's last assistant message from its conversation.
+6. **The answer bar**, sticky at the bottom, opaque: the note, the choices (more than three scroll
+   inside the bar, at most 38 % of the height), and "Open the full job". A question's option
+   answers in one press (multi: checkboxes and Submit); a gate's granting option (`isGate`:
+   crowsnest's `land_for`/`approval_for`/`requested_by` context or an allow/approve/merge/push
+   option, the web mirror of `push.GateShaped`) asks "This widens what agents may do … Yes, <label>"
+   first (R5-S2); an approval is Allow once or Deny, a dangerous allow confirmed again; a dialog's
+   options press their digit bound to the screen hash, a form opens the terminal.
+
+The **note** is kept in localStorage per item (`crowsnest-note:<item>`, swept after three days),
+so a rotation, a trip to another app or iOS discarding the page never loses it; it is cleared once
+the answer is in. A **stale** decision (answered elsewhere, expired, superseded, the dialog gone)
+shows why instead of the bar; a 409 on submit refetches, which turns the page stale, and keeps the
+note. After an answer the packet moves to the next decision in the queue, else Now.
+
+Who links here: the queue's `itemLink` (palette, tray agent rows), a push (23.4), the tray's
+question rows ("Review the decision" for anything not routine, "Review (add a note)" beside a
+routine one's options), and the Inbox's Open list on a phone (below `md`; the desktop keeps its
+list beside the detail; `/inbox?q=` links still open the sheet). The tray and the footer are
+hidden on `/decide`. Unified diffs everywhere now have one narrow line-number gutter and do not
+wrap (code scrolls sideways in its file, focusable for the keyboard); "Wrap" turns wrapping on.
+
+### 23.2 Rescue without a terminal
+
+`components/jobs/RescuePanel.tsx`, on a live job's detail (open by default when it is stuck or
+needs the human) and in a stuck job's tray row (folded): Interrupt (Esc through `POST
+/agents/{pane}/keys`, no hash), Continue (a job message: carry on, or say why with job_update),
+Nudge, Get it moving (the job's resume: retry now, restart a gone agent, else nudge), Restart on
+the same conversation (`restart-agent`, confirmed), Compact now (`/compact` typed as a prompt) and
+Switch model (`/model sonnet|opus|haiku`; for the rest of that conversation, a restart goes back
+to the job's model), the last two only while the agent is idle (decision 121); the dialog's own
+options (`DialogCard`) when one is up; the last screen as text; Open the terminal. Each says what
+it does in a line. Not offered on a job a lead or the orchestrator holds (they have their own
+controls). Sending a sentence is the message box below it.
+
+**The phone terminal** (`KeyBar`, `TerminalPanel`, `XTerm`): below `sm` the key bar is two rows,
+Esc Tab Ctrl ← ↑ ↓ → Enter, then ^C Paste Copy A− A+ (one scrolling row of 44 px keys left Paste
+half off screen at 390 px); from `sm` (landscape) one row. Copy takes the selection, or the
+visible screen when nothing is selected (a long-press selection in xterm on a phone is unreliable).
+The touch default font is 11 px (about 54 columns at 390 px; it was 13, 44 columns). Not done:
+horizontal pan at 80 columns.
+
+### 23.3 Voice: a job by voice, the readback, earcons; walk mode specified
+
+**A job by voice** (`components/jobs/VoiceJob.tsx`, `lib/voice/jobIntent.ts`; on Now's job box
+when talk mode is on): hold the mic (a tap locks it on, the next stops), speak; the transcript is
+shown editable; the project is worked out (`interpretJob`: a project's name or slug in the
+speech, "Website: …" or "for Website, …" taken off the brief; naming two, or none while none is
+chosen, asks "Which project?" with buttons, and a spoken name that contradicts the box's choice
+asks too); the readback "Website: Fix the checkout validation. Create the job?" is shown and, with
+speak mode on, spoken by the browser's own speech synthesis; nothing exists until Create, which
+gives the job to the project's lead (or the orchestrator) and shows "Created j_42 for Website"
+with Undo for 8 s (cancels it). Pressing the mic stops a readback (barge-in).
+
+**Earcons** (`lib/voice/earcons.ts`, Web Audio, no files): heard, sent, received, needs you, error.
+Heard, sent and error play in the voice job box; needs you plays when the queue's count rises with
+speak mode on (`AppFrame`).
+
+**Walk mode: specified, not built** (Fable 4.1 item 2, Codex V2). It is larger than the rest of
+this branch together and needs a real phone to tune. What it must be when built:
+- A full-screen page (`/walk`) holding a screen wake lock, large controls only: Talk, Repeat, Skip,
+  Stop; a listening indicator that cannot be missed (colour and shape and an earcon).
+- It reads the queue aloud in the server's order, blocking first: "<project>, <agent> asks:
+  <ask>. Recommended: <label>. Say <options>, skip or later." Then it listens automatically.
+- A spoken answer is matched to option labels and numbers for that question id only, read back
+  ("Answer Website's question with Short headline?") and committed after "yes" or two seconds
+  without "cancel"; silence is never consent; a generic "yes" after another item interrupted is
+  rejected.
+- Approvals above low risk, gates and anything with a diff are never answered by voice: "this one
+  needs your eyes", and it moves on. Free speech goes to the orchestrator as a job request through
+  23.3's readback.
+- Barge-in: talking stops speech; anything missed while talking is summarised, never dropped.
+- Platform ceiling, said plainly: a web page cannot hold the microphone with the screen locked on
+  iOS; for driving, the Claude app's own voice mode on a Remote Control session may be the better
+  tool (unverified).
+
+### 23.4 The lock screen: decision-grade notices
+
+`internal/push/decision.go`. A question, approval or dialog notice says where it belongs in the
+title ("<instance>: Website: blocking question", "Crowsnest: DANGEROUS approval",
+"Handbook: terminal dialog", "Unfiled" when there is no project) and the decision in the body
+("j_15 Homepage hero: Which hero copy? · Recommended: Short headline", "j_14 Fix links: job-14
+wants Bash: npx linkinator …"); the project and job come from `push.Describer` (the job given, or
+the one in the asking pane, else the project whose lead is in it). A tap opens the decision packet.
+Buttons (only where the platform shows them; never on iOS), narrowed under R5:
+
+| Item | Buttons |
+|---|---|
+| Low-risk approval whose summary fits uncut | Allow, Deny (as before) |
+| Low-risk approval whose summary was cut | Snooze |
+| Elevated or dangerous approval | none, and no token |
+| Gate-shaped question | none, and no token |
+| Routine question (one choice, no files, short body) with a recommendation | the recommended option, Snooze |
+| Any other question, a dialog | Snooze |
+
+Snooze (`POST /push/action` with action `snooze`) hides the item from the queue for ten minutes on
+every device and decides nothing. `/push/action` still answers only what the token was minted for;
+the fix builder of R5 enforces server-side that gates are never answerable from it. Not done:
+default-to-blocking-only push volume and per-project collapsing (Fable 3.4's third point).
+
+### 23.5 Tests
+
+Vitest: `lib/decision.test.ts` (item ids, briefs, staleness, routine and gate rules, the note's
+store and sweep, the last message), `components/decide/AnswerBar.test.tsx` (the note across a
+remount, a 409 turning stale with the note kept, the gate's second tap, the dangerous
+confirmation), `DiffNavigator.test.tsx`, `DiffView.test.tsx` (one gutter, wrap),
+`RescuePanel.test.tsx`, `TerminalPanel.test.tsx` (Copy, ^C), `lib/voice/jobIntent.test.ts`,
+`VoiceJob.test.tsx` (readback before create, Undo, the ambiguous ask). Go: `internal/push`
+(`decision_test.go`: the text, the button table, gates; the watcher's tests updated),
+`internal/httpd` (a Snooze press never decides). Playwright: `e2e/hermetic/phone.spec.ts` (390x844
+Chromium and WebKit, and 1440: a packet from a push link with the bar on screen, the note through
+reload, rotation and a background trip, stale after the answer; approvals with the dangerous
+confirmation; a long diff; rescue; the terminal's keys all on screen; axe on the packet and the
+rescue panel) and `phone-voice.spec.ts` (fake ElevenLabs and microphone: readback, Create, Undo);
+screenshots `web/screenshots/phone-*.png`.
 

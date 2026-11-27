@@ -201,7 +201,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	ctl.run(ctx, cfg.Demo)
 	live.ctl.Store(ctl)
 	refs := &jobRefs{ctl: ctl, guard: guardRules(cfg, logger), projects: newProjectWiring(cfg, db, events), instructions: instructions.New(instructions.Options{Store: db, RolesDir: rolesDir(cfg), Hub: events, Logger: logger})}
-	approvalLinks := &approvalWiring{}
+	approvalLinks := &approvalWiring{journal: journalLog, projects: refs.projects.service}
 	approvalService, err := newApprovals(cfg, db, events, refs.guard, approvalLinks, logger)
 	if err != nil {
 		return err
@@ -223,7 +223,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	approvalLinks.jobs.Store(jobService)
 	files.jobs = jobService
 	go files.run(ctx, events, refs.questions.Load)
-	pushService, pusher, err := startPush(ctx, cfg, db, events, ctl, logger)
+	pushService, pusher, err := startPush(ctx, cfg, db, events, ctl, pushDescriber(jobService, refs.projects), logger)
 	if err != nil {
 		return err
 	}
@@ -291,6 +291,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 			events.Publish(hub.Event{Type: "lead", Data: projects.LeadStatus{Status: status, ProjectID: project.ID, Slug: project.Slug, Running: true}})
 		},
 	})
+	approvalLinks.leads.Store(leads)
 	if cfg.Demo {
 		go seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
 	}

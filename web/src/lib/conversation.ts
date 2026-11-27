@@ -6,6 +6,7 @@
 // A conversation is fetched in pages: the first page (no cursor) is the newest messages; later
 // pages carry only what changed after the cursor the client holds, including tool cards that
 // gained their result. mergePage folds a page into what the client has.
+import type { RemoteControlFields } from "./remote";
 
 /** What a message is. `pane` is the fallback when no transcript exists: the pane's text. */
 export type MessageKind = "user" | "assistant" | "tool" | "thinking" | "pane";
@@ -99,8 +100,8 @@ export type OrchestratorState =
   | "restarting"
   | "failed";
 
-/** GET /orchestrator, and the data of an `orchestrator` event. */
-export interface OrchestratorStatus {
+/** GET /orchestrator, and the data of an `orchestrator` event (with Remote Control, 7.10). */
+export interface OrchestratorStatus extends RemoteControlFields {
   state: OrchestratorState;
   name: string;
   pane_id: string;

@@ -1,7 +1,11 @@
 // DiffView: a question's `files` as diffs (DESIGN.md 8.1). Unified on a phone, side by side from
 // lg; long unchanged runs fold into a "N unchanged lines" row that expands in place. Text is
 // rendered as text nodes only, so file contents can never become markup.
-import { FileDiff } from "lucide-react";
+//
+// Unified (the phone's) has one narrow line-number gutter (the new line's number, or the old one
+// for a deletion) and does not wrap: code scrolls sideways inside its file, so a line is never
+// broken mid-word at 38 characters (R4 Fable 3.6). "Wrap" in the file's header turns wrapping on.
+import { FileDiff, WrapText } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn } from "../../lib/cn";
 import { collapse, diffStats, lineDiff, splitRows, type DiffGap, type DiffItem, type DiffLine, type SplitRow } from "../../lib/diff";
@@ -38,6 +42,7 @@ function FileDiffCard({ file, mode }: { file: QuestionFile; mode: "unified" | "s
     );
   }, [lines, expanded]);
   const expand = (index: number) => setExpanded((current) => new Set(current).add(index));
+  const [wrap, setWrap] = useState(false);
 
   return (
     <section aria-label={`Diff of ${file.filename}`} className="min-w-0 overflow-hidden rounded-md border border-border">
@@ -48,12 +53,27 @@ function FileDiffCard({ file, mode }: { file: QuestionFile; mode: "unified" | "s
         </span>
         <span className="font-mono text-2xs text-success">+{stats.added}</span>
         <span className="font-mono text-2xs text-danger">−{stats.removed}</span>
+        {mode === "unified" && (
+          <button
+            type="button"
+            aria-pressed={wrap}
+            onClick={() => setWrap((current) => !current)}
+            className={cn(
+              "-my-1 inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded px-1.5 text-2xs hover:bg-hover md:min-h-6 md:min-w-0",
+              wrap ? "text-accent" : "text-muted",
+            )}
+          >
+            <WrapText className="h-3 w-3" aria-hidden />
+            Wrap
+          </button>
+        )}
       </header>
       {stats.added === 0 && stats.removed === 0 ? (
         <p className="px-2.5 py-2 text-xs text-muted">No changes.</p>
       ) : (
-        <div className="overflow-x-auto">
-          {mode === "split" ? <SplitTable items={items} onExpand={expand} /> : <UnifiedTable items={items} onExpand={expand} />}
+        // Focusable: unwrapped code scrolls sideways, and a keyboard must reach it (axe's scrollable-region-focusable).
+        <div className="overflow-x-auto" tabIndex={0} role="group" aria-label={`Changes in ${file.filename}`}>
+          {mode === "split" ? <SplitTable items={items} onExpand={expand} /> : <UnifiedTable items={items} onExpand={expand} wrap={wrap} />}
         </div>
       )}
     </section>
@@ -69,21 +89,20 @@ const rowTone: Record<DiffLine["kind"], string> = {
 };
 const marker: Record<DiffLine["kind"], string> = { add: "+", del: "−", same: " " };
 
-function UnifiedTable({ items, onExpand }: { items: Indexed[]; onExpand: (index: number) => void }) {
+function UnifiedTable({ items, onExpand, wrap }: { items: Indexed[]; onExpand: (index: number) => void; wrap: boolean }) {
   return (
-    <table className="w-full border-collapse font-mono text-2xs leading-5" data-layout="unified">
+    <table className="w-full border-collapse font-mono text-2xs leading-5" data-layout="unified" data-wrap={wrap ? "on" : "off"}>
       <tbody>
         {items.map((item, index) =>
           item.kind === "gap" ? (
-            <GapRow key={`g${index}`} gap={item} columns={4} onExpand={() => onExpand(item.gapIndex ?? -1)} />
+            <GapRow key={`g${index}`} gap={item} columns={3} onExpand={() => onExpand(item.gapIndex ?? -1)} />
           ) : (
             <tr key={index} className={rowTone[item.kind]} data-kind={item.kind}>
-              <LineNo value={item.oldNo} />
-              <LineNo value={item.newNo} />
+              <LineNo value={item.kind === "del" ? item.oldNo : item.newNo} narrow />
               <td aria-hidden className={cn("w-4 select-none pl-1 text-center align-top", markerTone(item.kind))}>
                 {marker[item.kind]}
               </td>
-              <Code text={item.text} />
+              <Code text={item.text} nowrap={!wrap} />
             </tr>
           ),
         )}
@@ -124,13 +143,15 @@ function markerTone(kind: DiffLine["kind"]): string {
   return kind === "add" ? "text-success" : kind === "del" ? "text-danger" : "text-muted";
 }
 
-function LineNo({ value, className }: { value?: number; className?: string }) {
-  return <td className={cn("w-10 select-none border-r border-border px-1.5 text-right align-top text-muted", className)}>{value ?? ""}</td>;
+function LineNo({ value, className, narrow }: { value?: number; className?: string; narrow?: boolean }) {
+  return (
+    <td className={cn("select-none border-r border-border text-right align-top text-muted", narrow ? "w-8 px-1" : "w-10 px-1.5", className)}>{value ?? ""}</td>
+  );
 }
 
-function Code({ text, className, kind }: { text?: string; className?: string; kind?: DiffLine["kind"] }) {
+function Code({ text, className, kind, nowrap }: { text?: string; className?: string; kind?: DiffLine["kind"]; nowrap?: boolean }) {
   return (
-    <td className={cn("whitespace-pre-wrap break-all px-2 align-top text-heading", className)} data-kind={kind}>
+    <td className={cn(nowrap ? "whitespace-pre" : "whitespace-pre-wrap break-all", "px-2 align-top text-heading", className)} data-kind={kind}>
       {text ?? ""}
     </td>
   );

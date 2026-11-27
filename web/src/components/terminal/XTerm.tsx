@@ -34,6 +34,8 @@ export interface XTermHandle {
   reconnect: () => void;
   /** True when the program switched arrows to application mode (ESC O A). */
   applicationCursor: () => boolean;
+  /** The selected text, or the visible screen's lines when nothing is selected (the phone's Copy). */
+  copyText: () => string;
 }
 
 interface XTermProps {
@@ -179,6 +181,7 @@ function openTerminal(container: HTMLElement, path: string, fontSize: number, la
     focus: () => terminal.focus(),
     reconnect: () => socket.reconnect(),
     applicationCursor: () => terminal.modes.applicationCursorKeysMode,
+    copyText: () => terminal.getSelection() || visibleText(terminal),
   });
 
   const dispose = () => {
@@ -249,3 +252,13 @@ const darkPalette: ITheme = {
   brightCyan: "#56d4dd",
   brightWhite: "#f0f6fc",
 };
+
+/** The lines on screen now, trailing spaces trimmed: what a long-press would struggle to select. */
+function visibleText(terminal: Terminal): string {
+  const buffer = terminal.buffer.active;
+  const lines: string[] = [];
+  for (let row = 0; row < terminal.rows; row++) {
+    lines.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "");
+  }
+  return lines.join("\n").replace(/\n+$/, "");
+}

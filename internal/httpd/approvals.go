@@ -23,10 +23,12 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/actions"
 	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/journal"
+	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 )
 
@@ -36,6 +38,13 @@ type DecideRequest struct {
 	Note     string `json:"note"`
 	// Confirm is the explicit second confirmation a dangerous allow needs.
 	Confirm bool `json:"confirm"`
+	// Remember, on an allow, also stores a job rule with this pattern (DESIGN.md 8.7, Policy).
+	Remember *RememberRequest `json:"remember,omitempty"`
+}
+
+// RememberRequest is "Allow and remember for this job": the pattern the human confirmed.
+type RememberRequest struct {
+	Pattern string `json:"pattern"`
 }
 
 // ActionRequest is the body of POST /push/action.
@@ -109,14 +118,19 @@ func (s *Server) handleApprovalDecide(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, `Send JSON with decision "allow" or "deny", and an optional note.`)
 		return
 	}
-	approval, err := service.Decide(r.Context(), r.PathValue("id"), approvals.Decision{
-		Allow: request.Decision == "allow", Note: request.Note, Confirmed: request.Confirm, Via: approvals.ViaBrowser,
-	})
+	decision := approvals.Decision{Allow: request.Decision == "allow", Note: request.Note, Confirmed: request.Confirm, Via: approvals.ViaBrowser}
+	if request.Remember != nil {
+		decision.Remember = &request.Remember.Pattern
+	}
+	approval, err := service.Decide(r.Context(), r.PathValue("id"), decision)
 	if err != nil {
-		s.writeApprovalError(w, err)
+		s.writePolicyError(w, err)
 		return
 	}
 	s.journalDecision(r, approval)
+	if request.Remember != nil {
+		s.journalRemember(r, approval, request.Remember.Pattern)
+	}
 	writeData(w, http.StatusOK, approval)
 }
 
@@ -158,6 +172,10 @@ func (s *Server) handlePushAction(w http.ResponseWriter, r *http.Request) {
 	item, err := s.deps.Actions.Redeem(r.Context(), request.Token, request.Action)
 	if err != nil {
 		writeError(w, http.StatusForbidden, codeForbidden, actions.ErrInvalid.Error())
+		return
+	}
+	if request.Action == push.ActionSnooze {
+		s.snoozeFromNotification(w, r, item)
 		return
 	}
 	kind, id, _ := strings.Cut(item, ":")
@@ -205,4 +223,22 @@ func (s *Server) handlePushAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusForbidden, codeForbidden, actions.ErrInvalid.Error())
 	}
+}
+
+// notificationSnooze is how long a notification's Snooze hides an item: the queue's own snooze.
+const notificationSnooze = 10 * time.Minute
+
+// snoozeFromNotification is a notification's Snooze button: the item leaves the queue (and the
+// count) on every device for ten minutes. It decides nothing, so any item may carry it, including
+// approvals and questions that may never be answered from a notification (R5-S2, R5-S7).
+func (s *Server) snoozeFromNotification(w http.ResponseWriter, r *http.Request, item string) {
+	if s.deps.Attention == nil {
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "Snoozing is not available on this server.")
+		return
+	}
+	if _, err := s.deps.Attention.Snooze(r.Context(), item, time.Now().Add(notificationSnooze)); err != nil {
+		writeData(w, http.StatusOK, ActionResult{Item: item, Message: "Nothing to snooze: it was already dealt with."})
+		return
+	}
+	writeData(w, http.StatusOK, ActionResult{Item: item, Message: "Snoozed for 10 minutes. It is still waiting in crowsnest."})
 }

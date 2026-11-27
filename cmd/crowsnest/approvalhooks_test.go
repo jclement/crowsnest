@@ -38,6 +38,12 @@ type approvalRig struct {
 // change moves the job's state), and a running job held in pane w2:p3.
 func newApprovalRig(t *testing.T, ttl time.Duration) *approvalRig {
 	t.Helper()
+	return newApprovalRigWith(t, ttl, nil)
+}
+
+// newApprovalRigWith is newApprovalRig with the policy's scope (nil: no rule ever applies).
+func newApprovalRigWith(t *testing.T, ttl time.Duration, scope func(ctx context.Context, jobID, paneID string) approvals.Scope) *approvalRig {
+	t.Helper()
 	db, err := store.OpenMemory(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +56,7 @@ func newApprovalRig(t *testing.T, ttl time.Duration) *approvalRig {
 		return err == nil && count > 0
 	}})
 	// Wired as serve wires it: the job reads what is pending itself (jobs.Options.ApprovalPending).
-	rig.approvals = approvals.New(approvals.Options{Store: db, TTL: ttl, OnChange: func(ctx context.Context, a approvals.Approval, change string) {
+	rig.approvals = approvals.New(approvals.Options{Store: db, TTL: ttl, Scope: scope, OnChange: func(ctx context.Context, a approvals.Approval, change string) {
 		_ = rig.jobs.SetApprovalWaiting(ctx, a.JobID, change == "requested", a.Summary)
 	}})
 	identity := agentid.New(db, nil)
@@ -195,6 +201,31 @@ func TestPermissionRequestHoldsThenAllows(t *testing.T) {
 		t.Fatalf("hook printed %q", result)
 	}
 	jobIs(t, rig, jobs.StateRunning, "") // after the decision
+}
+
+// A call a project rule allows is answered in the create reply: the hook prints the allow at once,
+// with no poll and no human, and the job never shows as waiting.
+func TestPermissionRequestPolicyAllowsAtOnce(t *testing.T) {
+	rig := newApprovalRigWith(t, 0, func(context.Context, string, string) approvals.Scope {
+		return approvals.Scope{ProjectID: 1, ProjectName: "Crowsnest", JobLive: true, Root: "/tmp"}
+	})
+	if _, err := rig.approvals.AddProjectRule(context.Background(), 1, approvals.RuleInput{Kind: approvals.KindBash, Pattern: "touch *"}); err != nil {
+		t.Fatal(err)
+	}
+	rig.timings.poll = time.Hour // a poll would hang the test: the allow must come from the create reply
+	started := time.Now()
+	result := hookResult(t, runRequestHook(t, rig, rig.env), 3*time.Second)
+	if !strings.Contains(result, `"behavior":"allow"`) || strings.Contains(result, "updatedPermissions") {
+		t.Fatalf("hook printed %q, want an allow", result)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("the policy allow took %s", elapsed)
+	}
+	list, _ := rig.approvals.List(context.Background(), nil, 10)
+	if len(list) != 1 || list[0].DecidedVia != approvals.ViaPolicy || !strings.HasPrefix(list[0].StatusReason, "Allowed by rule r_1 (project Crowsnest)") {
+		t.Fatalf("approvals %+v", list)
+	}
+	jobIs(t, rig, jobs.StateRunning, "")
 }
 
 func TestPermissionRequestDenyCarriesTheNote(t *testing.T) {

@@ -12,10 +12,12 @@ import { ReviewPanel } from "./ReviewPanel";
 import { BudgetCard, EvidenceCard, LastMessage, WaitLine } from "./AcceptPanels";
 import { acceptChip } from "../../lib/accept";
 import { AgentConversation } from "../agent/AgentConversation";
+import { JobRulesCard } from "../approvals/JobRulesCard";
 import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
 import { AgentTerminal } from "../agent/AgentTerminal";
 import { QuestionDetail } from "../inbox/QuestionDetail";
 import { JobFiles, JobMessageBox } from "./JobMessageBox";
+import { RescuePanel } from "./RescuePanel";
 import { Markdown } from "../Markdown";
 import { SpendSection } from "../spend/SpendSection";
 import { Banner } from "../ui/Banner";
@@ -158,6 +160,11 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
   return (
     <>
       <StuckBanner job={job} openTerminal={openTerminal} openReview={openReview} />
+      {/* Rescue buttons for a job's own agent; a standing agent (a lead, the orchestrator) has
+          its own controls, and restart-agent refuses its jobs. */}
+      {!isFinished(job.state) && job.pane_id && !job.agent_name.startsWith("lead-") && job.agent_name !== "orchestrator" && job.accept_state !== "checking" && (
+        <RescuePanel job={job} defaultOpen={job.stuck || job.state === "needs_you"} />
+      )}
       <LastMessage job={job} />
       {job.state === "in_review" && job.accept_state === "checking" && (
         <Banner tone="info" icon={GitCompareArrows}>
@@ -214,6 +221,7 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
           </ul>
         </Card>
       )}
+      <JobRulesCard jobId={job.id} finished={isFinished(job.state)} />
       <Timeline events={job.timeline} />
       {!isFinished(job.state) && <CancelJob id={job.id} />}
     </>

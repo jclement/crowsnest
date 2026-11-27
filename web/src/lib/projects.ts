@@ -6,6 +6,7 @@
 import type { ChipTone } from "../components/ui/Chip";
 import type { OrchestratorState } from "./conversation";
 import type { Job } from "./jobs";
+import type { RemoteControlFields } from "./remote";
 
 /** When a project's lead starts by itself: never (only Start lead), when opened, or on a job for it. */
 export type LeadStart = "manual" | "open" | "job";
@@ -44,7 +45,7 @@ export interface ProjectCounts {
 export type LeadState = OrchestratorState | "off" | "stopped";
 
 /** A lead's status (internal/projects LeadStatus: orch.Status plus the project). */
-export interface LeadStatus {
+export interface LeadStatus extends RemoteControlFields {
   state: LeadState;
   /** Its herdr agent name: lead-<slug>. */
   name: string;
@@ -53,9 +54,6 @@ export interface LeadStatus {
   dir: string;
   model?: string;
   detail?: string;
-  /** Claude Code's Remote Control: "active", "off", … and a sentence about it. */
-  remote_control?: string;
-  remote_control_note?: string;
   restarts: number;
   updated_at: string;
   project_id: number;
