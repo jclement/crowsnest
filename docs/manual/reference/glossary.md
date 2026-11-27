@@ -33,7 +33,8 @@ bottom (`/decide`).
 **Dialog**: Claude's own on-screen menu in a pane (a permission prompt, folder trust); crowsnest
 shows it and presses the key you choose.
 
-**Fleet**: every workspace, tab, pane and agent in the herdr session.
+**Agents** (the view): every workspace, tab, pane and agent in the herdr session, and the session
+terminal. **Fleet**: what it lists; also the old name of its tree view.
 
 **Gate**: a question that grants something (land, allow a wider job, approve a task file). Never
 answered from a notification. [Safety](../safety.md)

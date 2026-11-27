@@ -118,7 +118,7 @@ type Config struct {
 	Theme          string  // the default theme's id for browsers that chose none; "" the house theme
 	// ---- Day thirty: terminal reach, Tailscale sign-in, backups, retention (ops.go) ----
 
-	// TerminalMachines lets the Terminal view's herdr client show the user's saved SSH machines
+	// TerminalMachines lets the session terminal's herdr client show the user's saved SSH machines
 	// (--terminal-machines). Off: the client gets a state directory of crowsnest's own.
 	TerminalMachines bool
 	TailscaleAuth    bool // accept Tailscale identity headers from a local serve proxy (--tailscale-auth)

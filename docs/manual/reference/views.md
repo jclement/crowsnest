@@ -1,7 +1,7 @@
 # Every view
 
 On a phone the bottom bar is **Now**, **Projects**, **Inbox**, **Chat** and **More**; More holds
-**Jobs**, **Fleet**, **Terminal**, **Help** and **System**. On a desktop the left rail shows the
+**Jobs**, **Agents**, **Help** and **System**. On a desktop the left rail shows the
 same, with the More views under a heading. The account menu (top right) holds **System**,
 **Settings**, **Appearance**, **Account**, **Notifications**, **Instructions**, **Pause automation…** and **Do not
 disturb…** (and **Voice** with talk mode on).
@@ -72,19 +72,17 @@ A job's or project's changes, live and syntax-highlighted, with **Viewed** marks
 here: no header, nav or tray; **Back** or Esc returns. See [Review changes with the diff
 viewer](../how-to/review-changes.md).
 
-## Fleet
+## Agents
 
-`/fleet` · `g` then `f` · [Open Fleet](app:/fleet)
+`/agents` · `g` then `a` · [Open Agents](app:/agents)
 
-Every herdr workspace, tab and pane, with each agent's state (working, idle, done, blocked at a
-dialog), filterable with `/`. Pick an agent for its **Conversation** or **Terminal**; plain shell
-panes open too. The recovery and debugging view.
-
-## Terminal
-
-`/terminal` · `g` then `t` · [Open the Terminal view](app:/terminal)
-
-herdr's own TUI for the whole session. See [Use the terminal views](../how-to/terminals.md).
+The recovery and debugging view, under **More**. At left every herdr workspace, tab and pane, with
+each agent's state (working, idle, done, blocked at a dialog), filterable with `/`. Pick an agent
+for its **Conversation** or **Terminal**; plain shell panes open too. With nothing picked, the
+right side is the **Session terminal**, herdr's own TUI for the whole session (on a phone, the
+**Session terminal** row at the top opens it; `/agents?session=true`). The old Fleet and Terminal
+views were merged into it: `/fleet` and `/terminal` links land here. See [Use the terminal
+views](../how-to/terminals.md).
 
 ## Help
 

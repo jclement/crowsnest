@@ -7,8 +7,8 @@ you do, there are two kinds, and both are real: what you type reaches the agent.
 
 | | What it is | Where |
 |---|---|---|
-| **Terminal** view | herdr's own TUI for the whole session: every workspace, tab and pane, exactly as `herdr --session crowsnest` shows it | **More → Terminal** on a phone, the rail on a desktop, `g` then `t` |
-| **A pane's terminal** | One pane only (an agent's, or a plain shell), sized to fit your screen | A job's **Terminal** tab; Fleet → an agent → **Terminal**; **Open terminal** on a stuck card |
+| **Session terminal** | herdr's own TUI for the whole session: every workspace, tab and pane, exactly as `herdr --session crowsnest` shows it | **Agents** (under **More**), beside the tree when no agent is picked; on a phone its **Session terminal** row; `g` then `a` |
+| **A pane's terminal** | One pane only (an agent's, or a plain shell), sized to fit your screen | A job's **Terminal** tab; Agents → an agent → **Terminal**; **Open terminal** on a stuck card |
 
 Closing a browser tab only closes that client: never the herdr server, never an agent.
 
@@ -16,7 +16,7 @@ Closing a browser tab only closes that client: never the herdr server, never an 
 
 - **A pane's terminal**: to answer something only the screen shows (a login, a form), to look at
   a stuck agent, to type a slash command, or to clear a half-typed draft in its input box.
-- **The Terminal view**: to work with herdr itself: move between workspaces, open a new tab,
+- **The session terminal**: to work with herdr itself: move between workspaces, open a new tab,
   start a shell, see everything at once. It is the same TUI you use on your desktop.
 
 ## How
@@ -29,9 +29,9 @@ Closing a browser tab only closes that client: never the herdr server, never an 
    its control code), arrows and **Enter**; then **^C**, **Paste**, **Copy** (the selection, or the
    visible screen when nothing is selected), and **A−** / **A+** for the font size (remembered).
 
-The Fleet view ([Open Fleet](app:/fleet), `g` then `f`) lists every workspace, tab and pane with
+The Agents view ([Open Agents](app:/agents), `g` then `a`) lists every workspace, tab and pane with
 its agent's state; pick an agent for its **Conversation** or **Terminal**. `/` filters it. Plain
-shell panes can be opened too.
+shell panes can be opened too. (It was two views, Fleet and Terminal; their old links land here.)
 
 ## Keys to know
 
@@ -51,10 +51,10 @@ so ("Ended: terminal attach taken over") and offers **Reconnect**.
   toast says to long-press and paste.
 - **Characters look wrong**: the terminals use the JetBrains Mono Nerd Font if installed, else
   bundled fonts that load as glyphs appear; give them a second.
-- **The Terminal view shows machines you did not expect**: herdr's TUI shows every machine your
+- **The session terminal shows machines you did not expect**: herdr's TUI shows every machine your
   herdr config names. crowsnest starts it with its own state directory unless
   `--terminal-machines` is set.
 - **A 44-column phone terminal is cramped**: rotate to landscape (one row of keys), or use the
   Rescue buttons instead ([Rescue a stuck agent](rescue.md)).
 
-[Open the Terminal view](app:/terminal).
+[Open the session terminal](app:/agents?session=true).

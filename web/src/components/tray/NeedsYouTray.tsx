@@ -329,7 +329,7 @@ function RowBody({ item, cardRef, onDone, onNavigate }: { item: TrayItem; cardRe
             approval={item.approval}
             compact
             onDecided={onDone}
-            onOpenTerminal={item.approval.pane_id ? () => go("/fleet", { agent: item.approval.pane_id ?? "" }) : undefined}
+            onOpenTerminal={item.approval.pane_id ? () => go("/agents", { agent: item.approval.pane_id ?? "" }) : undefined}
           />
           <BatchAllow approval={item.approval} onDone={onDone} />
         </div>
@@ -337,7 +337,7 @@ function RowBody({ item, cardRef, onDone, onNavigate }: { item: TrayItem; cardRe
     case "question":
       return <QuickAnswer question={item.question} onOpen={() => go("/decide", { item: `question:${item.question.id}` })} />;
     case "dialog":
-      return <QuickDialog paneId={item.agent.pane_id} name={item.agent.name || item.agent.pane_id} onOpen={() => go("/fleet", { agent: item.agent.pane_id })} />;
+      return <QuickDialog paneId={item.agent.pane_id} name={item.agent.name || item.agent.pane_id} onOpen={() => go("/agents", { agent: item.agent.pane_id })} />;
     case "limit":
       return (
         <div className="flex flex-col gap-2">

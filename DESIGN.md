@@ -3376,16 +3376,19 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 | **Jobs** (`/jobs`) | A list: no composer (R8: jobs are given on Now, from the palette or by voice); **New job** (and `?new=1`) opens Now's form, `NewJobForm`, in a sheet. The board: needs-you and stuck first, then running, then finished today. Each card: title, state chip, the progress line, time since last activity, open-question count, agent. Tap for the job: timeline, result, questions, message box, and its Conversation and Terminal | Board at left, selected job at right |
 | **Chat** | Conversation, sticky composer, push-to-talk button when voice is on, orchestrator status chip (idle/working/blocked), "Poke now" in a menu | Same, centred column, fleet rail at left |
 | **Inbox** (badge) | The attention queue in full (approvals, questions, dialogs, stuck, failed or landable jobs, standing agents), the server's order, each with project and job; snoozed ones folded; notices apart; full-screen sheet to answer | List and detail side by side |
-| **Fleet** | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal | Tree at left, selected agent at right with Conversation/Terminal toggle |
-| **Terminal** | Full-screen xterm on the herdr TUI, with a key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Full-height xterm, font size in the status line |
+| **Agents** (`/agents`; R8 merged the Fleet and Terminal views into it) | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal; a **Session terminal** row at the top opens the herdr TUI full screen (`?session=true`) with the key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Tree at left; at right the selected agent with Conversation/Terminal toggle, or with nothing selected the session terminal, full height, font size in the status line |
 
 Since R4 (section 22) the nav has four primary destinations, Now, Projects, Inbox and Chat, which
-are the phone's bottom bar, plus **More** (a sheet: Jobs, Fleet, Terminal, Help, System); the
-desktop rail shows the same order with Jobs, Fleet, Terminal and Help under a "More" heading
+are the phone's bottom bar, plus **More** (a sheet: Jobs, Agents, Help, System); the
+desktop rail shows the same order with Jobs, Agents and Help under a "More" heading
 (`components/nav.ts` is the one list; Help is the manual, 12.11). Now is the default route (`/`, `g h`); a link made before it (`/?job=j_12`,
 `/?project=<slug>`) is redirected to the board at `/jobs` (`g j`); the others are `/projects`
-(`/projects/<slug>` a project), `/chat` (`?target=lead-<slug>` a project's lead), `/inbox`, `/fleet` (`?agent=<pane id>`
-selects an agent, so links and reloads land on it) and `/terminal`. A web app manifest and icons
+(`/projects/<slug>` a project), `/chat` (`?target=lead-<slug>` a project's lead), `/inbox` and `/agents` (`g a`;
+`?agent=<pane id>` selects an agent, so links and reloads land on it; `?session=true` the session
+terminal). `/fleet` and `/terminal`, the two views Agents replaced (R8: both were herdr's model and
+both for debugging), redirect to it, search and all, so old links and notifications still land.
+Where older sections of this document say "the Fleet view" or "the Terminal view", read the
+Agents view's tree and its session terminal. A web app manifest and icons
 make it installable to a home screen.
 
 **Web app structure (M3).** `web/src/components/ui/` is the design system: Button, IconButton,
@@ -3542,7 +3545,7 @@ key rules in `lib/hotkeys.ts`; all three are pure and unit-tested.
   works from any field. In a terminal only ⌘K opens it: xterm is told to ignore ⌘K
   (`attachCustomKeyEventHandler`) so it never reaches the shell, and Ctrl K is left to the shell
   (kill-line), as is a plain k anywhere. `?` opens the keyboard shortcuts sheet, and `g` then
-  `j`/`c`/`i`/`f`/`t` (within 1.5 s) goes to Jobs, Chat, Inbox, Fleet or Terminal; neither fires
+  `j`/`c`/`i`/`a` (within 1.5 s) goes to Jobs, Chat, Inbox or Agents (`f` and `t` until R8); neither fires
   while typing in a field or a terminal, with a modifier, or on auto-repeat. `/` stays the Fleet
   filter's.
 - **Phones.** The header icon opens the palette and focuses its input inside the tap

@@ -15,8 +15,8 @@ import { expect, expectAccessible, isPhone, test } from "../support/fixtures";
 const views = [
   { name: "jobs", path: "/jobs", ready: (page: Page) => page.getByRole("region", { name: "Needs you or stuck" }) },
   { name: "chat", path: "/chat", ready: (page: Page) => page.getByRole("list", { name: "Conversation" }) },
-  { name: "fleet", path: "/fleet", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
-  { name: "terminal", path: "/terminal", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
+  { name: "fleet", path: "/agents", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
+  { name: "terminal", path: "/agents?session=true", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
   { name: "project", path: "/projects/crowsnest", ready: (page: Page) => page.getByRole("region", { name: "Project jobs" }) },
 ] as const;
 
@@ -146,7 +146,7 @@ test("a dangerous approval needs a second confirmation", async ({ page }, testIn
 });
 
 test("a question answered from the tray", async ({ page }, testInfo) => {
-  await page.goto("/fleet");
+  await page.goto("/agents");
   const tray = await openTray(page, testInfo);
   await row(tray, /Where should the release notes live/).click();
   await tray.getByRole("button", { name: /Both, generated from commits/ }).click();

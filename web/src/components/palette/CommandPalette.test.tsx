@@ -71,19 +71,19 @@ describe("CommandPalette", () => {
   it("moves with the arrows and Ctrl+N/P, wrapping, and runs the row on Enter", async () => {
     stub();
     const { input, run, onClose, onRan } = setup();
-    await userEvent.type(input, "fleet");
+    await userEvent.type(input, "agents");
     const first = selectedOption();
-    expect(first).toHaveTextContent("Fleet");
+    expect(first).toHaveTextContent("Agents");
     await userEvent.keyboard("{ArrowDown}");
     expect(selectedOption()).not.toBe(first);
     await userEvent.keyboard("{Control>}p{/Control}");
-    expect(selectedOption()).toHaveTextContent("Fleet");
+    expect(selectedOption()).toHaveTextContent("Agents");
     await userEvent.keyboard("{ArrowUp}");
     expect(selectedOption()).toBe(screen.getAllByRole("option").at(-1));
     await userEvent.keyboard("{Control>}n{/Control}{Enter}");
-    expect(run).toHaveBeenCalledWith({ kind: "navigate", to: "/fleet" });
+    expect(run).toHaveBeenCalledWith({ kind: "navigate", to: "/agents" });
     expect(onClose).toHaveBeenCalled();
-    expect(onRan).toHaveBeenCalledWith("nav:/fleet");
+    expect(onRan).toHaveBeenCalledWith("nav:/agents");
   });
 
   it("highlights the matched characters", async () => {
@@ -205,9 +205,9 @@ describe("CommandPalette", () => {
 
   it("shows recent items first with no query", async () => {
     stub();
-    setup(["nav:/terminal"]);
+    setup(["nav:/agents"]);
     const recent = await screen.findByRole("group", { name: "Recent" });
-    expect(within(recent).getByText("Terminal")).toBeInTheDocument();
+    expect(within(recent).getByText("Agents")).toBeInTheDocument();
   });
 
   it("closes on the mobile Cancel button", async () => {

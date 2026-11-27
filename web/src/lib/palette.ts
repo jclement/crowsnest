@@ -21,7 +21,7 @@ import type { ChipTone } from "../components/ui/Chip";
 
 // ---- Commands -------------------------------------------------------------------------------
 
-export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/fleet" | "/terminal" | "/system" | "/help" | "/diff";
+export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/agents" | "/system" | "/help" | "/diff";
 /** The sheets the palette (and the manual's "open" buttons) can open. */
 export const PALETTE_SHEETS = ["appearance", "journal", "notifications", "shortcuts", "voice", "schedule", "spend", "instructions", "settings", "digests", "worktrees", "limits", "pause"] as const;
 export type PaletteSheet = (typeof PALETTE_SHEETS)[number];
@@ -192,8 +192,7 @@ const views: Array<{ to: ViewPath; label: string; icon: PaletteIcon; keywords: s
   { to: "/projects", label: "Projects", icon: "project", keywords: ["leads", "repos", "directories"], key: "p" },
   { to: "/chat", label: "Chat", icon: "chat", keywords: ["orchestrator", "conversation"], key: "c" },
   { to: "/inbox", label: "Inbox", icon: "inbox", keywords: ["questions", "dialogs", "answer"], key: "i" },
-  { to: "/fleet", label: "Fleet", icon: "fleet", keywords: ["agents", "workspaces", "panes"], key: "f" },
-  { to: "/terminal", label: "Terminal", icon: "terminal", keywords: ["herdr", "tui", "shell"], key: "t" },
+  { to: "/agents", label: "Agents", icon: "fleet", keywords: ["fleet", "terminal", "workspaces", "panes", "herdr", "tui", "shell"], key: "a" },
   { to: "/help", label: "Help", icon: "help", keywords: ["manual", "docs", "documentation", "guide", "how", "concepts"], key: "m" },
 ];
 
@@ -305,8 +304,8 @@ function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
   for (const agent of fleet.agents) {
     const name = agent.name || agent.pane_id;
     const where = `${agent.workspace} · ${cwdTail(agent.cwd)}`;
-    const conversation: PaletteCommand = { kind: "navigate", to: "/fleet", search: { agent: agent.pane_id, view: "conversation" } };
-    const terminal: PaletteCommand = { kind: "navigate", to: "/fleet", search: { agent: agent.pane_id, view: "terminal" } };
+    const conversation: PaletteCommand = { kind: "navigate", to: "/agents", search: { agent: agent.pane_id, view: "conversation" } };
+    const terminal: PaletteCommand = { kind: "navigate", to: "/agents", search: { agent: agent.pane_id, view: "terminal" } };
     const actions: PaletteAction[] = [];
     if (agent.has_transcript) actions.push({ id: "conversation", label: "Open conversation", command: conversation });
     actions.push({ id: "terminal", label: "Open terminal", command: terminal });
@@ -335,7 +334,7 @@ function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
           subtitle: `${workspace.label} › ${tab.label} · ${cwdTail(pane.cwd)}`,
           keywords: [pane.id, workspace.label, tab.label, pane.cwd, "pane", "shell"],
           icon: "pane",
-          command: { kind: "navigate", to: "/fleet", search: { agent: pane.id } },
+          command: { kind: "navigate", to: "/agents", search: { agent: pane.id } },
           verb: "Terminal",
         });
       }
@@ -417,7 +416,7 @@ function needsItem(entry: AttentionItem): PaletteItem | null {
   const open: PaletteCommand = { kind: "navigate", to: link.to as ViewPath, search: link.search };
   const actions: PaletteAction[] = [{ id: "open", label: entry.action.label, command: open }];
   if (entry.kind === "dialog" && entry.pane_id) {
-    actions.push({ id: "terminal", label: "Open its terminal", command: { kind: "navigate", to: "/fleet", search: { agent: entry.pane_id, view: "terminal" } } });
+    actions.push({ id: "terminal", label: "Open its terminal", command: { kind: "navigate", to: "/agents", search: { agent: entry.pane_id, view: "terminal" } } });
   }
   return {
     id: entry.kind === "dialog" ? entry.id : `need:${entry.id}`,

@@ -81,6 +81,6 @@ running?
 
 ## Still stuck
 
-**Open the terminal** for the job (or Fleet → the agent → **Terminal**) and look at the pane
+**Open the terminal** for the job (or Agents → the agent → **Terminal**) and look at the pane
 itself: a login prompt, a crash, a draft in its input box, a dialog crowsnest did not recognise.
 [Common problems](common-problems.md) lists the ones seen so far.

@@ -85,7 +85,7 @@ export function LeadControls({ project }: { project: ProjectView }) {
             Changes
           </Button>
           {running && lead.pane_id && (
-            <Button compact variant="ghost" icon={SquareTerminal} onClick={() => void navigate({ to: "/fleet", search: { agent: lead.pane_id, view: "terminal" } })}>
+            <Button compact variant="ghost" icon={SquareTerminal} onClick={() => void navigate({ to: "/agents", search: { agent: lead.pane_id, view: "terminal" } })}>
               Terminal
             </Button>
           )}

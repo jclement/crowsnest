@@ -19,8 +19,8 @@ const views = [
   { name: "inbox", path: "/inbox", ready: (page: Page) => page.getByRole("list", { name: "Needs you" }) },
   { name: "question", path: "/inbox?q=q_1", ready: (page: Page) => page.getByRole("region", { name: "Diff of internal/fleet/cache.go" }) },
   { name: "projects", path: "/projects", ready: (page: Page) => page.getByRole("heading", { name: "Projects" }).first() },
-  { name: "fleet", path: "/fleet", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
-  { name: "terminal", path: "/terminal", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
+  { name: "fleet", path: "/agents", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
+  { name: "terminal", path: "/agents?session=true", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
   { name: "system", path: "/system", ready: (page: Page) => page.getByRole("heading", { name: "System" }).first() },
 ] as const;
 
@@ -86,7 +86,7 @@ test.describe("accessibility in every theme", () => {
 test("picking a theme applies it at once, survives a reload with no flash, and the terminal follows", async ({ page }) => {
   await freshBrowser(page);
   await page.emulateMedia({ colorScheme: "dark" });
-  await page.goto("/terminal");
+  await page.goto("/agents?session=true");
   await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible({ timeout: 15_000 });
   const html = page.locator("html");
   await expect(html).toHaveAttribute("data-theme", "crowsnest");

@@ -18,8 +18,7 @@ The `g` sequences and `?` do nothing while you type in a field or a terminal, so
 | `g` then `p` | `g` then `p` | Go to Projects |
 | `g` then `c` | `g` then `c` | Go to Chat |
 | `g` then `i` | `g` then `i` | Go to Inbox |
-| `g` then `f` | `g` then `f` | Go to Fleet |
-| `g` then `t` | `g` then `t` | Go to Terminal |
+| `g` then `a` | `g` then `a` | Go to Agents |
 | `g` then `m` | `g` then `m` | Go to Help |
 | `g` then `n` | `g` then `n` | Focus the needs-you tray (then y or n answers the approval you open) |
 

@@ -69,8 +69,9 @@ describe("hotkeyFor", () => {
     expect(hotkeyFor(key("i"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/inbox" });
     expect(hotkeyFor(key("j"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/jobs" });
     expect(hotkeyFor(key("c"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/chat" });
-    expect(hotkeyFor(key("f"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/fleet" });
-    expect(hotkeyFor(key("t"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/terminal" });
+    expect(hotkeyFor(key("a"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/agents" });
+    // Fleet and Terminal were merged into Agents (R8): their keys go nowhere now.
+    expect(hotkeyFor(key("f"), page, first.state, 1500).action).toBeNull();
     expect(hotkeyFor(key("i"), page, first.state, 1000 + SEQUENCE_MS + 1).action).toBeNull();
   });
 

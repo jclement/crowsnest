@@ -179,7 +179,7 @@ test("the glyph test line draws every character from its intended face, on the g
     document.addEventListener("securitypolicyviolation", (event) => console.error(`Content-Security-Policy violation: ${event.violatedDirective} ${event.blockedURI}`));
   });
 
-  await page.goto("/terminal");
+  await page.goto("/agents?session=true");
   await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
   await expect.poll(() => rows(page).innerText()).toContain("glyphs ");
 

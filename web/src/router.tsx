@@ -9,14 +9,13 @@ import { ApiError, endpoints, isSetupRequired, queryKeys, type Me } from "./lib/
 import { LoginPage } from "./routes/LoginPage";
 import { SetupPage } from "./routes/SetupPage";
 import { NotFound } from "./routes/NotFound";
-import { FleetView } from "./routes/FleetView";
+import { AgentsView } from "./routes/AgentsView";
 import { ChatView } from "./routes/ChatView";
 import { InboxView } from "./routes/InboxView";
 import { JobsView } from "./routes/JobsView";
 import { DecideView } from "./routes/DecideView";
 import { NowView } from "./routes/NowView";
 import { ProjectsView } from "./routes/ProjectsView";
-import { TerminalView } from "./routes/views";
 import { SystemView } from "./routes/SystemView";
 import { HelpView } from "./routes/HelpView";
 import { DiffView } from "./routes/DiffView";
@@ -172,16 +171,24 @@ const inboxRoute = createRoute({
   }),
   component: InboxView,
 });
+// Agents (R8): the Fleet tree and the session terminal in one view. ?agent=<pane id> selects an
+// agent, so a link or a reload opens the same one; &view=terminal or conversation picks its tab
+// (the command palette's "Open terminal"); ?session=true opens the herdr session's terminal.
+type AgentsSearch = { agent?: string; view?: "conversation" | "terminal"; session?: true };
+const agentsSearch = (search: Record<string, unknown>): AgentsSearch => ({
+  agent: typeof search.agent === "string" && search.agent ? search.agent : undefined,
+  view: search.view === "terminal" || search.view === "conversation" ? search.view : undefined,
+  session: search.session === true || search.session === "true" || search.session === 1 ? true : undefined,
+});
+const agentsRoute = createRoute({ getParentRoute: () => appRoute, path: "/agents", validateSearch: agentsSearch, component: AgentsView });
+// The views Agents replaced: old links (notifications, bookmarks, the manual's history) land on it.
 const fleetRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/fleet",
-  // ?agent=<pane id> selects an agent, so a link or a reload opens the same one; &view=terminal
-  // or conversation picks its tab (the command palette's "Open terminal").
-  validateSearch: (search: Record<string, unknown>): { agent?: string; view?: "conversation" | "terminal" } => ({
-    agent: typeof search.agent === "string" && search.agent ? search.agent : undefined,
-    view: search.view === "terminal" || search.view === "conversation" ? search.view : undefined,
-  }),
-  component: FleetView,
+  validateSearch: agentsSearch,
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/agents", search });
+  },
 });
 // The decision packet: ?item=<attention item id> (question:q_7, approval:ap_3, dialog:<pane>).
 const decideRoute = createRoute({
@@ -192,7 +199,13 @@ const decideRoute = createRoute({
   }),
   component: DecideView,
 });
-const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
+const terminalRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/terminal",
+  beforeLoad: () => {
+    throw redirect({ to: "/agents", search: { session: true } });
+  },
+});
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
 // The built-in manual (DESIGN.md 12.11): /help is its contents, /help/<page>#<heading> a place in it.
 const helpRoute = createRoute({ getParentRoute: () => appRoute, path: "/help", component: () => <HelpView /> });
@@ -214,7 +227,7 @@ const diffRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, fleetRoute, terminalRoute, systemRoute, helpRoute, helpPageRoute, diffRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, agentsRoute, fleetRoute, terminalRoute, systemRoute, helpRoute, helpPageRoute, diffRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

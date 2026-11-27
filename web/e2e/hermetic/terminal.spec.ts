@@ -9,7 +9,7 @@ import { expect, isPhone, test } from "../support/fixtures";
 const rows = (page: Page) => page.locator("[data-terminal] .xterm-rows");
 
 async function openTerminal(page: Page) {
-  await page.goto("/terminal");
+  await page.goto("/agents?session=true");
   await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
   await expect.poll(() => rows(page).innerText()).toContain("demo terminal");
 }
@@ -131,7 +131,7 @@ test("a ninth terminal is refused with the cap's message and does not retry by i
     return sockets.filter((socket) => socket.readyState === WebSocket.OPEN).length;
   });
   expect(opened).toBe(8);
-  await page.goto("/terminal");
+  await page.goto("/agents?session=true");
   await expect(page.getByRole("status").filter({ hasText: /too many terminals open \(8\)/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reconnect" })).toBeVisible();
   // Closing one frees a slot; Reconnect then works.
@@ -142,7 +142,7 @@ test("a ninth terminal is refused with the cap's message and does not retry by i
 });
 
 test("a right click stays in the terminal; Shift+right click still gives the browser's menu", async ({ page }) => {
-  await page.goto("/terminal");
+  await page.goto("/agents?session=true");
   await expect(rows(page)).toContainText("demo", { timeout: 15_000 });
   // The page's context menu is what a right click opens unless the event is cancelled.
   const prevented = (shiftKey: boolean) =>

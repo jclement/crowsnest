@@ -72,7 +72,7 @@ export function RescuePanel({ job, defaultOpen }: RescuePanelProps) {
         </button>
         <HelpButton topic="how-to/rescue#the-rescue-panel" what="the rescue buttons" inline={false} />
       </div>
-      {open && <RescueBody job={job} openTerminal={() => void navigate({ to: "/fleet", search: { agent: job.pane_id, view: "terminal" } })} />}
+      {open && <RescueBody job={job} openTerminal={() => void navigate({ to: "/agents", search: { agent: job.pane_id, view: "terminal" } })} />}
     </section>
   );
 }

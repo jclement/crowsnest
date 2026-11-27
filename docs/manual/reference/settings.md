@@ -157,7 +157,7 @@ All of them, in `crowsnest --help` order. The config-file key is the flag's name
 | `--review` | `CROWSNEST_REVIEW` | `auto` | Throttling and review → Review gate | review gate for builder jobs in a worktree: auto (the other engine if installed), same, claude, codex or off |
 | `--merge` | `CROWSNEST_MERGE` | `merge` | Throttling and review → Land merges with | how Land merges a job's branch: merge (a merge commit) or ff (fast-forward only) |
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | none | Throttling and review → Daily digest at | HH:MM: write the daily digest into the Inbox after this local time (default off) |
-| `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | `false` | no | let the Terminal view's herdr client show your saved SSH machines (off: it gets a state directory of crowsnest's own and sees only this session) |
+| `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | `false` | no | let the session terminal's herdr client show your saved SSH machines (off: it gets a state directory of crowsnest's own and sees only this session) |
 | `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | `false` | no | sign in tailnet users the owner allowed, from the identity headers of `tailscale serve` on this machine (password login stays) |
 | `--backup-every` | `CROWSNEST_BACKUP_EVERY` | `0` | Backups and storage → Automatic backup every | make an automatic backup this often, such as 24h; 0 off |
 | `--backup-keep` | `CROWSNEST_BACKUP_KEEP` | `7` | Backups and storage → Automatic backups kept | automatic backups kept; older ones are deleted |

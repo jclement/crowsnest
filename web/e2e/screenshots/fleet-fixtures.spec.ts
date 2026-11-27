@@ -9,7 +9,7 @@ const MIN_TARGET_PX = 44;
 
 async function openFleet(page: Page, theme: (typeof themes)[number], search = "") {
   await page.addInitScript((value) => localStorage.setItem("crowsnest-theme", value), theme);
-  await page.goto(`/fleet?fixtures=1${search}`);
+  await page.goto(`/agents?fixtures=1${search}`);
   await expect(page.getByRole("list", { name: "Workspaces" })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
@@ -101,7 +101,7 @@ test("pressing a dialog option answers it (fixtures)", async ({ page }) => {
 test("every view fits 375 px with 44 px targets", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await openFleet(page, "light");
-  for (const label of ["Jobs", "Chat", "Inbox", "Fleet", "Terminal"]) {
+  for (const label of ["Jobs", "Chat", "Inbox", "Agents"]) {
     await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name: label }).last().click();
     await expectNoHorizontalScroll(page);
     await expectTapTargets(page);

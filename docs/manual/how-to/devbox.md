@@ -23,8 +23,8 @@ docker logs crowsnest 2>&1 | grep -o 'http://[^"]*/setup#token=[^"]*'
 
 1. Open the setup link from the log and choose a username and password. The login is kept in the
    volume.
-2. **Sign Claude in**: nothing personal is in the image. Open **Terminal** in the app
-   ([Open the Terminal view](app:/terminal)), run `claude`, and complete its login (it prints a URL
+2. **Sign Claude in**: nothing personal is in the image. Open the session terminal in the app
+   (**More → Agents → Session terminal**, [open it](app:/agents?session=true)), run `claude`, and complete its login (it prints a URL
    to open on any device). The login is kept in the volume.
 3. Clone your projects into the volume (from the terminal), then [create a
    project](projects.md) for each.
@@ -74,5 +74,5 @@ More in [Safety](../safety.md).
 - **The setup link is not in the log yet**: the first start runs `mise install` first (up to five
   minutes); keep following the log.
 - **Claude is not signed in**: jobs fail with "Claude needs a login or billing fix". Sign in from
-  the Terminal view.
+  the session terminal.
 - **"Host not allowed" behind a proxy**: add its name with `CROWSNEST_ALLOWED_HOSTS`.

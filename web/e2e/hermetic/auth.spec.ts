@@ -98,7 +98,7 @@ test("signing out ends the other tabs' event stream and terminal", async ({ page
   // The second tab holds a terminal and the event stream.
   const other = await context.newPage();
   const socketClosed = new Promise<void>((resolve) => other.on("websocket", (ws) => ws.on("close", () => resolve())));
-  await other.goto("/terminal");
+  await other.goto("/agents?session=true");
   await expect(other.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
   await expect(other.getByRole("status").filter({ hasText: "Live" })).toBeAttached();
 

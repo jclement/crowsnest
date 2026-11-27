@@ -1,6 +1,8 @@
-// The Fleet view (DESIGN.md 12) against `crowsnest --demo`: the tree of workspaces, tabs and
-// agents with the ones that need you first, the filter, an agent's detail with its Conversation
-// and Terminal tabs, a plain shell pane's terminal, and a link that lands on an agent.
+// The Agents view (DESIGN.md 12; R8 merged Fleet and Terminal into it) against `crowsnest --demo`:
+// the tree of workspaces, tabs and agents with the ones that need you first, the filter, an
+// agent's detail with its Conversation and Terminal tabs, a plain shell pane's terminal, the
+// session terminal beside the tree (a row of its own on a phone), a link that lands on an agent,
+// and the old /fleet and /terminal links landing here.
 //
 // Demo fleet (internal/herdr/fake/demo.go, names in internal/demostory): workspace w1
 // "orchestrator"; one per project, each agent named after the job it holds: w2 "crowsnest"
@@ -12,7 +14,7 @@ import type { Page } from "@playwright/test";
 import { detailRegion, expect, isPhone, test } from "../support/fixtures";
 
 async function openFleet(page: Page, search = "") {
-  await page.goto(`/fleet${search}`);
+  await page.goto(`/agents${search}`);
   await expect(page.getByRole("list", { name: "Workspaces" })).toBeVisible();
 }
 
@@ -112,4 +114,30 @@ test("an unknown agent in the URL shows the tree with nothing selected", async (
   await openFleet(page, "?agent=w99%3Ap9");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("list", { name: "Workspaces" })).toBeVisible();
+});
+
+test("the session terminal: beside the tree when no agent is chosen, its own row on a phone", async ({ page }, testInfo) => {
+  await openFleet(page);
+  const connected = page.getByRole("status").filter({ hasText: "Connected" });
+  if (isPhone(testInfo)) {
+    await expect(connected).toHaveCount(0);
+    await page.getByRole("button", { name: /Session terminal/ }).click();
+    await expect(page).toHaveURL(/\/agents\?session=true$/);
+    await expect(connected).toBeVisible();
+    await expect(page.locator("[data-terminal] .xterm-rows").first()).toBeVisible();
+    await page.getByRole("button", { name: "Agents" }).click();
+    await expect(page.getByRole("list", { name: "Workspaces" })).toBeVisible();
+  } else {
+    await expect(connected).toBeVisible();
+    await expect(page.getByRole("button", { name: /Session terminal/ })).toHaveAttribute("aria-current", "true");
+    await expect(page.locator("[data-terminal] .xterm-rows").first()).toBeVisible();
+  }
+});
+
+test("old links: /fleet keeps its agent, /terminal opens the session terminal", async ({ page }) => {
+  await page.goto("/fleet?agent=w2%3Ap1&view=terminal");
+  await expect(page).toHaveURL(/\/agents\?agent=w2(%3A|:)p1&view=terminal$/);
+  await page.goto("/terminal");
+  await expect(page).toHaveURL(/\/agents\?session=true$/);
+  await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
 });

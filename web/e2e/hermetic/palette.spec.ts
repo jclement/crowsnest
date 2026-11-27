@@ -173,12 +173,12 @@ test("a question is answered from its options in the palette", async ({ page, re
   expect(list.data.find((question) => question.title === "Apply the fleet cache refactor?")?.answer_value).toBe("yes");
 });
 
-test("navigating: a view, the shortcuts sheet with ?, and g i / g f", async ({ page }, testInfo) => {
+test("navigating: a view, the shortcuts sheet with ?, and g i / g j / g h", async ({ page }, testInfo) => {
   await openBoard(page);
   await openWithButton(page);
-  await input(page).fill("fleet");
+  await input(page).fill("agents");
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/fleet$/);
+  await expect(page).toHaveURL(/\/agents$/);
   if (isPhone(testInfo)) return; // no keyboard sequences on a phone
   await page.locator("body").click({ position: { x: 5, y: 300 } });
   await page.keyboard.press("g");
@@ -220,7 +220,7 @@ for (const platform of ["mac", "other"] as const) {
   test(`in the terminal (${platform}) only ⌘K opens it; Ctrl+K and k reach the shell`, async ({ page }, testInfo) => {
     test.skip(isPhone(testInfo), "a phone has no chord");
     await pinPlatform(page, platform);
-    await page.goto("/terminal");
+    await page.goto("/agents?session=true");
     await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
     const rows = page.locator("[data-terminal] .xterm-rows");
     await expect.poll(() => rows.innerText()).toContain("demo terminal");

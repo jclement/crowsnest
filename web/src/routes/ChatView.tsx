@@ -63,7 +63,7 @@ export function ChatView() {
   const orchestrator = status.data;
   const state = chatStateOf(orchestrator.state);
   const paneId = orchestrator.pane_id;
-  const openTerminal = paneId ? () => void navigate({ to: "/fleet", search: { agent: paneId } }) : undefined;
+  const openTerminal = paneId ? () => void navigate({ to: "/agents", search: { agent: paneId } }) : undefined;
 
   return (
     <section aria-label="Chat with the orchestrator" className="flex min-w-0 flex-col md:h-full md:min-h-0">
@@ -135,7 +135,7 @@ function LeadChat({ slug, project, pending, switcher, voice, showThinking, onTog
   const running = leadRunning(lead);
   const state = running ? chatStateOf(lead.state) : "off";
   const paneId = running ? lead.pane_id : "";
-  const openTerminal = paneId ? () => void navigate({ to: "/fleet", search: { agent: paneId } }) : undefined;
+  const openTerminal = paneId ? () => void navigate({ to: "/agents", search: { agent: paneId } }) : undefined;
   const agent = leadAgentName(project.slug);
   const name = `${project.name}'s lead`;
   const startLead = () =>

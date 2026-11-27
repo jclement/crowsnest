@@ -173,7 +173,7 @@ export function partOf(manual: Manual, id: string): ContentsPart | undefined {
 // ---- Links --------------------------------------------------------------------------------
 
 /** The views an "open the thing" link may open (app:/jobs). Keep in step with router.tsx. */
-export const APP_ROUTES = ["/", "/jobs", "/projects", "/chat", "/inbox", "/fleet", "/terminal", "/system", "/help"] as const;
+export const APP_ROUTES = ["/", "/jobs", "/projects", "/chat", "/inbox", "/agents", "/fleet", "/terminal", "/system", "/help"] as const;
 /** The sheets one may open (app:sheet/settings): exactly the palette's. */
 export const APP_SHEETS = PALETTE_SHEETS;
 

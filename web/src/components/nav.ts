@@ -2,12 +2,12 @@
 // read this, so they agree. Four primary destinations (R4 Fable 1.4, Codex C4): Now (home: what
 // needs you, every project, since you left), Projects, the Inbox (the badge) and Chat. The rest
 // are one tap further: on a phone under "More" (a sheet), on the desktop rail below a divider
-// in the same order. The Jobs board stays a view of its own; Fleet and the herdr TUI are the
-// recovery and debugging tools, reachable from any agent's "Open terminal" as well. Help (the
+// in the same order. The Jobs board stays a view of its own; Agents (the herdr tree and the session
+// terminal) is the recovery and debugging tool, reachable from any agent's "Open terminal" as well. Help (the
 // manual) is last.
-import { FolderKanban, Gauge, Inbox, LifeBuoy, ListTodo, MessageSquare, Ship, SquareTerminal, type LucideIcon } from "lucide-react";
+import { FolderKanban, Gauge, Inbox, LifeBuoy, ListTodo, MessageSquare, Ship, type LucideIcon } from "lucide-react";
 
-export type NavPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal" | "/help";
+export type NavPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/agents" | "/help";
 
 export interface NavItem {
   to: NavPath;
@@ -28,8 +28,8 @@ export const primaryNav: NavItem[] = [
 /** Under "More" on a phone; below the divider on the desktop rail. */
 export const moreNav: NavItem[] = [
   { to: "/jobs", label: "Jobs", icon: ListTodo },
-  { to: "/fleet", label: "Fleet", icon: Ship },
-  { to: "/terminal", label: "Terminal", icon: SquareTerminal },
+  // The herdr tree and the session terminal, one view (R8: Fleet and Terminal were two).
+  { to: "/agents", label: "Agents", icon: Ship },
   // The built-in manual (docs/manual): how crowsnest works and how to do things with it.
   { to: "/help", label: "Help", icon: LifeBuoy },
 ];

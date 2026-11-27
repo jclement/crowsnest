@@ -270,7 +270,7 @@ function DialogChoices({ paneId, screen, agentName, onError, onDone }: Omit<Choi
   if (screen.dialog.form || options.length === 0) {
     return (
       <Link
-        to="/fleet"
+        to="/agents"
         search={{ agent: paneId, view: "terminal" }}
         className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-3 text-sm font-medium text-heading md:min-h-8"
       >

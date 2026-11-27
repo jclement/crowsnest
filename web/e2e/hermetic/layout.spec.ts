@@ -16,9 +16,9 @@ const views = [
   { name: "inbox", path: "/inbox", ready: (page: Page) => page.getByRole("list", { name: "Needs you" }) },
   { name: "question", path: "/inbox?q=q_1", ready: (page: Page) => page.getByRole("region", { name: "Diff of internal/fleet/cache.go" }) },
   { name: "dialog", path: "/inbox?q=dialog%3Aw6%3Ap1", ready: (page: Page) => page.getByLabel("Dialog from job-5") },
-  { name: "fleet", path: "/fleet", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
-  { name: "agent", path: "/fleet?agent=w2%3Ap1", ready: (page: Page) => page.getByRole("tab", { name: "Conversation" }) },
-  { name: "terminal", path: "/terminal", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
+  { name: "fleet", path: "/agents", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
+  { name: "agent", path: "/agents?agent=w2%3Ap1", ready: (page: Page) => page.getByRole("tab", { name: "Conversation" }) },
+  { name: "terminal", path: "/agents?session=true", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
 ] as const;
 
 async function open(page: Page, path: string, ready: (page: Page) => ReturnType<Page["getByRole"]>) {

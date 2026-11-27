@@ -230,7 +230,7 @@ test("speak mode is remembered and works from another view", async ({ page, brow
   await page.reload();
   await expect(page.getByTestId("speak-toggle")).toHaveAttribute("aria-pressed", "true");
   // The switch is in the header of every view, not only Chat.
-  for (const path of ["/inbox", "/fleet", "/chat"]) {
+  for (const path of ["/inbox", "/agents", "/chat"]) {
     await page.goto(path);
     await expect(page.getByTestId("speak-toggle")).toHaveAttribute("aria-pressed", "true");
   }

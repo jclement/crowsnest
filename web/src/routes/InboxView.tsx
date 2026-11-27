@@ -325,7 +325,7 @@ function ApprovalDetail({ id }: { id: string }) {
       <ApprovalCard
         key={approval.data.id + approval.data.status}
         approval={approval.data}
-        onOpenTerminal={pane ? () => void navigate({ to: "/fleet", search: { agent: pane } }) : undefined}
+        onOpenTerminal={pane ? () => void navigate({ to: "/agents", search: { agent: pane } }) : undefined}
       />
     </div>
   );
@@ -350,7 +350,7 @@ function DialogDetail({ paneId }: { paneId: string }) {
         target={paneId}
         agentName={agent.name || paneId}
         screen={screen.data}
-        onOpenTerminal={() => void navigate({ to: "/fleet", search: { agent: paneId } })}
+        onOpenTerminal={() => void navigate({ to: "/agents", search: { agent: paneId } })}
       />
     </div>
   );

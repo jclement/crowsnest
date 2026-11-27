@@ -74,7 +74,7 @@ Open a project from **Projects** or a row on **Now**. Top to bottom:
 - **Edit** and **Archive** (archived projects take no jobs; their lead stops; **Show archived** on
   the list brings them back into view).
 - **The lead**: its state, then **Start lead** / **Stop lead**, **Chat with lead**, **Terminal**
-  (its pane in Fleet), **Poke now**, **Restart** (same conversation), **New conversation**, and
+  (its pane in Agents), **Poke now**, **Restart** (same conversation), **New conversation**, and
   **Open in Claude** when its Remote Control link is known.
 - **Jobs**: the project's jobs, with **Board** (the Jobs board filtered to it) and **New job**.
 - **Schedules**: its scheduled tasks with **Run now**, and **Manage** (the Schedule sheet).

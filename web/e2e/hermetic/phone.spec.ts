@@ -156,7 +156,7 @@ test("rescue a stuck agent with buttons, not a terminal", async ({ page }, testI
 test("the phone terminal: every key bar key on screen", async ({ page }, testInfo) => {
   test.skip(!isPhone(testInfo), "the key bar is the phone's");
   await sizeFor(page, testInfo);
-  await page.goto("/terminal");
+  await page.goto("/agents?session=true");
   const bar = page.getByRole("toolbar", { name: "Terminal keys" });
   await expect(bar).toBeVisible();
   const keys = bar.getByRole("button");

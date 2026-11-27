@@ -299,12 +299,12 @@ function Starting({ view }: { view: OnboardingView }) {
             target={orchestrator.pane_id}
             agentName="orchestrator"
             screen={screen.data}
-            onOpenTerminal={() => void navigate({ to: "/fleet", search: { agent: orchestrator.pane_id, view: "terminal" } })}
+            onOpenTerminal={() => void navigate({ to: "/agents", search: { agent: orchestrator.pane_id, view: "terminal" } })}
           />
         </>
       )}
       {showDialog && screen.data && !screen.data.dialog?.present && (
-        <Button icon={SquareTerminal} onClick={() => void navigate({ to: "/fleet", search: { agent: orchestrator.pane_id, view: "terminal" } })}>
+        <Button icon={SquareTerminal} onClick={() => void navigate({ to: "/agents", search: { agent: orchestrator.pane_id, view: "terminal" } })}>
           Open its terminal
         </Button>
       )}

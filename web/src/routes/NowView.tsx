@@ -97,7 +97,7 @@ function NowHeader() {
 // ---- 1. Needs you -----------------------------------------------------------------------------
 
 /** How many queue items Now shows on a phone before "Review all N". */
-export const PHONE_QUEUE_ITEMS = 3;
+const PHONE_QUEUE_ITEMS = 3;
 
 function QueueSection() {
   const attention = useAttention();

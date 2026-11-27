@@ -214,9 +214,10 @@ Files go in `<data-dir>/attachments/`, at most `--attachment-max-mb` (25) each a
 `--attachment-quota-mb` (1024) in all; past the quota the oldest files nobody needs any more (of
 finished jobs, settled questions, week-old chats, abandoned uploads) are deleted.
 
-**Terminals.** The Terminal view is the herdr TUI for the whole session (`herdr --session
-<name>` in a PTY; closing the tab kills only that client, never the server or an agent). In the
-Fleet view, an agent's Terminal tab, or any plain shell pane, opens just that pane through
+**Terminals.** The Agents view (under More; it merged the old Fleet and Terminal views, whose
+links redirect to it) has the session terminal, the herdr TUI for the whole session (`herdr --session
+<name>` in a PTY; closing the tab kills only that client, never the server or an agent). In its
+tree, an agent's Terminal tab, or any plain shell pane, opens just that pane through
 herdr's pane-control stream, which fits a phone. One browser controls a pane at a time: opening
 it elsewhere takes it over and the first browser says so and offers Reconnect. On phones a key
 bar under the terminal supplies Esc, Tab, a sticky Ctrl, arrows, Enter, Paste and the font size.
@@ -225,8 +226,8 @@ installed, else self-hosted JetBrains Mono with the Nerd Font symbols, DejaVu Sa
 Math and Noto Sans Symbols 2 behind it, each cut into small files a browser fetches only when a
 glyph in them is on screen (DESIGN.md 12, "Terminal font"). Setting localStorage
 `crowsnest-terminal-local-font` to `off` skips the installed font.
-Note that herdr's TUI shows every machine your herdr config names, remote ones included, so the
-Terminal view reaches those too.
+Note that herdr's TUI shows every machine your herdr config names, remote ones included, so with
+`--terminal-machines` on the session terminal reaches those too (off, the default, it does not).
 
 **Command palette.** ⌘K on a Mac (Ctrl K elsewhere), or the "Search or run…" field in the
 header: jobs, questions, agents, views, sheets, actions and the manual in one box; whatever you
@@ -978,7 +979,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--protected-hosts-file` | `CROWSNEST_PROTECTED_HOSTS_FILE` | `~/Developer/claude-agent/config/protected-hosts` | File of protected hosts, one per line, `#` comments; read when it exists, `''` for none |
 | `--protected-branch` | `CROWSNEST_PROTECTED_BRANCHES` | none | A branch agents may not commit or push onto, nor force-push (the guard hook). Repeatable |
 | `--browse-root` | `CROWSNEST_BROWSE_ROOTS` | none | A directory the folder picker may browse besides your home and the directories projects and the remembered list use (e.g. `/srv`, `/Volumes`). `/` is browsable only when named here. Repeatable |
-| `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | `false` | Let the Terminal view's herdr client show your saved SSH machines (`herdr machine add`). Off, it runs with a state directory of crowsnest's own and sees only this session, so signing in to crowsnest does not reach your other hosts |
+| `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | `false` | Let the session terminal's herdr client show your saved SSH machines (`herdr machine add`). Off, it runs with a state directory of crowsnest's own and sees only this session, so signing in to crowsnest does not reach your other hosts |
 | `--tailscale-serve` | `CROWSNEST_TAILSCALE_SERVE` | `false` | Publish crowsnest to your tailnet while it runs: a foreground `tailscale serve` that ends with crowsnest, on the first free of 443, 8443 and 10000. Needs a login (refused with `--no-auth`); never Funnel. Editable in Settings and from the System page. See [Publish to your tailnet](#publish-to-your-tailnet) |
 | `--tailscale-serve-port` | `CROWSNEST_TAILSCALE_SERVE_PORT` | `0` | The tailnet HTTPS port `--tailscale-serve` uses; `0` picks the first free of 443, 8443 and 10000. A port another serve config uses is refused, never taken over |
 | `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | `false` | Sign in tailnet users the owner allowed (Settings, Sign in with Tailscale) from the identity headers `tailscale serve` on this machine adds. Password login stays. See [Sign in with Tailscale](#sign-in-with-tailscale) |
@@ -1168,7 +1169,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | Task | Does |
 |---|---|
 | `mise run setup` | Install tools, Go modules and web dependencies. Idempotent |
-| `mise run dev` | The real thing, locally, as one binary on one port (`scripts/dev.sh`): builds `./bin/crowsnest` with the web app embedded and runs it (`--no-auth`, http://localhost:2769) against its own herdr session `crowsnest-dev` (`CROWSNEST_DEV_SESSION` to change; `default` is refused), with a real Claude orchestrator in `.dev/orchestrator`, its database in `.dev/data` and an empty `.dev/config.yaml` so nothing of a real install is read. Every `HERDR_*` variable is removed first, so it is safe to run from inside a herdr pane. The orchestrator's directory is new, so the first start stops at Claude's folder-trust prompt: answer it once in the Terminal view. Long-running; Ctrl+C stops it (the herdr session keeps running) |
+| `mise run dev` | The real thing, locally, as one binary on one port (`scripts/dev.sh`): builds `./bin/crowsnest` with the web app embedded and runs it (`--no-auth`, http://localhost:2769) against its own herdr session `crowsnest-dev` (`CROWSNEST_DEV_SESSION` to change; `default` is refused), with a real Claude orchestrator in `.dev/orchestrator`, its database in `.dev/data` and an empty `.dev/config.yaml` so nothing of a real install is read. Every `HERDR_*` variable is removed first, so it is safe to run from inside a herdr pane. The orchestrator's directory is new, so the first start stops at Claude's folder-trust prompt: answer it once in the session terminal (Agents). Long-running; Ctrl+C stops it (the herdr session keeps running) |
 | `mise run dev:hot` | As `dev`, for UI work: the Go server by `go run` (`--web-dev`) on :2769 plus Vite with hot reload on :5173. Two ports; open :5173 |
 | `mise run dev:demo` | Go server (`--no-auth`, `--web-dev`, `--demo`) on :2769 and Vite on :5173. No herdr or Claude, throwaway state. Long-running |
 | `mise run dev:container` | Build the devbox image for this machine (`image`), then run it in the foreground (`scripts/dev-container.sh`): container `crowsnest-dev` (`--rm`), `127.0.0.1:2770` (`CROWSNEST_DEV_CONTAINER_PORT`), home in the volume `crowsnest-dev-home`, user `crow` with a fresh random password printed once. The password reaches the container only as a 0600 file owned by `crow` in a throwaway volume (`crowsnest-dev-secret`, removed on exit) named by `CROWSNEST_PASSWORD_FILE`: never argv, environment or image. Ctrl+C stops it |
@@ -1230,7 +1231,7 @@ published) to prove the packaging; the archives land in `dist/`, which is gitign
 | `~/.local/state/crowsnest/<session>/jobs/j_<n>/` | A job agent's `prompt.md` (role prompt and job protocol), `brief.md`, `settings.json` (hooks with `--job j_<n>`, the allow rule) `mcp.json` (with the agent's token), `agent-token` (the token, for the hooks) and `guard.json` (the guard hook's rules: the session, protected hosts and branches); each written fresh and read-only (0400). The orchestrator's `guard.json` is beside its `claude-settings.json` |
 | `~/.config/crowsnest/risk.yaml` | Optional: overrides for the approval risk rules (`disable: [ids]`, `rules: [{id, level, tools, field, pattern, reason}]`); an invalid file stops the start (DESIGN.md 8.7) |
 | `~/.local/share/crowsnest/backups/` | Automatic backups (`auto-<session>-<time>.tar.gz`) and the copies taken before an upgrade (`pre-migration-…db`, newest three) |
-| `~/.local/state/crowsnest/<session>/terminal-client/` | The Terminal view's herdr client state (`XDG_STATE_HOME`), so it sees none of your saved SSH machines (`--terminal-machines` turns this off) |
+| `~/.local/state/crowsnest/<session>/terminal-client/` | The session terminal's herdr client state (`XDG_STATE_HOME`), so it sees none of your saved SSH machines (`--terminal-machines` turns this off) |
 | `~/.config/crowsnest/roles/*.md` | Optional role prompts that add to or replace the built-in ones |
 | `~/.config/crowsnest/prices.json` | Optional price overrides for the spend estimate (see Spend) |
 | `~/.local/state/crowsnest/<session>/mcp.json` | The orchestrator's `--mcp-config`: the `crowsnest mcp` stdio server, its `CROWSNEST_SOCKET` and its agent token (`0600`); `agent-token` beside it holds the same start's token for the hooks |

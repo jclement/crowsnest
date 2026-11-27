@@ -150,7 +150,7 @@ describe("buildItems", () => {
     expect(items.some((item) => item.group === "needs" && item.id.startsWith("dialog:"))).toBe(false);
     const withTranscript = fleet.agents.find((agent) => agent.has_transcript);
     const agentItem = items.find((item) => item.id === `agent:${withTranscript?.pane_id}`);
-    expect(agentItem?.command).toEqual({ kind: "navigate", to: "/fleet", search: { agent: withTranscript?.pane_id, view: "conversation" } });
+    expect(agentItem?.command).toEqual({ kind: "navigate", to: "/agents", search: { agent: withTranscript?.pane_id, view: "conversation" } });
     expect(agentItem?.actions?.map((action) => action.id)).toEqual(["conversation", "terminal"]);
     expect(agentItem?.alt?.id).toBe("terminal");
     expect(items.some((item) => item.id.startsWith("pane:"))).toBe(true);
@@ -241,11 +241,11 @@ describe("rankItems", () => {
   const all = () => buildItems(sources());
 
   it("with no query shows recents first, then what needs you, views, live jobs and actions", () => {
-    const groups = rankItems(all(), "", ["nav:/fleet", "job:j_2", "gone:item"]);
+    const groups = rankItems(all(), "", ["nav:/agents", "job:j_2", "gone:item"]);
     expect(groups.map((group) => group.id)).toEqual(["recent", "needs", "navigate", "jobs", "actions"]);
-    expect(ids(groups[0]!.items)).toEqual(["nav:/fleet", "job:j_2"]);
+    expect(ids(groups[0]!.items)).toEqual(["nav:/agents", "job:j_2"]);
     // Not repeated below.
-    expect(ids(groups[2]!.items)).not.toContain("nav:/fleet");
+    expect(ids(groups[2]!.items)).not.toContain("nav:/agents");
     // Finished jobs are not offered without a query.
     expect(ids(groups[3]!.items)).toEqual(["job:j_3", "job:j_1"]);
   });

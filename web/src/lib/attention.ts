@@ -146,7 +146,7 @@ export function itemLink(item: AttentionItem): { to: string; search: Record<stri
     case "limit":
       return { to: "/jobs", search: {} };
     case "agent":
-      return { to: "/fleet", search: item.pane_id ? { agent: item.pane_id, view: "terminal" } : {} };
+      return { to: "/agents", search: item.pane_id ? { agent: item.pane_id, view: "terminal" } : {} };
   }
 }
 

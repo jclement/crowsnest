@@ -39,7 +39,7 @@ const (
 
 func init() {
 	options = append(options,
-		option{name: optTerminalMachines, env: []string{"CROWSNEST_TERMINAL_MACHINES"}, kind: kindBool, def: "false", usage: "let the Terminal view's herdr client show your saved SSH machines (off: it gets a state directory of crowsnest's own and sees only this session)"},
+		option{name: optTerminalMachines, env: []string{"CROWSNEST_TERMINAL_MACHINES"}, kind: kindBool, def: "false", usage: "let the session terminal's herdr client show your saved SSH machines (off: it gets a state directory of crowsnest's own and sees only this session)"},
 		option{name: optTailscaleAuth, env: []string{"CROWSNEST_TAILSCALE_AUTH"}, kind: kindBool, def: "false", usage: "sign in tailnet users the owner allowed, from the identity headers of `tailscale serve` on this machine (password login stays)"},
 		option{name: optBackupEvery, env: []string{"CROWSNEST_BACKUP_EVERY"}, kind: kindDuration, def: "0", usage: "make an automatic backup this often, such as 24h; 0 off"},
 		option{name: optBackupKeep, env: []string{"CROWSNEST_BACKUP_KEEP"}, kind: kindInt, def: fmt.Sprint(DefaultBackupKeep), usage: "automatic backups kept; older ones are deleted"},
@@ -112,7 +112,7 @@ func (l *loader) days(name string) (int, error) {
 	return value, nil
 }
 
-// TerminalClientStateDir is the XDG_STATE_HOME the Terminal view's herdr client runs with, or ""
+// TerminalClientStateDir is the XDG_STATE_HOME the session terminal's herdr client runs with, or ""
 // for the user's own (--terminal-machines).
 func (c Config) TerminalClientStateDir() string {
 	if c.TerminalMachines || c.StateDir == "" {
