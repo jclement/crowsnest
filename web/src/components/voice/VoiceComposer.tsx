@@ -10,7 +10,6 @@
 // - useSpaceToTalk: holding Space anywhere outside a text field records for as long as it is held
 //   and sends on release. In a text field Space types a space, so the composer offers a chord
 //   there: hold Option+Space (Ctrl+Space off a Mac).
-import { useTrayKeepOut } from "../../lib/trayKeepOut";
 import { Loader2, Lock, Mic, MicOff, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { endpoints } from "../../lib/api";
@@ -60,7 +59,6 @@ export function VoiceComposer(props: ComposerProps) {
   useSpaceToTalk(guarded, enabled && desktop);
   // The talk review (Send now, Cancel) sits above the composer: the tray keeps clear of both.
   const rootRef = useRef<HTMLDivElement>(null);
-  useTrayKeepOut(rootRef, "composer");
 
   return (
     <div ref={rootRef} className="flex flex-col gap-1.5">

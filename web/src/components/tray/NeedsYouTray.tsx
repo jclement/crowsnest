@@ -5,10 +5,11 @@
 // or failed jobs and standing agents that need the terminal, most urgent and longest waiting
 // first, each labelled with its project and job, each with "Snooze 10 min" (kept on the server).
 //
-// Desktop (md and up): a stack anchored bottom-right, above whatever it must not cover (the Chat
-// composer, the terminal's last rows: lib/trayKeepOut.ts sets --tray-bottom); it shows the top
-// three and folds into a pill. Phone: a slim bar in the page's flow above the bottom nav (so it
-// covers nothing) that opens a sheet. It replaces nothing in the Inbox, which stays the full list
+// Desktop (md and up): docked, a column at the right of the layout beside the view, never floating
+// over it (R8: the old bottom-right stack covered the chips of a project's job cards). It lists
+// every item and folds into a slim strip (folded to begin with below lg, where a column would
+// squeeze the view). Phone: a slim bar in the page's flow above the bottom nav (so it covers
+// nothing) that opens a sheet. It replaces nothing in the Inbox, which stays the full list
 // and the history, and reuses the Inbox's cards.
 //
 // Keyboard: g then n focuses the tray (expanding it); Tab moves through it; Enter opens an item,
@@ -16,11 +17,11 @@
 import { isRoutine } from "../../lib/decision";
 import { RescuePanel } from "../jobs/RescuePanel";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { BellDot, BellOff, Bot, ChevronDown, ChevronUp, Clock, Hourglass, ListTodo, MessageSquareWarning, MessagesSquare, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { BellDot, BellOff, Bot, ChevronLeft, ChevronRight, ChevronUp, Clock, Hourglass, ListTodo, MessageSquareWarning, MessagesSquare, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { DESKTOP_QUERY } from "../../lib/media";
+import { DESKTOP_QUERY, LARGE_QUERY } from "../../lib/media";
 import { relativeTime } from "../../lib/format";
 import { FOCUS_TRAY_EVENT, trayTitle, type TrayItem } from "../../lib/needsYou";
 import { itemLink, kindLabel, plainPreview, whereLine } from "../../lib/attention";
@@ -36,9 +37,6 @@ import { Chip } from "../ui/Chip";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
 
-
-/** How many items the desktop stack shows before "Show all". */
-const STACK = 3;
 
 /** Views that show the whole queue themselves, so the tray would only repeat it (R4 Fable 1.5), and the decision packet, whose answer bar it would crowd. */
 const QUEUE_VIEWS = new Set(["/", "/inbox", "/decide"]);
@@ -74,8 +72,10 @@ export function TrayPanel() {
   const items = useTrayItems();
   const onQueueView = useOnQueueView();
   const fresh = useArrivals(items);
-  const [folded, setFolded] = useState(() => sessionStorage.getItem("crowsnest-tray-folded") === "1");
-  const [all, setAll] = useState(false);
+  const [folded, setFolded] = useState(() => {
+    const saved = sessionStorage.getItem("crowsnest-tray-folded");
+    return saved === null ? !(window.matchMedia?.(LARGE_QUERY).matches ?? true) : saved === "1";
+  });
   const [sound, setSound] = useState(traySoundOn);
   const [bump, setBump] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
@@ -108,8 +108,6 @@ export function TrayPanel() {
   }, []);
 
   if (items.length === 0 || onQueueView) return null;
-  const shown = all ? items : items.slice(0, STACK);
-  const style = { bottom: "var(--tray-bottom, 1rem)" };
 
   if (folded) {
     return (
@@ -117,15 +115,16 @@ export function TrayPanel() {
         type="button"
         data-tray="pill"
         onClick={() => fold(false)}
-        style={style}
+        title="Needs you: show the tray"
         className={cn(
-          "fixed right-4 z-30 hidden items-center gap-2 rounded-full border border-border-strong bg-surface-raised px-3 py-1.5 text-sm font-medium text-heading shadow-lg hover:bg-hover md:inline-flex",
+          "hidden w-11 shrink-0 flex-col items-center gap-2 border-l border-border bg-surface-raised py-3 text-xs font-medium text-heading hover:bg-hover md:flex",
           bump && "animate-tray-in",
         )}
       >
         <TrayCount count={items.length} />
-        Needs you<span className="sr-only">: show the tray</span>
-        <ChevronUp className="h-4 w-4 text-muted" aria-hidden />
+        <span className="sr-only">Needs you: show the tray</span>
+        <span aria-hidden className="[writing-mode:vertical-rl]">Needs you</span>
+        <ChevronLeft className="h-4 w-4 text-muted" aria-hidden />
       </button>
     );
   }
@@ -135,9 +134,8 @@ export function TrayPanel() {
       ref={panelRef}
       aria-label="Needs you"
       data-tray="panel"
-      style={style}
       className={cn(
-        "fixed right-4 z-30 hidden w-[24rem] max-w-[calc(100vw-14rem)] flex-col overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl md:flex",
+        "hidden w-80 shrink-0 flex-col overflow-hidden border-l border-border bg-surface md:flex xl:w-[22rem]",
         bump && "animate-tray-in",
       )}
     >
@@ -153,16 +151,11 @@ export function TrayPanel() {
               setSound(!sound);
             }}
           />
-          <IconButton icon={ChevronDown} label="Fold the tray" onClick={() => fold(true)} />
+          <IconButton icon={ChevronRight} label="Fold the tray" onClick={() => fold(true)} />
         </span>
       </header>
-      <div className="max-h-[calc(100dvh-var(--tray-bottom,1rem)-7rem)] overflow-y-auto">
-        <TrayList items={shown} fresh={fresh} />
-        {items.length > STACK && (
-          <button type="button" onClick={() => setAll(!all)} className="w-full border-t border-border px-3 py-2 text-left text-xs text-accent hover:bg-hover">
-            {all ? "Show fewer" : `Show all ${items.length}`}
-          </button>
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <TrayList items={items} fresh={fresh} />
       </div>
     </aside>
   );

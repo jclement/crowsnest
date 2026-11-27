@@ -11,8 +11,10 @@
 //      kept per browser on the server, with "Mark all seen".
 //   4. Give a job, with the project it goes to.
 //
-// On a phone the sections stack in that order; from lg the queue and the projects sit side by
-// side, so the first screen answers all three questions.
+// On a phone the sections stack in that order, and the queue shows only its top three items and
+// "Review all N" (the Inbox has the rest), so the projects, Since you left and the job box are
+// within the first two screens (R8); from lg the queue and the projects sit side by side, so the
+// first screen answers all three questions.
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Bot, CheckCheck, CheckCircle2, ChevronRight, CircleAlert, Clock, FolderKanban, Gauge, HelpCircle, Inbox, MessageSquareReply, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -35,6 +37,7 @@ import { leadRunning } from "../lib/projects";
 import { findProject, useAttention, useNow, useNowSince, useProjects } from "../lib/queries";
 import type { RemoteControlFields } from "../lib/remote";
 import { formatUSD } from "../lib/spend";
+import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../lib/api";
 import { HelpButton } from "../components/help/HelpButton";
@@ -93,9 +96,14 @@ function NowHeader() {
 
 // ---- 1. Needs you -----------------------------------------------------------------------------
 
+/** How many queue items Now shows on a phone before "Review all N". */
+export const PHONE_QUEUE_ITEMS = 3;
+
 function QueueSection() {
   const attention = useAttention();
   const items = useTrayItems();
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  const shown = desktop ? items : items.slice(0, PHONE_QUEUE_ITEMS);
   return (
     <section aria-labelledby="now-queue" className="min-w-0 overflow-hidden rounded-md border border-border bg-surface">
       <SectionHeader id="now-queue" icon={Inbox} title="Needs you" count={attention.data?.counts.total}>
@@ -114,7 +122,14 @@ function QueueSection() {
           Every agent is working, waiting on something else, or done.
         </EmptyState>
       ) : (
-        <TrayList items={items} fresh={new Set()} />
+        <>
+          <TrayList items={shown} fresh={new Set()} />
+          {shown.length < items.length && (
+            <Link to="/inbox" className="flex min-h-11 items-center border-t border-border px-3 text-sm font-medium text-accent hover:bg-hover">
+              Review all {items.length}
+            </Link>
+          )}
+        </>
       )}
     </section>
   );
@@ -227,8 +242,10 @@ function ProjectRow({ row }: { row: NowRow }) {
             </span>
             {row.last_activity_at && <span>active {relativeTime(row.last_activity_at)}</span>}
           </span>
-          {/* One line: the same ownership sentence repeats on most rows; the whole of it is the tooltip. */}
-          <span className="block truncate pt-1 text-2xs leading-snug text-muted" data-owner title={row.owner}>
+          {/* One line: the same ownership sentence repeats on most rows; the whole of it is the tooltip.
+              Not on a phone, where it pushed the job box past the second screen (R8); the project's
+              page says it there. */}
+          <span className="hidden truncate pt-1 text-2xs leading-snug text-muted md:block" data-owner title={row.owner}>
             {row.owner}
           </span>
         </span>
@@ -252,6 +269,9 @@ const sinceIcons: Record<SinceEvent["kind"], typeof CheckCircle2> = {
 
 const sinceWords: Record<SinceEvent["kind"], string> = { done: "Finished", failed: "Failed", cancelled: "Cancelled", asked: "Asked", answered: "Answered" };
 
+/** How many "since you left" entries a phone shows before "Show all" (the job box comes after). */
+const PHONE_SINCE_EVENTS = 5;
+
 function SinceSection() {
   const browser = useMemo(() => browserId(), []);
   const since = useNowSince(browser);
@@ -268,6 +288,9 @@ function SinceSection() {
     }
   };
   const events = since.data?.events ?? [];
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  const [all, setAll] = useState(false);
+  const shown = desktop || all ? events : events.slice(0, PHONE_SINCE_EVENTS);
   const open = (event: SinceEvent) => {
     if ((event.kind === "asked" || event.kind === "answered") && event.ref) void navigate({ to: "/inbox", search: { q: event.ref } });
     else if (event.job_id) void navigate({ to: "/jobs", search: { job: event.job_id } });
@@ -293,7 +316,7 @@ function SinceSection() {
       ) : (
         <>
           <ul aria-label="Since you left" className="divide-y divide-border">
-            {events.map((event) => {
+            {shown.map((event) => {
               const Icon = sinceIcons[event.kind];
               return (
                 <li key={`${event.kind}:${event.job_id ?? ""}:${event.ref ?? ""}:${event.at}`}>
@@ -315,6 +338,11 @@ function SinceSection() {
             })}
           </ul>
           <div className="flex justify-end border-t border-border px-2 py-1">
+            {shown.length < events.length && (
+              <Button compact variant="ghost" className="mr-auto" onClick={() => setAll(true)}>
+                Show all {events.length}
+              </Button>
+            )}
             <Button compact variant="ghost" icon={CheckCheck} disabled={marking} onClick={() => void markSeen()}>
               Mark all seen
             </Button>

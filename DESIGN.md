@@ -3022,16 +3022,16 @@ the fallback that is always there.
   card; a confirm or choice question's options (one tap answers; "Open in the Inbox" to add a
   note); a dialog's card with its digit buttons (8.2's `DialogCard`); a job's cause and "Open the
   job". Every row has "Snooze for 10 minutes" (kept on the server since R4, so it holds on every
-  device; section 22). Desktop: a stack anchored
-  bottom-right showing the top three ("Show all N"), foldable into a pill, with a count, an
-  arrival slide and an optional chime (off by default, a switch in its header, remembered in the
+  device; section 22). Desktop: **docked** (R8), a column at the
+  right of the layout beside the view (`w-80`, `22rem` from `xl`) listing every item, foldable into
+  a slim strip (folded to begin with below `lg`, where a column would squeeze the view), with a
+  count, an arrival slide and an optional chime (off by default, a switch in its header, remembered in the
   browser). Phone: a 44 px bar in the page's flow between the content and the bottom nav (the top
   item and the count) that opens a sheet; in-flow arrivals flash instead of sliding, since a slide
-  pushed the page sideways for a moment. **It never covers** the Chat composer (the talk review
-  above it included) or the terminal's last rows: each registers itself (`useTrayKeepOut`), and
-  the tray's `bottom` is `--tray-bottom`, kept above the highest of them on the right half of the
-  window (a terminal keeps its bottom 40%, at most 240 px, clear). On a phone it is in the flow,
-  so it covers nothing, the bottom nav included. `g` then `n` focuses it (expanding it); Enter
+  pushed the page sideways for a moment. **It never covers anything**: docked on a desktop, the view
+  ends where it begins (the bottom-right stack it replaced covered the chips of a project's job
+  cards, and needed a keep-out registry, `useTrayKeepOut`, to stay off the Chat composer and the
+  terminal's last rows; both are gone); on a phone it is in the flow, the bottom nav included. `g` then `n` focuses it (expanding it); Enter
   opens a row; an opened approval takes focus so `y`/`n` work. It replaces nothing in the Inbox,
   which lists approvals first (`?q=approval:ap_3`) and keeps settled ones in History; the palette's
   "Needs you" group lists them too (opening the card; the palette allows nothing itself). The nav
@@ -4298,9 +4298,10 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
     protected branch or stop the herdr server are not approvals: the agent is told why and must
     ask the human in words. It is local and fast because it runs on every Bash call, and it is
     a seatbelt, said so plainly, not a sandbox.
-73. **The tray is in the flow on a phone and keeps clear on a desktop.** A floating tray that
-    covers the composer or the terminal's prompt would be worse than none; the elements it must
-    not cover register themselves, so a new composer opts in with one line.
+73. **The tray is in the flow everywhere: a bar on a phone, a docked column on a desktop** (R8;
+    before, a floating stack kept clear of the elements that registered themselves). A floating
+    tray covers whatever did not register (a project's job chips did not); a docked one cannot
+    cover anything, and costs a column that folds to a strip.
 74. **App schedules are Tasks, and a file wins a shared name** (7.8). Turning a row into the same
     Task a file becomes (through the same frontmatter rules) keeps one set of due rules, stamps,
     switches and poke lines. A file is what someone wrote and committed; an app schedule can be
@@ -4870,7 +4871,10 @@ queue and the projects side by side.
 
 1. **Needs you**: the queue, each row the tray's (expands to an approval's card, a question's
    options, a dialog's digits, a job's or agent's way in). The tray itself is hidden on Now and
-   the Inbox.
+   the Inbox. On a phone only the top three and "Review all N" (to the Inbox), and the project
+   rows drop their ownership sentence and Since you left shows five ("Show all N"), so the
+   projects, Since you left and the job box are within the first two screens (R8;
+   `now.spec.ts` measures it at 390x844).
 2. **Projects**: one row per live project with its lead's state, what it is doing in a line (the
    most recently active moving job's "doing now", "+N more"), running / waiting on you (the
    queue's count) / done today / failed today, estimated spend today (its jobs and its lead,

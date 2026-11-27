@@ -10,7 +10,7 @@ different places and behave differently.
 | **Terminal dialog** | Claude Code's own on-screen menu (permission prompt, folder trust, a form) | Press the option's button; crowsnest presses that key in the pane | Yes |
 
 All three land in the same [attention queue](attention-and-now.md): on Now, in the Inbox, in the
-tray at the bottom of every view, and as a notification when you are away.
+tray on every other view, and as a notification when you are away.
 
 ## Questions
 

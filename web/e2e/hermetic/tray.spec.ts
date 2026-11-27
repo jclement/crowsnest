@@ -1,6 +1,6 @@
 // The needs-you tray and approval cards (DESIGN.md 8.7) against `crowsnest --demo`: on every view
-// at 1440 and 375 px, never covering the Chat composer, the terminal's last rows or the bottom
-// nav; an approval allowed and one denied with a note from the tray; the dangerous one's second
+// at 1440 and 375 px, docked beside the view on a desktop (never over it: not the Chat composer,
+// the terminal's last rows or a project's job cards) and above the bottom nav on a phone; an approval allowed and one denied with a note from the tray; the dangerous one's second
 // confirmation; a question answered from the tray; the keyboard path (g n, Enter, y/n only on a
 // focused card); axe. Screenshots of each view with the tray into web/screenshots.
 //
@@ -17,6 +17,7 @@ const views = [
   { name: "chat", path: "/chat", ready: (page: Page) => page.getByRole("list", { name: "Conversation" }) },
   { name: "fleet", path: "/fleet", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
   { name: "terminal", path: "/terminal", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
+  { name: "project", path: "/projects/crowsnest", ready: (page: Page) => page.getByRole("region", { name: "Project jobs" }) },
 ] as const;
 
 interface Box {
@@ -77,8 +78,11 @@ for (const view of views) {
       const panel = page.getByRole("complementary", { name: "Needs you" });
       await expect(panel).toBeVisible();
       await expect(panel.getByRole("button", { name: /git push --force origin main/, expanded: false })).toBeVisible();
-      await page.waitForTimeout(300); // the keep-out offset follows layout on the next frame
       const panelBox = await box(panel);
+      // Docked: the view ends where the tray begins, so nothing in it can be covered.
+      const main = await box(page.getByRole("main"));
+      expect(main.x + main.width, "the view stops at the tray").toBeLessThanOrEqual(panelBox.x + 0.5);
+      expect(panelBox.x + panelBox.width, "the tray reaches the window's right edge").toBeGreaterThanOrEqual(1440 - 0.5);
       if (view.name === "chat") expect(overlaps(panelBox, await box(page.getByRole("form", { name: /^Message/ }))), "the tray covers the composer").toBe(false);
       if (view.name === "terminal") {
         const terminal = await box(page.locator(".xterm").first());

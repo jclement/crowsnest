@@ -46,22 +46,24 @@ Now is home ([Open Now](app:/), `g` then `h`). Top to bottom on a phone; side by
 screen:
 
 1. **Needs you**: the queue. Each row expands in place: an approval's card with **Allow once** and
-   **Deny**, a question's options, a dialog's buttons, a job's way in.
+   **Deny**, a question's options, a dialog's buttons, a job's way in. On a phone, the top three
+   and **Review all N**, which opens the Inbox with the rest.
 2. **Projects**: one row per project with its lead's state, what it is doing in a line, running /
    waiting on you / done today, estimated spend today, last activity, and one sentence saying who
-   owns its work. Then **Unfiled** (jobs in no project) and the **Orchestrator**. A row opens the
+   owns its work (that sentence is left out on a phone). Then **Unfiled** (jobs in no project) and the **Orchestrator**. A row opens the
    project, the unfiled board, or Chat.
 3. **Since you left**: jobs that finished, failed or were cancelled, and questions asked, since this
    browser was last here (a gap of ten minutes starts a new window; a browser never seen gets the
-   last twelve hours). **Mark all seen** clears it.
+   last twelve hours). **Mark all seen** clears it. A phone shows the latest five and **Show all**.
 4. **Give a job**: the job box, with **For** choosing the orchestrator or a project.
 
 ![Now on a phone: the queue first, then projects](../img/now-390.jpg)
 
 ## The tray
 
-On every view except Now and the Inbox, the tray shows the queue's count: bottom-right on a
-desktop, a bar above the bottom nav on a phone. `g` then `n` focuses it; with an approval open,
+On every view except Now and the Inbox, the tray shows the queue: a column docked at the right
+of a desktop (beside the view, never over it; **Fold the tray** shrinks it to a strip), a bar
+above the bottom nav on a phone. `g` then `n` focuses it; with an approval open,
 `y` or `n` answers it. A routine question's options can be answered right there; anything else
 offers **Review the decision**, which opens the full decision screen.
 

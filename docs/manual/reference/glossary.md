@@ -101,7 +101,8 @@ orchestrator and leads. [Remote Control](../how-to/remote-control.md)
 
 **Sweep**: the list of finished worktree jobs never landed (**Worktrees still around**).
 
-**Tray**: the queue's count and quick answers at the bottom of every view but Now and the Inbox.
+**Tray**: the queue with quick answers on every view but Now and the Inbox: docked at the right on
+a desktop, a bar at the bottom on a phone.
 
 **Unfiled**: jobs in no project; the orchestrator's.
 

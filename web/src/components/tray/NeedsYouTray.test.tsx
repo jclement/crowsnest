@@ -107,7 +107,9 @@ describe("NeedsYouTray", () => {
     stubTray();
     renderTray(<TrayPanel />);
     const panel = await screen.findByRole("complementary", { name: "Needs you" });
-    await waitFor(() => expect(within(panel).getByText("Show all", { exact: false })).toBeInTheDocument());
+    // Docked, it lists every item (no "Show all" stack to unfold).
+    await waitFor(() => expect(within(panel).getAllByRole("listitem").length).toBeGreaterThan(0));
+    expect(within(panel).queryByText("Show all", { exact: false })).toBeNull();
     await user.click(within(panel).getByRole("button", { name: "Fold the tray" }));
     const pill = await screen.findByRole("button", { name: /Needs you: show the tray/ });
     window.dispatchEvent(new Event(FOCUS_TRAY_EVENT));

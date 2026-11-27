@@ -6,7 +6,7 @@ dialogs](../concepts/questions-approvals-dialogs.md).
 
 ## From Now or the tray
 
-1. On **Now**, press an item under **Needs you** (anywhere else, the tray at the bottom shows the
+1. On **Now**, press an item under **Needs you** (anywhere else, the tray, at the right on a desktop and at the bottom on a phone, shows the
    count; `g` then `n` focuses it).
 2. It expands in place:
    - an **approval** shows the call (the command and its directory, or the edit as a diff) with

@@ -76,7 +76,7 @@ everything away when it exits. On a real install, run `crowsnest` and follow its
    "doing now" and how long ago it last did anything. Pick one to see its timeline, its
    conversation and its terminal.
 4. **Answer something.** When an agent asks, the question appears in Needs you, in the Inbox and
-   in the tray at the bottom of every view. Press it, pick an option (the agent's recommendation is
+   in the tray on every other view (docked at the right on a desktop, a bar at the bottom on a phone). Press it, pick an option (the agent's recommendation is
    marked), add a note if you like, and answer. The agent did not stop to wait: it carried on with
    whatever the answer does not block, and your answer is typed into its pane.
 5. **Land it.** When a builder says done, crowsnest runs the project's check command itself. If it

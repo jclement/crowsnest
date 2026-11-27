@@ -156,9 +156,10 @@ export function AppFrame() {
               would show up under the composer at the end of the conversation. */}
           {pathname !== "/chat" && pathname !== "/decide" && <Footer className="border-t border-border px-3 py-2 md:hidden" />}
         </main>
+        {/* Docked beside the view, in the layout: it never floats over content (R8). */}
+        <TrayPanel />
       </div>
       <TrayBar />
-      <TrayPanel />
       <nav
         aria-label="Views"
         className="flex shrink-0 border-t border-border bg-surface-raised pb-[env(safe-area-inset-bottom)] md:hidden"
