@@ -62,7 +62,7 @@ func newHarness(t *testing.T) *harness {
 // service is a fresh Service over the harness's database: a new one is a crowsnest restart.
 func (h *harness) service() *Service {
 	return New(Options{
-		KV: h.db, Jobs: h.jobs, Journal: h.journal, Location: time.UTC, Now: func() time.Time { return h.now },
+		KV: h.db, Reviews: h.db, Jobs: h.jobs, Journal: h.journal, Location: time.UTC, Now: func() time.Time { return h.now },
 		Sources: []Source{{Dir: h.dir, Origin: OriginDir}, {Dir: h.userDir, Origin: OriginUser}},
 		Picture: func(context.Context) []string { return []string{"agent a idle"} },
 	})
@@ -72,6 +72,19 @@ func (h *harness) write(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// approveAll approves every task file that needs review, as the human would in the Schedule view.
+func approveAll(t *testing.T, service *Service) {
+	t.Helper()
+	ctx := context.Background()
+	for _, row := range service.List(ctx).Tasks {
+		if row.Review == ReviewNeeded {
+			if err := service.Approve(ctx, row.Name, row.Hash); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }
 
@@ -175,6 +188,7 @@ func TestJobTasks(t *testing.T) {
 	ctx := context.Background()
 	h.write(t, h.dir, "build.md", "---\nevery: 1h\nas: job\ndir: /tmp/repo\nrole: builder\n---\n# Nightly build\nRun it.\n")
 	service := h.service()
+	approveAll(t, service)
 	if due := service.DueTasks(ctx, h.now); len(due) != 0 {
 		t.Fatalf("job tasks are not poke reasons: %+v", due)
 	}
@@ -198,7 +212,7 @@ func TestJobTasks(t *testing.T) {
 		t.Fatalf("after the first job finished, a second run starts; created %d", len(h.jobs.created))
 	}
 	page, _ := h.journal.List(ctx, journal.Query{Kinds: []journal.Kind{journal.KindTask}})
-	if len(page.Entries) != 2 {
+	if len(page.Entries) != 3 { // the approval, then two starts
 		t.Fatalf("job starts journalled: %+v", page.Entries)
 	}
 }
@@ -247,6 +261,7 @@ func TestJobTasksWaitWhilePaused(t *testing.T) {
 	h.write(t, h.dir, "build.md", "---\nevery: 1h\nas: job\ndir: /tmp/repo\n---\n# Nightly build\nRun it.\n")
 	paused := true
 	service := h.service()
+	approveAll(t, service)
 	service.opts.Paused = func() bool { return paused }
 	service.Tick(ctx)
 	if len(h.jobs.created) != 0 {

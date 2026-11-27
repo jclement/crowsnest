@@ -6,19 +6,22 @@
 // is flagged "shadowed" (it never runs). A project filter narrows the list (GET
 // /schedule?project=id). Files that could not be read are listed under it. Reached from the Chat
 // menu, the Jobs view, the project page and the palette as a Sheet (ScheduleSheet); a table from
-// md, a list on a phone.
+// md, a list on a phone. A task file that starts a job or pokes a lead runs only once the human
+// has approved its exact content (R5-S3): it is flagged "new or changed: review", its body is shown
+// in full, and Approve names the hash of what was shown.
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, CalendarClock, ChevronDown, ChevronRight, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, CalendarClock, Check, ChevronDown, ChevronRight, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
 import type { ProjectView } from "../../lib/projects";
-import { useProjects, useSchedule, useScheduleAction, useScheduleEdit } from "../../lib/queries";
+import { useProjects, useSchedule, useScheduleAction, useScheduleApprove, useScheduleEdit } from "../../lib/queries";
 import { nextDueText, targetOf, type ScheduleInput, type ScheduleTask } from "../../lib/schedule";
 import { DigestSwitch } from "../control/DigestSwitch";
 import { DigestsSheet } from "../control/DigestsSheet";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
+import { Markdown } from "../Markdown";
 import { EmptyState } from "../ui/EmptyState";
 import { Sheet } from "../ui/Sheet";
 import { SkeletonRows } from "../ui/Skeleton";
@@ -105,6 +108,7 @@ export function SchedulePanel({ projectId, onOpenJob }: SchedulePanelProps) {
                   {task.schedule} · last {task.last_run_at ? relativeTime(task.last_run_at) : "never"} · next {nextDueText(task, relativeTime)}
                 </div>
                 <Outcome task={task} />
+                <Review task={task} />
                 <div className="flex flex-wrap items-center justify-between gap-1">
                   <EnabledSwitch task={task} />
                   <span className="flex flex-wrap items-center justify-end gap-1">
@@ -134,6 +138,7 @@ export function SchedulePanel({ projectId, onOpenJob }: SchedulePanelProps) {
                   <td className="px-2 py-1">
                     <TaskHeading task={task} projectName={names.get(task.project_id ?? 0)} />
                     <Outcome task={task} />
+                    <Review task={task} />
                     <Runs task={task} onOpenJob={onOpenJob} />
                   </td>
                   <td className="px-2 py-1 text-body">{task.schedule}</td>
@@ -210,6 +215,11 @@ function TaskHeading({ task, projectName }: { task: ScheduleTask; projectName?: 
       {fromFile && (
         <Chip title={`Read-only here: ${task.path}`}>{task.origin === "user" ? "user file" : "from file"}</Chip>
       )}
+      {task.review === "needed" && (
+        <Chip tone="warning" title="This file starts a job or reaches a lead; it does not run until you approve what it says now">
+          new or changed: review
+        </Chip>
+      )}
       {task.shadowed && (
         <Chip tone="warning" title="A task file of the same name hides this schedule; it never runs while the file is there">
           shadowed
@@ -228,6 +238,42 @@ function Outcome({ task }: { task: ScheduleTask }) {
     <div className="text-2xs text-muted">
       {task.last_outcome}
       {task.job_id && task.job_state && ` · ${task.job_id} is ${task.job_state}`}
+    </div>
+  );
+}
+
+/**
+ * A task file waiting for review: what it says, in full, and Approve. An agent can write task
+ * files, so the human approves the content itself; any later edit is a new hash and asks again.
+ */
+function Review({ task }: { task: ScheduleTask }) {
+  const approve = useScheduleApprove();
+  const toast = useToast();
+  if (task.review !== "needed" || !task.hash) return null;
+  const go = () =>
+    approve
+      .mutateAsync({ name: task.name, hash: task.hash ?? "" })
+      .then(() => toast.show({ tone: "success", title: `${task.name} approved as it reads now` }))
+      .catch((error: Error) => toast.show({ tone: "danger", title: "Not approved", description: error.message }));
+  return (
+    <div className="my-1 flex flex-col gap-1 rounded border border-warning/30 bg-warning/5 p-2 text-xs" aria-label={`Review ${task.name}`}>
+      <div className="text-body">
+        <code className="break-all font-mono">{task.path}</code> {task.as === "job" ? "starts a job" : "pokes a project's lead"}
+        {task.dir && (
+          <>
+            {" "}in <code className="break-all font-mono">{task.dir}</code>
+          </>
+        )}
+        {task.role && ` as ${task.role}`}, {task.schedule}. Any agent can write this file, so it does not run until you approve what it says:
+      </div>
+      <div className="max-h-64 overflow-auto rounded border border-border bg-surface-raised p-2">
+        <Markdown className="text-xs">{task.body_md ?? ""}</Markdown>
+      </div>
+      <div>
+        <Button compact variant="primary" icon={Check} onClick={() => void go()} disabled={approve.isPending} aria-label={`Approve ${task.name}`}>
+          Approve as it reads now
+        </Button>
+      </div>
     </div>
   );
 }

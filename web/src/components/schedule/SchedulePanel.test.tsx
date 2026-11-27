@@ -27,12 +27,33 @@ function serveSchedule(view: ScheduleView = structuredClone(fixtureSchedule)) {
       }
       return { body: { data: view } };
     }
+    const approve = /^\/schedule\/([^/]+)\/approve$/.exec(call.path);
+    if (approve && call.method === "POST") {
+      const task = view.tasks.find((t) => t.name === approve[1]);
+      if (!task || task.hash !== (call.body as { hash: string }).hash) return { status: 409, body: { error: { code: "CONFLICT", message: "changed" } } };
+      task.review = "approved";
+      return { body: { data: view } };
+    }
     if (call.path.startsWith("/journal")) return { body: { data: { entries: [], total: 0, next_before: 0 } } };
     return undefined;
   });
 }
 
 describe("SchedulePanel", () => {
+  it("holds a new or changed task file for review and approves the content it shows (R5-S3)", async () => {
+    const view = structuredClone(fixtureSchedule);
+    const job = view.tasks.find((t) => t.as === "job")!;
+    Object.assign(job, { origin: "dir", review: "needed", hash: "abc123", body_md: "Do the nightly build." });
+    const calls = serveSchedule(view);
+    renderWithClient(<SchedulePanel />);
+    const table = await screen.findByRole("table", { name: "Scheduled tasks" });
+    expect(within(table).getByText("new or changed: review")).toBeInTheDocument();
+    expect(within(table).getByText("Do the nightly build.")).toBeInTheDocument();
+    await userEvent.click(within(table).getByRole("button", { name: `Approve ${job.name}` }));
+    await waitFor(() => expect(calls.some((c) => c.path === `/schedule/${job.name}/approve` && (c.body as { hash: string }).hash === "abc123")).toBe(true));
+    await waitFor(() => expect(within(table).queryByText("new or changed: review")).not.toBeInTheDocument());
+  });
+
   it("lists every task with its cadence, last run, next time and outcome, and the skipped files", async () => {
     serveSchedule();
     renderWithClient(<SchedulePanel />);

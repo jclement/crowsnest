@@ -255,6 +255,7 @@ func TestDueTasksPerTarget(t *testing.T) {
 	h.write(t, h.dir, "ghost.md", "---\nevery: 15m\nproject: ghost\n---\nNobody.\n")
 	h.write(t, h.dir, "alpha-build.md", "---\nevery: 1h\nas: job\nproject: alpha\n---\nBuild alpha.\n")
 	service := h.appService()
+	approveAll(t, service)
 	if err := service.Create(ctx, ScheduleInput{Name: "beta-check", Every: "15m", ProjectID: 4, BodyMD: "For beta's lead."}); err != nil {
 		t.Fatal(err)
 	}
@@ -300,6 +301,7 @@ func TestRunHistory(t *testing.T) {
 	h.write(t, h.dir, "build.md", "---\nevery: 1h\nas: job\n---\nBuild.\n")
 	h.write(t, h.dir, "check.md", "---\nevery: 15m\n---\nCheck.\n")
 	service := h.appService()
+	approveAll(t, service)
 
 	service.Tick(ctx) // j_1 created
 	h.now = h.now.Add(2 * time.Hour)

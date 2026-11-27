@@ -24,6 +24,8 @@
 package schedule
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -84,6 +86,9 @@ type Task struct {
 	ProjectID int64  `json:"project_id"`
 	Title     string `json:"title"` // the body's first heading or line, for the UI
 	Body      string `json:"-"`
+	// Hash is the hex SHA-256 of a task file's bytes ("" for an app schedule): what the human
+	// approves for a file that needs review (review.go, R5-S3).
+	Hash string `json:"hash,omitempty"`
 }
 
 // Target is who carries out a task.
@@ -142,7 +147,8 @@ func Parse(path, origin string, content []byte) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	task := Task{Name: name, Path: path, Origin: origin, As: RunAsPoke, Body: body, Title: titleOf(body, name)}
+	sum := sha256.Sum256(content)
+	task := Task{Name: name, Path: path, Origin: origin, As: RunAsPoke, Body: body, Title: titleOf(body, name), Hash: hex.EncodeToString(sum[:])}
 	if err := task.apply(front); err != nil {
 		return Task{}, err
 	}

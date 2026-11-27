@@ -146,3 +146,41 @@ func (s *Store) ListScheduleRuns(ctx context.Context, name string, limit int) ([
 	}
 	return out, rows.Err()
 }
+
+// ---- Task file reviews (migration 0016, R5-S3) ---------------------------------------------
+
+// TaskReviewApproved is the state of an approved task file.
+const TaskReviewApproved = "approved"
+
+// TaskReviewIsApproved reports whether the human approved the task file at path with this content
+// hash.
+func (s *Store) TaskReviewIsApproved(ctx context.Context, path, hash string) (bool, error) {
+	var state string
+	err := s.db.QueryRowContext(ctx, `SELECT state FROM task_reviews WHERE path = ? AND hash = ?`, path, hash).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading a task review: %w", err)
+	}
+	return state == TaskReviewApproved, nil
+}
+
+// ApproveTaskFile records the human's approval of the task file at path with this content hash.
+// Earlier hashes of the same path are forgotten: only the content approved last may run, so
+// putting back an older file asks again.
+func (s *Store) ApproveTaskFile(ctx context.Context, path, hash string, at time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("approving a task file: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM task_reviews WHERE path = ?`, path); err != nil {
+		return fmt.Errorf("approving a task file: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO task_reviews (path, hash, state, question_id, at) VALUES (?, ?, ?, 0, ?)`,
+		path, hash, TaskReviewApproved, at.Unix()); err != nil {
+		return fmt.Errorf("approving a task file: %w", err)
+	}
+	return tx.Commit()
+}

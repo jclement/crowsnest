@@ -245,6 +245,15 @@ export function useScheduleAction() {
   });
 }
 
+/** Approves a task file's content as the Schedule view showed it (R5-S3): hash names those bytes. */
+export function useScheduleApprove() {
+  const write = useScheduleWrite();
+  return useMutation({
+    mutationFn: (review: { name: string; hash: string }) => endpoints.scheduleApprove(review.name, review.hash),
+    ...write,
+  });
+}
+
 /** Creates, edits or deletes an app schedule (task files are read-only: 409). */
 export function useScheduleEdit() {
   const write = useScheduleWrite();

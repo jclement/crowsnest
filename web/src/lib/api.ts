@@ -329,6 +329,7 @@ export const endpoints = {
     api<ScheduleView>(`/schedule/${encodeURIComponent(name)}`, { method: "PUT", body: input }),
   scheduleDelete: (name: string) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}`, { method: "DELETE" }),
   /** Run now: a poke task goes with the next poke, a job task starts its job. */
+  scheduleApprove: (name: string, hash: string) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}/approve`, { method: "POST", body: { hash } }),
   scheduleRun: (name: string) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}/run`, { method: "POST" }),
   scheduleSet: (name: string, enabled: boolean) => api<ScheduleView>(`/schedule/${encodeURIComponent(name)}`, { method: "PUT", body: { enabled } }),
   orchestratorContext: () => api<ContextInfo>("/orchestrator/context"),

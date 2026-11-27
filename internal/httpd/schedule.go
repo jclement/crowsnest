@@ -32,6 +32,7 @@ func (s *Server) registerScheduleRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/schedule", s.requireAuth(http.HandlerFunc(s.handleSchedule)))
 	mux.Handle("POST /api/v1/schedule", s.requireAuth(http.HandlerFunc(s.handleScheduleCreate)))
 	mux.Handle("POST /api/v1/schedule/{name}/run", s.requireAuth(http.HandlerFunc(s.handleScheduleRun)))
+	mux.Handle("POST /api/v1/schedule/{name}/approve", s.requireAuth(http.HandlerFunc(s.handleScheduleApprove)))
 	mux.Handle("PUT /api/v1/schedule/{name}", s.requireAuth(http.HandlerFunc(s.handleScheduleSet)))
 	mux.Handle("DELETE /api/v1/schedule/{name}", s.requireAuth(http.HandlerFunc(s.handleScheduleDelete)))
 	mux.Handle("GET /api/v1/orchestrator/context", s.requireAuth(http.HandlerFunc(s.handleOrchestratorContext)))
@@ -95,6 +96,32 @@ func (s *Server) handleScheduleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, http.StatusOK, service.List(ctx))
+}
+
+// scheduleApproveRequest is POST /schedule/{name}/approve: the content hash the human was shown.
+type scheduleApproveRequest struct {
+	Hash string `json:"hash"`
+}
+
+// handleScheduleApprove records the human's review of a task file that starts a job or reaches a
+// lead (R5-S3). It is a browser route behind the session: the agent socket has no such verb.
+func (s *Server) handleScheduleApprove(w http.ResponseWriter, r *http.Request) {
+	service := s.scheduleService(w)
+	if service == nil {
+		return
+	}
+	var input scheduleApproveRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxScheduleBody))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || input.Hash == "" {
+		writeError(w, http.StatusBadRequest, codeValidation, `Send JSON like {"hash": "<the hash the Schedule view showed>"}.`)
+		return
+	}
+	if err := service.Approve(r.Context(), r.PathValue("name"), input.Hash); err != nil {
+		s.scheduleError(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, service.List(r.Context()))
 }
 
 // scheduleSetRequest is PUT /schedule/{name}: the switch, the full schedule, or both.
@@ -175,6 +202,10 @@ func (s *Server) scheduleError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, http.StatusConflict, codeConflict, "read-only: edit the file. This task is a file in a tasks directory; only its switch is the app's.")
 	case errors.Is(err, schedule.ErrNameTaken):
 		writeError(w, http.StatusConflict, codeConflict, "A scheduled task (a file or an app schedule) already has that name; pick another.")
+	case errors.Is(err, schedule.ErrStaleReview):
+		writeError(w, http.StatusConflict, codeConflict, err.Error())
+	case errors.Is(err, schedule.ErrNeedsReview), errors.Is(err, schedule.ErrNoReview):
+		writeError(w, http.StatusConflict, codeConflict, err.Error())
 	case errors.Is(err, schedule.ErrNoAppSchedules):
 		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "Schedules made in the app are not available in this server.")
 	default:

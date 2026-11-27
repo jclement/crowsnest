@@ -91,6 +91,9 @@ type Options struct {
 	// Kick asks the poker to check now (a Run now of a poke task). Nil: the next check.
 	Kick func()
 	Now  func() time.Time
+	// Reviews records the human's approval of task files that start jobs or reach leads
+	// (review.go, R5-S3). Nil: every such task is held.
+	Reviews Reviews
 	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): no
 	// `as: job` task is started meanwhile (Run now still works). Nil: never.
 	Paused func() bool
@@ -276,7 +279,7 @@ func (s *Service) DueTasks(ctx context.Context, now time.Time) []DueTask {
 func (s *Service) DueTasksFor(ctx context.Context, now time.Time, projectID int64) []DueTask {
 	all, problems := s.Load(ctx)
 	s.reportProblems(ctx, problems)
-	tasks := slices.DeleteFunc(all, func(t Task) bool { return t.As != RunAsPoke || t.ProjectID != projectID })
+	tasks := slices.DeleteFunc(all, func(t Task) bool { return t.As != RunAsPoke || t.ProjectID != projectID || !s.mayRun(ctx, t) })
 	picture := ""
 	if s.opts.Picture != nil && slices.ContainsFunc(tasks, func(t Task) bool { return t.Every.Kind == CadenceChange }) {
 		picture = fingerprint(s.opts.Picture(ctx))
@@ -384,6 +387,10 @@ func (s *Service) Tick(ctx context.Context) {
 		if verdict == NotDue {
 			continue
 		}
+		if !s.mayRun(ctx, task) {
+			s.notRun(ctx, task.Name, now, outcomeNeedsReview, "", nil)
+			continue
+		}
 		s.runJob(ctx, task, now, previous)
 	}
 }
@@ -452,6 +459,9 @@ func (s *Service) RunNow(ctx context.Context, name string) error {
 	task, err := s.find(ctx, name)
 	if err != nil {
 		return err
+	}
+	if !s.mayRun(ctx, task) {
+		return ErrNeedsReview // Run now is not an approval: the human approves the content itself
 	}
 	s.stamp(ctx, name, func(st *Stamp) { st.RunNow = true })
 	if task.As == RunAsJob {
@@ -526,7 +536,7 @@ type TaskView struct {
 	Dir         string     `json:"dir,omitempty"`
 	Role        string     `json:"role,omitempty"`
 	Engine      string     `json:"engine,omitempty"`
-	BodyMD      string     `json:"body_md,omitempty"` // app schedules only (a file is read from disk)
+	BodyMD      string     `json:"body_md,omitempty"` // app schedules, and task files that need review
 	Shadowed    bool       `json:"shadowed"`          // an app schedule a task file of the same name hides: never run
 	Enabled     bool       `json:"enabled"`
 	LastRunAt   *time.Time `json:"last_run_at"`
@@ -536,6 +546,10 @@ type TaskView struct {
 	JobState    string     `json:"job_state,omitempty"`
 	RunNow      bool       `json:"run_now"` // pressed, not yet carried out
 	Runs        []RunView  `json:"runs"`    // newest first, at most 20
+	// Review is "" (not reviewed), "needed" (new or changed: it does not run) or "approved"
+	// (review.go). Hash is the content the view shows, which Approve must name.
+	Review string `json:"review,omitempty"`
+	Hash   string `json:"hash,omitempty"`
 }
 
 // RunView is one line of a task's run history.
@@ -570,6 +584,12 @@ func (s *Service) List(ctx context.Context) View {
 		view.Tasks = append(view.Tasks, s.viewLocked(task, now))
 	}
 	s.mu.Unlock()
+	for i, task := range all.tasks {
+		if NeedsReview(task) {
+			// The human approves what they read here: the body and the hash of these bytes.
+			view.Tasks[i].Review, view.Tasks[i].Hash, view.Tasks[i].BodyMD = s.reviewState(ctx, task), task.Hash, task.Body
+		}
+	}
 	for _, task := range all.shadowed {
 		view.Tasks = append(view.Tasks, shadowedView(task))
 	}

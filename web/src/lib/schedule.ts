@@ -34,8 +34,15 @@ export interface ScheduleTask {
   dir?: string;
   role?: string;
   engine?: string;
-  /** App schedules only (a file is read from disk). */
+  /** App schedules, and task files waiting for review (what the human approves). */
   body_md?: string;
+  /**
+   * A task file that starts a job or pokes a lead runs only once the human approves its exact
+   * content (R5-S3): "needed" (new or changed, does not run) or "approved". Absent: not reviewed.
+   */
+  review?: "needed" | "approved";
+  /** The content hash Approve must name. */
+  hash?: string;
   /** An app schedule hidden by a task file of the same name: it never runs. */
   shadowed?: boolean;
   enabled: boolean;

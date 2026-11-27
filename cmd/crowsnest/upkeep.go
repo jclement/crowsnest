@@ -127,7 +127,7 @@ func startSchedule(ctx context.Context, cfg config.Config, db *store.Store, even
 	options := schedule.Options{
 		Paused: ctl.paused,
 		KV:     db, Sources: taskSources(cfg), Journal: journalLog, Hub: events, Logger: logger,
-		Store: db, StateDir: cfg.StateDir, Projects: liveProjects(db, logger),
+		Store: db, Reviews: db, StateDir: cfg.StateDir, Projects: liveProjects(db, logger),
 		Picture: fleetPicture(client, jobService),
 		Kick: func() {
 			if poker := kick.Load(); poker != nil {
