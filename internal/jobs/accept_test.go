@@ -202,7 +202,7 @@ func TestAcceptStaleAndMovedBaseRefuseLand(t *testing.T) {
 			t.Fatalf("after the rebase: %s (%s)", d.AcceptState, d.AcceptDetail)
 		}
 		// The human may override explicitly too.
-		if _, err := r.svc.LandWith(ctx, job.ID, LandMerge, "you", true); err != nil {
+		if _, err := r.svc.LandWith(ctx, job.ID, LandMerge, "you", LandFlags{Override: true}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -287,5 +287,42 @@ func TestAutoCheckCommand(t *testing.T) {
 	}
 	if got := AutoCheckCommand(t.TempDir()); got != "" {
 		t.Errorf("no mise.toml: %q", got)
+	}
+}
+
+// TestLandTakesTheReviewedCommit (R5-S4): Land merges the commit the Review tab showed, and a
+// commit made after the review stops it, with nothing changed; an agent's land request is pinned
+// to the commit it was made at.
+func TestLandTakesTheReviewedCommit(t *testing.T) {
+	r := newAcceptRig(t, "", LandingOptions{MergeMode: "merge"})
+	ctx := context.Background()
+	repo := landRepo(t)
+	job := r.create(CreateInput{Brief: "Add a widget", Dir: repo})
+	commitIn(t, job.WorkDir, "widget.go", "package widget\n")
+	if _, err := r.svc.Done(ctx, job.ID, done); err != nil {
+		t.Fatal(err)
+	}
+	view, err := r.svc.ReviewOf(ctx, job.ID)
+	if err != nil || view.Land.Head == "" || !strings.Contains(view.Land.Confirm[LandMerge], "Commit "+shortHash(view.Land.Head)) {
+		t.Fatalf("the review does not pin a commit: %+v %v", view.Land, err)
+	}
+	reviewed := view.Land.Head
+	// The agent commits after the human opened the review.
+	commitIn(t, job.WorkDir, "sneaky.go", "package widget\n")
+	_, err = r.svc.LandWith(ctx, job.ID, LandMerge, "you", LandFlags{Head: reviewed})
+	var evidence *EvidenceError
+	if !errors.As(err, &evidence) || evidence.Code != "head_moved" {
+		t.Fatalf("a land past the reviewed commit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "widget.go")); !os.IsNotExist(err) {
+		t.Fatal("a refused land merged anyway")
+	}
+	// Reviewed again, the new head lands, and main has exactly it.
+	view, _ = r.svc.ReviewOf(ctx, job.ID)
+	if _, err := r.svc.LandWith(ctx, job.ID, LandMerge, "you", LandFlags{Head: view.Land.Head}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "sneaky.go")); err != nil {
+		t.Fatal("the reviewed commit was not merged")
 	}
 }

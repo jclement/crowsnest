@@ -103,6 +103,7 @@ type JobRecord struct {
 	NoCommitsReason string
 	FixOf           int64
 	ReviewCommit    string
+	LandHead        string
 	BudgetUSD       float64
 	BudgetTokens    int64
 	BudgetMinutes   int
@@ -168,7 +169,7 @@ func jobColumns(r *JobRecord) []column {
 		timeCol("torn_down_at", &r.TornDownAt), textCol("land_request", &r.LandRequest),
 		int64Col("land_question_id", &r.LandQuestionID), boolCol("start_anyway", &r.StartAnyway),
 		textCol("accept_state", &r.AcceptState), textCol("accept_detail", &r.AcceptDetail), intCol("check_rounds", &r.CheckRounds),
-		textCol("no_commits_reason", &r.NoCommitsReason), int64Col("fix_of", &r.FixOf), textCol("review_commit", &r.ReviewCommit),
+		textCol("no_commits_reason", &r.NoCommitsReason), int64Col("fix_of", &r.FixOf), textCol("review_commit", &r.ReviewCommit), textCol("land_head", &r.LandHead),
 		floatCol("budget_usd", &r.BudgetUSD), int64Col("budget_tokens", &r.BudgetTokens), intCol("budget_minutes", &r.BudgetMinutes),
 		intCol("budget_turns", &r.BudgetTurns), textCol("budget_state", &r.BudgetState), textCol("budget_detail", &r.BudgetDetail),
 		intCol("turns", &r.Turns), textCol("wake_kind", &r.WakeKind), timeCol("wake_at", &r.WakeAt), int64Col("wake_job", &r.WakeJob),

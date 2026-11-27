@@ -60,6 +60,8 @@ export interface LandOptions {
    * stale, failed, missing, checking or needs_rebase. Land then needs an explicit override. */
   evidence?: "" | "stale" | "failed" | "missing" | "checking" | "needs_rebase";
   evidence_why?: string;
+  /** The branch's commit as the Review tab read it; sent back so what lands is what was reviewed. */
+  head?: string;
 }
 
 export interface ReviewRound {

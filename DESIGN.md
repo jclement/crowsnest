@@ -1116,6 +1116,16 @@ job's `done` is now the agent's claim, and crowsnest decides whether it is **acc
   starts a **rebase job** (`fix_of`): a builder in the same worktree, not isolated, no review,
   briefed to merge the base in, resolve, check and commit; when it finishes, the job is checked
   again and is accepted or failed on that.
+- **What lands is what was reviewed** (R5-S4, `reviews/R5-opus-security.md`): the Review tab
+  carries the branch's commit (`land.head`), the confirmation names it ("Commit abc1234, as
+  reviewed: …; if the branch has moved past abc1234, nothing is landed"), and the browser must
+  send it back as `expected_head` to merge or push (`400` without). Land refuses with `409
+  EVIDENCE_HEAD_MOVED` when the branch moved past it, and merges or pushes that commit by its
+  SHA, not the branch's tip at click time; the landing package checks the pin again right before
+  the merge or push. An agent's land request is pinned to the commit it was made at
+  (`land_head`), so the human's later Allow lands that commit or nothing. Not done: freezing the
+  agent's branch while the human reviews (the agent may still commit; Land then refuses and the
+  review is opened again).
 - **Shown.** Cards carry Accepted, Unverified, Check failed (round N), Evidence stale, Needs
   rebase, or Checking beside the state; the job view has "crowsnest's check" (command, result,
   exit, duration, commit, the output's end) with Run the check again and Ask an agent to rebase;
@@ -2411,7 +2421,8 @@ idle_seconds}`), `POST /presence/gone`, `PUT /presence/dnd` `{until}`, `GET /dig
 `{check_command, budget_usd, budget_minutes}`, `POST /questions/{id}/reconcile`, `POST
 /questions/{id}/retype` `{confirm: true}`. `POST /jobs/{id}/land` takes `override: true`, and
 answers `409 EVIDENCE_STALE|FAILED|MISSING|CHECKING|NEEDS_REBASE` without it when the evidence
-does not support the revision. Jobs carry `accept_state`, `accept_detail`, `check_rounds`,
+does not support the revision; it needs `expected_head` (the Review tab's `land.head`) to merge
+or push, and answers `409 EVIDENCE_HEAD_MOVED` when the branch moved past it (R5-S4). Jobs carry `accept_state`, `accept_detail`, `check_rounds`,
 `budget`, `turns`, `wait_owner`, `wake`, `wake_kind`, `wake_at`, `wake_job`, `rechecks`,
 `last_message`; a job's detail adds `evidence`; questions add `receipt`, `received_at`,
 `held_reason`. Event `limits`. On the agent socket, `job_update` takes `recheck_in`,

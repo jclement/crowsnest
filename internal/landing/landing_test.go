@@ -2,6 +2,7 @@ package landing
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -339,5 +340,37 @@ func TestStripCredentialsAndHost(t *testing.T) {
 		if IsGitHub(url) != want {
 			t.Errorf("IsGitHub(%q) != %v", url, want)
 		}
+	}
+}
+
+// TestPushAndMergeArePinnedToTheReviewedCommit (R5-S4): with Commit set, a branch that moved past
+// it is refused (head_moved), and the reviewed commit is what is pushed or merged.
+func TestPushAndMergeArePinnedToTheReviewedCommit(t *testing.T) {
+	r := newRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	run(t, r.main, "git", "init", "-q", "--bare", remote)
+	run(t, r.main, "git", "remote", "add", "origin", remote)
+	r.commitInWorktree("feature.go", "x", "feature")
+	reviewed, _ := Head(context.Background(), r.worktree)
+	r.commitInWorktree("later.go", "y", "after the review")
+	ctx := context.Background()
+	_, err := Push(ctx, PushInput{WorkDir: r.worktree, Branch: r.branch, Base: "main", Commit: reviewed})
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refusal.Code != CodeHeadMoved {
+		t.Fatalf("push past the reviewed commit: %v", err)
+	}
+	if out := run(t, remote, "git", "branch", "--list", r.branch); strings.Contains(out, r.branch) {
+		t.Fatal("a refused push reached the remote")
+	}
+	_, err = Merge(ctx, MergeInput{MainDir: r.main, WorkDir: r.worktree, Branch: r.branch, Base: "main", Mode: ModeMerge, Commit: reviewed})
+	if !errors.As(err, &refusal) || refusal.Code != CodeHeadMoved {
+		t.Fatalf("merge past the reviewed commit: %v", err)
+	}
+	now, _ := Head(ctx, r.worktree)
+	if _, err := Push(ctx, PushInput{WorkDir: r.worktree, Branch: r.branch, Base: "main", Commit: now}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(run(t, remote, "git", "rev-parse", "refs/heads/"+r.branch)); got != now {
+		t.Fatalf("the remote has %s, want the reviewed %s", got, now)
 	}
 }

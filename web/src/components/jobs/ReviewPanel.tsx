@@ -71,11 +71,11 @@ function EvidenceList({ title, items, tone }: { title: string; items: string[]; 
 function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
   const [confirming, setConfirming] = useState<LandAction | null>(null);
   const [override, setOverride] = useState(false);
-  const plainLand = useLand(job.id);
-  const overrideLand = useLandOverride(job.id);
+  const options = view.land;
+  const plainLand = useLand(job.id, options.head);
+  const overrideLand = useLandOverride(job.id, options.head);
   const teardown = useTeardown();
   const toast = useToast();
-  const options = view.land;
   if (options.state) {
     return (
       <Card title="Landed">

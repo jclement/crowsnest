@@ -16,6 +16,9 @@ ALTER TABLE jobs ADD COLUMN check_rounds INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE jobs ADD COLUMN no_commits_reason TEXT NOT NULL DEFAULT '';
 ALTER TABLE jobs ADD COLUMN fix_of INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE jobs ADD COLUMN review_commit TEXT NOT NULL DEFAULT '';
+-- The commit an agent's land request was made at (R5-S4): the human's Allow lands that commit or
+-- nothing.
+ALTER TABLE jobs ADD COLUMN land_head TEXT NOT NULL DEFAULT '';
 
 -- Budgets set on the job itself (0: unset, the project's or the server's default applies).
 -- budget_state: '' | warned (80%) | exceeded (100%: needs you) | grace (the human let it finish

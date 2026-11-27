@@ -87,6 +87,18 @@ type LandOptions struct {
 	// EvidenceWhy. Land then needs the human's explicit override.
 	Evidence    string `json:"evidence,omitempty"`
 	EvidenceWhy string `json:"evidence_why,omitempty"`
+	// Head is the branch's commit as this view read it (R5-S4): the browser sends it back as
+	// expected_head, and Land merges or pushes that commit or refuses.
+	Head string `json:"head,omitempty"`
+}
+
+// LandFlags are the human's choices with a land action.
+type LandFlags struct {
+	// Override lands over crowsnest's evidence (6.15).
+	Override bool
+	// Head is the commit the human reviewed (R5-S4): Land refuses when the branch has moved past
+	// it, and merges or pushes exactly it. Empty: the branch's tip (callers that showed no commit).
+	Head string
 }
 
 // ReviewOf builds the Review tab for a job.
@@ -140,7 +152,11 @@ func (s *Service) ReviewOf(ctx context.Context, id string) (ReviewView, error) {
 
 // landOptions decides which actions are open for job.
 func (s *Service) landOptions(job Job, produced *landing.Produced) LandOptions {
-	opts := LandOptions{State: job.LandState, Detail: job.LandDetail, TornDown: job.TornDownAt != nil, Base: job.BaseBranch,
+	head := ""
+	if produced != nil {
+		head = produced.Head
+	}
+	opts := LandOptions{State: job.LandState, Detail: job.LandDetail, TornDown: job.TornDownAt != nil, Base: job.BaseBranch, Head: head,
 		Branch: job.WorktreeBranch, MergeMode: firstNonEmptyDir(s.landing().MergeMode, landing.ModeMerge),
 		Protected: slices.Contains(s.landing().Protected, job.BaseBranch), Request: job.LandRequest,
 		Allowed: map[string]bool{}, Why: map[string]string{}, Confirm: map[string]string{}}
@@ -150,7 +166,7 @@ func (s *Service) landOptions(job Job, produced *landing.Produced) LandOptions {
 		} else {
 			opts.Allowed[action] = true
 		}
-		opts.Confirm[action] = confirmText(job, action, opts.MergeMode)
+		opts.Confirm[action] = confirmText(job, action, opts.MergeMode, head)
 	}
 	return opts
 }
@@ -195,7 +211,16 @@ func (s *Service) landBlocked(job Job, action string, produced *landing.Produced
 }
 
 // confirmText says exactly what an action will do, for the confirmation.
-func confirmText(job Job, action, mode string) string {
+func confirmText(job Job, action, mode, head string) string {
+	text := confirmBody(job, action, mode)
+	if head != "" && action != LandDiscard {
+		text = fmt.Sprintf("Commit %s, as reviewed: ", shortHash(head)) + text + fmt.Sprintf(" If the branch has moved past %s, nothing is landed.", shortHash(head))
+	}
+	return text
+}
+
+// confirmBody is the confirmation without the pinned commit.
+func confirmBody(job Job, action, mode string) string {
 	teardown := "Then stop " + firstNonEmptyDir(job.AgentName, "the agent") + ", remove the worktree " + firstNonEmptyDir(job.WorkDir, "") +
 		" and its workspace"
 	switch action {
@@ -278,13 +303,14 @@ type LandResult struct {
 // Land runs a land action for the human (by names them on the timeline: "you", or "you, as
 // lead-x asked"). A refusal changes nothing and comes back as a ValidationError.
 func (s *Service) Land(ctx context.Context, id, action, by string) (LandResult, error) {
-	return s.LandWith(ctx, id, action, by, false)
+	return s.LandWith(ctx, id, action, by, LandFlags{})
 }
 
 // LandWith is Land with the human's explicit override of crowsnest's evidence (6.15): without
 // it, a merge or push of a revision whose check is stale, failed or missing, or whose base has
 // moved on, is refused.
-func (s *Service) LandWith(ctx context.Context, id, action, by string, override bool) (LandResult, error) {
+func (s *Service) LandWith(ctx context.Context, id, action, by string, flags LandFlags) (LandResult, error) {
+	override := flags.Override
 	if !ValidLandAction(action) {
 		return LandResult{}, invalid("unknown land action %q: give merge, pr or discard", action)
 	}
@@ -299,6 +325,14 @@ func (s *Service) LandWith(ctx context.Context, id, action, by string, override 
 	if action == LandDiscard {
 		return s.discard(ctx, job, by)
 	}
+	if flags.Head != "" {
+		// What is landed is what was reviewed (R5-S4): a commit after the review stops it here.
+		if head, err := landing.Head(ctx, job.WorkDir); err != nil || head != flags.Head {
+			why := fmt.Sprintf("the branch is now at %s, but you reviewed %s: a commit came after the review. Open the review again", shortHash(head), shortHash(flags.Head))
+			_ = s.Journal(ctx, job.ID, EventLand, "Land ("+action+") refused: "+why, map[string]any{"evidence": landing.CodeHeadMoved})
+			return LandResult{}, &EvidenceError{Code: landing.CodeHeadMoved, Message: why + "; nothing was changed"}
+		}
+	}
 	if code, why := s.LandEvidence(ctx, job, nil); code != "" {
 		if !override {
 			s.markEvidence(ctx, job.ID, code, why)
@@ -307,8 +341,13 @@ func (s *Service) LandWith(ctx context.Context, id, action, by string, override 
 		}
 		_ = s.Journal(ctx, job.ID, EventLand, "Landed over crowsnest's evidence by "+firstNonEmptyDir(by, "you")+" ("+code+": "+why+")", map[string]any{"evidence": code, "override": true})
 	}
-	detailText, err := s.landRemote(ctx, job, action)
+	detailText, err := s.landRemote(ctx, job, action, flags.Head)
 	if err != nil {
+		var refusal *landing.Refusal
+		if errors.As(err, &refusal) && refusal.Code == landing.CodeHeadMoved {
+			_ = s.Journal(ctx, job.ID, EventLand, "Land ("+action+") refused: "+oneLine(err.Error(), 240), nil)
+			return LandResult{}, &EvidenceError{Code: landing.CodeHeadMoved, Message: refusal.Message}
+		}
 		if landing.IsRefusal(err) {
 			_ = s.Journal(ctx, job.ID, EventLand, "Land ("+action+") refused: "+oneLine(err.Error(), 240), nil)
 			return LandResult{}, invalid("%s", err.Error())
@@ -330,14 +369,14 @@ func (s *Service) LandWith(ctx context.Context, id, action, by string, override 
 }
 
 // landRemote merges or pushes; it returns the sentence recorded as land_detail.
-func (s *Service) landRemote(ctx context.Context, job Job, action string) (string, error) {
+func (s *Service) landRemote(ctx context.Context, job Job, action, head string) (string, error) {
 	mainDir, err := landing.MainCheckout(ctx, job.Dir)
 	if err != nil {
 		return "", invalid("the repository's main checkout cannot be found: %v", err)
 	}
 	if action == LandMerge {
 		result, err := landing.Merge(ctx, landing.MergeInput{MainDir: mainDir, WorkDir: job.WorkDir, Branch: job.WorktreeBranch, Base: job.BaseBranch,
-			Mode: s.landing().MergeMode, Message: fmt.Sprintf("Merge job %s: %s", job.ID, job.Title), Protected: s.landing().Protected})
+			Mode: s.landing().MergeMode, Message: fmt.Sprintf("Merge job %s: %s", job.ID, job.Title), Protected: s.landing().Protected, Commit: head})
 		if err != nil {
 			return "", err
 		}
@@ -348,7 +387,7 @@ func (s *Service) landRemote(ctx context.Context, job Job, action string) (strin
 		return fmt.Sprintf("Merged into %s (%s, %s)", job.BaseBranch, how, shortHash(result.Commit)), nil
 	}
 	push, err := landing.Push(ctx, landing.PushInput{WorkDir: job.WorkDir, Branch: job.WorktreeBranch, Base: job.BaseBranch,
-		Title: job.Title, Body: prBody(job), Protected: s.landing().Protected, GH: s.landing().GH})
+		Title: job.Title, Body: prBody(job), Protected: s.landing().Protected, GH: s.landing().GH, Commit: head})
 	if err != nil {
 		return "", err
 	}
@@ -621,8 +660,13 @@ func (s *Service) RequestLand(ctx context.Context, id, action string, caller que
 	if job.LandRequest != "" {
 		return questions.Question{}, invalid("a land request for job %s is already waiting for the human", job.ID)
 	}
+	head := ""
+	if action != LandDiscard && job.WorkDir != "" {
+		// The request is for the branch as it is now (R5-S4): Allow lands this commit or nothing.
+		head, _ = landing.Head(ctx, job.WorkDir)
+	}
 	body := fmt.Sprintf("An agent asks to **%s** job %s, %q.\n\n%s\n\n", landVerb(action), job.ID, job.Title,
-		confirmText(job, action, firstNonEmptyDir(s.landing().MergeMode, landing.ModeMerge)))
+		confirmText(job, action, firstNonEmptyDir(s.landing().MergeMode, landing.ModeMerge), head))
 	if reason = strings.TrimSpace(reason); reason != "" {
 		body += "Its reason (written by the agent, not crowsnest):\n\n" + indent(oneLine(reason, 600)) + "\n\n"
 	}
@@ -638,7 +682,7 @@ func (s *Service) RequestLand(ctx context.Context, id, action string, caller que
 	qid, _ := strings.CutPrefix(question.ID, "q_")
 	numeric, _ := parseInt64(qid)
 	_, _ = s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
-		r.LandRequest, r.LandQuestionID = action, numeric
+		r.LandRequest, r.LandQuestionID, r.LandHead = action, numeric, head
 		c.event(EventLand, "An agent asked to "+landVerb(action)+" it; waiting for you ("+question.ID+")", map[string]any{"question": question.ID})
 		return nil
 	})
@@ -664,9 +708,13 @@ func (s *Service) LandRequestSettled(ctx context.Context, jobID string, question
 		return
 	}
 	action := detail.LandRequest
+	head := ""
+	if record, err := s.opts.Store.GetJob(ctx, mustParse(jobID)); err == nil {
+		head = record.LandHead
+	}
 	allowed := question.Status == "answered" && answerKey(question.AnswerValue) == "allow" && strings.TrimSpace(question.AnswerNote) == ""
 	_, _ = s.mutate(ctx, jobID, func(r *store.JobRecord, c *change) error {
-		r.LandRequest, r.LandQuestionID = "", 0
+		r.LandRequest, r.LandQuestionID, r.LandHead = "", 0, ""
 		if !allowed {
 			c.event(EventLand, "You did not allow the request to "+landVerb(action), nil)
 		}
@@ -675,7 +723,7 @@ func (s *Service) LandRequestSettled(ctx context.Context, jobID string, question
 	if !allowed {
 		return
 	}
-	if _, err := s.Land(ctx, jobID, action, "you, as an agent asked"); err != nil {
+	if _, err := s.LandWith(ctx, jobID, action, "you, as an agent asked", LandFlags{Head: head}); err != nil {
 		_ = s.Journal(ctx, jobID, EventLand, "The land you allowed was refused: "+oneLine(err.Error(), 240), nil)
 	}
 }

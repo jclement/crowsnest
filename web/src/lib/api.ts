@@ -262,12 +262,14 @@ export const endpoints = {
   // ---- Landing, throttling, the pause, presence, the digest (DESIGN.md 6.11 to 6.14, 7.12) ----
   review: (id: string) => api<ReviewView>(`/jobs/${encodeURIComponent(id)}/review`),
   reviewDiff: (id: string, path: string) => api<FileDiffView>(`/jobs/${encodeURIComponent(id)}/review/diff?path=${encodeURIComponent(path)}`),
-  land: (id: string, action: LandAction) => api<LandResult>(`/jobs/${encodeURIComponent(id)}/land`, { method: "POST", body: { action, confirm: true } }),
+  /** head is the commit the Review tab showed (R5-S4): what lands is what was reviewed. */
+  land: (id: string, action: LandAction, head?: string) =>
+    api<LandResult>(`/jobs/${encodeURIComponent(id)}/land`, { method: "POST", body: { action, confirm: true, ...(head ? { expected_head: head } : {}) } }),
   teardown: (id: string) => api<LandResult>(`/jobs/${encodeURIComponent(id)}/teardown`, { method: "POST", body: { confirm: true } }),
   startAnyway: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/start-anyway`, { method: "POST" }),
   // ---- Acceptance, budgets, wake-ups, the usage limit, receipt (DESIGN.md 6.15 to 6.19) ----
-  landOverride: (id: string, action: LandAction) =>
-    api<LandResult>(`/jobs/${encodeURIComponent(id)}/land`, { method: "POST", body: { action, confirm: true, override: true } }),
+  landOverride: (id: string, action: LandAction, head?: string) =>
+    api<LandResult>(`/jobs/${encodeURIComponent(id)}/land`, { method: "POST", body: { action, confirm: true, override: true, ...(head ? { expected_head: head } : {}) } }),
   recheck: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/recheck`, { method: "POST" }),
   rebase: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/rebase`, { method: "POST" }),
   setBudget: (id: string, budget: BudgetInput) => api<Job>(`/jobs/${encodeURIComponent(id)}/budget`, { method: "PUT", body: budget }),

@@ -440,21 +440,22 @@ export function useReviewDiff(id: string, path: string, enabled: boolean) {
   return useQuery({ queryKey: queryKeys.reviewDiff(id, path), queryFn: () => endpoints.reviewDiff(id, path), enabled, staleTime: 30_000 });
 }
 
-/** Land: merge, push with a PR, or discard (the confirmation is the caller's). */
-export function useLand(id: string) {
+/** Land: merge, push with a PR, or discard (the confirmation is the caller's). head is the commit
+ * the Review tab showed: the server lands exactly it, or refuses (R5-S4). */
+export function useLand(id: string, head?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (action: LandAction) => endpoints.land(id, action),
+    mutationFn: (action: LandAction) => endpoints.land(id, action, head),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
   });
 }
 
 /** Land over crowsnest's evidence (stale, failed or missing check; a base that moved on): only ever
  * after the human ticked the explicit override. */
-export function useLandOverride(id: string) {
+export function useLandOverride(id: string, head?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (action: LandAction) => endpoints.landOverride(id, action),
+    mutationFn: (action: LandAction) => endpoints.landOverride(id, action, head),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
   });
 }

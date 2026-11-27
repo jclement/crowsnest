@@ -36,9 +36,15 @@ const (
 )
 
 // Refusal is a land action crowsnest would not take, worded for the human: nothing was changed.
-type Refusal struct{ Message string }
+type Refusal struct {
+	Message string
+	Code    string // "" or CodeHeadMoved
+}
 
 func (r *Refusal) Error() string { return r.Message }
+
+// CodeHeadMoved marks a refusal because the branch moved past the reviewed commit (R5-S4).
+const CodeHeadMoved = "head_moved"
 
 // IsRefusal reports whether err is a Refusal.
 func IsRefusal(err error) bool {
