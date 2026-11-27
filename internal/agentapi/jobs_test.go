@@ -239,15 +239,53 @@ func isStatus(err error, status int) bool {
 	return errors.As(err, &apiErr) && apiErr.Status == status
 }
 
+// TestSessionStartNoticeNeedsAnAck is R7-C11: a SessionStart reply that carries something which
+// must reach the agent comes with an ack token, and it is marked delivered only by the ack the
+// hook client sends after writing it; a reply never acknowledged is delivered again.
+func TestSessionStartNoticeNeedsAnAck(t *testing.T) {
+	pending := "v1"
+	f := startSocket(t, func(o *ServerOptions) {
+		o.SessionContext = func(_ context.Context, pane, _ string) (string, string) {
+			if pending == "" {
+				return "", ""
+			}
+			return "# New instructions", pending
+		}
+		o.AckSessionContext = func(_ context.Context, pane, ack string) bool {
+			if pane == "w1:p1" && ack == pending {
+				pending = ""
+				return true
+			}
+			return false
+		}
+	})
+	ctx := context.Background()
+	client := NewClient(f.socket, f.token(t, "w1:p1", ""))
+	reply, err := client.HookReply(ctx, jobs.HookSessionStart, json.RawMessage(`{"source":"resume"}`))
+	if err != nil || reply.Stdout != "# New instructions" || reply.Ack != "v1" {
+		t.Fatalf("reply %+v %v", reply, err)
+	}
+	// The client timed out and never acknowledged: the next start carries it again.
+	if again, _ := client.HookReply(ctx, jobs.HookSessionStart, json.RawMessage(`{"source":"resume"}`)); again.Stdout == "" {
+		t.Fatal("an unacknowledged notice was not delivered again")
+	}
+	if err := client.HookAck(ctx, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := client.HookReply(ctx, jobs.HookSessionStart, json.RawMessage(`{"source":"resume"}`)); after.Stdout != "" {
+		t.Fatalf("delivered after the ack: %+v", after)
+	}
+}
+
 // The orchestrator's SessionStart gets its standing context (DESIGN.md 7.9); a job agent's does
 // not, and a pane the provider does not know gets nothing extra.
 func TestSessionStartStandingContext(t *testing.T) {
 	f := startSocket(t, func(o *ServerOptions) {
-		o.SessionContext = func(_ context.Context, pane, source string) string {
+		o.SessionContext = func(_ context.Context, pane, source string) (string, string) {
 			if pane != "w1:p1" {
-				return ""
+				return "", ""
 			}
-			return "# Standing context (" + source + ")"
+			return "# Standing context (" + source + ")", ""
 		}
 	})
 	ctx := context.Background()

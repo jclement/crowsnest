@@ -185,18 +185,28 @@ func TestResumedConversationGetsItsNewInstructions(t *testing.T) {
 	if _, err := rig.orch.Restart(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if notice := rig.orch.InstructionsNotice(ctx); notice != "" {
+	if notice, _ := rig.orch.InstructionsNotice(ctx); notice != "" {
 		t.Fatalf("a resume with the same instructions left a notice: %q", notice)
 	}
 	tmpl.set("Codeword: PELICAN.")
 	if _, err := rig.orch.Restart(ctx); err != nil {
 		t.Fatal(err)
 	}
-	notice := rig.orch.InstructionsNotice(ctx)
-	if !strings.Contains(notice, "PELICAN") || !strings.Contains(notice, "replaces") {
-		t.Fatalf("notice %q", notice)
+	notice, version := rig.orch.InstructionsNotice(ctx)
+	if !strings.Contains(notice, "PELICAN") || !strings.Contains(notice, "replaces") || version == "" {
+		t.Fatalf("notice %q (version %q)", notice, version)
 	}
-	if again := rig.orch.InstructionsNotice(ctx); again != "" {
-		t.Fatal("the notice was given twice")
+	// R7-C11: a reply that never reached the agent (no ack) is delivered again at the next start.
+	if again, _ := rig.orch.InstructionsNotice(ctx); !strings.Contains(again, "PELICAN") {
+		t.Fatal("an unacknowledged notice was dropped")
+	}
+	if rig.orch.AckInstructionsNotice(ctx, "an-older-version") {
+		t.Fatal("an ack of another version was taken")
+	}
+	if !rig.orch.AckInstructionsNotice(ctx, version) {
+		t.Fatal("the ack was refused")
+	}
+	if again, _ := rig.orch.InstructionsNotice(ctx); again != "" {
+		t.Fatal("the notice was given after it was acknowledged")
 	}
 }

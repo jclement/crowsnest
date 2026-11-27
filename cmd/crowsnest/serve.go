@@ -249,7 +249,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	runApprovals(ctx, approvalService, fleetCache, logger)
 	digests := &digestProxy{}
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, ctl, digests, logger)
+		standingHooks{Context: standingContext(cfg, refs, refs.questions.Load, jobService), Ack: ackStandingContext(refs)}, files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, ctl, digests, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {

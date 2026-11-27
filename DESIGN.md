@@ -1781,8 +1781,12 @@ not at all with the Setting "Restart for new instructions" off (`--no-instructio
 **Claude Code keeps a resumed conversation's original appended system prompt** (seen with real
 Claude: resumed with a new file, it still followed the old one), so a resume alone is not enough:
 each fresh conversation records the fingerprint it began with, and a start that resumes one whose
-instructions changed since leaves a notice that the agent's SessionStart context carries once: the
-current instructions in full, "replaces the crowsnest instructions in your system prompt". This
+instructions changed since leaves a notice that the agent's SessionStart context carries: the
+current instructions in full, "replaces the crowsnest instructions in your system prompt". The
+notice is versioned and stays pending until the hook client acknowledges it (R7-C11): the hook
+reply carries `ack`, and `crowsnest hook` posts `POST /api/v1/hook-ack {ack}` on the agent socket
+only after it wrote the reply to stdout; a reply lost on the way (a timeout, a disconnect) is not
+acknowledged, so the next SessionStart carries the notice again. This
 also covers a manual Restart and the automatic restart after a crash. Job agents are not restarted
 by themselves (a restart mid-job loses the turn); their "changed since start" banner and Restart
 are the human's.

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -182,23 +183,38 @@ func (o *Orchestrator) noteConversationInstructions(ctx context.Context, resumin
 	if began == current {
 		return
 	}
-	_ = o.opts.KV.SetKV(ctx, o.kvKey(kvInstructionsNotice), "1")
-	// From now on the conversation has them (once the notice is read).
+	// The notice is versioned: it stays pending until the hook that printed it acknowledges that
+	// exact version (R7-C11), so a SessionStart reply lost on the way is delivered again.
+	_ = o.opts.KV.SetKV(ctx, o.kvKey(kvInstructionsNotice), strconv.FormatInt(o.opts.Now().UnixNano(), 36))
+	// The conversation counts as having them once the notice is acknowledged; until then it is re-sent.
 	_ = o.opts.KV.SetKV(ctx, o.kvKey(kvConversationFingerprint), current)
 }
 
-// InstructionsNotice returns, once, the agent's current instructions for its SessionStart context
-// when it resumed a conversation that began with other ones ("" otherwise).
-func (o *Orchestrator) InstructionsNotice(ctx context.Context) string {
-	if pending, _ := o.opts.KV.GetKV(ctx, o.kvKey(kvInstructionsNotice)); pending == "" {
-		return ""
+// InstructionsNotice returns the agent's current instructions for its SessionStart context when it
+// resumed a conversation that began with other ones ("" otherwise), and the notice's version. It
+// does not mark the notice delivered: AckInstructionsNotice does, once the hook client has written
+// the reply (R7-C11). Until then every SessionStart carries it again.
+func (o *Orchestrator) InstructionsNotice(ctx context.Context) (text, version string) {
+	pending, _ := o.opts.KV.GetKV(ctx, o.kvKey(kvInstructionsNotice))
+	if pending == "" {
+		return "", ""
 	}
 	body, err := os.ReadFile(filepath.Join(o.opts.StateDir, InstructionsFile)) //nolint:gosec // crowsnest's own state file
 	if err != nil || strings.TrimSpace(string(body)) == "" {
-		return ""
+		return "", ""
 	}
-	_ = o.opts.KV.DeleteKV(ctx, o.kvKey(kvInstructionsNotice))
 	return "# Crowsnest: your instructions changed\n\n" +
 		"Crowsnest's instructions for you changed since this conversation began. The text below is the current version and replaces " +
-		"the crowsnest instructions in your system prompt: where the two differ, follow this one.\n\n" + string(body)
+		"the crowsnest instructions in your system prompt: where the two differ, follow this one.\n\n" + string(body), pending
+}
+
+// AckInstructionsNotice marks the notice of that version delivered: the hook printed it. An ack of
+// an older version (a newer restart replaced it) leaves the newer one pending.
+func (o *Orchestrator) AckInstructionsNotice(ctx context.Context, version string) bool {
+	pending, _ := o.opts.KV.GetKV(ctx, o.kvKey(kvInstructionsNotice))
+	if version == "" || pending != version {
+		return false
+	}
+	_ = o.opts.KV.DeleteKV(ctx, o.kvKey(kvInstructionsNotice))
+	return true
 }

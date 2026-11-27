@@ -99,9 +99,20 @@ func (c *Client) FailJob(ctx context.Context, id, reason string) (jobs.Job, erro
 
 // Hook forwards a hook's raw stdin and returns what the hook should print.
 func (c *Client) Hook(ctx context.Context, event string, input json.RawMessage) (string, error) {
+	reply, err := c.HookReply(ctx, event, input)
+	return reply.Stdout, err
+}
+
+// HookReply posts a hook's stdin and returns the whole reply, its ack token included (R7-C11).
+func (c *Client) HookReply(ctx context.Context, event string, input json.RawMessage) (jobs.HookReply, error) {
 	var out jobs.HookReply
 	err := c.do(ctx, http.MethodPost, "/api/v1/hooks/"+url.PathEscape(event), input, &out)
-	return out.Stdout, err
+	return out, err
+}
+
+// HookAck tells crowsnest a reply carrying ack was written (R7-C11).
+func (c *Client) HookAck(ctx context.Context, ack string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/hook-ack", map[string]string{"ack": ack}, nil)
 }
 
 // RequestApproval posts a PermissionRequest hook's input (DESIGN.md 8.7).
