@@ -17,6 +17,10 @@ async function jobId(request: APIRequestContext, branch: string): Promise<string
   const body = (await response.json()) as { data: Array<{ id: string; worktree_branch?: string }> };
   const job = body.data.find((entry) => entry.worktree_branch === branch);
   if (!job) throw new Error(`no demo job on ${branch}`);
+  // The demo makes the repository and worktrees in the background, after the rows: wait for both
+  // diffs to read (the running job's, and the Website project's main checkout).
+  await expect.poll(async () => (await request.get(`/api/v1/changes/jobs/${job.id}`)).status(), { timeout: 20_000 }).toBe(200);
+  await expect.poll(async () => (await request.get("/api/v1/changes/projects/website?scope=uncommitted")).status(), { timeout: 20_000 }).toBe(200);
   return job.id;
 }
 
@@ -30,8 +34,9 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
 }
 
 async function touch(page: Page, app: Instance, id: string) {
-  const response = await page.request.post(`/api/v1/changes/jobs/${id}/demo-touch`, { headers: sameOriginHeaders(app) });
-  expect(response.ok()).toBe(true);
+  await expect
+    .poll(async () => (await page.request.post(`/api/v1/changes/jobs/${id}/demo-touch`, { headers: sameOriginHeaders(app) })).ok(), { timeout: 20_000 })
+    .toBe(true);
 }
 
 test("a running job's diff: mark a file viewed, hide it, it changes, it comes back flagged, since-viewed shows only the new edit", async ({ page, app }, testInfo) => {
@@ -118,6 +123,7 @@ test("full screen keeps the scope and file, hides the app's chrome, and Esc come
 
 test("a lead's uncommitted changes, from the project page, in light and dark", async ({ page }, testInfo) => {
   await phoneSize(page, testInfo);
+  await jobId(page.request, "job/120-checkout-redesign"); // waits for the demo's repository
   await page.goto("/projects/website");
   const card = page.getByRole("region", { name: "Changes", exact: true });
   await expect(card).toContainText("Main checkout (the lead's)");

@@ -32,6 +32,7 @@ var demoDiff struct {
 	jobID   string
 	dir     string
 	touches int
+	ready   bool // the repository and worktrees exist
 }
 
 const demoCartPath = "web/src/cart.ts"
@@ -48,6 +49,35 @@ func SeedDemoDiffs(ctx context.Context, s *Service, repo string, projectID int64
 	if _, err := os.Stat(filepath.Join(repo, ".git")); err == nil {
 		return nil // a demo database reused: already seeded
 	}
+	// The job rows are written now, so the demo's job ids never depend on timing (the hermetic
+	// suite names them); the repository, its worktrees and the panes are made in the background,
+	// because serve answers "starting" until seeding returns and this is a few dozen git calls.
+	running, err := insertDiffJob(ctx, s, repo, projectID, "job/120-checkout-redesign", "Redesign the checkout", StateRunning)
+	if err != nil {
+		return err
+	}
+	done, err := insertDiffJob(ctx, s, repo, projectID, "job/121-price-rounding", "Round prices to the cent", StateDone)
+	if err != nil {
+		return err
+	}
+	demoDiff.mu.Lock()
+	demoDiff.jobID, demoDiff.dir = FormatID(running), worktreePath(repo, "job/120-checkout-redesign")
+	demoDiff.mu.Unlock()
+	go func() {
+		if err := buildDemoDiffs(ctx, s, repo, running, done); err != nil {
+			s.opts.Logger.Warn("building the diff demo's repository", "err", err)
+			return
+		}
+		demoDiff.mu.Lock()
+		demoDiff.ready = true
+		demoDiff.mu.Unlock()
+		demoKeepChanging(ctx, s)
+	}()
+	return nil
+}
+
+// buildDemoDiffs makes the repository and the two jobs' worktrees, and gives the rows their panes.
+func buildDemoDiffs(ctx context.Context, s *Service, repo string, running, done int64) error {
 	if err := demoGit(repo, "init", "-q", "-b", "main"); err != nil {
 		return err
 	}
@@ -80,18 +110,14 @@ func SeedDemoDiffs(ctx context.Context, s *Service, repo string, projectID int64
 	if err := demoWrite(repo, "NOTES.md", "# Lead's notes\n\n- Checkout redesign is j_running; review the cart once it settles.\n"); err != nil {
 		return err
 	}
-	running, dir, err := seedDiffJob(ctx, s, repo, projectID, "job/120-checkout-redesign", "Redesign the checkout", StateRunning, demoCheckoutWork)
-	if err != nil {
+	if err := makeDiffWorktree(ctx, s, repo, running, "job/120-checkout-redesign", demoCheckoutWork); err != nil {
 		return err
 	}
-	demoDiff.mu.Lock()
-	demoDiff.jobID, demoDiff.dir = FormatID(running), dir
-	demoDiff.mu.Unlock()
-	if _, _, err := seedDiffJob(ctx, s, repo, projectID, "job/121-price-rounding", "Round prices to the cent", StateDone, demoRoundingWork); err != nil {
-		return err
-	}
-	go demoKeepChanging(ctx, s)
-	return nil
+	return makeDiffWorktree(ctx, s, repo, done, "job/121-price-rounding", demoRoundingWork)
+}
+
+func worktreePath(repo, branch string) string {
+	return filepath.Join(filepath.Dir(repo), ".worktrees", strings.ReplaceAll(branch, "/", "-"))
 }
 
 // demoKeepChanging edits the running job's cart once a minute until ctx ends.
@@ -120,6 +146,9 @@ func DemoDiffTouch(ctx context.Context, s *Service, id string) error {
 	if demoDiff.jobID == "" || id != demoDiff.jobID {
 		return fmt.Errorf("only the diff demo's running job (%s) edits files on demand", firstNonEmptyDir(demoDiff.jobID, "none"))
 	}
+	if !demoDiff.ready {
+		return fmt.Errorf("the diff demo's repository is still being made; try again in a moment")
+	}
 	demoDiff.touches++
 	path := filepath.Join(demoDiff.dir, filepath.FromSlash(demoCartPath))
 	body, err := os.ReadFile(path) //nolint:gosec // the demo's own worktree
@@ -133,22 +162,33 @@ func DemoDiffTouch(ctx context.Context, s *Service, id string) error {
 	return s.Journal(ctx, id, EventProgress, fmt.Sprintf("Edited %s (change %d)", demoCartPath, demoDiff.touches), nil)
 }
 
-// seedDiffJob makes a worktree job: committed work, then uncommitted work, then the record.
-func seedDiffJob(ctx context.Context, s *Service, repo string, projectID int64, branch, title string, state State, work func(dir string) error) (int64, string, error) {
-	path := filepath.Join(filepath.Dir(repo), ".worktrees", strings.ReplaceAll(branch, "/", "-"))
+// makeDiffWorktree makes a job's worktree through herdr, does its work in it (committed, then
+// uncommitted) and gives its row the pane and workspace.
+func makeDiffWorktree(ctx context.Context, s *Service, repo string, id int64, branch string, work func(dir string) error) error {
+	path := worktreePath(repo, branch)
 	created, err := s.opts.Herdr.WorktreeCreate(ctx, herdr.WorktreeCreateParams{Cwd: repo, Branch: branch, Path: path, Label: branch})
 	if err != nil {
-		return 0, "", fmt.Errorf("making a demo worktree: %w", err)
+		return fmt.Errorf("making a demo worktree: %w", err)
 	}
 	if err := work(path); err != nil {
-		return 0, "", err
+		return err
 	}
+	_, err = s.mutate(ctx, FormatID(id), func(r *store.JobRecord, _ *change) error {
+		r.PaneID, r.WorkspaceID = created.RootPane.ID, created.Workspace.ID
+		return nil
+	})
+	return err
+}
+
+// insertDiffJob writes a diff demo job's row (its worktree comes later, from buildDemoDiffs).
+func insertDiffJob(ctx context.Context, s *Service, repo string, projectID int64, branch, title string, state State) (int64, error) {
+	path := worktreePath(repo, branch)
 	now := s.opts.Now()
 	record := store.JobRecord{
 		Title: title, BriefMD: title, Role: "builder", Dir: repo, WorktreeBranch: branch, WorkDir: path, Isolate: true, ProjectID: projectID,
-		Engine: EngineClaude, State: string(state), PaneID: created.RootPane.ID, AgentName: "job-demo", BriefSent: true,
+		Engine: EngineClaude, State: string(state), AgentName: "job-demo", BriefSent: true,
 		CreatedAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour), LastActivityAt: now.Add(-time.Minute),
-		BaseBranch: "main", WorkspaceID: created.Workspace.ID, VerifiedJSON: "[]", NotVerifiedJSON: "[]", Reviewer: ReviewerOff,
+		BaseBranch: "main", VerifiedJSON: "[]", NotVerifiedJSON: "[]", Reviewer: ReviewerOff,
 	}
 	if state == StateRunning {
 		record.Progress = "Restyling the cart and wiring the new checkout handler"
@@ -161,10 +201,10 @@ func seedDiffJob(ctx context.Context, s *Service, repo string, projectID int64, 
 	}
 	id, err := s.opts.Store.InsertJob(ctx, record)
 	if err != nil {
-		return 0, "", err
+		return 0, err
 	}
 	_, _ = s.opts.Store.InsertJobEvent(ctx, store.JobEventRecord{JobID: id, Kind: EventLaunch, Summary: "Opened a worktree on " + branch, At: now.Add(-2 * time.Hour)})
-	return id, path, nil
+	return id, nil
 }
 
 func demoCheckoutWork(dir string) error {
