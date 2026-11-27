@@ -439,7 +439,7 @@ func TestWritePlainHasNoEscapes(t *testing.T) {
 	if err := Write(&out, run(t, healthyMachine().without("herdr")), Style{}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), "\x1b[") || !strings.Contains(out.String(), "FAIL") || !strings.Contains(out.String(), "→ Install herdr") {
+	if strings.Contains(out.String(), "\x1b[") || !strings.Contains(out.String(), "FAIL") || !strings.Contains(out.String(), "→ Install herdr") || !strings.Contains(out.String(), "$ brew install herdr") {
 		t.Errorf("plain output:\n%s", out.String())
 	}
 }

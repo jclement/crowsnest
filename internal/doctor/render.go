@@ -103,8 +103,12 @@ func Write(out io.Writer, report Report, style Style) error {
 				fmt.Fprintf(&b, "%s", style.paint("35", " [cost: "+check.Cost+"]"))
 			}
 			b.WriteString("\n")
-			if check.Fix != "" && (check.Status == StatusFail || check.Status == StatusWarn || check.Status == StatusInfo) {
+			needsFix := check.Status == StatusFail || check.Status == StatusWarn || check.Status == StatusInfo
+			if check.Fix != "" && needsFix {
 				fmt.Fprintf(&b, "        %s %s\n", style.paint("36", "→"), check.Fix)
+			}
+			if check.Command != "" && needsFix {
+				fmt.Fprintf(&b, "          %s\n", style.paint("1", "$ "+check.Command))
 			}
 		}
 	}
