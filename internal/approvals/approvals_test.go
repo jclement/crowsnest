@@ -250,13 +250,45 @@ func TestReconcileScreens(t *testing.T) {
 	}
 }
 
-func TestRecoverAtStart(t *testing.T) {
+// A restart keeps hooked approvals pending for the restart grace: one whose hook polls again stays
+// pending and a later decision reaches the new waiter; one nobody polls is superseded after it.
+func TestRestartSurvival(t *testing.T) {
 	h := newHarness(t)
-	approval := h.request(t, "Bash", "ls")
+	polled := h.request(t, "Bash", "ls")
+	silent := h.request(t, "Bash", "make")
+	h.clock.add(time.Hour) // long past the poll grace of the old process
 	fresh := New(Options{Store: h.db, Now: h.clock.Now})
 	fresh.RecoverAtStart(context.Background())
-	if got, _ := fresh.Get(context.Background(), approval.ID); got.Status != StatusSuperseded {
-		t.Fatalf("a previous process's pending approval: %s", got.Status)
+	fresh.Sweep(context.Background())
+	for _, id := range []string{polled.ID, silent.ID} {
+		if got, _ := fresh.Get(context.Background(), id); got.Status != StatusPending {
+			t.Fatalf("%s right after the restart: %s, want pending", id, got.Status)
+		}
+	}
+	done := make(chan Approval, 1)
+	go func() {
+		settled, _ := fresh.Wait(context.Background(), polled.ID, time.Minute)
+		done <- settled
+	}()
+	time.Sleep(20 * time.Millisecond)
+	h.clock.add(DefaultRestartGrace + time.Second)
+	fresh.Sweep(context.Background())
+	if got, _ := fresh.Get(context.Background(), silent.ID); got.Status != StatusSuperseded || !strings.Contains(got.StatusReason, "restarted") {
+		t.Fatalf("not polled within the grace: %+v", got)
+	}
+	if got, _ := fresh.Get(context.Background(), polled.ID); got.Status != StatusPending {
+		t.Fatalf("polled within the grace: %s, want pending", got.Status)
+	}
+	if _, err := fresh.Decide(context.Background(), polled.ID, Decision{Allow: true}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case settled := <-done:
+		if settled.Status != StatusAllowed {
+			t.Fatalf("the waiter after the restart saw %s", settled.Status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a decision after the restart did not reach the hook's poll")
 	}
 }
 

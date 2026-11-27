@@ -32,20 +32,33 @@ type ApprovalRecord struct {
 	DecidedVia   string
 	Note         string
 	StatusReason string
-	CreatedAt    time.Time
-	SettledAt    time.Time
-	ExpiresAt    time.Time
+	// RuleIDs are the approval_rules that allowed it, comma-separated ("3,5"), when DecidedVia is
+	// "policy"; "" otherwise.
+	RuleIDs   string
+	CreatedAt time.Time
+	SettledAt time.Time
+	ExpiresAt time.Time
 }
 
 const approvalColumns = `id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons,
-	status, hooked, decided_via, note, status_reason, created_at, settled_at, expires_at`
+	status, hooked, decided_via, note, status_reason, rule_ids, created_at, settled_at, expires_at`
 
-// InsertApproval stores a new pending approval and returns its id.
+// InsertApproval stores a new approval and returns its id. It is pending unless Status says
+// otherwise: an approval the policy allowed is stored already settled (with DecidedVia,
+// StatusReason, RuleIDs and SettledAt), so it never shows as waiting, even for a moment.
 func (s *Store) InsertApproval(ctx context.Context, a ApprovalRecord) (int64, error) {
+	status, settled := a.Status, int64(0)
+	if status == "" {
+		status = "pending"
+	}
+	if !a.SettledAt.IsZero() {
+		settled = a.SettledAt.Unix()
+	}
 	result, err := s.db.ExecContext(ctx, `INSERT INTO approvals (job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input,
-		suggestions, risk, risk_reasons, status, hooked, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+		suggestions, risk, risk_reasons, status, hooked, decided_via, status_reason, rule_ids, created_at, settled_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.JobID, a.PaneID, a.AgentName, a.SessionID, a.Cwd, a.ToolName, a.ToolInput, a.Suggestions, a.Risk, a.RiskReasons,
-		boolInt(a.Hooked), a.CreatedAt.Unix(), a.ExpiresAt.Unix())
+		status, boolInt(a.Hooked), a.DecidedVia, a.StatusReason, a.RuleIDs, a.CreatedAt.Unix(), settled, a.ExpiresAt.Unix())
 	if err != nil {
 		return 0, fmt.Errorf("inserting approval: %w", err)
 	}
@@ -100,11 +113,12 @@ func (s *Store) CountPendingApprovals(ctx context.Context, jobID string) (int, e
 // ErrNotPending is returned by SettleApproval when the approval is no longer pending.
 var ErrNotPending = errors.New("approval is not pending")
 
-// SettleApproval moves a pending approval to status, recording how and why. It fails with
-// ErrNotPending when another settle won, and ErrNotFound when there is no such approval.
-func (s *Store) SettleApproval(ctx context.Context, id int64, status, via, note, reason string, at time.Time) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE approvals SET status = ?, decided_via = ?, note = ?, status_reason = ?, settled_at = ?
-		WHERE id = ? AND status = 'pending'`, status, via, note, reason, at.Unix(), id)
+// SettleApproval moves a pending approval to status, recording how and why (and, for a policy
+// allow, the rules that allowed it). It fails with ErrNotPending when another settle won, and
+// ErrNotFound when there is no such approval.
+func (s *Store) SettleApproval(ctx context.Context, id int64, status, via, note, reason, ruleIDs string, at time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE approvals SET status = ?, decided_via = ?, note = ?, status_reason = ?, rule_ids = ?, settled_at = ?
+		WHERE id = ? AND status = 'pending'`, status, via, note, reason, ruleIDs, at.Unix(), id)
 	if err != nil {
 		return fmt.Errorf("settling approval %d: %w", id, err)
 	}
@@ -122,7 +136,7 @@ func scanApproval(row interface{ Scan(...any) error }) (ApprovalRecord, error) {
 	var hooked int
 	var created, settled, expires int64
 	err := row.Scan(&a.ID, &a.JobID, &a.PaneID, &a.AgentName, &a.SessionID, &a.Cwd, &a.ToolName, &a.ToolInput, &a.Suggestions,
-		&a.Risk, &a.RiskReasons, &a.Status, &hooked, &a.DecidedVia, &a.Note, &a.StatusReason, &created, &settled, &expires)
+		&a.Risk, &a.RiskReasons, &a.Status, &hooked, &a.DecidedVia, &a.Note, &a.StatusReason, &a.RuleIDs, &created, &settled, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ApprovalRecord{}, ErrNotFound
 	}

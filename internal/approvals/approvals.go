@@ -59,6 +59,10 @@ const (
 	// DefaultPollGrace: a hooked approval nobody has polled for this long has lost its hook
 	// (Claude killed it at its timeout, or the agent went away): it is superseded.
 	DefaultPollGrace = 45 * time.Second
+	// DefaultRestartGrace: after a crowsnest restart, a hooked approval left pending stays pending
+	// this long from the start for its hook to poll again (the hook retries failed polls every 2 s
+	// for 2 minutes); one not polled within it is superseded (Fable R4 2.11).
+	DefaultRestartGrace = 150 * time.Second
 	// screenGrace is how old an approval must be before a dialog missing from its pane's screen
 	// counts (the dialog is drawn a moment after the hook starts).
 	screenGrace = 15 * time.Second
@@ -81,6 +85,16 @@ var (
 	ErrVia = errors.New("only low-risk approvals can be answered from a notification")
 )
 
+// RefusedError is an answer the service will not take as asked (a remember or a batch it
+// refuses), with the reason in a sentence; the browser API answers it with 409.
+type RefusedError struct{ Message string }
+
+func (e *RefusedError) Error() string { return e.Message }
+
+func refused(format string, args ...any) error {
+	return &RefusedError{Message: fmt.Sprintf(format, args...)}
+}
+
 // Approval is one request, as the API shows it.
 type Approval struct {
 	ID           string          `json:"id"`
@@ -98,11 +112,16 @@ type Approval struct {
 	DecidedVia   string          `json:"decided_via,omitempty"`
 	Note         string          `json:"note,omitempty"`
 	StatusReason string          `json:"status_reason,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	SettledAt    *time.Time      `json:"settled_at,omitempty"`
-	ExpiresAt    time.Time       `json:"expires_at"`
+	// RuleIDs are the policy rules that allowed it (decided_via "policy").
+	RuleIDs   []string   `json:"rule_ids,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	SettledAt *time.Time `json:"settled_at,omitempty"`
+	ExpiresAt time.Time  `json:"expires_at"`
 	// Summary is the call in one line ("Bash: go test ./...").
 	Summary string `json:"summary"`
+	// Remember is the job rule "Allow and remember for this job" proposes; only on a pending,
+	// non-dangerous approval of a job.
+	Remember *Suggestion `json:"remember,omitempty"`
 
 	hookedFlag bool // a hook process waits on it (false for the demo's)
 }
@@ -130,9 +149,13 @@ type Options struct {
 	RiskContext func(ctx context.Context, jobID string) risk.Context
 	// OnChange runs after every change (requested, allowed, denied, expired, superseded), outside
 	// any lock: the job's state and pushes hang off it.
-	OnChange  func(ctx context.Context, approval Approval, change string)
-	TTL       time.Duration
-	PollGrace time.Duration
+	OnChange func(ctx context.Context, approval Approval, change string)
+	// Scope tells the policy where a call comes from (project, live job, working root); nil
+	// leaves the policy with no project and no live job, so no rule ever applies.
+	Scope        func(ctx context.Context, jobID, paneID string) Scope
+	TTL          time.Duration
+	PollGrace    time.Duration
+	RestartGrace time.Duration
 }
 
 // Service owns the approvals.
@@ -144,6 +167,9 @@ type Service struct {
 	lastPoll map[int64]time.Time
 	waiting  map[int64]int // long-polls in progress
 	misses   map[int64]int // screen looks in a row with no dialog
+	// restarted holds, for each hooked approval a previous process left pending, the end of its
+	// restart grace; the first poll removes it.
+	restarted map[int64]time.Time
 }
 
 // New builds a Service.
@@ -163,7 +189,11 @@ func New(opts Options) *Service {
 	if opts.PollGrace <= 0 {
 		opts.PollGrace = DefaultPollGrace
 	}
-	return &Service{opts: opts, settled: map[int64]chan struct{}{}, lastPoll: map[int64]time.Time{}, waiting: map[int64]int{}, misses: map[int64]int{}}
+	if opts.RestartGrace <= 0 {
+		opts.RestartGrace = DefaultRestartGrace
+	}
+	return &Service{opts: opts, settled: map[int64]chan struct{}{}, lastPoll: map[int64]time.Time{}, waiting: map[int64]int{}, misses: map[int64]int{},
+		restarted: map[int64]time.Time{}}
 }
 
 // FormatID renders an approval id.
@@ -196,7 +226,9 @@ type RequestInput struct {
 	Hooked bool
 }
 
-// Request stores a new pending approval, classified, and announces it.
+// Request stores a new approval, classified, and announces it. When a policy rule allows the call
+// (never a dangerous one) it is stored already allowed, decided via "policy", and announced as
+// allowed: the hook prints the allow from the create reply at once, and nobody is asked.
 func (s *Service) Request(ctx context.Context, in RequestInput) (Approval, error) {
 	if strings.TrimSpace(in.ToolName) == "" || len(in.ToolName) > 200 {
 		return Approval{}, fmt.Errorf("a tool name is required (at most 200 characters)")
@@ -216,24 +248,59 @@ func (s *Service) Request(ctx context.Context, in RequestInput) (Approval, error
 	verdict := s.opts.Classifier.Classify(in.ToolName, json.RawMessage(input), riskContext)
 	reasons, _ := json.Marshal(verdict.Reasons)
 	now := s.opts.Now()
-	id, err := s.opts.Store.InsertApproval(ctx, store.ApprovalRecord{
+	record := store.ApprovalRecord{
 		JobID: in.JobID, PaneID: in.PaneID, AgentName: in.AgentName, SessionID: in.SessionID, Cwd: in.Cwd,
 		ToolName: in.ToolName, ToolInput: input, Suggestions: suggestions, Risk: string(verdict.Level), RiskReasons: string(reasons),
 		Hooked: in.Hooked, CreatedAt: now, ExpiresAt: now.Add(s.opts.TTL),
-	})
+	}
+	if allow, ok := s.checkPolicy(ctx, in.JobID, in.PaneID, in.ToolName, json.RawMessage(input), verdict.Level); ok {
+		record.Status, record.DecidedVia, record.StatusReason, record.RuleIDs, record.SettledAt = string(StatusAllowed), ViaPolicy, allow.reason, allow.ruleIDs, now
+	}
+	id, err := s.opts.Store.InsertApproval(ctx, record)
 	if err != nil {
 		return Approval{}, err
+	}
+	if record.Status == string(StatusAllowed) {
+		approval, err := s.get(ctx, id)
+		if err != nil {
+			return Approval{}, err
+		}
+		s.announce(ctx, approval, string(StatusAllowed))
+		return approval, nil
 	}
 	s.mu.Lock()
 	s.settled[id] = make(chan struct{})
 	s.lastPoll[id] = now
 	s.mu.Unlock()
-	approval, err := s.get(ctx, id)
+	approval, err := s.withSuggestion(ctx, id)
 	if err != nil {
 		return Approval{}, err
 	}
 	s.announce(ctx, approval, "requested")
 	return approval, nil
+}
+
+// withSuggestion reads an approval and, when it is pending, not dangerous and of a job, adds the
+// rule "Allow and remember for this job" would propose (relative to the job's root).
+func (s *Service) withSuggestion(ctx context.Context, id int64) (Approval, error) {
+	approval, err := s.get(ctx, id)
+	if err != nil {
+		return Approval{}, err
+	}
+	s.suggest(ctx, &approval)
+	return approval, nil
+}
+
+func (s *Service) suggest(ctx context.Context, approval *Approval) {
+	if approval.Status != StatusPending || approval.Risk == risk.Dangerous || approval.JobID == "" {
+		return
+	}
+	scope := s.scopeOf(ctx, approval.JobID, approval.PaneID)
+	if !scope.JobLive {
+		return
+	}
+	suggestion := Suggest(approval.ToolName, approval.ToolInput, scope.Root)
+	approval.Remember = &suggestion
 }
 
 // Get returns one approval.
@@ -242,7 +309,7 @@ func (s *Service) Get(ctx context.Context, id string) (Approval, error) {
 	if err != nil {
 		return Approval{}, err
 	}
-	return s.get(ctx, numeric)
+	return s.withSuggestion(ctx, numeric)
 }
 
 func (s *Service) get(ctx context.Context, id int64) (Approval, error) {
@@ -271,7 +338,9 @@ func (s *Service) List(ctx context.Context, statuses []Status, limit int) ([]App
 	}
 	out := make([]Approval, 0, len(records))
 	for _, record := range records {
-		out = append(out, toApproval(record))
+		approval := toApproval(record)
+		s.suggest(ctx, &approval)
+		out = append(out, approval)
 	}
 	return out, nil
 }
@@ -305,6 +374,7 @@ func (s *Service) Wait(ctx context.Context, id string, max time.Duration) (Appro
 		s.settled[numeric] = ch
 	}
 	s.lastPoll[numeric] = s.opts.Now()
+	delete(s.restarted, numeric) // its hook came back after a restart
 	s.waiting[numeric]++
 	s.mu.Unlock()
 	defer func() {
@@ -336,6 +406,10 @@ type Decision struct {
 	// Confirmed is the explicit second confirmation a dangerous allow needs.
 	Confirmed bool
 	Via       string
+	// Remember, when set, also stores a job rule with this pattern ("Allow and remember for this
+	// job"): an allow only, never for a dangerous call, only for an approval of a live job. Other
+	// pending approvals of the job the new rule matches are then allowed by policy.
+	Remember *string
 }
 
 // Decide settles a pending approval with a human's answer.
@@ -354,6 +428,9 @@ func (s *Service) Decide(ctx context.Context, id string, decision Decision) (App
 	if decision.Via == ViaNotification && approval.Risk != risk.Low {
 		return approval, ErrVia
 	}
+	if decision.Remember != nil && approval.Risk == risk.Dangerous {
+		return approval, refused("A dangerous call is never remembered: allow it once, with the confirmation.")
+	}
 	if decision.Allow && approval.Risk == risk.Dangerous && !decision.Confirmed {
 		return approval, ErrConfirm
 	}
@@ -365,16 +442,92 @@ func (s *Service) Decide(ctx context.Context, id string, decision Decision) (App
 	if via == "" {
 		via = ViaBrowser
 	}
+	if decision.Remember != nil {
+		return s.allowAndRemember(ctx, approval, decision, via, note)
+	}
 	status := StatusDenied
 	if decision.Allow {
 		status = StatusAllowed
 	}
-	return s.settle(ctx, numeric, status, via, note, "")
+	return s.settle(ctx, numeric, status, via, note, "", "")
 }
 
-// settle moves a pending approval to status, wakes its waiter and announces it.
-func (s *Service) settle(ctx context.Context, id int64, status Status, via, note, reason string) (Approval, error) {
-	if err := s.opts.Store.SettleApproval(ctx, id, string(status), via, note, reason, s.opts.Now()); err != nil {
+// allowAndRemember allows an approval and stores a job rule from it, then lets the rule settle the
+// job's other pending approvals it matches. The rule is checked before anything is allowed.
+func (s *Service) allowAndRemember(ctx context.Context, approval Approval, decision Decision, via, note string) (Approval, error) {
+	switch {
+	case !decision.Allow:
+		return approval, refused("Only an allow can be remembered.")
+	case approval.Risk == risk.Dangerous:
+		return approval, refused("A dangerous call is never remembered: allow it once, with the confirmation.")
+	case approval.JobID == "":
+		return approval, refused("This call is not part of a job, so there is nothing to remember it for.")
+	}
+	scope := s.scopeOf(ctx, approval.JobID, approval.PaneID)
+	if !scope.JobLive {
+		return approval, refused("Job %s has ended, so there is nothing to remember it for.", approval.JobID)
+	}
+	kind := KindFor(approval.ToolName)
+	if _, err := NormalizeRule(kind, *decision.Remember, approval.Risk); err != nil {
+		return approval, err
+	}
+	allowed, err := s.settle(ctx, mustParse(approval.ID), StatusAllowed, via, note, "", "")
+	if err != nil {
+		return allowed, err
+	}
+	rule, err := s.addRule(ctx, store.ApprovalRuleRecord{Scope: ScopeJob, ProjectID: scope.ProjectID, JobID: approval.JobID},
+		RuleInput{Kind: kind, Pattern: *decision.Remember, MaxRisk: approval.Risk, Note: "Remembered from " + approval.ID, Via: via})
+	if err != nil {
+		return allowed, err
+	}
+	s.opts.Logger.Info("remembered an approval rule", "approval", approval.ID, "rule", rule.ID, "job", approval.JobID)
+	s.settleByPolicy(ctx, approval.JobID)
+	return allowed, nil
+}
+
+// BatchAllow allows several pending approvals with one tap: every one must be pending, low risk
+// and from the same job, or nothing is allowed and the reason says why.
+func (s *Service) BatchAllow(ctx context.Context, ids []string) ([]Approval, error) {
+	if len(ids) == 0 || len(ids) > 50 {
+		return nil, refused("Name between 1 and 50 approvals to allow.")
+	}
+	var batch []Approval
+	seen := map[string]bool{}
+	for _, id := range ids {
+		approval, err := s.Get(ctx, id)
+		if err != nil {
+			return nil, refused("%s does not exist.", id)
+		}
+		switch {
+		case seen[approval.ID]:
+			return nil, refused("%s is named twice.", approval.ID)
+		case approval.Status != StatusPending:
+			return nil, refused("%s is no longer waiting (%s), so nothing was allowed.", approval.ID, approval.Status)
+		case approval.Risk != risk.Low:
+			return nil, refused("%s is %s, not low risk: answer it on its own card. Nothing was allowed.", approval.ID, approval.Risk)
+		case approval.JobID == "" || (len(batch) > 0 && approval.JobID != batch[0].JobID):
+			return nil, refused("Every approval in a batch must come from the same job. Nothing was allowed.")
+		}
+		seen[approval.ID] = true
+		batch = append(batch, approval)
+	}
+	out := make([]Approval, 0, len(batch))
+	for _, approval := range batch {
+		allowed, err := s.settle(ctx, mustParse(approval.ID), StatusAllowed, ViaBrowser, "", "Allowed in a batch of "+strconv.Itoa(len(batch))+" low-risk calls.", "")
+		if err != nil {
+			// Settled meanwhile by something else (the agent moved on): the rest still go.
+			s.opts.Logger.Info("a batch allow lost a race", "approval", approval.ID, "err", err)
+			continue
+		}
+		out = append(out, allowed)
+	}
+	return out, nil
+}
+
+// settle moves a pending approval to status, wakes its waiter and announces it. ruleIDs names the
+// rules of a policy allow ("" otherwise).
+func (s *Service) settle(ctx context.Context, id int64, status Status, via, note, reason, ruleIDs string) (Approval, error) {
+	if err := s.opts.Store.SettleApproval(ctx, id, string(status), via, note, reason, ruleIDs, s.opts.Now()); err != nil {
 		if errors.Is(err, store.ErrNotPending) {
 			approval, _ := s.get(ctx, id)
 			return approval, ErrNotPending
@@ -391,6 +544,7 @@ func (s *Service) settle(ctx context.Context, id int64, status Status, via, note
 	}
 	delete(s.lastPoll, id)
 	delete(s.misses, id)
+	delete(s.restarted, id)
 	s.mu.Unlock()
 	approval, err := s.get(ctx, id)
 	if err != nil {
@@ -409,7 +563,7 @@ func (s *Service) SupersedePane(ctx context.Context, paneID, reason string) int 
 	count := 0
 	for _, approval := range s.pending(ctx) {
 		if approval.PaneID == paneID && approval.hooked() {
-			if _, err := s.settle(ctx, mustParse(approval.ID), StatusSuperseded, "", "", reason); err == nil {
+			if _, err := s.settle(ctx, mustParse(approval.ID), StatusSuperseded, "", "", reason, ""); err == nil {
 				count++
 			}
 		}
@@ -427,7 +581,7 @@ func (s *Service) SupersedeRan(ctx context.Context, paneID, tool string, input j
 	count := 0
 	for _, approval := range s.pending(ctx) {
 		if approval.PaneID == paneID && approval.ToolName == tool && sameInput(string(approval.ToolInput), ran) && approval.hooked() {
-			if _, err := s.settle(ctx, mustParse(approval.ID), StatusSuperseded, "", "", "Answered in the terminal: the tool ran."); err == nil {
+			if _, err := s.settle(ctx, mustParse(approval.ID), StatusSuperseded, "", "", "Answered in the terminal: the tool ran.", ""); err == nil {
 				count++
 			}
 		}
@@ -459,7 +613,7 @@ func (s *Service) Sweep(ctx context.Context) {
 	for _, approval := range s.pending(ctx) {
 		id := mustParse(approval.ID)
 		if !now.Before(approval.ExpiresAt) {
-			_, _ = s.settle(ctx, id, StatusExpired, "", "", "Nobody answered in time (expiry is not consent). The terminal dialog is still there.")
+			_, _ = s.settle(ctx, id, StatusExpired, "", "", "Nobody answered in time (expiry is not consent). The terminal dialog is still there.", "")
 			continue
 		}
 		if !approval.hooked() {
@@ -468,12 +622,19 @@ func (s *Service) Sweep(ctx context.Context) {
 		s.mu.Lock()
 		last, known := s.lastPoll[id]
 		active := s.waiting[id] > 0
+		graceEnd, restarted := s.restarted[id]
 		s.mu.Unlock()
+		if restarted {
+			if now.After(graceEnd) {
+				_, _ = s.settle(ctx, id, StatusSuperseded, "", "", "crowsnest restarted and the agent's hook did not come back; answer it in the terminal.", "")
+			}
+			continue
+		}
 		if !known {
 			last = approval.CreatedAt
 		}
 		if !active && now.Sub(last) > s.opts.PollGrace {
-			_, _ = s.settle(ctx, id, StatusSuperseded, "", "", "The agent stopped waiting for this answer (its hook ended).")
+			_, _ = s.settle(ctx, id, StatusSuperseded, "", "", "The agent stopped waiting for this answer (its hook ended).", "")
 		}
 	}
 }
@@ -508,17 +669,26 @@ func (s *Service) ReconcileScreens(ctx context.Context, look func(ctx context.Co
 		misses := s.misses[id]
 		s.mu.Unlock()
 		if misses >= screenMisses {
-			_, _ = s.settle(ctx, id, StatusSuperseded, "", "", "Answered in the terminal (the dialog is gone).")
+			_, _ = s.settle(ctx, id, StatusSuperseded, "", "", "Answered in the terminal (the dialog is gone).", "")
 		}
 	}
 }
 
-// RecoverAtStart supersedes the hooked approvals a previous crowsnest process left pending: their
-// hooks' long-polls died with it (each hook then prints nothing, leaving the terminal dialog).
+// RecoverAtStart gives each hooked approval a previous crowsnest process left pending a restart
+// grace (RestartGrace from now): its hook's long-poll died with the old process, but the hook
+// retries failed polls for two minutes, so it comes back to this one and a later decision still
+// reaches it. The sweep supersedes the ones not polled again within the grace.
 func (s *Service) RecoverAtStart(ctx context.Context) {
+	until := s.opts.Now().Add(s.opts.RestartGrace)
 	for _, approval := range s.pending(ctx) {
 		if approval.hooked() {
-			_, _ = s.settle(ctx, mustParse(approval.ID), StatusSuperseded, "", "", "crowsnest restarted while this was waiting; answer it in the terminal.")
+			id := mustParse(approval.ID)
+			s.mu.Lock()
+			s.restarted[id] = until
+			if _, ok := s.settled[id]; !ok {
+				s.settled[id] = make(chan struct{})
+			}
+			s.mu.Unlock()
 		}
 	}
 }
@@ -617,6 +787,11 @@ func toApproval(r store.ApprovalRecord) Approval {
 		ToolName: r.ToolName, ToolInput: json.RawMessage(r.ToolInput), Suggestions: json.RawMessage(r.Suggestions),
 		Risk: risk.Level(r.Risk), RiskReasons: reasons, Status: Status(r.Status), DecidedVia: r.DecidedVia, Note: r.Note,
 		StatusReason: r.StatusReason, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt, hookedFlag: r.Hooked,
+	}
+	if r.RuleIDs != "" {
+		for _, id := range strings.Split(r.RuleIDs, ",") {
+			approval.RuleIDs = append(approval.RuleIDs, "r_"+id)
+		}
 	}
 	if !r.SettledAt.IsZero() {
 		settled := r.SettledAt

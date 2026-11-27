@@ -181,6 +181,7 @@ func deleteJob(ctx context.Context, tx *sql.Tx, id int64) (bool, []string, error
 		{`DELETE FROM job_events WHERE job_id = ?`, id},
 		{`DELETE FROM questions WHERE job_id = ? AND status != 'open'`, ref},
 		{`DELETE FROM approvals WHERE job_id = ? AND status != 'pending'`, ref},
+		{`DELETE FROM approval_rules WHERE job_id = ?`, ref},
 		{`DELETE FROM agent_layers WHERE subject = ?`, ref},
 		{`DELETE FROM agent_instructions WHERE subject = ?`, ref},
 		{`DELETE FROM spend_turns WHERE subject = ?`, ref},
