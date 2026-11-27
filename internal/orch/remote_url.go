@@ -37,10 +37,22 @@ func ValidRemoteControlURL(url string) bool { return remoteControlURLPattern.Mat
 // Claude wraps the banner to the pane's width, breaking the URL anywhere (at 44 columns it was
 // ".../co" then "de/session_…" on the next line, indented), so a URL that runs to the end of a
 // line is continued with the first word of the next line while it is still incomplete.
+//
+// Only a URL that starts on a banner line, or within the few lines after it, is taken (R6-S10):
+// Claude's "/remote-control is active" line or the Remote Control panel's "available in the Claude
+// mobile app" line. A URL anywhere else in the pane is text an agent could have printed.
 func ParseRemoteControlURL(text string) string {
 	lines := strings.Split(text, "\n")
 	found := ""
+	bannerAt := -1
 	for i := 0; i < len(lines); i++ {
+		lower := strings.ToLower(lines[i])
+		if strings.Contains(lower, remoteControlBannerText) || strings.Contains(lower, remoteControlPanelText) {
+			bannerAt = i
+		}
+		if bannerAt < 0 || i-bannerAt > bannerReach {
+			continue
+		}
 		start := strings.Index(lines[i], "https://claude.ai/")
 		if start < 0 {
 			start = urlStartAtLineEnd(lines[i])
@@ -56,6 +68,14 @@ func ParseRemoteControlURL(text string) string {
 	}
 	return found
 }
+
+// The banner lines a pane URL must follow (R6-S10), lower case, and how many lines after one the
+// URL may start (it wraps at narrow widths).
+const (
+	remoteControlBannerText = "remote-control is active"
+	remoteControlPanelText  = "available in the claude mobile app"
+	bannerReach             = 2
+)
 
 // urlStartAtLineEnd finds a URL cut short before "claude.ai/" by the line end ("https://cla").
 func urlStartAtLineEnd(line string) int {
