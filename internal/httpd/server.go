@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/approvals"
-	"github.com/jclement/crowsnest/internal/attention"
 	"github.com/jclement/crowsnest/internal/attach"
+	"github.com/jclement/crowsnest/internal/attention"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
