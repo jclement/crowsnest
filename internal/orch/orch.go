@@ -91,12 +91,12 @@ type Status struct {
 	RemoteControlNote string `json:"remote_control_note,omitempty"`
 	// RemoteControlURL is the session's https://claude.ai/code/session_… link, once Claude has
 	// shown it (remote_control.go); "" until then, after every start, and when it is off.
-	RemoteControlURL string    `json:"remote_control_url,omitempty"`
+	RemoteControlURL string `json:"remote_control_url,omitempty"`
 	// InstructionsStale: what crowsnest would start it with now (prompt file, hooks, settings,
 	// MCP config) differs from what its running Claude was started with (freshness.go).
-	InstructionsStale bool `json:"instructions_stale,omitempty"`
-	Restarts         int       `json:"restarts"` // automatic restarts in the last hour
-	UpdatedAt        time.Time `json:"updated_at"`
+	InstructionsStale bool      `json:"instructions_stale,omitempty"`
+	Restarts          int       `json:"restarts"` // automatic restarts in the last hour
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // KV is the small persistent store the orchestrator keeps its session id in (store.Store).
