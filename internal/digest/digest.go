@@ -261,6 +261,18 @@ func (s *Service) Start(ctx context.Context) (StartResult, error) {
 	return StartResult{Day: day, Source: "crowsnest", Note: "Crowsnest wrote it from its own records."}, nil
 }
 
+// SeedDemo stores today's plain digest in the history without an Inbox notice (--demo shows one
+// digest in the Digests list without changing the Inbox's counts).
+func (s *Service) SeedDemo(ctx context.Context) error {
+	now := s.opts.Now().In(s.opts.Location)
+	facts, err := s.Facts(ctx, now)
+	if err != nil {
+		return err
+	}
+	_, err = s.opts.Store.InsertDigest(ctx, store.DigestRecord{Day: facts.Day, At: s.opts.Now(), Source: "crowsnest", BodyMD: Render(facts)})
+	return err
+}
+
 // Submit is the orchestrator's digest for day (from `crowsnest digest submit`). Only a day it was
 // asked for is taken, once.
 func (s *Service) Submit(ctx context.Context, day, body string) error {

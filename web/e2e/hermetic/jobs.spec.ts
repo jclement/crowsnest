@@ -94,7 +94,8 @@ test("the board puts needs-you first, then stuck, then running, then finished to
   // fall on depends on the time of day (and the timezone) the test runs in. Each one must be in
   // exactly one of the two places, today's list or behind the toggle, never lost. Asserting an
   // exact "Finished today" list made this test fail whenever it ran more than 5 h after midnight.
-  const finished = ["Fix the flaky SSE reconnect test", "Port the TUI to Bubble Tea v2"];
+  // The landing demo adds a job ready to land and the first review round of the job in review.
+  const finished = ["Fix the flaky SSE reconnect test", "Port the TUI to Bubble Tea v2", "Retry widget fetches with back-off", "Review job j_12 (round 1)"];
   const today = (await page.getByRole("region", { name: "Finished today" }).count()) > 0 ? await sectionTitles(page, "Finished today") : [];
   expect(today.every((title) => finished.includes(title))).toBe(true);
   const behindToggle = finished.filter((title) => !today.includes(title));
