@@ -36,6 +36,8 @@ const cartView: FileView = {
   new_text: "/* items */\nconst total = price * quantity;\n",
 };
 
+const noComments = { subject: "j_7", kind: "job", label: "j_7: Checkout", comments: [], drafts: 0, sent: 0, outdated: 0 };
+
 function setup(files: DiffFile[], options: { onMark?: (call: Call) => DiffFile[] } = {}) {
   let current = files;
   const calls = stubApi((call) => {
@@ -55,6 +57,7 @@ function setup(files: DiffFile[], options: { onMark?: (call: Call) => DiffFile[]
       if (call.path.includes("since=1")) return { body: { data: { ...cartView, path, hash, since: true, diff: "@@ -2,1 +2,2 @@\n const total = price * quantity;\n+export const fresh = 1;\n", old_text: cartView.new_text, new_text: cartView.new_text + "export const fresh = 1;\n" } } };
       return { body: { data: { ...cartView, path, hash } } };
     }
+    if (call.path.startsWith("/changes/jobs/j_7/comments")) return { body: { data: noComments } };
     if (call.path.startsWith("/changes/jobs/j_7")) return { body: { data: summary(current) } };
     return undefined;
   });

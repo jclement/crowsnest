@@ -84,6 +84,8 @@ export interface ReviewView {
   not_verified: string[];
   reviews: ReviewRound[];
   land: LandOptions;
+  /** Settings require every file viewed before Land: unsent diff comments are named in Land's confirmation. */
+  require_viewed?: boolean;
 }
 
 /** GET /jobs/{id}/review/diff?path=. */

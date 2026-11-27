@@ -5,8 +5,13 @@
 // Every line keeps its +/− sign and a spoken name; colour is never the only cue. Text only:
 // tokens are rendered as text nodes, never HTML. Invisible and direction-changing characters are
 // drawn as chips, and the file says how many it has (R7-S3).
-import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+//
+// With a comment layer (DiffViewer passes one), the line numbers are buttons: click one to select
+// the line, shift-click or drag for a range (on a phone, tap one, then tap another to extend), each
+// hunk has "Ask for change here", lines with a note get a marker in the gutter, and the notes and
+// the open editor are drawn after the last line they cover (comments.ts says where).
+import { ArrowDown, ArrowUp, ChevronsUpDown, MessageSquarePlus } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import {
   applyEmphasis,
@@ -24,6 +29,7 @@ import {
   type Range,
   type Token,
 } from "../../lib/changes";
+import { hunkRange, inSelection, sideOf, type DiffComment, type Selection } from "../../lib/comments";
 import { findHidden } from "../../lib/hidden";
 import { highlightLines, highlightOne } from "../../lib/syntax";
 import { HiddenWarning, Revealed } from "../ui/Revealed";
@@ -36,9 +42,30 @@ export interface FileDiffProps {
   wrap: boolean;
   /** Asks the server for more context when the file's text is not available to expand from. */
   onMoreContext: (lines: number) => void;
+  /** Line comments: selection, markers, notes and the editor (none: plain numbers). */
+  comments?: CommentLayer;
 }
 
-export function FileDiff({ view, split, wrap, onMoreContext }: FileDiffProps) {
+/** What FileDiff needs to draw and take line comments on one file. */
+export interface CommentLayer {
+  selection: Selection | null;
+  /** Lines of each side that carry a note. */
+  marked: { old: Set<number>; new: Set<number> };
+  /** Notes drawn in the rows, by "side:last line". */
+  inline: Map<string, DiffComment[]>;
+  /** The open editor goes after this line. */
+  editorAt: { side: "old" | "new"; line: number } | null;
+  renderEditor: () => ReactNode;
+  renderComments: (comments: DiffComment[]) => ReactNode;
+  /** A click or tap on a line number; extend asks to move the selection's end there. */
+  onLine: (side: "old" | "new", line: number, extend: boolean) => void;
+  /** "Ask for change here" on a hunk: select its lines and open the editor. */
+  onHunk: (range: { side: "old" | "new"; start: number; end: number }) => void;
+  /** On a phone a tap on another line extends an open selection. */
+  phone: boolean;
+}
+
+export function FileDiff({ view, split, wrap, onMoreContext, comments }: FileDiffProps) {
   const [expansions, setExpansions] = useState<Record<number, Expansion>>({});
   const [shown, setShown] = useState(CHUNK);
   const language = languageFor(view.path);
@@ -54,6 +81,14 @@ export function FileDiff({ view, split, wrap, onMoreContext }: FileDiffProps) {
   // The whole diff text is scanned, not only the rows rendered so far: a hidden character far down
   // must be announced before the reviewer ticks Viewed.
   const hidden = useMemo(() => findHidden(view.path, view.diff), [view.path, view.diff]);
+  // The rows reuse the hunks' line objects, so a hunk's first line finds its "Ask for change here".
+  const hunkStarts = useMemo(() => new Map(hunks.map((hunk, index) => [hunk.lines[0], index])), [hunks]);
+  const dragging = useRef<"old" | "new" | null>(null);
+  useEffect(() => {
+    const stop = () => (dragging.current = null);
+    window.addEventListener("pointerup", stop);
+    return () => window.removeEventListener("pointerup", stop);
+  }, []);
   const sentinel = useRef<HTMLTableRowElement>(null);
   useEffect(() => {
     const element = sentinel.current;
@@ -84,6 +119,79 @@ export function FileDiff({ view, split, wrap, onMoreContext }: FileDiffProps) {
     return <p className="px-3 py-2 text-xs text-muted">{view.since ? "No change in the text since you viewed it." : "No text changes (a mode change or an empty file)."}</p>;
   }
   const visible = rows.slice(0, shown);
+  const columns = split ? 6 : 4;
+  const number = (n: number, side: "old" | "new", className?: string) =>
+    comments ? (
+      <NumberButton
+        key={side}
+        n={n}
+        side={side}
+        selected={inSelection(comments.selection, view.path, side, n)}
+        marked={n > 0 && comments.marked[side].has(n)}
+        className={className}
+        onPress={(extend) => comments.onLine(side, n, extend || (comments.phone && comments.selection?.path === view.path && comments.selection.side === side))}
+        onDragStart={() => (dragging.current = side)}
+        onDragOver={() => dragging.current === side && comments.onLine(side, n, true)}
+      />
+    ) : (
+      <LineNumber key={side} n={n} className={className} />
+    );
+  // Rows after a line: its notes, then the editor if it is open there.
+  const after = (keys: [("old" | "new"), number][], index: number): ReactNode[] => {
+    if (!comments) return [];
+    const extra: ReactNode[] = [];
+    for (const [side, line] of keys) {
+      if (line <= 0) continue;
+      const notes = comments.inline.get(`${side}:${line}`);
+      if (notes) {
+        extra.push(
+          <tr key={`notes-${index}-${side}`} data-comment-row="">
+            <td colSpan={columns} className="bg-surface px-2 py-1.5 font-sans">
+              {comments.renderComments(notes)}
+            </td>
+          </tr>,
+        );
+      }
+      if (comments.editorAt && comments.editorAt.side === side && comments.editorAt.line === line) {
+        extra.push(
+          <tr key={`editor-${index}-${side}`} data-comment-row="">
+            <td colSpan={columns} className="bg-surface px-2 py-1.5 font-sans">
+              {comments.renderEditor()}
+            </td>
+          </tr>,
+        );
+      }
+    }
+    return extra;
+  };
+  const hunkBar = (first: DiffLine | null | undefined, index: number): ReactNode => {
+    if (!comments || !first) return null;
+    const at = hunkStarts.get(first);
+    if (at === undefined) return null;
+    const hunk = hunks[at];
+    if (!hunk) return null;
+    const range = hunkRange(hunk);
+    return (
+      <tr key={`hunk-${at}-${index}`} className="bg-accent/5 text-muted">
+        <td colSpan={columns} className="px-1 py-0">
+          <div className="flex flex-wrap items-center gap-2 font-sans text-2xs">
+            <button
+              type="button"
+              aria-label={`Ask for change here: the change at ${range.side === "old" ? "old " : ""}line ${range.start}`}
+              onClick={() => comments.onHunk(range)}
+              className="inline-flex min-h-11 items-center gap-1 rounded px-1.5 hover:bg-hover hover:text-heading md:min-h-6"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+              Ask for change here
+            </button>
+            <span className="font-mono">
+              @@ −{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
+            </span>
+          </div>
+        </td>
+      </tr>
+    );
+  };
   const codeClass = cn("pr-3 align-top", wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre");
   const gapRow = (gap: Gap, hidden: number, header: string | undefined, key: string, columns: number) => (
     <tr key={key} className="bg-accent/5 text-muted">
@@ -133,40 +241,65 @@ export function FileDiff({ view, split, wrap, onMoreContext }: FileDiffProps) {
         )}
         <tbody>
           {visible.map((row, index) => {
-            if (row.type === "gap") return gapRow(row.gap, row.hidden, row.header, `gap-${row.gap.index}-${index}`, split ? 6 : 4);
+            if (row.type === "gap") return gapRow(row.gap, row.hidden, row.header, `gap-${row.gap.index}-${index}`, columns);
             const previous = visible[index - 1];
             const startsChange = row.change !== null && !(previous && previous.type !== "gap" && previous.change === row.change);
             if (row.type === "line") {
               const line = row.line;
               const side = line.kind === "del" ? "old" : "new";
+              const picked = !!comments && (inSelection(comments.selection, view.path, "old", line.old) || inSelection(comments.selection, view.path, "new", line.new));
               return (
-                <tr key={index} data-change={row.change ?? undefined} data-change-start={startsChange ? "" : undefined} className={rowTone(line.kind)}>
-                  <LineNumber n={line.old} />
-                  <LineNumber n={line.new} />
-                  <Sign kind={line.kind} />
-                  <td className={codeClass}>
-                    <Code tokens={tokensOf(line, side)} emphasis={row.emphasis} kind={line.kind} />
-                    {line.noNewline && <NoNewline />}
-                  </td>
-                </tr>
+                <Fragment key={index}>
+                  {hunkBar(line, index)}
+                  <tr data-change={row.change ?? undefined} data-change-start={startsChange ? "" : undefined} className={rowTone(line.kind)}>
+                    {line.old > 0 ? number(line.old, sideOf(line, "old")) : <LineNumber n={0} />}
+                    {line.new > 0 ? number(line.new, sideOf(line, "new")) : <LineNumber n={0} />}
+                    <Sign kind={line.kind} />
+                    <td className={cn(codeClass, picked && selectedCode)}>
+                      <Code tokens={tokensOf(line, side)} emphasis={row.emphasis} kind={line.kind} />
+                      {line.noNewline && <NoNewline />}
+                    </td>
+                  </tr>
+                  {after(
+                    [
+                      ["old", line.kind === "add" ? 0 : line.old],
+                      ["new", line.kind === "del" ? 0 : line.new],
+                    ],
+                    index,
+                  )}
+                </Fragment>
               );
             }
             const { left, right } = row;
             const same = left && right && left === right;
+            const leftTone = left ? rowTone(same ? "context" : left.kind) : "bg-surface-sunken";
+            const rightTone = right ? rowTone(same ? "context" : right.kind) : "bg-surface-sunken";
+            const leftPicked = !!comments && !!left && inSelection(comments.selection, view.path, "old", left.old);
+            const rightPicked = !!comments && !!right && inSelection(comments.selection, view.path, "new", right.new);
             return (
-              <tr key={index} data-change={row.change ?? undefined} data-change-start={startsChange ? "" : undefined}>
-                <LineNumber n={left?.old ?? 0} className={left ? rowTone(same ? "context" : left.kind) : "bg-surface-sunken"} />
-                <Sign kind={left ? (same ? "context" : left.kind) : null} className={left ? rowTone(same ? "context" : left.kind) : "bg-surface-sunken"} />
-                <td className={cn(codeClass, "border-r border-border", left ? rowTone(same ? "context" : left.kind) : "bg-surface-sunken")}>
-                  {left && <Code tokens={tokensOf(left, "old")} emphasis={row.leftEmphasis} kind={same ? "context" : left.kind} />}
-                </td>
-                <LineNumber n={right?.new ?? 0} className={right ? rowTone(same ? "context" : right.kind) : "bg-surface-sunken"} />
-                <Sign kind={right ? (same ? "context" : right.kind) : null} className={right ? rowTone(same ? "context" : right.kind) : "bg-surface-sunken"} />
-                <td className={cn(codeClass, right ? rowTone(same ? "context" : right.kind) : "bg-surface-sunken")}>
-                  {right && <Code tokens={tokensOf(right, "new")} emphasis={row.rightEmphasis} kind={same ? "context" : right.kind} />}
-                  {right?.noNewline && <NoNewline />}
-                </td>
-              </tr>
+              <Fragment key={index}>
+                {hunkBar(left ?? right, index) ?? (left !== right ? hunkBar(right, index) : null)}
+                <tr data-change={row.change ?? undefined} data-change-start={startsChange ? "" : undefined}>
+                  {left && left.old > 0 ? number(left.old, "old", leftTone) : <LineNumber n={0} className={leftTone} />}
+                  <Sign kind={left ? (same ? "context" : left.kind) : null} className={leftTone} />
+                  <td className={cn(codeClass, "border-r border-border", leftTone, leftPicked && selectedCode)}>
+                    {left && <Code tokens={tokensOf(left, "old")} emphasis={row.leftEmphasis} kind={same ? "context" : left.kind} />}
+                  </td>
+                  {right && right.new > 0 ? number(right.new, "new", rightTone) : <LineNumber n={0} className={rightTone} />}
+                  <Sign kind={right ? (same ? "context" : right.kind) : null} className={rightTone} />
+                  <td className={cn(codeClass, rightTone, rightPicked && selectedCode)}>
+                    {right && <Code tokens={tokensOf(right, "new")} emphasis={row.rightEmphasis} kind={same ? "context" : right.kind} />}
+                    {right?.noNewline && <NoNewline />}
+                  </td>
+                </tr>
+                {after(
+                  [
+                    ["old", left && left.kind !== "add" ? left.old : 0],
+                    ["new", right && right.kind !== "del" ? right.new : 0],
+                  ],
+                  index,
+                )}
+              </Fragment>
             );
           })}
           {shown < rows.length && (
@@ -191,6 +324,62 @@ function rowTone(kind: DiffLine["kind"]): string {
 
 function LineNumber({ n, className }: { n: number; className?: string }) {
   return <td className={cn("w-10 select-none px-1 text-right align-top text-muted", className)}>{n > 0 ? n : ""}</td>;
+}
+
+/** The selected lines' code: a bar down the left edge, so the selection reads without colour too. */
+const selectedCode = "shadow-[inset_3px_0_0_var(--color-accent)] bg-accent/10";
+
+/**
+ * A line number that selects its line: a mouse press selects (shift extends) and a drag over
+ * other numbers of the same side extends; a tap or a key press goes through the click.
+ */
+function NumberButton({ n, side, selected, marked, className, onPress, onDragStart, onDragOver }: {
+  n: number;
+  side: "old" | "new";
+  selected: boolean;
+  marked: boolean;
+  className?: string;
+  onPress: (extend: boolean) => void;
+  onDragStart: () => void;
+  onDragOver: () => void;
+}) {
+  const byMouse = useRef(false);
+  return (
+    <td className={cn("w-10 select-none p-0 text-right align-top", selected ? "bg-accent/25" : className)}>
+      <button
+        type="button"
+        data-line={n}
+        data-side={side}
+        aria-pressed={selected}
+        aria-label={`Line ${n}, ${side} side${marked ? ", has a comment" : ""}`}
+        title="Select to comment (shift-click or drag for a range; c to comment)"
+        onPointerDown={(event) => {
+          byMouse.current = event.pointerType === "mouse";
+          if (!byMouse.current || event.button !== 0) return;
+          event.preventDefault(); // no text selection while dragging across numbers
+          onPress(event.shiftKey);
+          onDragStart();
+        }}
+        onPointerEnter={(event) => {
+          if (event.pointerType === "mouse" && event.buttons === 1) onDragOver();
+        }}
+        onClick={(event) => {
+          if (byMouse.current) {
+            byMouse.current = false;
+            return; // the press already selected
+          }
+          onPress(event.shiftKey);
+        }}
+        className={cn(
+          "inline-flex w-full items-center justify-end gap-0.5 px-1 text-muted hover:bg-accent/15 hover:text-heading focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
+          selected && "font-semibold text-heading",
+        )}
+      >
+        {marked && <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />}
+        {n}
+      </button>
+    </td>
+  );
 }
 
 const signWords = { add: "added", del: "removed", context: "unchanged" } as const;

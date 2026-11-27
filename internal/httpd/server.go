@@ -186,6 +186,9 @@ type Deps struct {
 	// --demo job edit a file at once (the e2e's handle on "the file changes").
 	Changes   *changes.Service
 	DemoTouch func(ctx context.Context, jobID string) error
+	// RequireViewed reports Settings' "Require all files viewed before Land" now (live); the
+	// Review tab names unsent diff comments in Land's confirmation when it is on. Nil: off.
+	RequireViewed func() bool
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).

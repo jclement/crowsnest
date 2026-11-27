@@ -97,7 +97,14 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 		s.writeJobError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusOK, view)
+	writeData(w, http.StatusOK, reviewResponse{ReviewView: view, RequireViewed: s.deps.RequireViewed != nil && s.deps.RequireViewed()})
+}
+
+// reviewResponse is GET /jobs/{id}/review: the jobs service's view, and whether Settings require
+// every file viewed before Land (then unsent diff comments are named in Land's confirmation).
+type reviewResponse struct {
+	jobs.ReviewView
+	RequireViewed bool `json:"require_viewed"`
 }
 
 func (s *Server) handleReviewDiff(w http.ResponseWriter, r *http.Request) {

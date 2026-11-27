@@ -137,6 +137,14 @@ func demoKeepChanging(ctx context.Context, s *Service) {
 	}
 }
 
+// DemoDiffReady reports the diff demo's running job and its worktree once the repository and
+// worktrees exist (ok false before, or without the demo).
+func DemoDiffReady() (jobID, dir string, ok bool) {
+	demoDiff.mu.Lock()
+	defer demoDiff.mu.Unlock()
+	return demoDiff.jobID, demoDiff.dir, demoDiff.ready
+}
+
 // DemoDiffTouch makes the running demo job "edit" its cart now: one more line in web/src/cart.ts,
 // recorded on its timeline as activity, so the diff view reads it again and a viewed mark on the
 // file clears. Only the diff demo's running job can be touched.

@@ -54,7 +54,8 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   attention: [queryKeys.attention, queryKeys.now],
   // A diff changed or its marks did (6.21): the summaries refetch; a file's own diff is keyed by
   // its content hash, so only files that changed are fetched again.
-  changes: [["changes", "summary"], ["changes", "project"], ["changes", "progress"]],
+  // A comment change publishes one too (comments-queries.ts): the comment lists refetch.
+  changes: [["changes", "summary"], ["changes", "project"], ["changes", "progress"], ["changes", "comments"]],
 };
 
 /**
