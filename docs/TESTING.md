@@ -1,7 +1,8 @@
 # Testing crowsnest
 
 What is tested, how to run it, what each tier proves, what nothing proves yet, and the bugs the
-M9 test campaign (2026-11-26) found and fixed. DESIGN.md section 15 is the strategy; this is the
+M9 test campaign (2026-11-26) and the real-Claude browser campaign (`wip/e2e-claude`,
+2026-11-27) found and fixed. DESIGN.md section 15 is the strategy; this is the
 working guide.
 
 ## The tiers
@@ -10,10 +11,10 @@ working guide.
 |---|---|---|---|---|
 | Go unit and Vitest | `mise run test` (part of `mise run check`) | nothing | ~1 min | yes |
 | Go integration (real herdr) | `mise run test:integration` | herdr | ~20 s | no |
-| Hermetic browser suite | `mise run e2e` | Playwright browsers (`npx --prefix web playwright install chromium webkit`) | ~75 s locally | yes, job `e2e` |
+| Hermetic browser suite | `mise run e2e` | Playwright browsers (`npx --prefix web playwright install chromium webkit`) | ~5 min under `heavy` | yes, job `e2e` |
 | Real-herdr browser suite | `mise run e2e:real` | herdr | ~20 s | no |
-| Real Claude, Go | `mise run test:claude` | herdr, Claude logged in; a few cents | ~2 min | no |
-| Real Claude, browser | `mise run e2e:claude` | herdr, Claude logged in; a few cents | ~1.5 min | no |
+| Real Claude, Go | `mise run test:claude` | herdr, Claude logged in; haiku | ~8 min | no |
+| Real Claude, browser | `mise run e2e:claude` | herdr, Claude logged in, mise; haiku, about $1.60 API-equivalent a run (each spec prints its measured spend) | ~5 min | no |
 | Clean clone builds | `mise run test:clone` | network for `npm ci` | ~1 min | no |
 | Screenshots | `mise run screenshots`, `screenshots:chat`, `screenshots:inbox`, `screenshots:jobs` | Playwright | seconds each | no |
 
@@ -28,8 +29,12 @@ HERDR_SOCKET_PATH …`); the helpers scrub them for every child anyway.
 - `web/e2e/support/instance.ts` gives every instance its own scratch directory under `/tmp`
   (short, for unix socket paths), and a throwaway `HOME` for real herdr, except the real-Claude
   suite, which needs the real `HOME` for Claude's login (as `test:claude` does).
-- The real-Claude suites work only in scratch directories inside the worktree (which Claude
-  already trusts) and remove them at the end.
+- The real-Claude suites work only in scratch directories inside the worktree and remove them at
+  the end. A scratch git repository is its own root, so Claude asks its folder-trust question
+  there; `e2e:claude` answers it from the dialog's decision packet, as a person would. Builder
+  jobs get herdr worktrees where herdr puts them (`~/.herdr/worktrees/<scratch repo>/…`, the real
+  HOME): Land removes them, and each spec removes its scratch repository's leftovers through
+  `git worktree list`. Answering trust records the scratch folders in `~/.claude.json`.
 
 ## What each tier proves
 
@@ -38,7 +43,7 @@ HERDR_SOCKET_PATH …`); the helpers scrub them for every child anyway.
 Playwright against `./bin/crowsnest --demo`. Every test starts its own instance (about a third
 of a second), so tests run in parallel (four workers locally, three in CI) and never see each
 other's answers. Three projects: `desktop-chromium` (1440×900), `mobile-chromium` and
-`mobile-webkit` (375×812, touch). Last full run: **202 passed, 50 skipped, 74 s**. The skips are
+`mobile-webkit` (375×812, touch). Last full run (2026-11-27, `wip/e2e-claude`, under `heavy`): **529 passed, 95 skipped, 5.2 min**. The skips are
 deliberate: desktop-only tests (the 20 s sign-out heartbeat, the Node-side refusals, talk mode
 with Chromium's fake microphone, dark-theme axe) and phone-only ones (the key bar, the 375 px
 layout checks).
@@ -59,6 +64,19 @@ layout checks).
 
 What it cannot prove: anything herdr or Claude does. The demo's fake herdr and scripted
 orchestrator stand in for both.
+
+The specs added since M9, in one line each (their file headers say more):
+
+| Spec | Journeys |
+|---|---|
+| `now.spec.ts` | Now and the one attention queue at 390x844 and 1440: every obligation found from Now with its project and job; one number (badge, title, Now, Inbox, tray, API) agrees; answering a question and a low approval in place; "since you left" per browser; the nav order |
+| `phone.spec.ts` | the decision packet from a push link (the answer bar in reach, the note kept through a reload, rotation and backgrounding, stale after the answer, the receipt shown), approvals from their packets, a diff's packet, rescue without a terminal |
+| `tray.spec.ts` | the needs-you tray on every view at both sizes without covering the composer, the terminal or the nav; Allow once, Deny with a note, a dangerous allow's second confirmation, a question from the tray; the keyboard path; axe |
+| `landing.spec.ts` | the Review tab and Merge with its confirmation; review rounds; a job waiting for a slot and Start anyway; pause and resume; the digest; the worktree sweep; throttling settings |
+| `accept.spec.ts` | Accepted, Unverified and Check failed on cards and the job; crowsnest's evidence and Run the check again; Land offers no override for accepted work; budgets raised; a blocked job's owner and wake-up; the fleet's usage limit banner |
+| `policy.spec.ts` | a project's approval rules (preview, add, remove), Allow and remember for this job, a batch allow, the auto-allowed call on the timeline |
+| `palette.spec.ts`, `attachments.spec.ts`, `push.spec.ts`, `remote.spec.ts`, `spend.spec.ts`, `doctor.spec.ts`, `ops.spec.ts`, `phone-voice.spec.ts` | the command palette; attachments in Chat, jobs and questions; Web Push against a fake push service; Open in Claude links; spend chips, charts and the breakdown sheet; the guided first run and System page on scripted machines; backups, machines and Tailscale sign-in on System; a job by voice from Now with a fake ElevenLabs |
+
 
 ### Real-herdr browser suite (`web/e2e/real`, `mise run e2e:real`)
 
@@ -83,15 +101,22 @@ events, with a revision bump and a published `fleet` event.
 `test:claude` (Go): orchestrator start, prompt, Restart, New; a manual poke; the `ask` MCP tool;
 the stop test (an undeclared stop refused, `done`, ask → answer → done).
 
-`e2e:claude` (browser, haiku): a chat reply renders; a draft typed into the orchestrator's input
-through herdr is detected and refuses a send with 409 DRAFT, and is gone when cleared; a job
-given from the Jobs box (tester role, a scratch git repo) runs to done and shows its result and
-verified list; a job asks in the Inbox, the answer (by label) is applied and the job finishes; a
-job told to stop without declaring gets a nudge on its timeline (then cancelled from the UI);
-`crowsnest ask --wait` run by the orchestrator in its pane blocks, is answered in the Inbox
-("the agent was waiting and got the answer at once"), and the orchestrator reports the answer.
+`e2e:claude` (browser, haiku; `web/e2e/claude`, shared helpers in `rig.ts`). Each spec file
+starts its own crowsnest on a throwaway session over its own scratch git repository, with
+`--review` set explicitly (`auto` would pick Codex when it is installed). The suite plays the
+human only through the browser.
+
+| Spec | Journeys |
+|---|---|
+| `land.spec.ts` (`--review claude`; the repo has a `mise` `check` task) | a job given from Now for a project ("As a job", builder: its own herdr worktree), Now's project row counts it running, its card is in progress on the project's board; the agent commits and calls done; crowsnest's check passes, a Claude reviewer approves, the job is Accepted with its evidence pinned to HEAD; the Review tab shows one commit ahead of main and the file's diff; Merge's confirmation names the reviewed commit; main has the commit, the job is merged, the worktree is gone and the timeline says "Teardown finished". A builder whose done fails the check (answer.txt must be 42; the brief says 41): "Not accepted" on the timeline, the agent fixes it, Accepted with "passed · exit 0" and the card says Accepted |
+| `supervise.spec.ts` (tester jobs) | at 390x844: a question asked with the ask tool reaches Now's queue, its row opens the decision packet, the answer (red, with a note) goes in from the answer bar, the same link then shows the outcome and the receipt turns **Received** on the page without a reload, and the job applies the answer; an undeclared stop is nudged ("Nudged" on the timeline), then cancelled from the UI; a turn ended with a question in prose is refused (`prose_question` nudge) and the agent asks it for real (in the Inbox); pause from the Account menu holds a job given meanwhile ("Waiting to start … paused", still queued, no pane), Resume lets it launch and run to done |
+| `approvals.spec.ts` (`--permission-mode manual`) | a Bash call becomes a pending approval (the job `needs_you`/`approval-tool`), its card in the tray shows the command, Allow once runs it and the job ends done (follow-up requests allowed from their decision packets); a second call denied from the tray with a note: the agent quotes the note in its result and the file is never written. The terminal is never touched |
+| `lead.spec.ts` (no orchestrator) | a project created in the UI from the scratch repo; Start lead; the lead stops at the folder-trust prompt, its card says "Open lead-orchard's terminal", the prompt is answered from Needs you; the lead comes up idle; Remote Control is active and the card offers Open in Claude (a claude.ai link, new tab); Chat with lead gets a reply; a job given "To the lead" from the board is held by `lead-orchard` and finished |
+| `claude.spec.ts` (with the orchestrator) | a chat reply renders; a draft typed into the orchestrator's input through herdr is detected and refuses a send with 409 DRAFT, and is gone when cleared; `crowsnest ask --wait` run by the orchestrator in its pane blocks, is answered in the Inbox, the receipt is Received at once (the long-poll), and the orchestrator reports the answer |
+| `firstrun.spec.ts` | a true first run: setup link → password → checklist → Start → the folder-trust card on the checklist → Chat with the greeting |
+
 Real screens it captured are Go fixtures: `internal/fleet/testdata/screens/real_claude_2.1.332_*`
-(the idle prompt, a typed draft, the folder-trust prompt).
+(the idle prompt, a typed draft, the folder-trust prompt). Screenshots: `web/screenshots/e2e-claude-*.png`.
 
 The project lead (`cmd/crowsnest/lead_integration_test.go`) runs the built binary with
 `--no-orchestrator` on a throwaway session: the lead knows a codeword only its project's
@@ -156,8 +181,15 @@ it once in three runs).
 - **Rate-limit and crash recovery against real Claude.** StopFailure (limit, server error), a
   dying agent restarted with `--resume`, compaction re-injection: unit tests with a fake clock
   only.
-- **Permission dialogs from real Claude.** None appeared in the runs (`auto` mode let every
-  tool through); the hand-made permission fixtures stand. The real trust prompt was captured.
+- **Permission dialogs from real Claude in the terminal.** `approvals.spec.ts` runs in `manual`
+  mode, but the PermissionRequest hook answers before the dialog matters; nobody presses the
+  terminal's dialog. The hand-made permission fixtures stand. The real trust prompt was captured.
+- **Codex as the reviewer.** `--review auto` picks Codex when it is installed; the suites set
+  `claude` or `off`.
+- **Land's pull request and discard, a rebase job, budgets in the browser, the usage limit**: the
+  Go real-Claude tests and the hermetic suite only (`test:claude` has the budget stop; nothing
+  real opens a pull request).
+- **Voice, push notifications and the phone's lock screen against real agents**: hermetic only.
 - **Linux.** Every local tier ran on macOS (quark). CI runs `check` and the hermetic suite on
   Ubuntu; the herdr and Claude tiers have never run on Linux.
 - **The login rate limit's global cap** (20 a minute across IPs) and the 128-connection cap:
@@ -167,7 +199,8 @@ it once in three runs).
 - **First-run setup on real herdr.** The hermetic spec and the Go serve test run setup against
   the fake herdr; on real herdr it was proved through the devbox image (REPORT of wip/setup), not
   by a suite.
-- **The `--permission-mode default` path** for `brief.md` and the Bash tool: not run.
+- **What a cancelled or failed job's open questions become**: they stay open in Needs you (see
+  REPORT of `wip/e2e-claude`); nothing asserts either way.
 
 ## Bugs found and fixed by the campaign
 
@@ -180,15 +213,25 @@ it once in three runs).
 | 5 | Pressing an option on a dialog of an agent herdr detected but did not start by name (any Claude started by hand) was always a 502: `agent.send_keys` answers `agent_not_ready` | `e2e/real/herdr.spec.ts` | `3b1a916`: the press falls back to `pane.send_keys` (same bytes, already bound to the screen hash) |
 | 6 | A send from Chat while crowsnest was typing into the same pane (a poke, an answer, a brief) read the half-typed text as someone's draft and was refused with 409 DRAFT; the message was never sent | `e2e:claude` (2 of 4 runs before the fix) | `420c350`: one typist per pane in `orch.Prompt` (the draft check and the typing under a per-pane lock) |
 
+Found by the real-Claude browser campaign (`wip/e2e-claude`):
+
+| # | Bug | Found by | Fix |
+|---|---|---|---|
+| 7 | After Land merged a branch, the whole app fell to "Something went wrong!": a Review refetch landing between the merge and the teardown got `"files": null` (`landing.Order` turned an empty list into nil) and the Review tab read `files.length`. The demo's land is instant, so the hermetic suite never refetched in that window | `land.spec.ts` | `82151d3`: `Order` always returns a list; a Go test merges a branch and checks the JSON |
+| 8 | `--permission-mode default` (the mode DESIGN.md 8.7 names, and still taken by Claude 2.1.332) stopped crowsnest at start; a project's permission mode refused `manual`, the name the flag offers | `approvals.spec.ts` | `2abd7cd`: both take both |
+| 9 | An agent that took its answer and called done inside one 15 s receipt interval left the live pass before its transcript was read: its answer said "Delivered: not yet seen" for good, with "Did it arrive?" offered | `supervise.spec.ts` (the receipt on the decision packet) | `b27cd10`: the tick also reads the transcripts of finished jobs with an answer delivered in the last hour |
+| 10 | A lead stopped at its start-up prompt said "Open the orchestrator's terminal and answer it" | `lead.spec.ts` | `e37490a`: the detail names the agent and points at its card under Needs you |
+
 Also fixed: the demo seeded an "unresponsive" job with no agent, so its Nudge could only fail
 (`cd47723`); the chat screenshot spec counted a reply the demo made on its own (`c7ca910`).
 
 ## Found, not fixed (in DESIGN.md section 20)
 
-- Claude 2.1.332's folder-trust prompt is unnumbered; its card offers only the terminal.
 - The orchestrator is poked about job agents of jobs the human gave, and about jobs already
   finished, costing a turn each.
-- The Jobs form has no model field.
+- The Jobs form has no model field (the real-Claude suite adds `model: haiku` to the browser's
+  own POST /jobs).
+- A cancelled job's open question stays open in Needs you (REPORT of `wip/e2e-claude`).
 - The e2e code is not linted (`mise run lint` covers `web/src`); the repo's React-hooks rules
   misfire on Playwright fixtures.
 

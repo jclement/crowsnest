@@ -1,8 +1,8 @@
 // Playwright configuration for the real-Claude browser suite (`mise run e2e:claude`): opt-in and
-// paid (haiku, a few cents a run). One crowsnest serves a throwaway crowsnest-test-* herdr session
-// with a real orchestrator; the specs under e2e/claude drive it through the browser, one at a
-// time, with long timeouts (a Claude turn takes seconds to minutes). No retries: a retry would
-// spend tokens to hide a failure.
+// paid (haiku; about $1.60 API-equivalent a run, which each spec prints). Each spec file starts its
+// own crowsnest on a throwaway crowsnest-test-* herdr session (e2e/claude/rig.ts); the specs drive
+// them through the browser, one at a time, with long timeouts (a Claude turn takes seconds to
+// minutes). No retries: a retry would spend tokens to hide a failure.
 import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({

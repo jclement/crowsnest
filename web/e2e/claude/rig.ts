@@ -21,7 +21,7 @@ export const MODEL = process.env.CROWSNEST_E2E_MODEL ?? "haiku";
 /** Skips the file unless the suite was asked for and its tools are here. */
 export function realClaudeOnly(tools = ["herdr", "claude", "git"]) {
   const missing = tools.filter((tool) => spawnSync("sh", ["-c", `command -v ${tool}`], { env: scrubbedEnv() }).status !== 0);
-  test.skip(process.env.CROWSNEST_E2E_CLAUDE !== "1", "real-Claude suite: set CROWSNEST_E2E_CLAUDE=1 (mise run e2e:claude); it costs a few cents");
+  test.skip(process.env.CROWSNEST_E2E_CLAUDE !== "1", "real-Claude suite: set CROWSNEST_E2E_CLAUDE=1 (mise run e2e:claude); it spends real tokens (haiku)");
   test.skip(missing.length > 0, `not installed: ${missing.join(", ")}`);
 }
 

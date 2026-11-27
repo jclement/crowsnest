@@ -1,5 +1,5 @@
 // A true first run, end to end, with real herdr and real Claude (haiku; part of the opt-in
-// `mise run e2e:claude`, a few cents): crowsnest starts with no login and no data, prints a setup
+// `mise run e2e:claude`): crowsnest starts with no login and no data, prints a setup
 // link; the browser opens it, chooses a password, lands on the first-run checklist (already green
 // on a machine with herdr and a signed-in Claude), presses Start; the orchestrator starts in a
 // folder Claude has never seen, so Claude asks its one-time folder-trust question, which the

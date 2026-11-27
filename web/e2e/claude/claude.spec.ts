@@ -1,4 +1,4 @@
-// Real Claude through the browser (`mise run e2e:claude`; opt-in, a few cents of haiku): the
+// Real Claude through the browser (`mise run e2e:claude`; opt-in, haiku): the
 // orchestrator's journeys, against a real orchestrator in a throwaway herdr session.
 //
 //   - chat: a prompt from the Chat box gets a rendered reply; a draft typed at the terminal is
