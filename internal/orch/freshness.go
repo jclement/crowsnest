@@ -35,6 +35,8 @@ const (
 	// kvInstructionsNotice marks a resumed conversation whose instructions changed since.
 	kvConversationFingerprint = "conversation_fingerprint"
 	kvInstructionsNotice      = "instructions_notice"
+	// kvInstructionsRestartAt is when the agent was last restarted for new instructions.
+	kvInstructionsRestartAt = "instructions_restart_at"
 	// instructionCheckEvery spaces the comparisons (each renders the instructions).
 	instructionCheckEvery = 30 * time.Second
 	// instructionRestartGap is the least time between two restarts for new instructions.
@@ -108,6 +110,14 @@ func (o *Orchestrator) instructionsStale(ctx context.Context) (bool, error) {
 	return have != o.fingerprint(body), nil
 }
 
+// screenIsQuiet reports whether the agent's screen has crowsnest's recognised input box, empty,
+// and no dialog. A screen whose input box is not found counts as busy, not as "no draft" (R7-S13):
+// a screen crowsnest does not recognise must not get /exit typed into it.
+func (o *Orchestrator) screenIsQuiet(ctx context.Context, paneID string) bool {
+	screen, err := readScreen(ctx, o.opts.Client, paneID)
+	return err == nil && !screen.dialog.Present && screen.draft.InputFound && !screen.draft.Present
+}
+
 // checkInstructions compares, marks, and (with restart, from the watch) restarts a live agent
 // whose instructions changed at its next idle moment. The lifecycle lock is held.
 func (o *Orchestrator) checkInstructions(ctx context.Context, agent herdr.Agent, restart bool) {
@@ -119,6 +129,12 @@ func (o *Orchestrator) checkInstructions(ctx context.Context, agent herdr.Agent,
 	}
 	lastRestart := o.instructionsRestartAt
 	o.mu.Unlock()
+	// The gap between automatic restarts outlives a crowsnest restart (R7-S13).
+	if saved, err := o.opts.KV.GetKV(ctx, o.kvKey(kvInstructionsRestartAt)); err == nil {
+		if at, parseErr := time.Parse(time.RFC3339Nano, saved); parseErr == nil && at.After(lastRestart) {
+			lastRestart = at
+		}
+	}
 	if !due {
 		return
 	}
@@ -144,13 +160,19 @@ func (o *Orchestrator) checkInstructions(ctx context.Context, agent herdr.Agent,
 	case o.opts.HeldJobBusy != nil && o.opts.HeldJobBusy(ctx):
 		return
 	}
-	screen, err := readScreen(ctx, o.opts.Client, agent.PaneID)
-	if err != nil || screen.dialog.Present || screen.draft.Present {
-		return // a dialog or a draft in the input box: not now
+	if !o.screenIsQuiet(ctx, agent.PaneID) {
+		return
 	}
 	o.mu.Lock()
 	o.instructionsRestartAt = now
 	o.mu.Unlock()
+	_ = o.opts.KV.SetKV(ctx, o.kvKey(kvInstructionsRestartAt), now.UTC().Format(time.RFC3339Nano))
+	// Read the screen again right before /exit is typed: a human who started typing since the
+	// first look keeps their draft (R7-S13). Not atomic with the keystrokes, but the window is
+	// one herdr call, not the bookkeeping above.
+	if !o.screenIsQuiet(ctx, agent.PaneID) {
+		return
+	}
 	o.opts.Logger.Info("restarting for new instructions", "agent", o.agentName())
 	o.update(func(s *Status) { s.State, s.Detail = StateRestarting, "" })
 	var status Status

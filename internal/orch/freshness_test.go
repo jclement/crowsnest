@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/transcript"
@@ -73,6 +74,7 @@ func TestNewInstructionsRestartAnIdleAgent(t *testing.T) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.WriteFile(path, []byte("{}\n"), 0o600)
 	_ = f.SetStatus(first.PaneID, herdr.StatusIdle)
+	_ = f.SetScreen(first.PaneID, fleet.StripANSI(emptyInput), emptyInput) // idle: Claude's empty input box
 
 	rig.orch.Watch(ctx)
 	if len(f.Starts()) != 1 || rig.orch.Status().InstructionsStale {
@@ -119,6 +121,14 @@ func TestAdoptedAgentFromBeforeIsStale(t *testing.T) {
 		t.Fatal("restarted mid-turn")
 	}
 	_ = f.SetStatus(pane, herdr.StatusIdle)
+	// R7-S13: a screen whose input box crowsnest does not recognise is not "no draft".
+	_ = f.SetScreen(pane, "something crowsnest does not recognise", "something crowsnest does not recognise")
+	now.advance(time.Minute)
+	rig.orch.Watch(ctx)
+	if len(f.Starts()) != 0 {
+		t.Fatal("restarted with an unrecognised screen: /exit could land in a draft")
+	}
+	_ = f.SetScreen(pane, fleet.StripANSI(emptyInput), emptyInput)
 	now.advance(time.Minute)
 	rig.orch.Watch(ctx)
 	if len(f.Starts()) != 1 {

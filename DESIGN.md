@@ -1811,7 +1811,10 @@ a start) is compared; none recorded (an older crowsnest started it) counts as ch
 agent shows "Instructions changed since start" (the instructions card's banner and its Restart,
 `instructions_stale` on its status) and is restarted on the same conversation at its next idle
 moment: idle in herdr, an empty input box, no dialog, no step crowsnest is taking on a job it holds;
-journalled as a restart "for new instructions"; at most once per 10 minutes; never while paused;
+the input box must be one crowsnest recognises (a screen it cannot read counts as busy, not as "no
+draft"), and the screen is read again right before `/exit` is typed (R7-S13);
+journalled as a restart "for new instructions"; at most once per 10 minutes (kept in kv, so a
+crowsnest restart does not reset it); never while paused;
 not at all with the Setting "Restart for new instructions" off (`--no-instruction-restart`).
 **Claude Code keeps a resumed conversation's original appended system prompt** (seen with real
 Claude: resumed with a new file, it still followed the old one), so a resume alone is not enough:
