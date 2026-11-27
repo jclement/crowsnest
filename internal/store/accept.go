@@ -217,6 +217,28 @@ func (s *Store) DeliveredUnreceived(ctx context.Context, jobID string, limit int
 	return out, rows.Err()
 }
 
+// JobsWithUnreceivedAnswers lists the jobs with an answer typed since `since` that their agent
+// has not been seen to take in, oldest job first: the supervisor looks for those answers in the
+// transcripts of jobs that already finished (an agent can take an answer and finish inside one
+// receipt interval).
+func (s *Store) JobsWithUnreceivedAnswers(ctx context.Context, since time.Time, limit int) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT job_id FROM questions WHERE job_id != '' AND status != 'open' AND delivery = 'type'
+		AND received_at = 0 AND delivered_at >= ? ORDER BY job_id LIMIT ?`, since.Unix(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing jobs with unreceived answers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // ResetDelivery puts a typed answer whose delivery was uncertain or failed back in the delivery
 // queue: the human's explicit "type it again" (never automatic). An answer seen received, or
 // one delivered without doubt, is left alone.

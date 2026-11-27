@@ -1347,7 +1347,9 @@ An answer stored is not an answer taken in. Each settled question carries `recei
 `held_reason`, and crowsnest retries), **uncertain** (handed to the terminal, herdr's answer
 lost), **failed**, **delivered** (typed), **received**. Received is seen, not assumed: the
 answer line (`[crowsnest answer q_N]`) found in the asker's transcript (the tick looks every 15
-s for typed answers not yet received), or the asker's own long-poll returning it. Nothing is
+s for typed answers not yet received, in live jobs and, for an hour after the delivery, in jobs
+that already finished: an agent can take its answer and call done inside one interval), or the
+asker's own long-poll returning it. Nothing is
 retyped by itself: the Inbox offers **Did it arrive?** (`POST /questions/{id}/reconcile`, a
 transcript look) and only then, for an uncertain or failed delivery not seen received, **Type it
 again** (`POST /questions/{id}/retype`, with `confirm`). The job view lists each answered

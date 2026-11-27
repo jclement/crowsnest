@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/store"
@@ -21,6 +22,9 @@ const (
 	receiptEvery = 15 * time.Second
 	// receiptReadBytes is how much of the transcript's end is searched.
 	receiptReadBytes = 2 << 20
+	// settledReceiptWindow is how long after its delivery an answer to a job that has finished is
+	// still looked for in its transcript.
+	settledReceiptWindow = time.Hour
 )
 
 // reconcileReceipts marks answers received when their line is in the asker's transcript.
@@ -44,6 +48,28 @@ func (s *Service) reconcileReceipts(ctx context.Context, r store.JobRecord) {
 		return
 	}
 	s.markReceived(ctx, id, pending, readTail(path, receiptReadBytes))
+}
+
+// reconcileSettledReceipts looks for the answers of jobs that left the live pass before their
+// transcript was read: an agent that takes its answer, does the work and calls done inside one
+// receipt interval (seen with haiku in e2e:claude: answered, done 10 s later, and the answer
+// stayed "delivered" for good). Live jobs are the live pass's.
+func (s *Service) reconcileSettledReceipts(ctx context.Context) {
+	ids, err := s.opts.Store.JobsWithUnreceivedAnswers(ctx, s.opts.Now().Add(-settledReceiptWindow), superviseBatch)
+	if err != nil {
+		return
+	}
+	for _, id := range ids {
+		numeric, err := ParseID(id)
+		if err != nil {
+			continue
+		}
+		r, err := s.opts.Store.GetJob(ctx, numeric)
+		if err != nil || slices.Contains(liveStates, State(r.State)) {
+			continue
+		}
+		s.reconcileReceipts(ctx, r)
+	}
 }
 
 // markReceived marks each pending question whose answer line is in body received.

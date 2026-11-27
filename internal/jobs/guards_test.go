@@ -3,6 +3,8 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/transcript"
 )
 
 // ---- The fleet's usage limit (6.17) ---------------------------------------------------------
@@ -435,6 +438,58 @@ func TestReceiptFromTheTranscript(t *testing.T) {
 	}
 	if byID[fmt.Sprintf("q_%d", delivered)] != "received" || byID[fmt.Sprintf("q_%d", pending)] != "stored" {
 		t.Fatalf("receipts %v", byID)
+	}
+}
+
+// An agent that takes its answer, does the work and calls done inside one receipt interval leaves
+// the live pass before its transcript is read (found by e2e:claude: haiku answered and done in
+// ten seconds, and the Inbox said "delivered" for good). The tick still looks in a finished job's
+// transcript, for an hour after the delivery.
+func TestReceiptOfAJobThatFinishedFirst(t *testing.T) {
+	config := t.TempDir()
+	r := newRig(t, func(o *Options) { o.Launch.ClaudeConfigDir = config })
+	ctx := context.Background()
+	now := r.clock.Now()
+	// finished makes a done job whose transcript holds the answer to one question, delivered at
+	// `delivered`; it returns the question.
+	finished := func(session string, delivered time.Time) int64 {
+		job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+		numeric, _ := ParseID(job.ID)
+		record, err := r.db.GetJob(ctx, numeric)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Engine, record.ClaudeSessionID, record.State, record.Cause = EngineClaude, session, string(StateDone), ""
+		if err := r.db.UpdateJob(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+		id, err := r.db.InsertQuestion(ctx, store.QuestionRecord{Title: "Which colour?", Kind: "confirm", Urgency: "normal", Options: []byte("[]"), Context: []byte("{}"),
+			Files: []byte("[]"), JobID: job.ID, SourcePane: job.PaneID, CreatedAt: delivered, ExpiresAt: delivered.Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.db.SettleQuestion(ctx, id, "answered", []byte(`"yes"`), "", "type", delivered); err != nil {
+			t.Fatal(err)
+		}
+		_ = r.db.FinishDelivery(ctx, id, delivered, "")
+		path := transcript.Path(config, workDirOf(record), session)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		line := fmt.Sprintf(`{"type":"user","message":{"content":"[crowsnest answer q_%d] Which colour? → yes"}}`+"\n", id)
+		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	fresh := finished("6f9b2c1e-finished-first", now.Add(-5*time.Second))
+	old := finished("7a0c3d2f-long-ago", now.Add(-2*time.Hour))
+	r.svc.Tick(ctx)
+	if receipt, _ := r.db.GetQuestionReceipt(ctx, fresh); receipt.ReceivedAt.IsZero() {
+		t.Fatal("the answer to a job that finished first was never seen received")
+	}
+	if receipt, _ := r.db.GetQuestionReceipt(ctx, old); !receipt.ReceivedAt.IsZero() {
+		t.Fatal("a finished job's answer delivered two hours ago was still looked for")
 	}
 }
 
