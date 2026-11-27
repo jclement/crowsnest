@@ -123,7 +123,9 @@ type Server struct {
 	version   string
 	handler   http.Handler
 	// sessionContext is ServerOptions.SessionContext.
-	sessionContext func(ctx context.Context, paneID, source string) string
+	sessionContext func(ctx context.Context, paneID, source string) (string, string)
+	// ackSessionContext is ServerOptions.AckSessionContext.
+	ackSessionContext func(ctx context.Context, paneID, ack string) bool
 
 	asks    *ratelimit.Limiter
 	says    *ratelimit.Limiter
@@ -166,8 +168,12 @@ type ServerOptions struct {
 	Now     func() time.Time // for the quotas; nil means time.Now
 	// SessionContext, when set, adds to a SessionStart hook's output for a caller that holds no
 	// job token (the orchestrator): its standing context (DESIGN.md 7.9). It returns "" for a
-	// pane that is not the orchestrator's.
-	SessionContext func(ctx context.Context, paneID, source string) string
+	// pane that is not the orchestrator's. The second result, when set, is an ack token: the text
+	// carries something that must reach the agent (new instructions, R7-C11), and it counts as
+	// delivered only when the hook client acknowledges it (AckSessionContext).
+	SessionContext func(ctx context.Context, paneID, source string) (string, string)
+	// AckSessionContext marks what SessionContext gave paneID with that ack token delivered.
+	AckSessionContext func(ctx context.Context, paneID, ack string) bool
 	// Attachments stores files agents attach to a question or a result (internal/attach). Nil:
 	// an ask or done naming files is refused.
 	Attachments AgentAttacher
@@ -214,7 +220,7 @@ func NewServer(opts ServerOptions) *Server {
 	}
 	server := &Server{
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
-		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext,
+		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext, ackSessionContext: opts.AckSessionContext,
 		attachments: opts.Attachments, attachRoots: opts.AttachRoots, approvals: opts.Approvals,
 		instructions: opts.Instructions, subjectOf: opts.SubjectOf, projects: opts.Projects,
 		pause: opts.Pause, digest: opts.Digest, onHook: opts.OnHook, live: opts.Live,

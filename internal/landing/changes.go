@@ -33,6 +33,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -49,6 +50,16 @@ const (
 	// MaxBlobBytes is the largest side of a file whose whole text is served (for highlighting and
 	// expanding context in the browser).
 	MaxBlobBytes = 256 << 10
+	// maxListingBytes bounds a comparison's listing as git prints it: well past what 1,500 files
+	// need (a raw line is about 100 bytes plus the path), short of a repository-sized one.
+	maxListingBytes = 8 << 20
+	// maxSkipped bounds the untracked files listed as not read (R7-C09); past it they are counted
+	// in one row instead.
+	maxSkipped = 1000
+	// maxIndexBytes bounds the copy of a checkout's index (R7-S2). git's index for the 1,500
+	// files a diff lists is well under a megabyte; a repository of a few hundred thousand files
+	// is still under this.
+	maxIndexBytes = 256 << 20
 	// NullBlob is git's id for "no file on this side".
 	NullBlob = "0000000000000000000000000000000000000000"
 )
@@ -101,6 +112,9 @@ type gitCall struct {
 	config  []string // added to protectiveConfig
 	stdin   io.Reader
 	timeout time.Duration
+	// maxOut bounds stdout (maxGitOutput when 0). Past it git is stopped, and run returns what it
+	// read with ErrOutputCut, so a caller that can show part (a patch, a listing) says it was cut.
+	maxOut int
 }
 
 func (c gitCall) run(ctx context.Context) (string, error) {
@@ -118,9 +132,17 @@ func (c gitCall) run(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // fixed git subcommands; paths and refs are arguments
 	cmd.Env = append(gitEnv(), c.env...)
 	cmd.Stdin = c.stdin
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	limit := c.maxOut
+	if limit <= 0 {
+		limit = maxGitOutput
+	}
+	stdout, stderr := newCapped(limit, cancel), newCapped(maxGitStderr, nil)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
+	if stdout.over {
+		return stdout.String(), fmt.Errorf("git %s: %w", c.args[0], ErrOutputCut)
+	}
+	if err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = strings.TrimSpace(stdout.String())
@@ -248,12 +270,7 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath); _ = os.Remove(tmpPath + ".lock") }()
-	copied := false
-	if source, err := os.Open(realIndex); err == nil { //nolint:gosec // the checkout's own index, read only
-		_, copyErr := io.Copy(tmp, source)
-		_ = source.Close()
-		copied = copyErr == nil
-	}
+	copied := copyIndex(realIndex, tmp) == nil
 	if err := tmp.Close(); err != nil {
 		return "", nil, err
 	}
@@ -289,9 +306,9 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 		case info.Mode()&os.ModeSymlink != 0:
 			addable = appendCapped(addable, &skipped, name, info) // a link is its target's name, small
 		case !info.Mode().IsRegular():
-			skipped = append(skipped, skip(name, info, "not a regular file"))
+			appendSkipped(&skipped, skip(name, info, "not a regular file"))
 		case info.Size() > MaxUntrackedBytes:
-			skipped = append(skipped, skip(name, info, fmt.Sprintf("untracked, %s: too large to read", humanBytes(info.Size()))))
+			appendSkipped(&skipped, skip(name, info, fmt.Sprintf("untracked, %s: too large to read", humanBytes(info.Size()))))
 		default:
 			addable = appendCapped(addable, &skipped, name, info)
 		}
@@ -315,12 +332,52 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 	return strings.TrimSpace(out), skipped, nil
 }
 
+// copyIndex copies the checkout's index into tmp (R7-S2). The index is a file the agent controls:
+// a link to /dev/zero would copy until the disk is full, and a FIFO would block open(2) forever
+// while the subject's reading holds its lock. So it must be a regular file, not a link, opened
+// without blocking, no larger than maxIndexBytes, and the copy reads at most that much. Any refusal
+// is an error, and the caller builds the temporary index from HEAD instead (slower, trusts nothing).
+func copyIndex(path string, tmp *os.File) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxIndexBytes {
+		return fmt.Errorf("the index %s is not a regular file of at most %s", path, humanBytes(maxIndexBytes))
+	}
+	source, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // the checkout's own index, read only
+	if err != nil {
+		return err
+	}
+	defer func() { _ = source.Close() }()
+	opened, err := source.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return fmt.Errorf("the index %s changed while it was opened", path)
+	}
+	written, err := io.Copy(tmp, io.LimitReader(source, maxIndexBytes+1))
+	if err != nil {
+		return err
+	}
+	if written > maxIndexBytes {
+		return fmt.Errorf("the index %s grew past %s", path, humanBytes(maxIndexBytes))
+	}
+	return nil
+}
+
 func appendCapped(addable []string, skipped *[]Skipped, name string, info os.FileInfo) []string {
 	if len(addable) >= maxUntracked {
-		*skipped = append(*skipped, skip(name, info, fmt.Sprintf("untracked: past the first %d new files, not read", maxUntracked)))
+		appendSkipped(skipped, skip(name, info, fmt.Sprintf("untracked: past the first %d new files, not read", maxUntracked)))
 		return addable
 	}
 	return append(addable, name)
+}
+
+// appendSkipped keeps at most maxSkipped rows of files not read (R7-C09); past it nothing more is
+// kept: the listing itself is bounded (ls-files through maxGitOutput) and the rows say how many.
+func appendSkipped(skipped *[]Skipped, entry Skipped) {
+	if len(*skipped) < maxSkipped {
+		*skipped = append(*skipped, entry)
+	}
 }
 
 func skip(name string, info os.FileInfo, why string) Skipped {
@@ -350,15 +407,21 @@ func Compare(ctx context.Context, dir, from, to string) ([]DiffFile, bool, error
 		}
 		from = empty
 	}
-	raw, err := gitCall{dir: dir, args: []string{"diff", "--no-color", "--raw", "--no-abbrev", "-z", "-M", from, to}}.run(ctx)
-	if err != nil {
+	// Both listings are read through a bound (R7-C09): a listing past it is cut, its last, partial
+	// record dropped, and the comparison marked truncated, rather than read whole and cut after.
+	raw, err := gitCall{dir: dir, args: []string{"diff", "--no-color", "--raw", "--no-abbrev", "-z", "-M", from, to}, maxOut: maxListingBytes}.run(ctx)
+	cutList := errors.Is(err, ErrOutputCut)
+	if err != nil && !cutList {
 		return nil, false, fmt.Errorf("listing changed files: %w", err)
 	}
-	num, err := gitCall{dir: dir, args: []string{"diff", "--no-color", "--numstat", "-z", "-M", from, to}}.run(ctx)
-	if err != nil {
+	num, err := gitCall{dir: dir, args: []string{"diff", "--no-color", "--numstat", "-z", "-M", from, to}, maxOut: maxListingBytes}.run(ctx)
+	if err != nil && !errors.Is(err, ErrOutputCut) {
 		return nil, false, fmt.Errorf("counting changed lines: %w", err)
 	}
 	files := parseRaw(raw)
+	if cutList && len(files) > 0 {
+		files = files[:len(files)-1]
+	}
 	counts := parseNumstat(num)
 	for i := range files {
 		if count, ok := counts[files[i].Path]; ok {
@@ -366,8 +429,8 @@ func Compare(ctx context.Context, dir, from, to string) ([]DiffFile, bool, error
 		}
 		files[i].Hash = FileHash(files[i])
 	}
-	truncated := len(files) > MaxChangedFiles
-	if truncated {
+	truncated := cutList || len(files) > MaxChangedFiles
+	if len(files) > MaxChangedFiles {
 		files = files[:MaxChangedFiles]
 	}
 	return files, truncated, nil
@@ -481,8 +544,8 @@ func Patch(ctx context.Context, dir, from, to, path, oldPath string, opts PatchO
 	if oldPath != "" && oldPath != path {
 		args = append(args, oldPath)
 	}
-	out, err := gitCall{dir: dir, args: args}.run(ctx)
-	if err != nil {
+	out, err := gitCall{dir: dir, args: args, maxOut: maxFileDiffBytes + 1}.run(ctx)
+	if err != nil && !errors.Is(err, ErrOutputCut) {
 		return "", false, false, fmt.Errorf("reading the diff of %s: %w", path, err)
 	}
 	return trimPatch(out)
@@ -493,8 +556,8 @@ func Patch(ctx context.Context, dir, from, to, path, oldPath string, opts PatchO
 func BlobPatch(ctx context.Context, dir, fromBlob, toBlob, path string, opts PatchOptions) (diff string, binary, cut bool, err error) {
 	args := append([]string{"diff", "--no-color"}, opts.args()...)
 	args = append(args, fromBlob, toBlob)
-	out, err := gitCall{dir: dir, args: args}.run(ctx)
-	if err != nil {
+	out, err := gitCall{dir: dir, args: args, maxOut: maxFileDiffBytes + 1}.run(ctx)
+	if err != nil && !errors.Is(err, ErrOutputCut) {
 		return "", false, false, fmt.Errorf("reading what changed in %s: %w", path, err)
 	}
 	// git labels a blob diff with the blob ids; name the file instead.
@@ -545,7 +608,11 @@ func Blob(ctx context.Context, dir, blob string, maxBytes int) (string, error) {
 	if size > maxBytes {
 		return "", ErrBlobTooLarge
 	}
-	return gitCall{dir: dir, args: []string{"cat-file", "blob", blob}}.run(ctx)
+	text, err := gitCall{dir: dir, args: []string{"cat-file", "blob", blob}, maxOut: maxBytes + 1}.run(ctx)
+	if errors.Is(err, ErrOutputCut) {
+		return "", ErrBlobTooLarge // the size changed between the two reads: still bounded
+	}
+	return text, err
 }
 
 var objectID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)

@@ -64,9 +64,12 @@ func gitTimed(ctx context.Context, timeout time.Duration, dir string, args ...st
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", protectedArgs(dir, args)...) //nolint:gosec // fixed git subcommands; paths and refs are arguments
 	cmd.Env = gitEnv()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	stdout, stderr := newCapped(maxGitOutput, cancel), newCapped(maxGitStderr, nil)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	if err := cmd.Run(); err != nil || stdout.over {
+		if stdout.over {
+			return "", fmt.Errorf("git %s: %w", args[0], ErrOutputCut)
+		}
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = strings.TrimSpace(stdout.String())
@@ -116,7 +119,50 @@ func protectedArgs(dir string, args []string) []string {
 	return append(out, args...)
 }
 
-// gitEnv is the environment git runs with: never a prompt, never a pager, plain English output.
+// ---- Bounded output (R7-C09, R7-S7) -----------------------------------------------------------
+
+const (
+	// maxGitOutput bounds what any one git command may print before it is stopped: the agent
+	// controls the repository, so a multi-gigabyte file must not become gigabytes in memory.
+	maxGitOutput = 64 << 20
+	// maxGitStderr bounds a git command's error output (only its first line is ever shown).
+	maxGitStderr = 64 << 10
+)
+
+// ErrOutputCut means a git command printed more than its limit and was stopped there.
+var ErrOutputCut = errors.New("its output was larger than crowsnest reads, so it was stopped")
+
+// capped is an output buffer that keeps at most limit bytes. Past the limit it stops keeping,
+// marks itself over and calls stop (which kills the command), so the bound is on the reading,
+// not a cut made after everything was buffered.
+type capped struct {
+	buf   bytes.Buffer
+	limit int
+	over  bool
+	stop  func()
+}
+
+func newCapped(limit int, stop func()) *capped { return &capped{limit: limit, stop: stop} }
+
+func (c *capped) Write(p []byte) (int, error) {
+	room := c.limit - c.buf.Len()
+	if len(p) > room {
+		if room > 0 {
+			c.buf.Write(p[:room])
+		}
+		if !c.over && c.stop != nil {
+			c.stop()
+		}
+		c.over = true
+		return len(p), nil // swallowed: the command is being stopped
+	}
+	return c.buf.Write(p)
+}
+
+func (c *capped) String() string { return c.buf.String() }
+
+// gitEnv is the environment git runs with: never a prompt, never a pager, plain English output,
+// and pathspecs read literally (R7-S7): a file named `*.go` or `:(glob)**` names only itself.
 func gitEnv() []string {
 	env := []string{}
 	for _, entry := range os.Environ() {
@@ -125,7 +171,7 @@ func gitEnv() []string {
 		}
 		env = append(env, entry)
 	}
-	return append(env, "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "LC_ALL=C", "GIT_EDITOR=true", "GIT_MERGE_AUTOEDIT=no")
+	return append(env, "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "LC_ALL=C", "GIT_EDITOR=true", "GIT_MERGE_AUTOEDIT=no", "GIT_LITERAL_PATHSPECS=1")
 }
 
 func firstLine(text string) string {

@@ -34,6 +34,9 @@ export interface Layer {
   /** A role file's text hash, and whether it is unread or changed since it was read (R5-S14). */
   file_hash?: string;
   file_changed?: boolean;
+  /** Saved text a restore brought back that is withheld from agents until applied (R7-S4); saved_md shows it. */
+  restored?: boolean;
+  restored_hash?: string;
 }
 
 /** GET /instructions. */
@@ -123,7 +126,9 @@ export function layerId(layer: Pick<Layer, "scope" | "key">): string {
 }
 
 /** The badge for where a layer's text comes from. */
-export function sourceBadge(layer: { scope: string; source: LayerSource; file_changed?: boolean }): { label: string; tone: ChipTone } {
+export function sourceBadge(layer: { scope: string; source: LayerSource; file_changed?: boolean; restored?: boolean }): { label: string; tone: ChipTone } {
+  // A backup's text is not the human's word on this machine (R7-S4): withheld until applied.
+  if (layer.restored) return { label: "restored: not applied", tone: "danger" };
   switch (layer.source) {
     case "file":
       // A role file outranks the app's text and any agent may write it (R5-S14): unread or

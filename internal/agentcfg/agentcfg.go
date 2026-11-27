@@ -42,9 +42,10 @@ var Hooks = []struct {
 	// PermissionRequest holds until a human decides in the browser (8.7); it fails open to
 	// Claude's own dialog.
 	{"PermissionRequest", "permission-request", PermissionRequestTimeout, ""},
-	// PreToolUse is the guard (8.7): it decides locally from GuardRules, so it is fast, and only
-	// Bash is guarded.
-	{"PreToolUse", "pre-tool-use", 10, "Bash"},
+	// PreToolUse is the guard (8.7): it decides locally from GuardRules, so it is fast. Bash is
+	// guarded; the tools that write files reach it too, so that while crowsnest checks a job's
+	// worktree they are held (R7-C01, guard.HeldByCheck).
+	{"PreToolUse", "pre-tool-use", 10, "Bash|Edit|Write|MultiEdit|NotebookEdit"},
 	// InstructionsLoaded reports each CLAUDE.md or rules file Claude loads (DESIGN.md 21.3).
 	{"InstructionsLoaded", "instructions-loaded", 10, ""},
 }

@@ -474,7 +474,9 @@ by a newer schema, refuses a data directory that already holds a database (and a
 crowsnest) unless `--force`, and then keeps the replaced database beside it
 (`<session>.db.before-restore-<time>`, scrubbed of sessions and tokens like a backup). The
 backup's approval rules arrive revoked (add back the ones you want), and its role files are marked
-unread. An existing role, task or risk file is left alone unless
+unread. A project's custom check command comes back as automatic, the backup's command shown on
+the project page until you use it or keep the current check, and the backup's instruction layers
+reach no agent until you read and apply each one in Instructions. An existing role, task or risk file is left alone unless
 `--force`. The restored instance **starts paused**: crowsnest first compares the restored jobs
 with the panes herdr really has (the journal says which still have one), and the pause switch
 holds every job start, restart, retry, poke and scheduled task until you resume (account menu,
@@ -892,7 +894,11 @@ Every checkout has a live, syntax-highlighted diff (DESIGN.md 6.21), at any time
   the job **need a rebase** ("Ask an agent to rebase"). Land refuses both unless you tick the
   override. What Accepted proves: the project's own check passed on that commit in a clean tree.
   The branch can change that check, so the card names any change to its check definition; it is
-  not independent evidence, and the reviewer and you are the independent part.
+  not independent evidence, and the reviewer and you are the independent part. By default the
+  check runs in the job's working tree (with its dependencies), the agent's tools held meanwhile
+  and the tree's content compared before and after; the card says "checked in the working tree".
+  Tick **Isolated check** on the card (with an optional **prepare command**, such as `npm ci`)
+  to have it run in a temporary copy of exactly the commit instead: "checked in an isolated copy".
 - **Holds.** A budget reached, a check that still fails, a review that still objects, an approval
   waiting, a usage limit: each is a hold on the job that only you (or crowsnest's own recovery)
   lift. Nothing the agent declares moves it out of that.
@@ -1179,6 +1185,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /instructions`, `GET /instructions/{scope}/{key}` | session | Instruction layers: every layer with its source (`none`, `builtin`, `db`, `file`) and text; one layer with its revisions. The global layer's key is `-` |
 | `PUT /instructions/{scope}/{key}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` | session | `{body_md}` (at most 32 KB): a new revision; reset a role to its built-in; `{revision}`: that text again. `409` for a role that comes from a file |
 | `POST /instructions/role/{name}/file-seen` | session | `{hash}`: mark a role file's text read, which clears its "changed, review" badge → the layer. `409` when the file changed since |
+| `POST /instructions/{scope}/{key}/apply-restored` | session | `{hash}`: let a layer a restore brought back reach agents (R7-S4) → the layer. `409` when its text changed since |
 | `GET /agents-instructions/{subject}` | session | `j_<n>`, `orchestrator` or `lead:<slug>`: the layers it was started with, `changed` since, and the instruction files Claude loaded (paths only) |
 | `POST /voice/stt` | session | Talk mode. The body is one recording as MediaRecorder made it (`audio/webm`, `audio/mp4`, `audio/ogg`, …; up to five minutes: at most 8.2 MB, and it must arrive within 2 minutes) → `{text}`. 12 a minute per session (`429` with `Retry-After`); ElevenLabs failures are `502`/`503`/`422` with code `VOICE_UPSTREAM` and never its own error text |
 | `GET /voice/tts?text_id=` | session | The speech of a server-held text (a `say`, a SAY line, a read-aloud), streamed (`audio/mpeg`). `404` for an unknown or expired id (texts live an hour). 30 a minute per session; a replay comes from a cache |
@@ -1217,7 +1224,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run test:clone` | Clone HEAD into a temporary directory and run `setup` and `build` there: proves a clean checkout builds. Slow (a full `npm ci`) |
 | `mise run e2e` | Builds, then the hermetic browser suite (`web/e2e/hermetic`): Playwright against `./bin/crowsnest --demo`, a fresh instance per test (the auth specs with the login on), desktop Chromium 1440×900 plus 375×812 Chromium and WebKit. User journeys for auth, Jobs, Chat, Inbox, Fleet, terminals and talk mode, and every view's 375 px, theme, offline and axe checks. Also in CI. See [docs/TESTING.md](docs/TESTING.md) |
 | `mise run e2e:real` | Builds, then Playwright against the real binary (`web/e2e/real`): the Fleet view on `--demo` with no fixtures; on a throwaway `crowsnest-test-*` herdr session the terminals, a tab made through herdr appearing live, a scripted dialog in a pane answered from the Inbox, and the login-on WebSocket refusals. Each spec starts and stops its own instance |
-| `mise run e2e:claude` | Opt-in, a few cents (haiku): real Claude through the browser on a throwaway session: chat, a job from the Jobs box run to done, a job's question answered in the Inbox, a nudge on a timeline, `crowsnest ask --wait` from the orchestrator's pane, a real typed draft, and a true first run (setup link → password → checklist → Start → the folder-trust card → Chat greeting, in a fresh /tmp folder, which Claude then remembers as trusted in `~/.claude.json`). Uses your real HOME for Claude's login; scratch files stay under `web/e2e/claude/` |
+| `mise run e2e:claude` | Opt-in (running the task is the opt-in: it sets `CROWSNEST_E2E_CLAUDE=1`, without which the specs skip), about $1.50 (haiku): real Claude through the browser on a throwaway session: chat, a job from the Jobs box run to done, a job's question answered in the Inbox, a nudge on a timeline, `crowsnest ask --wait` from the orchestrator's pane, a real typed draft, and a true first run (setup link → password → checklist → Start → the folder-trust card → Chat greeting, in a fresh /tmp folder, which Claude then remembers as trusted in `~/.claude.json`). Uses your real HOME for Claude's login; scratch files stay under `web/e2e/claude/` |
 | `mise run screenshots` | Playwright with fixtures: Fleet screenshots at 375×812 and 1440×900, light and dark, into `web/screenshots/`, plus the 375 px checks (no sideways scroll, 44 px targets) |
 | `mise run screenshots:inbox` | (The three `screenshots:*` tasks run `web/e2e/screenshots` in the `screenshots` Playwright project, a fresh demo instance per test.) Builds, then Playwright against `./bin/crowsnest --demo`: the Inbox list and a question (mermaid and a diff) at 375×812 and 1440×900, light and dark, a multi-select, the 375 px checks, and an answer round trip |
 | `mise run screenshots:jobs` | Builds, then Playwright against `./bin/crowsnest --demo`: the Jobs board (light and dark), the new-job form, a running, a stuck and a done job at 375×812 and 1440×900, the 375 px checks, and giving a job |

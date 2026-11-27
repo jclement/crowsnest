@@ -381,14 +381,22 @@ export function useInstructionLayer(scope: LayerScope, key: string, enabled = tr
   return useQuery({ queryKey: queryKeys.instructionLayer(scope, key), queryFn: () => endpoints.instructionLayer(scope, key), enabled });
 }
 
-/** Save, reset to the built-in, restore a revision, or mark a role file read (R5-S14). Every instruction query refreshes after. */
+/** Save, reset to the built-in, restore a revision, mark a role file read (R5-S14), or apply a layer a restore brought back (R7-S4). Every instruction query refreshes after. */
 export function useInstructionEdit(scope: LayerScope, key: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (change: { kind: "save"; body: string } | { kind: "reset" } | { kind: "restore"; revision: number } | { kind: "file-seen"; hash: string }) => {
+    mutationFn: (
+      change:
+        | { kind: "save"; body: string }
+        | { kind: "reset" }
+        | { kind: "restore"; revision: number }
+        | { kind: "file-seen"; hash: string }
+        | { kind: "apply-restored"; hash: string },
+    ) => {
       if (change.kind === "save") return endpoints.saveInstruction(scope, key, change.body);
       if (change.kind === "reset") return endpoints.resetRole(key);
       if (change.kind === "file-seen") return endpoints.roleFileSeen(key, change.hash);
+      if (change.kind === "apply-restored") return endpoints.applyRestoredInstruction(scope, key, change.hash);
       return endpoints.restoreInstruction(scope, key, change.revision);
     },
     onSuccess: (detail) => queryClient.setQueryData(queryKeys.instructionLayer(scope, key), detail),
@@ -530,7 +538,8 @@ export function useProjectAccept(id: number) {
 export function useSetProjectAccept(id: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes">) => endpoints.setProjectAccept(id, value),
+    mutationFn: (value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes" | "check_isolated" | "check_prepare">) =>
+      endpoints.setProjectAccept(id, value),
     onSuccess: (view) => queryClient.setQueryData(queryKeys.projectAccept(id), view),
   });
 }

@@ -200,6 +200,52 @@ func TestParentBudgetHoldsQueuedChild(t *testing.T) {
 	}
 }
 
+// TestBudgetHoldsBelowAreRecoveredFromTheParent is R7-C02: crowsnest saved the parent's own budget
+// hold and then crashed before the walk reached the queued child and grandchild. The launch reads
+// the ancestors and refuses (Start anyway too), and the next tick puts the holds back.
+func TestBudgetHoldsBelowAreRecoveredFromTheParent(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	parent := r.create(CreateInput{Brief: "Parent", Dir: t.TempDir()})
+	child, err := r.svc.Create(ctx, CreateInput{Brief: "Child", Dir: t.TempDir()}, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild, err := r.svc.Create(ctx, CreateInput{Brief: "Grandchild", Dir: t.TempDir()}, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{child.ID, grandchild.ID} {
+		r.edit(id, func(rec *store.JobRecord) {
+			rec.State, rec.PaneID, rec.AgentName, rec.BriefSent = string(StateQueued), "", "", false
+			rec.Cause, rec.CauseDetail = string(CauseHeld), "waiting for a slot"
+		})
+	}
+	// The parent's own hold, as applyBudget saves it, and no walk after it: the crash.
+	r.placeHold(parent.ID, HoldBudget, "")
+	r.svc.mu.Lock()
+	why := r.svc.startHoldLocked(ctx, r.record(grandchild.ID))
+	r.svc.mu.Unlock()
+	if !strings.HasPrefix(why, holdPrefix) {
+		t.Fatalf("the grandchild would start past its grandparent's budget: %q", why)
+	}
+	if _, err := r.svc.StartAnyway(ctx, child.ID); err == nil {
+		t.Fatal("Start anyway passed a budget hold above the job")
+	}
+	r.svc.Tick(ctx)
+	for _, id := range []string{child.ID, grandchild.ID} {
+		if hold, ok := holdOf(r.record(id), HoldBudget); !ok || hold.From != parent.ID {
+			t.Fatalf("%s was not held from %s after a tick: %s", id, parent.ID, r.record(id).HoldsJSON)
+		}
+	}
+	// The walk cut short half way: the child held, the grandchild not. A tick finishes it.
+	r.edit(grandchild.ID, func(rec *store.JobRecord) { rec.HoldsJSON = "" })
+	r.svc.Tick(ctx)
+	if !hasHold(r.record(grandchild.ID), HoldBudget) {
+		t.Fatal("a walk interrupted below an already-held child was not finished")
+	}
+}
+
 // TestCheckFailureWaitsForThePause (R6-C07): a check failing while the automation is paused does
 // not type anything to the builder; the finding is kept and typed after the resume.
 func TestCheckFailureWaitsForThePause(t *testing.T) {
@@ -256,6 +302,56 @@ func TestFinishStepEndsAtTheBackstop(t *testing.T) {
 	if nudged, _ := r.svc.NudgeIfDue(ctx, r.backstopJob(job.ID)); nudged {
 		t.Fatal("nudged again")
 	}
+}
+
+// TestGraceEndsWithTheTurnWhateverTheAgentDeclares is R7-C03: an agent let finish its step that
+// declares blocked with a one-minute recheck before ending its turn is held at that end of turn,
+// and its wake does not start another turn; and a grace that never sees an end of turn ends after
+// budgetGraceMax.
+func TestGraceEndsWithTheTurnWhateverTheAgentDeclares(t *testing.T) {
+	ctx := context.Background()
+	grant := func(r *rig, id string) {
+		r.placeHold(id, HoldBudget, "")
+		r.edit(id, func(rec *store.JobRecord) { rec.BudgetState = BudgetExceeded })
+		if _, err := r.svc.BudgetFinishStep(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("blocked, then the turn ends", func(t *testing.T) {
+		r := newRig(t, nil)
+		job := r.create(CreateInput{Brief: "Work", Dir: t.TempDir()})
+		grant(r, job.ID)
+		if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "waiting on CI", State: "blocked", Reason: "CI", RecheckIn: "1m"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.svc.HandleHook(ctx, HookStop, job.ID, "", HookInput{SessionID: job.SessionID}); err != nil {
+			t.Fatal(err)
+		}
+		if rec := r.record(job.ID); !hasHold(rec, HoldBudget) || rec.BudgetState != BudgetExceeded {
+			t.Fatalf("grace survived the end of a turn that declared blocked: %s %s", rec.BudgetState, rec.HoldsJSON)
+		}
+		typed := len(r.fake.Prompts())
+		r.clock.Advance(2 * time.Minute)
+		r.svc.Tick(ctx)
+		if d := r.get(job.ID); d.State == StateRunning || len(r.fake.Prompts()) != typed {
+			t.Fatalf("the wake started another turn past the budget: %s, %d prompts typed", d.State, len(r.fake.Prompts())-typed)
+		}
+	})
+	t.Run("no end of turn seen", func(t *testing.T) {
+		r := newRig(t, nil)
+		job := r.create(CreateInput{Brief: "Work", Dir: t.TempDir()})
+		grant(r, job.ID)
+		r.clock.Advance(budgetGraceMax - time.Minute)
+		r.svc.Tick(ctx)
+		if hasHold(r.record(job.ID), HoldBudget) {
+			t.Fatal("grace ended early")
+		}
+		r.clock.Advance(2 * time.Minute)
+		r.svc.Tick(ctx)
+		if rec := r.record(job.ID); !hasHold(rec, HoldBudget) {
+			t.Fatalf("grace outlived its bound: %s", rec.BudgetState)
+		}
+	})
 }
 
 // TestWaitCyclesAreRefusedAndBroken (R6-C09): a job may not wait on a job that, through others,

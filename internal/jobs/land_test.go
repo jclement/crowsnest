@@ -296,3 +296,37 @@ func TestLandRefusals(t *testing.T) {
 
 // storeRecord is store.JobRecord, named here to keep the defaults table short.
 type storeRecord = store.JobRecord
+
+// TestViewedGateIsInEveryLand is R7-C07: the Viewed gate is in LandWith itself, so the app's
+// Land, an agent's approved request (which calls LandWith directly) and a Land with no head from
+// the caller all pass it, against the commit that would land. Discard never does.
+func TestViewedGateIsInEveryLand(t *testing.T) {
+	r := newLandRig(t, LandingOptions{MergeMode: "merge"}, nil)
+	ctx := context.Background()
+	repo := landRepo(t)
+	job := landedJob(t, r, repo)
+	var asked []string
+	r.svc.SetViewedGate(func(_ context.Context, jobID, head string) error {
+		asked = append(asked, head)
+		return invalid("1 of 1 files are not marked viewed")
+	})
+	head := strings.TrimSpace(gitIn(t, job.WorkDir, "rev-parse", "HEAD"))
+	if _, err := r.svc.LandWith(ctx, job.ID, LandMerge, "you, as an agent asked", LandFlags{Head: head}); err == nil {
+		t.Fatal("an agent's approved land passed the Viewed gate")
+	}
+	if _, err := r.svc.Land(ctx, job.ID, LandMerge, "you"); err == nil {
+		t.Fatal("a Land with no head passed the Viewed gate")
+	}
+	if len(asked) != 2 || asked[0] != head || asked[1] != head {
+		t.Fatalf("the gate was asked about %v, want the head %s twice", asked, head)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "widget.go")); err == nil {
+		t.Fatal("a refused Land merged anyway")
+	}
+	if _, err := r.svc.Land(ctx, job.ID, LandDiscard, "you"); err != nil {
+		t.Fatalf("a discard was gated: %v", err)
+	}
+	if len(asked) != 2 {
+		t.Fatal("discard asked the Viewed gate")
+	}
+}

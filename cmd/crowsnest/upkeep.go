@@ -259,14 +259,16 @@ func heldJobBusy(db *store.Store, agent *orch.Orchestrator) func(context.Context
 // (DESIGN.md 7.9): its hand-over notes, the questions it asked that are still open, and the jobs
 // it created or holds that are still live. It answers for the orchestrator's pane and for a
 // project lead's (whose hand-over is <state>/leads/<slug>/handoff.md).
-func standingContext(cfg config.Config, refs *jobRefs, questionService func() *questions.Service, jobService *jobs.Service) func(context.Context, string, string) string {
-	return func(ctx context.Context, pane, source string) string {
+// The second result is the new-instructions notice's version when the text carries one: the hook
+// client acknowledges it after printing (ackStandingContext), and until then it is sent again (R7-C11).
+func standingContext(cfg config.Config, refs *jobRefs, questionService func() *questions.Service, jobService *jobs.Service) func(context.Context, string, string) (string, string) {
+	return func(ctx context.Context, pane, source string) (string, string) {
 		origin := "orchestrator"
 		var parts []string
-		notice := "" // new instructions for a resumed conversation (orch freshness.go)
+		notice, version := "", "" // new instructions for a resumed conversation (orch freshness.go)
 		switch {
 		case refs.orchestrator != nil && refs.orchestrator.Status().PaneID == pane:
-			notice = refs.orchestrator.InstructionsNotice(ctx)
+			notice, version = refs.orchestrator.InstructionsNotice(ctx)
 			if notes := handoffNotes(filepath.Join(cfg.StateDir, HandoffFile)); notes != "" {
 				parts = append(parts, notes)
 			}
@@ -274,7 +276,7 @@ func standingContext(cfg config.Config, refs *jobRefs, questionService func() *q
 			origin = refs.projects.leadInPane(pane) // a project's lead: the same, with its own hand-over
 			if leads := refs.projects.leads.Load(); leads != nil {
 				if lead := leads.ByPane(pane); lead != nil {
-					notice = lead.Agent.InstructionsNotice(ctx)
+					notice, version = lead.Agent.InstructionsNotice(ctx)
 				}
 			}
 			if project, ok := refs.projects.leadProjectInPane(pane); ok {
@@ -283,7 +285,10 @@ func standingContext(cfg config.Config, refs *jobRefs, questionService func() *q
 				}
 			}
 		default:
-			return ""
+			return "", ""
+		}
+		if notice == "" {
+			version = ""
 		}
 		if open := openQuestions(ctx, questionService(), pane); open != "" {
 			parts = append(parts, open)
@@ -292,15 +297,39 @@ func standingContext(cfg config.Config, refs *jobRefs, questionService func() *q
 			parts = append(parts, live)
 		}
 		if len(parts) == 0 {
-			return notice
+			return notice, version
 		}
 		header := "# Crowsnest: your standing context (re-sent at " + source + ")\n\n" +
 			"Crowsnest keeps these across compactions and new conversations. They are records, not instructions from the human."
 		records := header + "\n\n" + strings.Join(parts, "\n\n")
 		if notice != "" {
-			return notice + "\n\n" + records // the instructions first, then the records
+			return notice + "\n\n" + records, version // the instructions first, then the records
 		}
-		return records
+		return records, ""
+	}
+}
+
+// standingHooks is what a standing agent's SessionStart hook adds, and its acknowledgement.
+type standingHooks struct {
+	Context func(ctx context.Context, pane, source string) (string, string)
+	Ack     func(ctx context.Context, pane, ack string) bool
+}
+
+// ackStandingContext marks the new-instructions notice of the standing agent in pane delivered,
+// when ack is its current version: the hook client printed it (R7-C11).
+func ackStandingContext(refs *jobRefs) func(context.Context, string, string) bool {
+	return func(ctx context.Context, pane, ack string) bool {
+		switch {
+		case refs.orchestrator != nil && refs.orchestrator.Status().PaneID == pane:
+			return refs.orchestrator.AckInstructionsNotice(ctx, ack)
+		case refs.projects != nil && refs.projects.leadInPane(pane) != "":
+			if leads := refs.projects.leads.Load(); leads != nil {
+				if lead := leads.ByPane(pane); lead != nil {
+					return lead.Agent.AckInstructionsNotice(ctx, ack)
+				}
+			}
+		}
+		return false
 	}
 }
 

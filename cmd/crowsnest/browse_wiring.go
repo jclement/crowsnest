@@ -115,7 +115,8 @@ func (c *claudeTrust) trusted(dir string) (trusted, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.body == nil || info.Size() != c.size || !info.ModTime().Equal(c.mod) {
-		body, readErr := os.ReadFile(c.path)
+		// Not os.ReadFile: a FIFO in its place would hold open(2), and this mutex, for good (R7-S10).
+		body, readErr := browse.ReadMetadata(c.path, claudeConfigLimit, true)
 		if readErr != nil {
 			return false, false
 		}

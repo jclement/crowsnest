@@ -40,6 +40,7 @@ const (
 	opDispatch = "dispatch" // typing the brief into the orchestrator
 	opRetry    = "retry"    // typing "continue" after a limit or an API error
 	opNudge    = "nudge"    // typing a nudge (the backstop, or the human's Nudge)
+	opFeedback = "feedback" // typing a check's or a review's findings (pending_feedback, R7-C05)
 )
 
 // claimTTL is how long a claim held by this process counts as live. Every step finishes well
@@ -239,6 +240,12 @@ func (s *Service) resolveStaleLocked(r *store.JobRecord, c *change) {
 			"The agent reads it at session start; if it sits idle it is nudged", map[string]any{"step": op})
 	case opRetry, opNudge:
 		c.event(EventLaunch, "A "+op+" interrupted by a crowsnest restart may or may not have been typed; it stays counted", map[string]any{"step": op})
+	case opFeedback:
+		// R7-C05: the findings may have been typed; typing them again would start a second turn
+		// on the same findings. They stay readable (job_get: the check's output, the review).
+		r.PendingFeedback = ""
+		c.event(EventAccept, "crowsnest stopped while typing the findings to the agent; they may or may not have arrived, so they are not typed again "+
+			"(job_get shows them; send a message if the agent did not get them)", map[string]any{"step": op})
 	default:
 		c.event(EventLaunch, "A step interrupted by a crowsnest restart was dropped: "+op, map[string]any{"step": op})
 	}

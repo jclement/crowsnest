@@ -154,8 +154,7 @@ type harnessOptions struct {
 	machines    bool
 	ops         Ops
 	// The live diff (changes_test.go); nil: 503
-	changes       *changes.Service
-	requireViewed func() bool
+	changes *changes.Service
 	// The folder picker (browse_test.go); nil: the /browse routes answer 503
 	browse *browse.Service
 	// Publish to the tailnet (tsserve_test.go); nil: 503
@@ -260,7 +259,6 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Attention:     opts.attention,
 		Now:           opts.now,
 		Changes:       opts.changes,
-		RequireViewed: opts.requireViewed,
 
 		TailscaleServe: opts.tailscaleServe,
 	})

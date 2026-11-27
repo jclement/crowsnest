@@ -92,11 +92,14 @@ func (s *Service) List(ctx context.Context, path string, opts ListOptions) (List
 		if err != nil {
 			return Listing{}, classify(err)
 		}
+
 		roots := s.roots(ctx)
 		listing := Listing{
 			Path: cleaned, Resolved: resolved, Label: s.label(cleaned), Root: holder.Place,
 			Crumbs: s.crumbs(cleaned, roots), Entries: []Entry{}, Git: s.isGit(resolved),
 		}
+		// Only the first MaxReadDir names were read from a bigger directory (R7-S12).
+		listing.Partial = len(dirents) >= MaxReadDir
 		if parent := filepath.Dir(cleaned); parent != cleaned && s.browsable(parent, roots) {
 			listing.Parent = parent
 		}
@@ -138,7 +141,9 @@ func (s *Service) entries(dir string, dirents []fs.DirEntry, opts ListOptions, r
 			listing.HiddenCount++
 			continue
 		}
-		if !entry.Dir && !opts.Files {
+		// A link out of the roots is listed in both modes (marked, and not enterable): whether it
+		// points at a folder is not said (R7-S12), so it cannot be sorted by that.
+		if !entry.Dir && !entry.Outside && !opts.Files {
 			listing.FileCount++
 			continue
 		}
@@ -156,10 +161,13 @@ func (s *Service) followLink(entry *Entry, roots []root) {
 		entry.Readable = false
 		return
 	}
-	entry.Target = target
 	if _, ok := rootOf(roots, target); !ok {
-		entry.Outside = true
+		// Outside every root (R7-S12): neither where it points nor whether that exists is said,
+		// and nothing past the root is looked at.
+		entry.Outside, entry.Dir = true, false
+		return
 	}
+	entry.Target = target
 	if info, err := s.opts.FS.Stat(target); err == nil {
 		entry.Dir = info.IsDir()
 	}

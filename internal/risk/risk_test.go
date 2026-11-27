@@ -46,7 +46,7 @@ func TestClassify(t *testing.T) {
 		{"npm install", "Bash", map[string]any{"command": "npm install left-pad"}, Elevated},
 		{"protected host in a command", "Bash", map[string]any{"command": "echo hi > /tmp/nyc1-notes"}, Dangerous},
 		{"protected host in a URL", "WebFetch", map[string]any{"url": "https://nyc1/status"}, Dangerous},
-		{"similar host", "Bash", map[string]any{"command": "ping nyc10"}, Low},
+		{"similar host", "Bash", map[string]any{"command": "echo nyc10"}, Low}, // ping is no longer low (R7-S5)
 		{"edit inside", "Edit", map[string]any{"file_path": filepath.Join(root, "a.go"), "old_string": "a", "new_string": "b"}, Low},
 		{"edit outside", "Edit", map[string]any{"file_path": "/etc/hosts", "old_string": "a", "new_string": "b"}, Elevated},
 		{"write outside", "Write", map[string]any{"file_path": filepath.Join(filepath.Dir(root), "x.txt"), "content": "c"}, Elevated},

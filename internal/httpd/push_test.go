@@ -223,4 +223,10 @@ func TestServiceWorkerIsServedFromTheRootUncached(t *testing.T) {
 	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "worker-src 'self'") {
 		t.Fatalf("CSP %q", csp)
 	}
+	// R7-S14: the directives that do not fall back to default-src are named.
+	for _, directive := range []string{"base-uri 'self'", "form-action 'self'", "object-src 'none'"} {
+		if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, directive) {
+			t.Fatalf("CSP %q lacks %s", csp, directive)
+		}
+	}
 }

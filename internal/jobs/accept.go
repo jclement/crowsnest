@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,7 +39,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/landing"
+	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -135,6 +138,9 @@ type Evidence struct {
 	// DefinitionChanged lists files of the branch's own diff that define its check (R6-S4): the
 	// branch changed what passing means, so the pass is the branch's own word about itself.
 	DefinitionChanged []string `json:"definition_changed"`
+	// Mode is where the check ran (R7-C01): "worktree" (the job's checkout, the default) or
+	// "isolated" (a temporary copy of exactly Commit).
+	Mode string `json:"mode"`
 }
 
 // workDirOf is where a job's agent works.
@@ -176,11 +182,19 @@ func AutoCheckCommand(dir string) string {
 // readSmallRegular reads a regular file of at most 1 MiB, never following a link (R6-S4: a
 // committed mise.toml that links to /dev/zero or a FIFO must not hang or exhaust crowsnest).
 func readSmallRegular(path string) ([]byte, bool) {
-	info, err := os.Lstat(path)
+	// R7-I6: opened, not read by path after an Lstat, so a FIFO swapped in between cannot block:
+	// O_NOFOLLOW refuses a link, O_NONBLOCK keeps open(2) from waiting, and the opened file itself
+	// is checked to be regular and small before it is read through a limit.
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // the job's own checkout
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
 		return nil, false
 	}
-	body, err := os.ReadFile(path) //nolint:gosec // the job's own checkout, a regular file checked above
+	body, err := io.ReadAll(io.LimitReader(file, 1<<20))
 	return body, err == nil
 }
 
@@ -356,8 +370,16 @@ func (s *Service) runCheck(ctx context.Context, id string) {
 		return
 	}
 	defs := landing.CheckDefinitionChanges(ctx, dir, base, baseCommit, commandPaths(dir, command))
+	isolated, prepare := s.checkIsolationFor(ctx, r)
 	record := store.CheckRecord{JobID: numeric, Commit: before.Head, Command: command, Status: CheckRunning,
-		ExitCode: -1, Owner: s.instance, StartedAt: s.opts.Now(), DefinitionChanged: strings.Join(defs, ",")}
+		ExitCode: -1, Owner: s.instance, StartedAt: s.opts.Now(), DefinitionChanged: strings.Join(defs, ","), Mode: CheckModeWorktree}
+	if isolated {
+		record.Mode = CheckModeIsolated
+	} else {
+		// R7-C01: a content fingerprint of the checkout (tracked and untracked files) at the start,
+		// compared with one at the end.
+		record.TreeBefore, _ = landing.TreeFingerprint(ctx, dir)
+	}
 	if record.ID, err = s.opts.Store.InsertCheck(ctx, record); err != nil {
 		// A check that cannot be recorded cannot be evidence (R6-C13): nothing is run.
 		s.opts.Logger.Warn("recording a check", "job", id, "err", err)
@@ -365,20 +387,34 @@ func (s *Service) runCheck(ctx context.Context, id string) {
 			OutputTail: "crowsnest could not record the check, so it cannot count as evidence: " + err.Error()})
 		return
 	}
-	result := s.execCheck(ctx, dir, command)
+	var result checkResult
+	if isolated {
+		result = s.execIsolatedCheck(ctx, id, dir, before.Head, prepare, command)
+	} else {
+		result = s.execWorktreeCheck(ctx, id, dir, command)
+	}
 	after, err := landing.Snap(ctx, dir, base, baseCommit)
+	if !isolated && err == nil {
+		record.TreeAfter, _ = landing.TreeFingerprint(ctx, dir)
+	}
 	moved := false
 	switch {
+	case result.status == CheckError && result.note != "":
+		// The run itself could not be made (the copy, the prepare command): that is the result.
 	case err != nil:
 		result.status, result.note = CheckError, "the worktree could not be read after the check: "+err.Error()
 	case after.Head != before.Head:
 		// A commit landed while the check ran: this evidence is about a revision that is gone.
 		moved = true
 		result.status, result.note = CheckError, fmt.Sprintf("HEAD moved from %s to %s while the check ran; it will be run again", shortHash(before.Head), shortHash(after.Head))
-	case !after.Clean:
+	case !isolated && !after.Clean:
 		// The tree changed under the check (an agent's process, or the check itself writing
-		// tracked files): what passed is not the commit (R6-C02, R6-S4).
+		// tracked files): what passed is not the commit (R6-C02, R6-S4). An isolated check ran
+		// in its own copy, so the job's checkout changing does not touch it.
 		result.status, result.note = CheckError, "the worktree changed while the check ran, so this run is not evidence for the commit: "+strings.Join(capList(after.Dirty, 8), "; ")
+	case !isolated && record.TreeBefore != "" && record.TreeAfter != record.TreeBefore:
+		result.status, result.note = CheckError, fmt.Sprintf("the checkout's content changed while the check ran (fingerprint %s, then %s), so this run is not evidence for the commit",
+			shortHash(record.TreeBefore), shortHash(record.TreeAfter))
 	}
 	record.Status, record.ExitCode, record.Duration, record.FinishedAt = result.status, result.exit, result.duration, s.opts.Now()
 	record.OutputTail = tailText(result.output, checkTailBytes)
@@ -410,6 +446,72 @@ func (s *Service) runCheck(ctx context.Context, id string) {
 	watch.checkReruns = 0
 	record.Owner = path // carried to checkFinished: where the full output is
 	s.checkFinished(ctx, id, record)
+}
+
+// Check modes (R7-C01): where crowsnest ran a check.
+const (
+	CheckModeWorktree = "worktree" // the job's own checkout (the default)
+	CheckModeIsolated = "isolated" // a temporary detached worktree of exactly the commit
+)
+
+// checkIsolationFor reads whether r's project runs its check in an isolated copy, and the
+// command that prepares the copy ("" for none).
+func (s *Service) checkIsolationFor(ctx context.Context, r store.JobRecord) (bool, string) {
+	if r.ProjectID == 0 {
+		return false, ""
+	}
+	project, err := s.opts.Store.GetProjectAccept(ctx, r.ProjectID)
+	if err != nil {
+		return false, ""
+	}
+	return project.CheckIsolated, strings.TrimSpace(project.CheckPrepare)
+}
+
+// execWorktreeCheck runs the check in the job's own checkout. While it runs, the job's agent is
+// held from using tools: the marker file beside its guard rules makes its PreToolUse hook answer
+// "wait" (R7-C01). That is not airtight: a process the agent started in the background earlier is
+// not a tool call, and the agent can remove the file; the fingerprints and the clean-tree checks
+// are what void such a run, and the isolated mode is what the project chooses to rule it out.
+func (s *Service) execWorktreeCheck(ctx context.Context, id, dir, command string) checkResult {
+	marker := s.checkingMarker(id)
+	if marker != "" {
+		deadline := s.opts.Now().Add(s.accept().timeout() + time.Minute)
+		_ = os.WriteFile(marker, []byte(deadline.UTC().Format(time.RFC3339)+"\n"), 0o600)
+		defer func() { _ = os.Remove(marker) }()
+	}
+	return s.execCheck(ctx, dir, command)
+}
+
+// execIsolatedCheck makes the isolated copy of commit, runs prepare (if any) and then the check in
+// it, and removes the copy. A copy that cannot be made, or a prepare command that fails, is the
+// run's result (an error with what happened); it never falls back to the job's checkout.
+func (s *Service) execIsolatedCheck(ctx context.Context, id, dir, commit, prepare, command string) checkResult {
+	copied, err := landing.IsolatedCheckout(ctx, dir, commit)
+	if err != nil {
+		return checkResult{status: CheckError, exit: -1, note: "the isolated copy of the commit could not be made, so nothing was checked: " + err.Error()}
+	}
+	defer copied.Remove(ctx)
+	_ = s.Journal(ctx, id, EventAccept, "Checking an isolated copy of "+shortHash(commit), nil)
+	if prepare != "" {
+		prepared := s.execCheck(ctx, copied.Dir, prepare)
+		if prepared.status != CheckPassed {
+			prepared.status = CheckError
+			prepared.note = strings.TrimSpace(fmt.Sprintf("the prepare command `%s` did not succeed (exit %d), so the check was not run. %s", oneLine(prepare, 120), prepared.exit, prepared.note))
+			return prepared
+		}
+	}
+	return s.execCheck(ctx, copied.Dir, command)
+}
+
+// checkingMarker is the file whose presence (with a deadline in it) holds the job's agent's tools
+// while crowsnest checks its worktree; it sits beside the job's guard rules ("" when the job has
+// no directory of its own).
+func (s *Service) checkingMarker(id string) string {
+	dir, err := s.jobDir(id)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, guard.CheckingMarkerFile)
 }
 
 // maxCheckReruns is how many times in a row a check is run again because HEAD moved under it.
@@ -711,7 +813,7 @@ func (s *Service) EvidenceOf(ctx context.Context, job Job) *Evidence {
 	}
 	evidence := &Evidence{Command: check.Command, Status: check.Status, ExitCode: check.ExitCode, DurationMS: check.Duration.Milliseconds(),
 		Commit: check.Commit, OutputTail: check.OutputTail, StartedAt: check.StartedAt.UTC(), FinishedAt: timePtr(check.FinishedAt),
-		DefinitionChanged: splitList(check.DefinitionChanged)}
+		DefinitionChanged: splitList(check.DefinitionChanged), Mode: firstNonEmptyDir(check.Mode, CheckModeWorktree)}
 	if job.TornDownAt != nil || job.WorkDir == "" || check.Status == CheckRunning {
 		return evidence
 	}
@@ -939,6 +1041,15 @@ type ProjectAccept struct {
 	// Effective is the check that would run now in the project's directory, and why.
 	Effective       string `json:"effective"`
 	EffectiveSource string `json:"effective_source"`
+	// RestoredCheckCommand is the command a restore set aside (R7-S4): not run until the human
+	// saves a check command (this one, or another), which clears it.
+	RestoredCheckCommand string `json:"restored_check_command,omitempty"`
+	// CheckIsolated runs the check in a temporary detached worktree of exactly the commit, after
+	// CheckPrepare (installing dependencies; "" for none). R7-C01. RestoredCheckPrepare is a prepare
+	// command a restore set aside, like RestoredCheckCommand.
+	CheckIsolated        bool   `json:"check_isolated"`
+	CheckPrepare         string `json:"check_prepare"`
+	RestoredCheckPrepare string `json:"restored_check_prepare,omitempty"`
 }
 
 // ProjectAcceptOf reads a project's acceptance defaults; dir is its directory, for Effective.
@@ -950,60 +1061,102 @@ func (s *Service) ProjectAcceptOf(ctx context.Context, projectID int64, dir stri
 		}
 		return ProjectAccept{}, err
 	}
-	out := ProjectAccept{ProjectID: projectID, CheckCommand: stored.CheckCommand, BudgetUSD: stored.BudgetUSD, BudgetMinutes: stored.BudgetMinutes}
+	out := ProjectAccept{ProjectID: projectID, CheckCommand: stored.CheckCommand, BudgetUSD: stored.BudgetUSD, BudgetMinutes: stored.BudgetMinutes,
+		CheckIsolated: stored.CheckIsolated, CheckPrepare: stored.CheckPrepare}
 	out.Effective, out.EffectiveSource = s.checkCommandFor(ctx, store.JobRecord{ProjectID: projectID, Dir: dir})
+	if aside, err := s.opts.Store.GetKV(ctx, store.RestoredCheckKey(projectID)); err == nil {
+		out.RestoredCheckCommand = aside
+	}
+	if aside, err := s.opts.Store.GetKV(ctx, store.RestoredPrepareKey(projectID)); err == nil {
+		out.RestoredCheckPrepare = aside
+	}
 	return out, nil
 }
 
 // SetProjectAccept writes a project's acceptance defaults (the human's, from the app).
 func (s *Service) SetProjectAccept(ctx context.Context, projectID int64, input ProjectAccept) error {
 	command := strings.TrimSpace(input.CheckCommand)
+	prepare := strings.TrimSpace(input.CheckPrepare)
 	switch {
-	case strings.ContainsAny(command, "\n\r\x00"):
-		return invalid("the check command is one line (use && to chain, or a mise task)")
-	case len(command) > 500:
-		return invalid("the check command is longer than 500 characters; put it in a mise task or a script")
+	case strings.ContainsAny(command, "\n\r\x00"), strings.ContainsAny(prepare, "\n\r\x00"):
+		return invalid("the check and prepare commands are one line each (use && to chain, or a mise task)")
+	case len(command) > 500 || len(prepare) > 500:
+		return invalid("a check or prepare command is longer than 500 characters; put it in a mise task or a script")
 	case input.BudgetUSD < 0 || input.BudgetMinutes < 0:
 		return invalid("a budget is a positive number, or 0 for the server's default")
 	}
-	err := s.opts.Store.SetProjectAccept(ctx, projectID, store.ProjectAccept{CheckCommand: command, BudgetUSD: input.BudgetUSD, BudgetMinutes: input.BudgetMinutes})
+	err := s.opts.Store.SetProjectAccept(ctx, projectID, store.ProjectAccept{CheckCommand: command, BudgetUSD: input.BudgetUSD, BudgetMinutes: input.BudgetMinutes,
+		CheckIsolated: input.CheckIsolated, CheckPrepare: prepare})
 	if errors.Is(err, store.ErrNotFound) {
 		return ErrNotFound
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// The human has now said which check runs: a command a restore set aside is settled (R7-S4).
+	if err := s.opts.Store.DeleteKV(ctx, store.RestoredCheckKey(projectID)); err != nil {
+		return err
+	}
+	return s.opts.Store.DeleteKV(ctx, store.RestoredPrepareKey(projectID))
 }
 
-// deliverFeedback types a check failure's pending message to the agent (R6-C07): not while the
-// automation is paused, not while a hold keeps the job, and cleared only after it was typed. A
-// send that fails is journalled (at most every few minutes) and tried again by the tick.
+// deliverFeedback types a job's pending findings (a check's failure, R6-C07, or a review's
+// changes) to its agent. It is a lifecycle step (opFeedback, lifecycle.go), so exactly one caller
+// owns a delivery: the check's callback, the review's and the tick can all call it, and the claim
+// on the row lets one through (R7-C05). It passes the continuation gate before the claim and again
+// just before typing (R7-C04): not while paused, not under any hold, not while a budget above the
+// job or the fleet's usage limit holds it. The message is cleared only when it was (or may have
+// been) typed, and only if it is still the one typed; a crowsnest that stopped mid-send leaves a
+// stale claim, which is settled as "may have arrived, not typed again" (resolveStaleLocked), never
+// replayed blindly. A send that typed nothing is journalled (at most every few minutes) and tried
+// again by the tick.
 func (s *Service) deliverFeedback(ctx context.Context, id string) {
-	numeric, err := ParseID(id)
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		s.noteHeldContinuation(ctx, id, "the findings for the agent", why)
+		return
+	}
+	var message, paneID, agent string
+	cl, err := s.claimStep(ctx, id, opFeedback, func(r *store.JobRecord, c *change) error {
+		if r.PendingFeedback == "" || r.PaneID == "" || State(r.State) != StateRunning || len(effectiveHolds(*r, c.questions)) > 0 {
+			return errSkip
+		}
+		message, paneID, agent = r.PendingFeedback, r.PaneID, r.AgentName
+		return nil
+	})
 	if err != nil {
 		return
 	}
-	r, err := s.opts.Store.GetJob(ctx, numeric)
-	if err != nil || r.PendingFeedback == "" || State(r.State) != StateRunning || len(holdsOf(r)) > 0 || r.PaneID == "" {
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		s.finishQuietly(ctx, cl, nil)
+		s.noteHeldContinuation(ctx, id, "the findings for the agent", why)
 		return
 	}
-	if s.heldWhilePaused(ctx, "feedback:"+id, "the check's findings for "+id) {
+	var result orch.PromptResult
+	var sendErr error
+	if err := s.effect(ctx, cl, paneID, func(ctx context.Context) {
+		result, sendErr = orch.Prompt(ctx, s.opts.Herdr, paneID, orch.PromptRequest{Text: message, ForceOverDraft: true, ExpectAgent: agent})
+	}); err != nil {
 		return
 	}
-	message := r.PendingFeedback
-	if err := s.sendText(ctx, r.PaneID, r.AgentName, message); err != nil {
-		watch := s.watchOf(id)
-		if now := s.opts.Now(); now.Sub(watch.feedbackAt) > 5*time.Minute {
-			watch.feedbackAt = now
-			_ = s.Journal(ctx, id, EventAccept, "The check's failure could not be typed to the agent yet: "+oneLine(err.Error(), 160)+"; crowsnest tries again", nil)
+	outcome := typedOutcome(result, sendErr)
+	watch := s.watchOf(id)
+	s.finishQuietly(ctx, cl, func(rec *store.JobRecord, c *change) {
+		switch {
+		case outcome == typedNo:
+			if now := s.opts.Now(); now.Sub(watch.feedbackAt) > 5*time.Minute {
+				watch.feedbackAt = now
+				c.event(EventAccept, "The findings could not be typed to the agent yet: "+oneLine(sendErr.Error(), 160)+"; crowsnest tries again", nil)
+			}
+		case rec.PendingFeedback != message:
+			// Replaced while it was typed (a newer check or review): the newer one is still due.
+		default:
+			rec.PendingFeedback = ""
+			if outcome == typedMaybe {
+				c.event(EventAccept, "crowsnest lost track of typing the findings; counted as delivered, not typed again", nil)
+			} else {
+				c.event(EventAccept, "The findings reached the agent", nil)
+			}
 		}
-		return
-	}
-	_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
-		if rec.PendingFeedback != message {
-			return errSkip
-		}
-		rec.PendingFeedback = ""
-		c.event(EventAccept, "The check's findings reached the agent", nil)
-		return nil
 	})
 }
 

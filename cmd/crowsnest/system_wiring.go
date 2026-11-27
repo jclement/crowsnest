@@ -109,7 +109,7 @@ func reloader(flags *pflag.FlagSet, secrets map[string]string) func(map[string]s
 		return value, ok
 	}
 	return func(stored map[string]string) (config.Config, error) {
-		return config.Load(flags, config.Options{Stored: stored, Getenv: getenv})
+		return config.Load(flags, config.Options{Stored: stored, StrictStored: true, Getenv: getenv})
 	}
 }
 

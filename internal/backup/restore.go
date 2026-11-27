@@ -80,6 +80,11 @@ type Result struct {
 	// many role files' "I've read it" marks were dropped, so changed role files show as unread.
 	RevokedRules int
 	ForgotSeen   int
+	// CheckCommands are the projects' custom check commands set back to automatic (R7-S4), kept
+	// aside until the human uses them again; RestoredLayers how many instruction layers are
+	// withheld from agents until the human applies them.
+	CheckCommands  []store.RestoredCheck
+	RestoredLayers int
 }
 
 // ErrNotEmpty is returned when the target already holds data and Force is off.
@@ -485,6 +490,16 @@ func markRestored(ctx context.Context, dbPath, file string, manifest Manifest, a
 		return err
 	}
 	if _, err := db.DeleteKVSuffix(ctx, "remote_control"); err != nil {
+		return err
+	}
+	// R7-S4: the same for what crowsnest acts on by itself. A custom check command is a shell
+	// command crowsnest runs on every done: it goes back to automatic, the backup's command kept
+	// aside for the human to use again. The instruction layers become agents' system prompts:
+	// each is withheld until the human has read it and applied it.
+	if result.CheckCommands, err = db.SetAsideCheckCommands(ctx); err != nil {
+		return err
+	}
+	if result.RestoredLayers, err = db.MarkLayersRestored(ctx); err != nil {
 		return err
 	}
 	return db.Close()

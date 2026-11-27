@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 
@@ -28,7 +29,8 @@ type changesResolver struct {
 
 func (r changesResolver) jobTarget(ctx context.Context, job jobs.Job) changes.Target {
 	target := changes.Target{Subject: job.ID, Kind: changes.KindJob, JobID: job.ID, JobState: string(job.State), Label: job.ID + ": " + job.Title,
-		ProjectID: job.ProjectID, BaseBranch: job.BaseBranch, Root: job.WorkDir, Walkthrough: job.WalkthroughMD}
+		ProjectID: job.ProjectID, BaseBranch: job.BaseBranch, Root: job.WorkDir, Walkthrough: job.WalkthroughMD,
+		Worktree: job.WorktreeBranch != ""}
 	if target.Root == "" {
 		target.Root = job.Dir
 	}
@@ -134,7 +136,8 @@ func (r changesResolver) Retired(ctx context.Context, subject string) bool {
 
 // startChanges builds the live diff service and runs its loop until ctx ends.
 func startChanges(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, jobService *jobs.Service, projectService *projects.Service, logger *slog.Logger) *changes.Service {
-	service := changes.New(changes.Options{Store: db, Hub: events, Logger: logger,
+	home, _ := os.UserHomeDir()
+	service := changes.New(changes.Options{Store: db, Hub: events, Logger: logger, Home: home,
 		Resolver: changesResolver{cfg: cfg, db: db, jobs: jobService, projects: projectService}})
 	go service.Run(ctx)
 	return service

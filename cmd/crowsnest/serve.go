@@ -253,7 +253,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	runApprovals(ctx, approvalService, fleetCache, logger)
 	digests := &digestProxy{}
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, ctl, digests, logger)
+		standingHooks{Context: standingContext(cfg, refs, refs.questions.Load, jobService), Ack: ackStandingContext(refs)}, files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, ctl, digests, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
@@ -298,6 +298,14 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		}
 	}
 	changeService := startChanges(ctx, cfg, db, events, jobService, refs.projects.service, logger)
+	// "Require all files viewed before Land" (live), enforced in the jobs service's one Land path
+	// so an agent's approved land request passes it too (R7-C07).
+	jobService.SetViewedGate(func(ctx context.Context, jobID, head string) error {
+		if !live.config.get().RequireViewedBeforeLand {
+			return nil
+		}
+		return changeService.LandViewed(ctx, jobID, head)
+	})
 	if demo, ok := client.(*fake.Demo); ok {
 		// After the jobs: each demo approval and question names the job whose pane raised it.
 		inbox := demoInbox{demo: demo, jobs: jobService, approvals: approvalService, questions: questionService, files: files, stateDir: cfg.StateDir}
@@ -365,8 +373,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(), Attention: attentionService, Now: nowSources,
-		Changes:       changeService,
-		RequireViewed: func() bool { return live.config.get().RequireViewedBeforeLand },
+		Changes: changeService,
 	}
 	if cfg.Demo {
 		deps.DemoTouch = func(ctx context.Context, id string) error { return jobs.DemoDiffTouch(ctx, jobService, id) }

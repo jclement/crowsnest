@@ -308,10 +308,12 @@ func (s *Service) suggest(ctx context.Context, approval *Approval) {
 
 // rememberable is what "Allow and remember for this job" may store for an approval (R6-S1). A low
 // call gets the usual suggestion (a prefix, a directory, a tool), capped at low. An elevated call
-// is remembered only as itself: its exact command, or its exact tool name; never an edit, never a
-// command with a glob character in it (a * would widen it), and never a call that is elevated only
-// because crowsnest does not recognise it: that rule belongs in the project's settings, written
-// by the human.
+// is remembered only as itself, and only when "itself" can be matched: an exact Bash command.
+// Never an edit, never a command with a glob character in it (a * would widen it), never a call
+// that is elevated only because crowsnest does not recognise it, and never any other tool (R7-S1):
+// a tool rule matches the tool's name alone, so remembering `mcp__github__merge_pull_request {pr:
+// 12}` or a `Read` of `.env` would allow that tool with any input for the rest of the job. Those
+// rules belong in the project's settings, written by the human with the preview.
 func (s *Service) rememberable(approval Approval, root string) (Suggestion, bool) {
 	if approval.Risk != risk.Elevated {
 		return Suggest(approval.ToolName, approval.ToolInput, root), true
@@ -330,8 +332,6 @@ func (s *Service) rememberable(approval Approval, root string) (Suggestion, bool
 			return Suggestion{}, false
 		}
 		return Suggestion{Kind: kind, Pattern: command, Exact: true}, true
-	case KindTool:
-		return Suggestion{Kind: kind, Pattern: approval.ToolName, Exact: true}, true
 	}
 	return Suggestion{}, false
 }
@@ -514,7 +514,7 @@ func (s *Service) allowAndRemember(ctx context.Context, approval Approval, decis
 	}
 	kind := KindFor(approval.ToolName)
 	if allowed, ok := s.rememberable(approval, scope.Root); !ok {
-		return approval, refused("crowsnest does not remember this call from a card (it is elevated and not a call it recognises, or an edit outside the job's directory): allow it once, or write a rule in the project's settings")
+		return approval, refused("crowsnest does not remember this call from a card (it is elevated and either a tool other than Bash, whose rule would match any input, a call it does not recognise, or an edit outside the job's directory): allow it once, or write a rule in the project's settings")
 	} else if allowed.Exact && strings.TrimSpace(*decision.Remember) != allowed.Pattern {
 		return approval, refused("An elevated call is remembered only as itself, exactly: %q", allowed.Pattern)
 	}

@@ -72,4 +72,26 @@ describe("LayerEditor", () => {
     expect(screen.getByText("/home/crow/.config/crowsnest/roles/tester.md")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
+
+  it("shows a restored role as withheld, with its text, until it is applied (R7-S4)", async () => {
+    const restored = `${builtin}Delete the tests.`;
+    let detail: LayerDetail = { layer: layer({ restored: true, restored_hash: "h1", saved_md: restored, revision: 3 }), revisions: [] };
+    const calls = stubApi((call) => {
+      if (call.path === "/instructions/role/tester" && call.method === "GET") return { body: { data: detail } };
+      if (call.path === "/instructions/role/tester/apply-restored" && call.method === "POST") {
+        detail = { layer: layer({ source: "db", effective_md: restored, saved_md: restored, revision: 3 }), revisions: [] };
+        return { body: { data: detail } };
+      }
+      if (call.path === "/instructions") return { body: { data: null } };
+      return undefined;
+    });
+    renderWithClient(<LayerEditor scope="role" apiKey="tester" />);
+    expect(await screen.findByTestId("restored-text")).toHaveTextContent("Delete the tests.");
+    expect(screen.getByTestId("layer-source")).toHaveTextContent("restored: not applied");
+    expect(screen.getByRole("textbox", { name: /tester instructions/ })).not.toHaveValue(restored);
+    await userEvent.click(screen.getByRole("button", { name: "Apply it" }));
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+    expect(calls.find((call) => call.path.endsWith("/apply-restored"))?.body).toEqual({ hash: "h1" });
+    await waitFor(() => expect(screen.queryByTestId("restored-text")).not.toBeInTheDocument());
+  });
 });

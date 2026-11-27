@@ -305,31 +305,33 @@ func (s *Service) reconcileReview(ctx context.Context, r store.JobRecord) {
 	}
 }
 
-// sendBackForChanges puts the job back to running and types the findings to its builder.
+// sendBackForChanges puts the job back to running and has the findings typed to its builder. The
+// text is kept as the job's pending feedback and typed by deliverFeedback (R7-C04, R7-C05): a
+// budget hold that waited latent through the review now holds the job, and the findings wait with
+// it until the hold is lifted, instead of telling a held builder to carry on.
 func (s *Service) sendBackForChanges(ctx context.Context, parent Detail, reviewer Job, findings, path string) {
-	job, err := s.mutate(ctx, parent.ID, func(r *store.JobRecord, c *change) error {
+	_, err := s.mutate(ctx, parent.ID, func(r *store.JobRecord, c *change) error {
 		if State(r.State) != StateInReview {
 			return errSkip
 		}
 		liftHoldLocked(r, c, HoldReviewing, LiftCrowsnest, nil)
 		r.State, r.ReviewVerdict, r.ReviewMD = string(StateRunning), VerdictChanges, findings
 		s.markProgressLocked(r) // a fresh start for the nudge budget: the builder has new work
-		c.event(EventReview, fmt.Sprintf("Changes requested by %s (round %d of %d); the findings were sent to the agent", reviewer.ID, r.ReviewRound, maxReviewRounds),
+		text := fmt.Sprintf("[crowsnest review %s] The reviewer asked for changes (round %d of %d). Its findings are in %s (job_get shows them too). "+
+			"Address each one, commit, and call done again with what you changed.", reviewer.ID, r.ReviewRound, maxReviewRounds, path)
+		if path == "" {
+			text = fmt.Sprintf("[crowsnest review %s] The reviewer asked for changes (round %d of %d); job_get shows its findings. Address each one, commit, and call done again.",
+				reviewer.ID, r.ReviewRound, maxReviewRounds)
+		}
+		r.PendingFeedback = text
+		c.event(EventReview, fmt.Sprintf("Changes requested by %s (round %d of %d); the findings go to the agent", reviewer.ID, r.ReviewRound, maxReviewRounds),
 			map[string]any{"reviewer": reviewer.ID, "findings": path})
 		return nil
 	})
-	if err != nil || job.PaneID == "" {
+	if err != nil {
 		return
 	}
-	text := fmt.Sprintf("[crowsnest review %s] The reviewer asked for changes (round %d of %d). Its findings are in %s (job_get shows them too). "+
-		"Address each one, commit, and call done again with what you changed.", reviewer.ID, job.ReviewRound, maxReviewRounds, path)
-	if path == "" {
-		text = fmt.Sprintf("[crowsnest review %s] The reviewer asked for changes (round %d of %d); job_get shows its findings. Address each one, commit, and call done again.",
-			reviewer.ID, job.ReviewRound, maxReviewRounds)
-	}
-	if err := s.sendText(ctx, job.PaneID, job.AgentName, text); err != nil {
-		_ = s.Journal(ctx, job.ID, EventReview, "The findings could not be typed to the agent: "+oneLine(err.Error(), 160)+"; send them with a message", nil)
-	}
+	s.deliverFeedback(ctx, parent.ID)
 }
 
 // reviewNeedsHuman ends the review in front of the human: needs_you, cause review.

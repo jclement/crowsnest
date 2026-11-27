@@ -147,7 +147,8 @@ test.describe.serial("the orchestrator, with real Claude", () => {
     await expect(outcome).toContainText("Yes");
     // A waiting asker gets it through the long-poll, not typed into its pane: its own call
     // returning the answer is the receipt (DESIGN.md 6.19), Received at once.
-    await expect(outcome.getByLabel("Answer receipt")).toContainText("Received");
+    // exact: the manual's "Help: answer receipts" button sits beside it.
+    await expect(outcome.getByLabel("Answer receipt", { exact: true })).toContainText("Received");
     await expect(outcome).not.toContainText("Typed into the agent");
     await page.goto(`${instance.baseURL}/chat`);
     await expect(page.getByRole("article", { name: "Reply" }).last()).toContainText(/answered/i, { timeout: 180_000 });

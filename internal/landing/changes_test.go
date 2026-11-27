@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // changesFixture is a worktree with one commit on its branch (feature.go added, README.md
@@ -318,5 +320,109 @@ func TestFirstCommitAgainstEmpty(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].Status != "added" {
 		t.Fatalf("files = %+v", files)
+	}
+}
+
+// TestWorkTreeDistrustsTheIndexFile is R7-S2: the checkout's index is the agent's file. A FIFO in
+// its place must not block the reading, a link to /dev/zero must not be copied, and an oversized
+// file is not copied either; each time the snapshot is built from HEAD instead and still shows
+// the work.
+func TestWorkTreeDistrustsTheIndexFile(t *testing.T) {
+	ctx := context.Background()
+	for _, kind := range []string{"fifo", "dev-zero", "huge"} {
+		t.Run(kind, func(t *testing.T) {
+			r, _ := changesFixture(t)
+			index := strings.TrimSpace(run(t, r.worktree, "git", "rev-parse", "--path-format=absolute", "--git-path", "index"))
+			if err := os.Remove(index); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "fifo":
+				if err := syscall.Mkfifo(index, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "dev-zero":
+				if err := os.Symlink("/dev/zero", index); err != nil {
+					t.Fatal(err)
+				}
+			case "huge":
+				file, err := os.Create(index)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := file.Truncate(maxIndexBytes + 1); err != nil {
+					t.Fatal(err)
+				}
+				_ = file.Close()
+			}
+			type result struct {
+				work string
+				err  error
+			}
+			done := make(chan result, 1)
+			go func() {
+				work, _, err := WorkTree(ctx, r.worktree)
+				done <- result{work, err}
+			}()
+			var got result
+			select {
+			case got = <-done:
+			case <-time.After(15 * time.Second):
+				t.Fatal("WorkTree did not return: it is reading the index file")
+			}
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			files, _, err := Compare(ctx, r.worktree, HeadTree(ctx, r.worktree), got.work)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if listed := byPath(files); listed["server.go"].Status != "modified" || listed["notes.txt"].Status != "added" {
+				t.Fatalf("the snapshot lost the work: %+v", files)
+			}
+		})
+	}
+}
+
+// TestPatchPathsAreLiteral is R7-S7: a file whose name is pathspec magic (`[a]pp.go` globs to
+// app.go) shows its own diff only, not another file's under its card.
+func TestPatchPathsAreLiteral(t *testing.T) {
+	r := newRepo(t)
+	ctx := context.Background()
+	base := HeadTree(ctx, r.worktree)
+	write(t, r.worktree, "app.go", "package app // the real app\n")
+	write(t, r.worktree, "[a]pp.go", "package app // the odd name\n")
+	work, _, err := WorkTree(ctx, r.worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, _, _, err := Patch(ctx, r.worktree, base, work, "[a]pp.go", "", PatchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "the odd name") || strings.Contains(diff, "the real app") {
+		t.Fatalf("the diff of [a]pp.go:\n%s", diff)
+	}
+}
+
+// TestGitOutputIsBoundedWhileRead is R7-C09: a git command that prints past its bound is stopped
+// there, not read whole and cut afterwards.
+func TestGitOutputIsBoundedWhileRead(t *testing.T) {
+	stopped := false
+	buffer := newCapped(10, func() { stopped = true })
+	if n, err := buffer.Write([]byte("0123456789abcdef")); n != 16 || err != nil {
+		t.Fatalf("write = %d %v", n, err)
+	}
+	if !stopped || !buffer.over || buffer.String() != "0123456789" {
+		t.Fatalf("stopped %v, over %v, kept %q", stopped, buffer.over, buffer.String())
+	}
+	r := newRepo(t)
+	ctx := context.Background()
+	big := strings.Repeat("a line of a generated file\n", 200_000) // about 5 MB
+	write(t, r.worktree, "generated.txt", big)
+	blob := strings.TrimSpace(run(t, r.worktree, "git", "hash-object", "-w", "generated.txt"))
+	out, err := gitCall{dir: r.worktree, args: []string{"cat-file", "blob", blob}, maxOut: 1 << 20}.run(ctx)
+	if !errors.Is(err, ErrOutputCut) || len(out) != 1<<20 {
+		t.Fatalf("read %d bytes, err %v; want the first MiB and ErrOutputCut", len(out), err)
 	}
 }

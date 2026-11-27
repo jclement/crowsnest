@@ -38,6 +38,10 @@ type Options struct {
 	// whoever starts the process with a flag or a variable wins, then the app, then the file
 	// (DESIGN.md 3). Only options in EditableOptions are read from here; anything else is ignored.
 	Stored map[string]string
+	// StrictStored refuses a bad stored value as a flag's would be refused: the app's validation
+	// of a change sets it. At start it is off, so a bad value saved earlier (or brought by a
+	// restore, R7-I5) is a warning where a setting can fall back safely, not a failed start.
+	StrictStored bool
 	// TailnetName returns this machine's Tailscale MagicDNS name ("" for none), for the host
 	// allowlist: requests through `tailscale serve` carry it as Host. Nil: no detection (tests,
 	// and every caller but serve and doctor). --no-tailscale-detect skips it.

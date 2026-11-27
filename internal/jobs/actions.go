@@ -251,6 +251,11 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 		}
 		return false, err
 	}
+	if why := s.continuationRefusal(ctx, job.ID); why != "" {
+		s.finishQuietly(ctx, cl, spent.refund) // R7-C04: no nudge into a held job
+		s.noteHeldContinuation(ctx, job.ID, "the backstop's nudge", why)
+		return false, nil
+	}
 	var result orch.PromptResult
 	var sendErr error
 	if err := s.effect(ctx, cl, detail.PaneID, func(ctx context.Context) {

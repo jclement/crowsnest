@@ -401,9 +401,13 @@ func runHook(ctx context.Context, stdin io.Reader, stdout io.Writer, getenv func
 	}
 	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
 	defer cancel()
-	reply, err := client.Hook(ctx, event, input)
-	if err != nil || reply == "" {
+	reply, err := client.HookReply(ctx, event, input)
+	if err != nil || reply.Stdout == "" {
 		return
 	}
-	_, _ = io.WriteString(stdout, reply)
+	if _, err := io.WriteString(stdout, reply.Stdout); err != nil || reply.Ack == "" {
+		return
+	}
+	// The reply carried something that must reach the agent: say it was written (R7-C11).
+	_ = client.HookAck(ctx, reply.Ack)
 }

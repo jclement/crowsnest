@@ -125,6 +125,17 @@ func printRestore(out io.Writer, cfg config.Config, result backup.Result) {
 	if result.ForgotSeen > 0 {
 		_, _ = fmt.Fprintf(out, "%d role file(s) are marked unread: review them in Instructions.\n", result.ForgotSeen)
 	}
+	for _, check := range result.CheckCommands {
+		if check.Command != "" {
+			_, _ = fmt.Fprintf(out, "Project %s's check command from the backup is not used until you approve it on the project page (automatic until then): %q\n", check.Name, check.Command)
+		}
+		if check.Prepare != "" {
+			_, _ = fmt.Fprintf(out, "Project %s's prepare command from the backup is not used until you approve it on the project page: %q\n", check.Name, check.Prepare)
+		}
+	}
+	if result.RestoredLayers > 0 {
+		_, _ = fmt.Fprintf(out, "%d instruction layer(s) from the backup are withheld from agents until you read and apply them in Instructions.\n", result.RestoredLayers)
+	}
 	_, _ = fmt.Fprintln(out, "It starts PAUSED. Start crowsnest, check the agents on the System page and the journal, then resume.")
 }
 

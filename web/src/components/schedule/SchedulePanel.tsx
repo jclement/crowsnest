@@ -13,6 +13,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, CalendarClock, Check, ChevronDown, ChevronRight, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
+import { findHidden } from "../../lib/hidden";
 import type { ProjectView } from "../../lib/projects";
 import { useProjects, useSchedule, useScheduleAction, useScheduleApprove, useScheduleEdit } from "../../lib/queries";
 import { nextDueText, targetOf, type ScheduleInput, type ScheduleTask } from "../../lib/schedule";
@@ -21,6 +22,7 @@ import { DigestsSheet } from "../control/DigestsSheet";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
+import { HiddenWarning, Revealed } from "../ui/Revealed";
 import { Markdown } from "../Markdown";
 import { EmptyState } from "../ui/EmptyState";
 import { Sheet } from "../ui/Sheet";
@@ -272,6 +274,7 @@ function Review({ task }: { task: ScheduleTask }) {
         )}
         {task.role && ` as ${task.role}`}, {task.schedule}. Any agent can write this file, so it does not run until you approve what it says:
       </div>
+      <HiddenWarning report={findHidden(source)} what="This file" />
       {hidesSomething && (
         <p role="note" className="text-warning">
           This file contains HTML or comments, which the formatted view does not show. Read the raw text below: it is what you approve.
@@ -282,7 +285,7 @@ function Review({ task }: { task: ScheduleTask }) {
           <Markdown className="text-xs">{task.body_md ?? ""}</Markdown>
         ) : (
           <pre aria-label={`Raw text of ${task.name}`} className="whitespace-pre-wrap break-words font-mono text-2xs text-body">
-            {source}
+            <Revealed text={source} />
           </pre>
         )}
       </div>

@@ -72,6 +72,7 @@ type jobWatch struct {
 	receiptAt   time.Time
 	feedbackAt  time.Time // the last failed attempt to type pending feedback (R6-C07)
 	checkReruns int       // check runs in a row voided by a moving HEAD (R6-S8)
+	heldNoteAt  time.Time // the last "an automatic prompt waits for a hold" journal line (R7-C04)
 	spinAt      time.Time
 	spinSize    int64
 }

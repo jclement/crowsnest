@@ -9,7 +9,8 @@
 //	POST /api/v1/jobs/{id}/update        job_update
 //	POST /api/v1/jobs/{id}/done          done
 //	POST /api/v1/jobs/{id}/fail          fail
-//	POST /api/v1/hooks/{event}           a Claude Code hook's stdin; answers {stdout}
+//	POST /api/v1/hooks/{event}           a Claude Code hook's stdin; answers {stdout, ack}
+//	POST /api/v1/hook-ack {ack}          the hook client wrote that reply (R7-C11)
 //
 // The job id is explicit in the path; clients take it from --job / job_id or CROWSNEST_JOB. What
 // the caller may do comes from its token, never from that path (R1b N2): reading is open to any
@@ -60,6 +61,7 @@ func (s *Server) registerJobRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/jobs/{id}/done", s.handleJobDone)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/fail", s.handleJobFail)
 	mux.HandleFunc("POST /api/v1/hooks/{event}", s.handleHook)
+	mux.HandleFunc("POST /api/v1/hook-ack", s.handleHookAck)
 }
 
 // jobService answers 503 when this server has no jobs.
@@ -229,11 +231,27 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.PathValue("event") == jobs.HookSessionStart && caller.JobID == "" && caller.PaneID != "" && s.sessionContext != nil {
-		if standing := s.sessionContext(r.Context(), caller.PaneID, input.Source); standing != "" {
+		if standing, ack := s.sessionContext(r.Context(), caller.PaneID, input.Source); standing != "" {
 			reply.Stdout = strings.TrimSpace(reply.Stdout + "\n\n" + standing)
+			reply.Ack = ack
 		}
 	}
 	writeData(w, http.StatusOK, reply)
+}
+
+// handleHookAck is the hook client saying it wrote a reply that carried an ack token: what that
+// reply had to deliver (a standing agent's new instructions) is delivered now (R7-C11). Without
+// it, the next SessionStart carries the same text again. Always 204: a lost ack costs a repeat.
+func (s *Server) handleHookAck(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Ack string `json:"ack"`
+	}
+	caller := s.callerOf(r)
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&input); err == nil && input.Ack != "" &&
+		caller.PaneID != "" && s.ackSessionContext != nil {
+		s.ackSessionContext(r.Context(), caller.PaneID, input.Ack)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleInstructionsLoaded records an instruction file Claude loaded (DESIGN.md 21.3). It never

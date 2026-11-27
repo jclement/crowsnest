@@ -2,6 +2,8 @@ package changes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/landing"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -335,5 +338,149 @@ func TestWatchedSubjectReadAfterActivity(t *testing.T) {
 		case <-deadline:
 			t.Fatal("no changes event after the job's activity")
 		}
+	}
+}
+
+// TestLandViewedFailsClosed is R7-C07 and R7-S9: with every listed file viewed, the gate still
+// refuses when the commit being landed is not the one it read (the agent committed a new file
+// just as the human tapped Land), when the branch changes more files than a reading lists, and
+// when the checkout cannot be read.
+func TestLandViewedFailsClosed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	summary, err := f.svc.Summary(ctx, job1, ScopeCommitted, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed := summary.Head
+	if _, err := f.svc.Mark(ctx, job1, ScopeAll, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.LandViewed(ctx, "j_1", reviewed); err != nil {
+		t.Fatalf("everything viewed: %v", err)
+	}
+	var refusal *LandRefusal
+
+	// A new commit lands on the branch after the human viewed everything.
+	write(t, f.wt, "late.go", "package app\n\nfunc Late() {}\n")
+	git(t, f.wt, "add", "late.go")
+	git(t, f.wt, "commit", "-q", "-m", "late")
+	if err := f.svc.LandViewed(ctx, "j_1", reviewed); !errors.As(err, &refusal) || !refusal.Unknown {
+		t.Fatalf("landing the reviewed head after a new commit: %v", err)
+	}
+	if err := f.svc.LandViewed(ctx, "j_1", git(t, f.wt, "rev-parse", "HEAD")); !errors.As(err, &refusal) || refusal.Unknown || refusal.Unviewed != 1 {
+		t.Fatalf("the new head with its new file unviewed: %v", err)
+	}
+
+	// More files than a reading lists: every listed one viewed is not every file.
+	for i := 0; i <= landing.MaxChangedFiles; i++ {
+		write(t, f.wt, fmt.Sprintf("gen/f%04d.txt", i), "x\n")
+	}
+	git(t, f.wt, "add", "gen")
+	git(t, f.wt, "commit", "-q", "-m", "many")
+	head := git(t, f.wt, "rev-parse", "HEAD")
+	if _, err := f.svc.Mark(ctx, job1, ScopeAll, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.LandViewed(ctx, "j_1", head); !errors.As(err, &refusal) || !refusal.Unknown || !strings.Contains(refusal.Message, "more than") {
+		t.Fatalf("a truncated listing: %v", err)
+	}
+
+	// The checkout cannot be read.
+	f.res.mu.Lock()
+	f.res.job.Root = filepath.Join(t.TempDir(), "gone")
+	f.res.mu.Unlock()
+	if err := f.svc.LandViewed(ctx, "j_1", head); !errors.As(err, &refusal) || !refusal.Unknown {
+		t.Fatalf("an unreadable checkout: %v", err)
+	}
+}
+
+// TestFileServesOnlyTheHashAsked is R7-C12: the browser asks for a file's body by the hash the
+// list showed; after an edit the server's reading has another hash, and it answers stale rather
+// than a body the browser would cache under the old version.
+func TestFileServesOnlyTheHashAsked(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	summary, err := f.svc.Summary(ctx, job1, ScopeAll, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown, _ := fileOf(summary, "b.go")
+	if view, err := f.svc.File(ctx, job1, FileAsk{Path: "b.go", Scope: ScopeAll, Hash: shown.Hash}); err != nil || view.Hash != shown.Hash {
+		t.Fatalf("the version shown: %+v %v", view.Hash, err)
+	}
+	write(t, f.wt, "b.go", "package app\n\nfunc B() { println(2) }\n")
+	f.later()
+	_, err = f.svc.File(ctx, job1, FileAsk{Path: "b.go", Scope: ScopeAll, Hash: shown.Hash})
+	if e, ok := AsError(err); !ok || e.Kind != "stale" {
+		t.Fatalf("an edited file asked by its old hash: %v", err)
+	}
+}
+
+// TestRepositoryTopMustBeTheSubjects is R7-S8: a worktree job whose .git file is gone is not read
+// as the repository around it, and no subject is read through a repository whose top holds home.
+func TestRepositoryTopMustBeTheSubjects(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.res.mu.Lock()
+	f.res.job.Worktree = true
+	f.res.mu.Unlock()
+	if _, err := f.svc.Summary(ctx, job1, ScopeAll, false); err != nil {
+		t.Fatalf("a worktree read as itself: %v", err)
+	}
+	// A folder inside the main checkout, given as a worktree job's root: git finds main around it.
+	inner := filepath.Join(f.main, "inner")
+	write(t, inner, "x.txt", "x\n")
+	f.res.mu.Lock()
+	f.res.job.Root = inner
+	f.res.mu.Unlock()
+	f.later()
+	if _, err := f.svc.Summary(ctx, job1, ScopeAll, true); err == nil {
+		t.Fatal("a worktree job was read through the repository around it")
+	}
+	// Home inside a repository (a dotfiles repository): a project in it is not read.
+	home := filepath.Join(f.main, "home")
+	write(t, home, "notes.txt", "n\n")
+	svc := New(Options{Store: f.st, Resolver: f.res, Now: func() time.Time { return f.now }, Home: home})
+	if _, err := svc.Summary(ctx, Ask{Kind: KindProject, Ref: "1"}, ScopeAll, false); err == nil || !strings.Contains(err.Error(), "home") {
+		t.Fatalf("the repository holding home was read: %v", err)
+	}
+}
+
+// TestConcurrentReadsAreRaceFree is R7-C08: a reading being replaced while the progress route and
+// the watch tick look at it. Run with -race (mise run test does): before the fix, the entry's
+// reading and time were written under the entry's lock and read under the service's.
+func TestConcurrentReadsAreRaceFree(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	svc := New(Options{Store: f.st, Hub: f.hub, Resolver: f.res, Now: time.Now, MinInterval: time.Nanosecond})
+	if _, err := svc.Summary(ctx, job1, ScopeAll, false); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				_, _ = svc.Summary(ctx, job1, ScopeAll, true)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				_, _ = svc.ProgressAll(ctx)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				svc.refreshWatched(ctx, 0)
+			}
+		}()
+	}
+	wg.Wait()
+	if progress, err := svc.ProgressAll(ctx); err != nil || progress["j_1"].Total == 0 {
+		t.Fatalf("progress after the reads: %+v %v", progress, err)
 	}
 }

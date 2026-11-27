@@ -38,8 +38,9 @@ func TestHooksIncludeApprovalAndGuard(t *testing.T) {
 		t.Fatalf("PermissionRequest hook %v", request)
 	}
 	guard := hooks["PreToolUse"].([]map[string]any)[0]
-	if guard["matcher"] != "Bash" {
-		t.Fatalf("the guard runs on Bash only: %v", guard)
+	// Bash for the guard, and the tools that write files for the check hold (R7-C01).
+	if guard["matcher"] != "Bash|Edit|Write|MultiEdit|NotebookEdit" {
+		t.Fatalf("the guard's matcher: %v", guard)
 	}
 	command := guard["hooks"].([]map[string]any)[0]["command"].(string)
 	if command != "'/bin/crowsnest' hook pre-tool-use --socket '/tmp/s.sock' --job 'j_3' --token-file '/state/agent-token' --rules '/state/guard.json'" {

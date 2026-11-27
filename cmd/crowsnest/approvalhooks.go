@@ -115,7 +115,18 @@ func runGuardHook(ctx context.Context, stdout io.Writer, input []byte, rulesFile
 		return
 	}
 	var call guardInput
-	if json.Unmarshal(input, &call) != nil || call.ToolName != "Bash" || strings.TrimSpace(call.ToolInput.Command) == "" {
+	if json.Unmarshal(input, &call) != nil {
+		return
+	}
+	if guard.HeldByCheck(rulesFile, time.Now()) {
+		// R7-C01: crowsnest is checking this worktree; no tool call changes it meanwhile.
+		body, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{
+			"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": guard.CheckHoldReason,
+		}})
+		_, _ = stdout.Write(body)
+		return
+	}
+	if call.ToolName != "Bash" || strings.TrimSpace(call.ToolInput.Command) == "" {
 		return
 	}
 	rules, err := guard.Load(rulesFile)

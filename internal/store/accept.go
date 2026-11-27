@@ -29,16 +29,22 @@ type CheckRecord struct {
 	// DefinitionChanged lists files of the job's diff that define its check (migration 0019,
 	// R6-S4), comma-separated.
 	DefinitionChanged string
+	// Mode is where the check ran (migration 0021, R7-C01): "worktree" (the job's checkout) or
+	// "isolated" (a temporary copy of exactly Commit). TreeBefore and TreeAfter fingerprint the
+	// job's checkout when a worktree-mode check started and ended.
+	Mode       string
+	TreeBefore string
+	TreeAfter  string
 }
 
 const checkSelect = `SELECT id, job_id, commit_sha, base_sha, command, status, exit_code, duration_ms, output_tail, owner,
-	started_at, finished_at, definition_changed FROM job_checks`
+	started_at, finished_at, definition_changed, mode, tree_before, tree_after FROM job_checks`
 
 func scanCheck(row interface{ Scan(...any) error }) (CheckRecord, error) {
 	var r CheckRecord
 	var duration, started, finished int64
 	err := row.Scan(&r.ID, &r.JobID, &r.Commit, &r.BaseCommit, &r.Command, &r.Status, &r.ExitCode, &duration, &r.OutputTail, &r.Owner,
-		&started, &finished, &r.DefinitionChanged)
+		&started, &finished, &r.DefinitionChanged, &r.Mode, &r.TreeBefore, &r.TreeAfter)
 	r.Duration = time.Duration(duration) * time.Millisecond
 	r.StartedAt, r.FinishedAt = unixToTime(started), unixToTime(finished)
 	return r, err
@@ -47,9 +53,10 @@ func scanCheck(row interface{ Scan(...any) error }) (CheckRecord, error) {
 // InsertCheck records a check that has started and returns its id.
 func (s *Store) InsertCheck(ctx context.Context, r CheckRecord) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `INSERT INTO job_checks (job_id, commit_sha, base_sha, command, status, exit_code,
-		duration_ms, output_tail, owner, started_at, finished_at, definition_changed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		duration_ms, output_tail, owner, started_at, finished_at, definition_changed, mode, tree_before, tree_after)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.JobID, r.Commit, r.BaseCommit, r.Command, r.Status, r.ExitCode, r.Duration.Milliseconds(), r.OutputTail, r.Owner,
-		unixOrNil(r.StartedAt), unixOrNil(r.FinishedAt), r.DefinitionChanged)
+		unixOrNil(r.StartedAt), unixOrNil(r.FinishedAt), r.DefinitionChanged, checkMode(r.Mode), r.TreeBefore, r.TreeAfter)
 	if err != nil {
 		return 0, fmt.Errorf("recording a check: %w", err)
 	}
@@ -59,12 +66,21 @@ func (s *Store) InsertCheck(ctx context.Context, r CheckRecord) (int64, error) {
 // FinishCheck records how a check ended.
 func (s *Store) FinishCheck(ctx context.Context, r CheckRecord) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE job_checks SET status = ?, exit_code = ?, duration_ms = ?, output_tail = ?,
-		finished_at = ?, commit_sha = ?, definition_changed = ? WHERE id = ?`, r.Status, r.ExitCode, r.Duration.Milliseconds(), r.OutputTail,
-		unixOrNil(r.FinishedAt), r.Commit, r.DefinitionChanged, r.ID)
+		finished_at = ?, commit_sha = ?, definition_changed = ?, mode = ?, tree_before = ?, tree_after = ? WHERE id = ?`,
+		r.Status, r.ExitCode, r.Duration.Milliseconds(), r.OutputTail,
+		unixOrNil(r.FinishedAt), r.Commit, r.DefinitionChanged, checkMode(r.Mode), r.TreeBefore, r.TreeAfter, r.ID)
 	if err != nil {
 		return fmt.Errorf("finishing check %d: %w", r.ID, err)
 	}
 	return nil
+}
+
+// checkMode is a check's mode as stored: "worktree" when none was given.
+func checkMode(mode string) string {
+	if mode == "" {
+		return "worktree"
+	}
+	return mode
 }
 
 // LatestCheck returns a job's newest check, or ErrNotFound.
@@ -102,13 +118,17 @@ type ProjectAccept struct {
 	CheckCommand  string  // '' automatic, 'none', or a shell command
 	BudgetUSD     float64 // 0: the server's default
 	BudgetMinutes int
+	// CheckIsolated runs the check in a temporary copy of the commit; CheckPrepare is run there
+	// first ('' for none). Migration 0021, R7-C01.
+	CheckIsolated bool
+	CheckPrepare  string
 }
 
 // GetProjectAccept reads a project's acceptance defaults (zero for an unknown project).
 func (s *Store) GetProjectAccept(ctx context.Context, id int64) (ProjectAccept, error) {
 	var r ProjectAccept
-	err := s.db.QueryRowContext(ctx, `SELECT check_command, budget_usd, budget_minutes FROM projects WHERE id = ?`, id).
-		Scan(&r.CheckCommand, &r.BudgetUSD, &r.BudgetMinutes)
+	err := s.db.QueryRowContext(ctx, `SELECT check_command, budget_usd, budget_minutes, check_isolated, check_prepare FROM projects WHERE id = ?`, id).
+		Scan(&r.CheckCommand, &r.BudgetUSD, &r.BudgetMinutes, &r.CheckIsolated, &r.CheckPrepare)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProjectAccept{}, ErrNotFound
 	}
@@ -120,8 +140,8 @@ func (s *Store) GetProjectAccept(ctx context.Context, id int64) (ProjectAccept, 
 
 // SetProjectAccept writes a project's acceptance defaults.
 func (s *Store) SetProjectAccept(ctx context.Context, id int64, r ProjectAccept) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE projects SET check_command = ?, budget_usd = ?, budget_minutes = ? WHERE id = ?`,
-		r.CheckCommand, r.BudgetUSD, r.BudgetMinutes, id)
+	result, err := s.db.ExecContext(ctx, `UPDATE projects SET check_command = ?, budget_usd = ?, budget_minutes = ?, check_isolated = ?, check_prepare = ? WHERE id = ?`,
+		r.CheckCommand, r.BudgetUSD, r.BudgetMinutes, r.CheckIsolated, r.CheckPrepare, id)
 	if err != nil {
 		return fmt.Errorf("writing project %d's acceptance: %w", id, err)
 	}

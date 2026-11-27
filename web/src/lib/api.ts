@@ -285,7 +285,7 @@ export const endpoints = {
   clearLimit: (engine: string) => api<{ engine: string; released: number }>(`/limits/${encodeURIComponent(engine)}/clear`, { method: "POST" }),
   waits: () => api<WaitsView>("/system/waits"),
   projectAccept: (id: number) => api<ProjectAccept>(`/projects/${id}/accept`),
-  setProjectAccept: (id: number, value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes">) =>
+  setProjectAccept: (id: number, value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes" | "check_isolated" | "check_prepare">) =>
     api<ProjectAccept>(`/projects/${id}/accept`, { method: "PUT", body: value }),
   reconcileAnswer: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}/reconcile`, { method: "POST" }),
   retypeAnswer: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}/retype`, { method: "POST", body: { confirm: true } }),
@@ -341,6 +341,9 @@ export const endpoints = {
   /** Back to the built-in text (roles only). */
   roleFileSeen: (name: string, hash: string) => api<LayerDetail>(`/instructions/role/${encodeURIComponent(name)}/file-seen`, { method: "POST", body: { hash } }),
   resetRole: (name: string) => api<LayerDetail>(`/instructions/role/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  /** Let a layer a restore brought back reach agents (R7-S4); hash is the restored_hash shown. 409 when it changed. */
+  applyRestoredInstruction: (scope: LayerScope, key: string, hash: string) =>
+    api<LayerDetail>(`/instructions/${scope}/${encodeURIComponent(key)}/apply-restored`, { method: "POST", body: { hash } }),
   restoreInstruction: (scope: LayerScope, key: string, revision: number) =>
     api<LayerDetail>(`/instructions/${scope}/${encodeURIComponent(key)}/restore`, { method: "POST", body: { revision } }),
   /** What an agent was started with: j_<n>, orchestrator or lead:<slug>. */

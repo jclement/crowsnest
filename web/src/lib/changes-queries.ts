@@ -2,14 +2,14 @@
 // refreshes the summaries; a file's diff is keyed by its content hash, so a file that did not
 // change keeps its cached diff and one that did gets a new key (and a fresh fetch) by itself.
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { whoKey, whoPath, type ChangeScope, type DiffProgress, type DiffSummary, type DiffWho, type FileView, type ProjectChangeRow } from "./changes";
 
 export const changesKeys = {
   all: ["changes"] as const,
   summary: (who: DiffWho, scope: ChangeScope, base: string) => ["changes", "summary", whoKey(who), scope, base] as const,
   file: (who: DiffWho, path: string, hash: string, scope: ChangeScope, options: FileOptions) =>
-    ["changes", "file", whoKey(who), path, hash, scope, options.context, options.ignoreWhitespace, options.since] as const,
+    ["changes", "file", whoKey(who), path, hash, scope, options.context, options.ignoreWhitespace, options.since, options.since ? (options.baseline ?? "") : ""] as const,
   project: (ref: string) => ["changes", "project", ref] as const,
   progress: ["changes", "progress"] as const,
 };
@@ -18,6 +18,15 @@ export interface FileOptions {
   context: number;
   ignoreWhitespace: boolean;
   since: boolean;
+  /** What a since-viewed diff starts from (when the file was viewed): part of its cache key (R7-C12). */
+  baseline?: string;
+}
+
+/** The server read the file at another version than the one asked for (R7-C12). */
+export class StaleFileError extends Error {}
+
+function isStale(error: unknown): boolean {
+  return error instanceof StaleFileError || (error instanceof ApiError && error.code === "STALE");
 }
 
 function query(params: Record<string, string | undefined>): string {
@@ -30,12 +39,13 @@ function query(params: Record<string, string | undefined>): string {
 export const changesApi = {
   summary: (who: DiffWho, scope: ChangeScope, base: string, refresh = false) =>
     api<DiffSummary>(whoPath(who) + query({ scope, base: who.kind === "job" ? undefined : base, refresh: refresh ? "1" : undefined })),
-  file: (who: DiffWho, path: string, scope: ChangeScope, options: FileOptions, base: string) =>
+  file: (who: DiffWho, path: string, scope: ChangeScope, options: FileOptions, base: string, hash?: string) =>
     api<FileView>(
       whoPath(who) +
         "/file" +
         query({
           path,
+          hash,
           scope,
           context: options.context ? String(options.context) : undefined,
           ws: options.ignoreWhitespace ? "ignore" : undefined,
@@ -64,13 +74,29 @@ export function useDiffSummary(who: DiffWho, scope: ChangeScope, base: string, e
   });
 }
 
-/** One file's diff; fetched when its section comes near the screen. */
+/** One file's diff; fetched when its section comes near the screen. It is cached forever under
+ * its hash, so it must be the body of exactly that version (R7-C12): the request names the hash,
+ * the server refuses another (409 STALE), and an answer for another hash is not cached either.
+ * Either way the summary is read again, which brings the new hash (and so a new key). */
 export function useDiffFile(who: DiffWho, path: string, hash: string, scope: ChangeScope, options: FileOptions, base: string, enabled: boolean) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: changesKeys.file(who, path, hash, scope, options),
-    queryFn: () => changesApi.file(who, path, scope, options, base),
+    queryFn: async () => {
+      try {
+        const view = await changesApi.file(who, path, scope, options, base, hash);
+        if (view.hash !== hash) throw new StaleFileError(`${path} changed since the list was read`);
+        return view;
+      } catch (error) {
+        if (isStale(error)) {
+          void queryClient.invalidateQueries({ queryKey: ["changes", "summary", whoKey(who)] });
+        }
+        throw error;
+      }
+    },
     enabled,
     staleTime: Infinity,
+    retry: (count, error) => !isStale(error) && count < 2,
     placeholderData: keepPreviousData,
   });
 }

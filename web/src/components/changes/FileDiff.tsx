@@ -3,7 +3,8 @@
 // gaps between hunks expandable from the file's text (20 lines up or down, or all of it), and the
 // rows rendered in chunks as they scroll near, so a 5,000-line file does not block the page.
 // Every line keeps its +/− sign and a spoken name; colour is never the only cue. Text only:
-// tokens are rendered as text nodes, never HTML.
+// tokens are rendered as text nodes, never HTML. Invisible and direction-changing characters are
+// drawn as chips, and the file says how many it has (R7-S3).
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
@@ -23,7 +24,9 @@ import {
   type Range,
   type Token,
 } from "../../lib/changes";
+import { findHidden } from "../../lib/hidden";
 import { highlightLines, highlightOne } from "../../lib/syntax";
+import { HiddenWarning, Revealed } from "../ui/Revealed";
 
 const CHUNK = 300;
 
@@ -48,6 +51,9 @@ export function FileDiff({ view, split, wrap, onMoreContext }: FileDiffProps) {
     () => (split ? splitRows(hunks, gaps, expansions, newLines) : unifiedRows(hunks, gaps, expansions, newLines)),
     [split, hunks, gaps, expansions, newLines],
   );
+  // The whole diff text is scanned, not only the rows rendered so far: a hidden character far down
+  // must be announced before the reviewer ticks Viewed.
+  const hidden = useMemo(() => findHidden(view.path, view.diff), [view.path, view.diff]);
   const sentinel = useRef<HTMLTableRowElement>(null);
   useEffect(() => {
     const element = sentinel.current;
@@ -113,6 +119,7 @@ export function FileDiff({ view, split, wrap, onMoreContext }: FileDiffProps) {
   );
   return (
     <div className={cn("overflow-x-auto bg-surface", !wrap && "max-w-full")}>
+      <HiddenWarning report={hidden} what="This file's diff" className="m-1" />
       <table aria-label={`Diff of ${view.path}`} className={cn("w-full border-collapse font-mono text-2xs leading-5", split && "table-fixed")}>
         {split && (
           <colgroup>
@@ -203,7 +210,13 @@ function Code({ tokens, emphasis, kind }: { tokens: Token[]; emphasis?: Range[];
   return (
     <>
       {pieces.map((piece, index) => {
-        const text = piece.className ? <span className={piece.className}>{piece.text}</span> : piece.text;
+        const text = piece.className ? (
+          <span className={piece.className}>
+            <Revealed text={piece.text} />
+          </span>
+        ) : (
+          <Revealed text={piece.text} />
+        );
         return piece.mark ? (
           <mark key={index} className={cn("rounded-sm text-inherit", kind === "add" ? "bg-success/30" : "bg-danger/30")}>
             {text}

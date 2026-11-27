@@ -453,11 +453,13 @@ func (s *Service) exceedBelow(ctx context.Context, root, parent, what string, de
 			continue
 		}
 		id := FormatID(child.ID)
+		alreadyHeld := false
 		job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 			if State(r.State).Terminal() {
 				return errSkip
 			}
 			if held, ok := holdOf(*r, HoldBudget); ok && held.From == root {
+				alreadyHeld = true
 				return errSkip
 			}
 			if r.BudgetState != BudgetExceeded {
@@ -467,6 +469,11 @@ func (s *Service) exceedBelow(ctx context.Context, root, parent, what string, de
 			s.placeHoldLocked(r, c, HoldBudget, "Its parent "+parent+" used "+what+": raise "+root+"'s budget, or stop the job", root)
 			return nil
 		})
+		if alreadyHeld {
+			// Held by an earlier walk that may have been cut short below it (R7-C02): go on down.
+			s.exceedBelow(ctx, root, id, what, depth+1)
+			continue
+		}
 		if err != nil {
 			continue
 		}
@@ -474,6 +481,49 @@ func (s *Service) exceedBelow(ctx context.Context, root, parent, what string, de
 			"commit what is safe, call job_update with where you got to, and end your turn.", id, parent))
 		s.exceedBelow(ctx, root, id, what, depth+1)
 	}
+}
+
+// reconcileBudgetHolds derives the jobs below every job held by its own budget from that hold,
+// on every tick and so at the first one after a start (R7-C02). The walk after the hold is placed
+// is a side effect a crash or a failed child write can cut short; the parent's hold is the durable
+// fact, and this puts back whatever the walk did not finish. Placing an existing hold is a no-op.
+func (s *Service) reconcileBudgetHolds(ctx context.Context) {
+	var roots []store.JobRecord
+	if err := s.eachLive(ctx, append(append([]State{}, liveStates...), StateInReview), func(r store.JobRecord) {
+		if hasOwnBudgetHold(r) {
+			roots = append(roots, r)
+		}
+	}); err != nil && ctx.Err() == nil {
+		s.opts.Logger.Warn("supervisor: listing jobs for budget holds", "err", err)
+	}
+	for _, r := range roots {
+		what := strings.TrimPrefix(r.BudgetDetail, "Used ")
+		s.exceedBelow(ctx, FormatID(r.ID), FormatID(r.ID), what, 0)
+	}
+}
+
+// ancestorBudgetHold returns why r may not start because a job above it is held by its own
+// budget ("" when none is). It reads the ancestors themselves, so a child the walk has not reached
+// yet is still held (R7-C02); an ancestor that cannot be read holds it too (fail closed).
+func (s *Service) ancestorBudgetHold(ctx context.Context, r store.JobRecord) string {
+	parent := r.ParentID
+	for depth := 0; parent != 0; depth++ {
+		if depth >= maxBudgetDepth {
+			return ""
+		}
+		above, err := s.opts.Store.GetJob(ctx, parent)
+		if errors.Is(err, store.ErrNotFound) {
+			return ""
+		}
+		if err != nil {
+			return "crowsnest could not read job " + FormatID(parent) + " above it, whose budget covers it; it starts once that can be read"
+		}
+		if !State(above.State).Terminal() && hasOwnBudgetHold(above) {
+			return "job " + FormatID(above.ID) + " above it reached its budget: raise that budget, or stop the job"
+		}
+		parent = above.ParentID
+	}
+	return ""
 }
 
 // liftBudgetBelow lifts the budget holds root's exhausted budget put on the jobs below it, now
@@ -613,6 +663,7 @@ func (s *Service) BudgetFinishStep(ctx context.Context, id string) (Job, error) 
 	if err != nil {
 		return Job{}, err
 	}
+	_ = s.opts.Store.SetKV(ctx, graceKey(job.ID), s.opts.Now().UTC().Format(time.RFC3339Nano)) // R7-C03: bounded in time too
 	if job.PaneID != "" {
 		_ = s.sendText(ctx, job.PaneID, job.AgentName, fmt.Sprintf("[crowsnest budget] The human lets you finish the step you are in on job %s. "+
 			"Finish it, commit what is safe to keep, call job_update with where you got to, then end your turn.", job.ID))
@@ -623,14 +674,56 @@ func (s *Service) BudgetFinishStep(ctx context.Context, id string) (Job, error) 
 // budgetStopLocked applies a grace stop at an observed end of turn (s.mu held): the Stop hook,
 // or the backstop for an agent without hooks (R6-C06). The step is over, so the job is held for
 // the human again. It reports whether it did.
+//
+// Grace ends at the first end of turn whatever state the agent declared (R7-C03): an agent that
+// declares blocked with a short recheck before ending its turn would otherwise keep grace across
+// the wake and every turn after it. The hold then keeps the job (and its wake) for the human.
 func (s *Service) budgetStopLocked(r *store.JobRecord, c *change) bool {
-	if r.BudgetState != BudgetGrace || State(r.State) != StateRunning {
+	if r.BudgetState != BudgetGrace || State(r.State).Terminal() {
 		return false
 	}
 	r.BudgetState = BudgetExceeded
 	s.placeHoldLocked(r, c, HoldBudget, firstNonEmptyDir(r.BudgetDetail, "Reached its budget")+"; it finished the step it was in", "")
 	c.event(EventBudget, "Finished the step it was in; back to you for the budget", nil)
 	return true
+}
+
+// budgetGraceMax bounds "finish the step you are in" in time as well (R7-C03): an agent that
+// never ends its turn, or one whose end of turn crowsnest cannot see, is back in front of the
+// human after this long all the same.
+const budgetGraceMax = 30 * time.Minute
+
+// graceKey is the kv row holding when a job's grace began (kv, not a column: nothing else needs it).
+func graceKey(id string) string { return "budget.grace_at." + id }
+
+// checkGraceExpiry ends a grace that has run past budgetGraceMax. A grace with no recorded start
+// (granted before this was built, or the row lost) starts its clock now.
+func (s *Service) checkGraceExpiry(ctx context.Context, r store.JobRecord) {
+	id := FormatID(r.ID)
+	if r.BudgetState != BudgetGrace {
+		return
+	}
+	now := s.opts.Now()
+	since, err := s.opts.Store.GetKV(ctx, graceKey(id))
+	began, parseErr := time.Parse(time.RFC3339Nano, since)
+	if err != nil || parseErr != nil {
+		_ = s.opts.Store.SetKV(ctx, graceKey(id), now.UTC().Format(time.RFC3339Nano))
+		return
+	}
+	if now.Sub(began) < budgetGraceMax {
+		return
+	}
+	_, _ = s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+		if r.BudgetState != BudgetGrace || State(r.State).Terminal() {
+			return errSkip
+		}
+		r.BudgetState = BudgetExceeded
+		s.placeHoldLocked(r, c, HoldBudget, firstNonEmptyDir(r.BudgetDetail, "Reached its budget")+
+			fmt.Sprintf("; the step it was let finish ran past %d minutes", int(budgetGraceMax/time.Minute)), "")
+		c.event(EventBudget, fmt.Sprintf("The step it was let finish ran past %d minutes; back to you for the budget", int(budgetGraceMax/time.Minute)), nil)
+		return nil
+	})
+	_ = s.opts.Store.DeleteKV(ctx, graceKey(id))
 }
 
 func derefOr(value *float64) float64 {

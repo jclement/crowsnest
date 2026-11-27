@@ -212,7 +212,10 @@ func (s *Service) startInPane(ctx context.Context, cl claim, job Job, resume boo
 	}
 	if resume && job.briefSent {
 		var sendErr error
-		if err := s.effect(ctx, cl, job.PaneID, func(ctx context.Context) {
+		// R7-C04: a held job's agent is back in its pane, but it is not told to carry on.
+		if why := s.continuationRefusal(ctx, job.ID); why != "" {
+			sendErr = errors.New("not typed: the job is " + why)
+		} else if err := s.effect(ctx, cl, job.PaneID, func(ctx context.Context) {
 			sendErr = s.sendText(ctx, job.PaneID, AgentName(job.ID), "[crowsnest restart] You were restarted. "+NudgeText(job.ID))
 		}); err != nil {
 			return err

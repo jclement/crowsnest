@@ -66,6 +66,9 @@ var (
 // HookReply is what the hook prints on stdout ("" prints nothing).
 type HookReply struct {
 	Stdout string `json:"stdout"`
+	// Ack, when set, is what the hook client posts back (POST /api/v1/hook-ack) once it has
+	// written Stdout: a SessionStart notice is marked delivered only then (R7-C11).
+	Ack string `json:"ack,omitempty"`
 }
 
 // HandleHook applies one hook event. jobID and callerPane come from the hook's agent token (the

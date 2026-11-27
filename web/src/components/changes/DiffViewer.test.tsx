@@ -48,9 +48,12 @@ function setup(files: DiffFile[], options: { onMark?: (call: Call) => DiffFile[]
       return { body: { data: summary(current) } };
     }
     if (call.path.startsWith("/changes/jobs/j_7/file")) {
-      const path = new URLSearchParams(call.path.split("?")[1]).get("path") ?? "";
-      if (call.path.includes("since=1")) return { body: { data: { ...cartView, path, since: true, diff: "@@ -2,1 +2,2 @@\n const total = price * quantity;\n+export const fresh = 1;\n", old_text: cartView.new_text, new_text: cartView.new_text + "export const fresh = 1;\n" } } };
-      return { body: { data: { ...cartView, path } } };
+      const params = new URLSearchParams(call.path.split("?")[1]);
+      const path = params.get("path") ?? "";
+      // The server serves the version asked for (R7-C12): the stub answers with the hash requested.
+      const hash = params.get("hash") ?? cartView.hash;
+      if (call.path.includes("since=1")) return { body: { data: { ...cartView, path, hash, since: true, diff: "@@ -2,1 +2,2 @@\n const total = price * quantity;\n+export const fresh = 1;\n", old_text: cartView.new_text, new_text: cartView.new_text + "export const fresh = 1;\n" } } };
+      return { body: { data: { ...cartView, path, hash } } };
     }
     if (call.path.startsWith("/changes/jobs/j_7")) return { body: { data: summary(current) } };
     return undefined;

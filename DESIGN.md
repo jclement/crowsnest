@@ -452,7 +452,7 @@ rebinding against `--no-auth` on localhost); secrets leaking into logs; agent ou
 6. **Agent-side socket**: a unix socket in a `0700` directory, mode `0600`. Filesystem permissions decide who may connect (this user's processes); it serves only the agent API (ask, say, notify, job, hook), never terminals. **Who is calling** comes from a token, never from what the caller says (R1b N2, N7): crowsnest mints a random token (`cnt_…`, 32 bytes) for each agent it starts, puts it in that agent's pane environment (`CROWSNEST_TOKEN`), in its MCP server's environment (`mcp.json`) and in a 0600 `agent-token` file its hook command lines name (`--token-file`), and keeps only the token's SHA-256 in `kv`, mapped to the pane and job (`internal/agentid`). A caller with no known token is unidentified: it may ask (the answer reaches it only through `--wait`), nothing is ever typed into a pane on its behalf, and it may not withdraw questions, create jobs or act on one. Job verbs work only on the token's job or the job held in the token's pane (the orchestrator's tokens name no job). Quotas per caller cap the rate of asks, says and job creations, open questions (10 for a job agent, 30 for the orchestrator and for the shared bucket of callers without a token; 200 in all, the orchestrator not counted against it, R2-L5) and concurrent long-polls (8), and an expiry is at least five minutes. `say` needs a token (R2-I4). Tokens end with the work (R2-L1): a job's tokens are revoked when it reaches done, failed or cancelled, and a sweeper revokes, once a minute, the tokens of panes herdr no longer lists (bindings younger than two minutes are spared, and nothing is revoked while herdr cannot be read). Replacing a pane's tokens is one locked, transactional step, and a start token for a pane now held by another job is refused (R2-C15). Token files are 0600 in a 0700 per-job directory, and tokens are never logged. Since R3-L4 every file crowsnest writes there (`brief.md`, `prompt.md`, `settings.json`, `mcp.json`, `agent-token`) is removed and created afresh, exclusively and without following a link, read-only (0400), and a job directory that is a link is refused; that stops a planted link from redirecting crowsnest's write and an accidental overwrite, not a same-uid agent, which can chmod or recreate the file.
 
     **What the token is, plainly (R2-M2).** Agents in one session run as one uid, and processes of one uid are not isolated from each other. Any agent can read another agent's environment (`/proc/<pid>/environ`, `ps eww`) or its 0600 files under the state directory (`<state>/jobs/j_N/agent-token`, `<state>/agent-token`, `mcp.json`) with an ordinary file read, and then act as that agent on the socket: update, finish or fail its job, forge its hooks (and so silence its supervision), ask or `say` as it, the orchestrator included. The token stops accidents and forged environment variables (a process that merely sets `CROWSNEST_TOKEN` or names a pane gets nothing); it does not stop a hostile same-uid process. Only running crowsnest as its own uid would make the socket a hard boundary. That is a deployment change, not a code change, and is not done.
-7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'`. (`worker-src` and `manifest-src` repeat what `default-src` allows, so loosening `default-src` later cannot widen where the service worker comes from. `unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
+7. **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and a CSP of `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'` (the last three do not fall back to `default-src`, R7-S14). (`worker-src` and `manifest-src` repeat what `default-src` allows, so loosening `default-src` later cannot widen where the service worker comes from. `unsafe-inline` styles are for xterm.js and mermaid; no inline script. That is why the no-flash theme bootstrap is a blocking `/theme-init.js` file rather than the usual inline `<script>` in `<head>`.)
 8. **Rendering untrusted text**: transcripts, pane text and question bodies are data. Markdown renders without raw HTML; mermaid runs with `securityLevel: 'strict'`; links open with `rel="noopener noreferrer"`; no `dangerouslySetInnerHTML` outside the sanitised mermaid SVG.
 9. **Secrets**: the password, session ids and the ElevenLabs key are never logged, never returned by any endpoint, never placed in argv or the environment of a child process. Once the config is loaded, `serve` removes `CROWSNEST_PASSWORD`, `CROWSNEST_PASSWORD_FILE`, `ELEVENLABS_API_KEY`, `CROWSNEST_NOTIFY_URL`, `CROWSNEST_NO_AUTH`, `SUPPRESS_AUTH` and `CROWSNEST_I_KNOW_THIS_IS_OPEN` from its own environment (R1 H1). That only changes the process's in-memory copy: the kernel keeps the environment a process was exec'd with, readable by the same user. So when `serve` finds any of the secret variables it re-executes itself once, with them removed from the new environment and handed over through an inherited pipe (`CROWSNEST_SECRETS_FD`); the environment the OS reports for crowsnest then holds no secret (R1b H1 residual; `cmd/crowsnest/secretenv.go`). The process that started crowsnest (a shell, tini in the devbox) keeps its own environment: pass the password as a file to keep it out of that too. Request logs record method, path, status, duration and client IP only. Error responses, the orchestrator's status detail and a terminal's start failure carry a sentence that says what to do, never herdr's or the orchestrator's own error text (which can hold paths and internals); that goes to the server log (R1 I2). A terminal's exit reason is still herdr's (`detached`, `terminal attach taken over`), because the browser acts on it. A `redact` helper scrubs token-shaped strings from anything echoed from panes into logs or notices.
 10. **Child processes** get a scrubbed environment: every `HERDR_*` variable is removed and the session is always addressed by its explicit socket path, so crowsnest started from inside a herdr pane cannot drive the pane's session. Every `CROWSNEST_*` variable except the pane variables (`CROWSNEST`, `CROWSNEST_SESSION`, `CROWSNEST_SOCKET`, `CROWSNEST_JOB`) and every `ELEVENLABS_*` one is removed too. That covers the herdr server crowsnest starts (which spawns every pane and agent, so a prompt-injected `env` in any pane finds no secret), the TUI client and each pane-control process (R1 H1). **A herdr session crowsnest did not start keeps whatever environment its server was started with**: if that shell exported the password or the ElevenLabs key, every pane in it can read them. Start the session through crowsnest, or from a shell without them.
@@ -536,7 +536,17 @@ once (so newer migrations run), and gets kv `pause.state` `{paused: true, by: "r
 (the pause switch's own row and shape, 6.13 on `wip/landing`) and `restore.pending`. R6-S5: a
 backup is not the human's word on this machine, so its approval rules are kept but **revoked**
 (the CLI says how many; add back the ones you want), its role files' "I've read it" marks are
-dropped, and any Remote Control link goes. The replaced database is **scrubbed** like a backup
+dropped, and any Remote Control link goes. R7-S4: the same for what crowsnest acts on by itself.
+Each project's **custom check command** (a shell command crowsnest runs on every done) goes back
+to automatic, the backup's command kept aside in kv (`restored.check_command.<id>`), named in the
+CLI's summary and shown on the project's Acceptance card with "Use this command" and "Keep the
+current check"; any save of the project's check settles it. Each saved **instruction layer** is
+marked "restored, not applied" (kv `instructions.restored.<scope>.<key>`, the hash of its text):
+while its saved text still has that hash it is **withheld** from every agent (a role falls back to
+its built-in), the layer editor shows the text with **Apply it** (`POST
+/instructions/{scope}/{key}/apply-restored {hash}`, 409 if it changed), and the human's own save
+replaces it. Applying changes what a start would write, so the standing agents restart for new
+instructions as for any other change (7.x freshness). The replaced database is **scrubbed** like a backup
 (sessions, token hashes, the push key, the notify URL): rolling back to it means signing in again.
 R6-S6: snapshots, backups and pre-migration copies drop every `*remote_control` key and carry a
 scrub mark (`snapshot.scrubbed`); a pre-migration copy without the current mark is scrubbed again
@@ -650,7 +660,11 @@ What holds now:
 - **Gates are never answered from a notification** (R5-S2). `questions.GateShaped` is a gate key,
   or any option key or label, or the title, that uses a granting word (`allow`, `approve`, `merge`,
   `land`, `push`, `deploy`, `delete`, `grant`, `permit`; R6-S9: an agent
-  could put "Allow: merge j_5" on a key "y"). Agents may not set any `land_`, `task_`,
+  could put "Allow: merge j_5" on a key "y"). R7-S6: the text is normalised first (NFKC, format
+  characters such as zero-width joiners removed, Cyrillic and Greek look-alikes folded onto Latin),
+  the words match with their inflections (`merging`, `deploys`, `approved` …), and "go ahead" counts;
+  "ship" does not ("Ship?" is the plain confirm of ordinary questions). The web's `isGate` mirrors
+  it. Agents may not set any `land_`, `task_`,
   `approval_` or `crowsnest_` context key (R6-I1). Such a question's
   notice gets no buttons and no action token (`internal/push/decision.go`), and `/push/action`
   refuses one (`403`). The endpoint is the authority.
@@ -682,7 +696,14 @@ What holds now:
   file are refused on otherwise benign programs: `fd -x/-X/--exec`, `rg --pre`, `sort -o` and
   `--compress-program`, `tree -o`, `uniq` with an output file, `go -exec/-toolexec/-vettool/-o`,
   `cargo --config`, `date -s`, and on read-only git `--output`, `-O`, `--open-files-in-pager`,
-  `--upload-pack`, `--ext-diff`, `--textconv`.
+  `--upload-pack`, `--ext-diff`, `--textconv`. R7-S5 closed the next ones: clustered short options
+  are taken apart for fd, rg, sort, tree, uniq and date (`sort -uo FILE`, `fd -Hx rm`; not for go,
+  whose single-dash words are not clusters); a lone `-` counts as a uniq operand (`uniq - FILE`);
+  `go env -w/-u` is not low (it persists into the human's go environment, every later build);
+  `git -C`, `cd`, `pushd`, `mkdir` and `touch` with a path outside the job's directory (absolute
+  outside it, `~`, or any `..`; with no directory known, any absolute path) are not low, nor is git
+  with `--git-dir`/`--work-tree`; `git fetch`/`pull` is low only from a configured remote's name,
+  never a URL or path; `ping` is off the list.
 - **The guard follows the line** (`internal/guard/guard.go`, R5-C02). A `cd` moves the directory
   the next git command runs in, and `checkout`/`switch` changes the branch the next commit lands
   on. Where that cannot be followed (a cd to a variable or inside a subshell, `--git-dir`,
@@ -787,6 +808,21 @@ the Terminal view; it is held to the same standard as everything else anyway:
   (`<state>/demo-home`: a GitHub repository with a check task and AGENTS.md, an Azure DevOps one
   with CLAUDE.md, a plain folder, `~/Work`, a hidden folder, a file) as its home, never the
   machine's own home, so the hermetic suite and screenshots neither show nor depend on real files.
+- **Home is a root by default** (said plainly, R7-S12): every name under `~` can be listed,
+  `.ssh` and `.aws` included, and with `files=1` the file names too. Contents are never served.
+- **R7 hardening.** Every filesystem touch of a route runs inside the deadline and an in-flight
+  slot: `GET /browse/places` reads favourites and roots in one bounded call (R7-C10). Every
+  metadata file (`.git/HEAD`, `config`, `packed-refs`, `commondir`, a worktree's `.git` file, and
+  Claude's trust file) is opened `O_NONBLOCK`, without following a link in its last part (Claude's
+  file may be a link), checked to be a regular file and read through a limit, so a FIFO cannot
+  hold a slot or a mutex and a linked HEAD outside is not read; the branch is one line (R7-S10).
+  Roots from crowsnest's records are checked again on each call: a remembered directory must
+  still resolve to itself (it is stored resolved), and no project or remembered directory that is
+  an ancestor of home is a root (R7-S11). A link out of the roots carries neither its target nor
+  whether that is a folder (it is listed in both modes, marked, not enterable); a path under a
+  file (`ENOTDIR`) answers like a missing one; a directory is read in batches of at most 5,000
+  names (the listing then says partial); a remote loses its query, fragment and an scp-like
+  password (R7-S12).
 
 ## 5. Driving herdr
 
@@ -1424,6 +1460,30 @@ job's `done` is now the agent's claim, and crowsnest decides whether it is **acc
   because a fresh checkout has none of the ignored files a check needs (node_modules, a virtual
   environment, build caches) and would fail for reasons the agent cannot fix. The residual: a
   process that changes files and puts them back between the two looks is not seen.
+- **Where the check runs: decided by the lead after R7-C01** (recorded here as a decision). The
+  **default stays the job's worktree**, for the reason above, and every place that shows evidence
+  says what that does and does not prove ("checked in the working tree"). In that mode crowsnest
+  also records a **content fingerprint** of the checkout (its tracked files as they are and its
+  untracked, not-ignored files, as one git tree id: `landing.TreeFingerprint`) at the start and
+  the end (`job_checks.tree_before`, `tree_after`; a run where they differ is not evidence), and
+  **holds the job's agent's tools** while the check runs: a marker file beside the job's guard
+  rules (`<state>/jobs/j_N/checking`, holding a deadline) makes its PreToolUse hook answer "wait:
+  crowsnest is running the check" for Bash and the file-writing tools (the hook's matcher is now
+  `Bash|Edit|Write|MultiEdit|NotebookEdit`). **That hold is not airtight**: a process the agent
+  started in the background earlier is no tool call, and the agent can remove the file; a change
+  made and put back between the two looks still escapes. A project that wants that ruled out turns
+  on its **isolated check** (the project's Acceptance card; `projects.check_isolated`,
+  `check_prepare`, migration 0021): the check then runs in a **temporary detached worktree of
+  exactly the pinned commit** (`landing.IsolatedCheckout`: the protective configuration, every
+  configured filter off, Git LFS's smudge skipped, made under a new temporary directory and removed
+  afterwards with `worktree remove --force` and `worktree prune`), after the project's optional
+  **prepare** command (installing dependencies) run in the copy, both under the heavy gate and
+  with the scrubbed environment. A copy that cannot be made, or a prepare command that fails, is
+  the run's result (a check error saying which); it never falls back to the worktree. The copy has
+  no ignored files, no initialised submodules and LFS pointer files only, unless the prepare
+  command makes them. The record (`job_checks.mode`: `worktree` | `isolated`) and the job card
+  say which mode produced the evidence: "checked in an isolated copy of abc1234567" or "checked in
+  the working tree". A restore sets a backup's prepare command aside like its check command (R7-S4).
 - **Durable or nothing** (R6-C13). A check whose row could not be written is not run; a result
   whose write failed is not evidence; and a job is accepted only when its newest durable check is
   that run, passed, at that commit.
@@ -1532,12 +1592,19 @@ not measured (Codex) shows "not measured", never zero, and is bounded by minutes
   point (finish the step, commit what is safe, job_update, end the turn); nothing is killed and
   no tool is interrupted. The human: **Raise the budget** (back to running, the agent told),
   **Let it finish this step** (`grace`: running, and its next observed end of turn puts it back in
-  front of the human: the Stop hook, or for an agent without hooks the backstop, R6-C06), or
-  **Stop the job** (cancel).
+  front of the human: the Stop hook, or for an agent without hooks the backstop, R6-C06; whatever
+  state the agent declared before that end of turn, blocked included, so a short recheck cannot
+  carry grace across turns; and in any case after 30 minutes, R7-C03, the start kept in kv
+  `budget.grace_at.<id>`), or **Stop the job** (cancel).
 - The limit is a `budget` hold (6.20). A parent's exhausted budget puts a hold from that parent
   on every live job below it, queued ones included, so a child waiting for a slot does not start
   past it, Start anyway included (R6-C05); a held job cannot delegate. Raising the parent's
-  budget lifts those holds; a child still over its own budget is held by that one.
+  budget lifts those holds; a child still over its own budget is held by that one. R7-C02: the
+  parent's own hold is the durable fact and the holds below are derived from it, so a crash or a
+  failed write in the walk loses nothing: every tick (and so the first after a start) walks again
+  below each job held by its own budget, going on below children already held; and a launch (Start
+  anyway too) reads the job's ancestors itself, refusing when one is held by its own budget or
+  cannot be read.
 
 ### 6.17 Spinning and the fleet's usage limit (built on `wip/accept`)
 
@@ -1589,7 +1656,9 @@ budget, the pause).
   dependency settled while crowsnest was down. After three rechecks of one blocked spell the
   human is told. A wait that would go in a circle (`until_job` on a job that, through blocked jobs
   waiting on jobs, waits on the caller) is refused; a circle found by the invariant check (left
-  from before) is broken by moving the job to wait on the human, who is told (R6-C09). `until_human` notifies at once and puts the job with the attention items; "Wake
+  from before) is broken by moving the job to wait on the human, who is told (R6-C09). The walk
+  ends on a job already visited, not after a number of hops, so a circle of any length is found;
+  a walk that cannot finish (a job that cannot be read) refuses the new wait (R7-C06). `until_human` notifies at once and puts the job with the attention items; "Wake
   it" is the human's. A blocked job from before wake-ups is given a 30-minute recheck.
 - **A question asked in prose** (`prose.go`): at the Stop hook, a last message whose last
   paragraph ends with a question addressed to the human ("Should I…?", "Want me to…?", "Which
@@ -1659,6 +1728,21 @@ the job whose budget ran out.
 | job_create | allowed only under questions, approval_tool and usage_limit (waits crowsnest ends); refused under a human's hold or while checked or reviewed |
 
 - Only the human's actions and crowsnest's own recovery lift holds (`liftHoldLocked`).
+- **Every automatic prompt** that would start a turn passes one gate right before it is typed
+  (`continuationRefusal`, R7-C04): a timed or dependency wake-up, a review's findings, a check's
+  findings, a retry's "continue", the backstop's nudge, the restart note. It reads the row fresh
+  and refuses while paused, on a finished job, under any hold (the job's set, its open blocking
+  questions, a budget above it) and while the fleet is under a usage limit (a retry ignores only
+  the usage-limit hold it lifts itself). A refused wake-up leaves the job blocked with its wake-up
+  for later; a refused retry or nudge gives its attempt back; a refused restart starts the agent
+  but types nothing. The human's own Wake it is refused with the reason. The check is not atomic
+  with herdr's keystrokes: a hold placed in the milliseconds between them is not seen.
+- **Findings have one owner** (R7-C05). A check's failure and a review's changes are both kept as
+  the job's `pending_feedback` and typed by `deliverFeedback`, a lifecycle step (`feedback`): the
+  claim on the row lets exactly one caller through (the check's callback, the review's and the
+  tick may all try), the gate runs before the claim and again before typing, and the message is
+  cleared only if it is still the one typed. A claim left by a crowsnest that stopped mid-send is
+  settled as "may have arrived", cleared and journalled, never typed again.
 
 ### 6.21 A diff at any time, and viewed tracking (built on `wip/diff`)
 
@@ -1675,7 +1759,12 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
 - **Subjects.** A job (`j_N`: its worktree, or its directory when not isolated), a project's main
   checkout (`project:<id>`, the lead's), or the orchestrator's folder. `changes.Resolver`
   (implemented in `cmd`) turns each into a root and a base; the package knows nothing of jobs.
-  A job that was landed or torn down answers `410` ("its review is kept on the job").
+  A job that was landed or torn down answers `410` ("its review is kept on the job"). The
+  repository read is the subject's own (R7-S8): a worktree job's root must be its repository's
+  top (one whose `.git` file is gone is not read through the repository around it), and no
+  subject is read through a repository whose top is the home directory or above it (a dotfiles
+  repository would put every untracked file under home in the diff). A directory job or project
+  inside a larger repository reads that repository.
 - **Three comparisons, all tree to tree.** committed = base → HEAD; uncommitted = HEAD → the work
   tree; all = base → the work tree; plus **since viewed** (below). The base: a worktree job's
   merge base with `refs/heads/<base_branch>`, else its `base_commit`, else HEAD when it started
@@ -1688,14 +1777,24 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
   not ignored (`ls-files --others --exclude-standard`; regular files and links up to 2 MB, the
   first 1,000; larger or other ones are listed as "too large", with a size-and-mtime stamp in
   place of a blob), then `git write-tree`. The real index, HEAD and refs are never written and
-  no lock of the agent's is held; the trace is loose objects that gc collects.
+  no lock of the agent's is held; the trace is loose objects that gc collects. The index file is
+  the agent's (R7-S2): it is copied only when it is a regular file, not a link, of at most 256
+  MiB, opened with `O_NOFOLLOW|O_NONBLOCK` and read through a limit; otherwise the temporary index
+  is built from HEAD (`read-tree HEAD`), so a FIFO or a link to `/dev/zero` cannot hang the
+  reading or fill the disk.
 - **Protection.** Every call carries landing's protective configuration (4.22, R5-S5), and the
   **clean, smudge and process filters** the configuration defines (at any level) are switched off
   by name (`filter.<name>.clean=` …, read with `git config --get-regexp`, which runs nothing),
   because `git add` and even `write-tree` (refreshing racy entries) run a clean filter: found by
   the test, a marker written by `write-tree`. Bounds: 20 s per git call, 1,500 files listed, a
   file's diff cut at 512 KB, each side's whole text served only under 256 KB. A file is served
-  only if the comparison lists it.
+  only if the comparison lists it. The bounds are on the reading, not cuts made after it
+  (R7-C09, R7-S7): every git call's output goes through a capped buffer that stops git at its
+  limit (64 MiB by default, 64 KiB of error output, a listing 8 MiB, a file's diff 512 KB, a blob
+  its limit), and a cut listing marks the comparison truncated; at most 1,000 "not read" rows are
+  kept; at most two checkouts are read with git at once across every subject; an entry nobody has
+  asked about in 30 minutes is dropped. Every git call of landing and the diff runs with
+  `GIT_LITERAL_PATHSPECS=1`, so a file named `[a]pp.go` or `:(glob)**` names only itself.
 - **Content hashes.** Each file's hash is SHA-256 of (old blob, new blob, old path, path, modes),
   so it is the same change in any comparison that produces it (committing an edit unchanged
   keeps base → work tree's hash) and changes exactly when the file's diff does.
@@ -1714,14 +1813,34 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
   watched job is read again 1.5 s after its `job` event (the agent's tool calls make those), and
   every watched subject on a 10 s tick; a reading whose fingerprint changed publishes `changes`
   `{subject, revision}`, and the browser refetches the summary. A file's diff is cached in the
-  browser by its hash, so only files that changed are fetched again.
+  browser by its hash, so only files that changed are fetched again. That cache holds only the
+  version it is keyed by (R7-C12): the request names the hash (`?hash=`), the server answers
+  `409 STALE` when its reading has another, the browser refuses to cache an answer for another
+  hash, and either way reads the summary again; a since-viewed diff is keyed by when the file was
+  viewed too.
+- **Hidden characters are never silent** (R7-S3, "Trojan Source"). Every Unicode format character
+  (bidi embeddings, overrides and isolates, LRM/RLM, zero-width space and joiners, BOM, soft
+  hyphen, tags), the line and paragraph separators and the invisible fillers are drawn as a chip
+  naming the code point (`⟨U+202E⟩`; the character itself is not rendered, so it cannot reorder
+  what follows), and a word mixing Latin with Cyrillic, Greek or Armenian letters gets a wavy
+  underline (`web/src/lib/hidden.ts`, `ui/Revealed.tsx`). The check covers each file's path (in
+  the list, with a warning icon, and in its header, with a chip) and its whole diff text (a
+  warning above the rows says how many, scanned over the whole diff, not only the rows drawn so
+  far). The same chips and warning are on a task file's raw review card and on a layer's restored
+  or effective text. Not done: the Land gate does not treat such a file specially; the human sees
+  the warning when the file's body loads, before ticking Viewed.
 - **Reading order** as 6.11: files the walkthrough names first, then by group, churn last.
   Churn and changes over 3,000 lines start collapsed with the reason (a lockfile, generated code,
   snapshots, vendored code, build output, an image or font, a large change).
 - **Land, lightly.** The Land card says "N of M files not viewed" (the committed comparison: what
   merges), and the confirmation repeats it. Settings → "Require all files viewed before Land"
   (`--require-viewed-before-land`, off by default, live) makes merge and push answer `409
-  UNVIEWED`; discard never.
+  UNVIEWED`; discard never. The gate is in the jobs service's one Land path (`SetViewedGate`,
+  `changes.LandViewed`), so an agent's approved land request passes it too (R7-C07), and it
+  **fails closed** (R7-S9): it takes a fresh reading, not the cached one, and answers `409
+  UNVIEWED_UNKNOWN` when that reading is not at the commit being landed (a Land without a head
+  from the caller is pinned to the head read then), when the branch changes more files than a
+  reading lists (1,500), or when the checkout or the marks cannot be read.
 - **The viewer** (`DiffViewer`, lazily loaded): highlighting with lowlight (highlight.js as a
   tree, already in the bundle for markdown), the **whole old and new text** highlighted and cut
   into lines, so a comment or string spanning lines is right on both sides; tokens rendered as
@@ -1862,13 +1981,20 @@ a start) is compared; none recorded (an older crowsnest started it) counts as ch
 agent shows "Instructions changed since start" (the instructions card's banner and its Restart,
 `instructions_stale` on its status) and is restarted on the same conversation at its next idle
 moment: idle in herdr, an empty input box, no dialog, no step crowsnest is taking on a job it holds;
-journalled as a restart "for new instructions"; at most once per 10 minutes; never while paused;
+the input box must be one crowsnest recognises (a screen it cannot read counts as busy, not as "no
+draft"), and the screen is read again right before `/exit` is typed (R7-S13);
+journalled as a restart "for new instructions"; at most once per 10 minutes (kept in kv, so a
+crowsnest restart does not reset it); never while paused;
 not at all with the Setting "Restart for new instructions" off (`--no-instruction-restart`).
 **Claude Code keeps a resumed conversation's original appended system prompt** (seen with real
 Claude: resumed with a new file, it still followed the old one), so a resume alone is not enough:
 each fresh conversation records the fingerprint it began with, and a start that resumes one whose
-instructions changed since leaves a notice that the agent's SessionStart context carries once: the
-current instructions in full, "replaces the crowsnest instructions in your system prompt". This
+instructions changed since leaves a notice that the agent's SessionStart context carries: the
+current instructions in full, "replaces the crowsnest instructions in your system prompt". The
+notice is versioned and stays pending until the hook client acknowledges it (R7-C11): the hook
+reply carries `ack`, and `crowsnest hook` posts `POST /api/v1/hook-ack {ack}` on the agent socket
+only after it wrote the reply to stdout; a reply lost on the way (a timeout, a disconnect) is not
+acknowledged, so the next SessionStart carries the notice again. This
 also covers a manual Restart and the automatic restart after a crash. Job agents are not restarted
 by themselves (a restart mid-job loses the turn); their "changed since start" banner and Restart
 are the human's.
@@ -2855,7 +2981,10 @@ the fallback that is always there.
     rule first, allows this call once, stores the job rule (`max_risk` the approval's risk), then
     allows by policy every other pending call of the job the rule now matches. The job's page
     lists its remembered rules with Remove. R6-S1: an **elevated** call is remembered only as
-    itself, its exact command or tool name, shown read-only (`exact`); a wider pattern is refused;
+    itself, its exact command, shown read-only (`exact`), and only a Bash command (R7-S1: an
+    elevated MCP call or a `Read` of a secret is not remembered, because a tool rule matches the
+    name alone and would allow that tool with any input; the card says the exact command runs
+    "whatever the scripts or files it runs say at the time", R7-I1); a wider pattern is refused;
     a command with a glob character is not remembered; an edit outside the job's directory is not;
     and a call that is elevated only because crowsnest does not recognise it (an interpreter, an
     unknown program, a command it cannot read: `risk.Result.Unrecognised`) offers no remember at
@@ -3061,6 +3190,7 @@ times under one page.
 | `GET /schedule?project=`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md (app schedules, and task files waiting for review), shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs:[{at, outcome, job_id}], review: ""\|needed\|approved, hash}], problems:[{path, name, error}], dirs}`, `project=<id>` keeping one project's tasks (0: the orchestrator's and unfiled); Run now (`409` for a task file waiting for review); `{enabled}` for any task and/or every field of an app schedule (a full replacement; a task file's edit is `409` "read-only: edit the file") (7.8). A `schedule` event (`{at}`) says a stamp, switch or app schedule changed |
 | `POST /schedule/{name}/approve` | `{hash}`: approve a task file that starts a job or pokes a lead, as the view showed it (4.22, R5-S3) → the list. `409` when the file changed since (read it again) or the task needs no review. Session only: the agent socket has no such verb |
 | `POST /instructions/role/{name}/file-seen` | `{hash}`: mark a role file's text read (4.22, R5-S14) → the layer. `409` when the file changed since, `404` for a role with no file |
+| `POST /instructions/{scope}/{key}/apply-restored` | `{hash}`: a layer a restore brought back may reach agents (4.17, R7-S4) → the layer. `409` when its text changed since, `404` when it is not waiting |
 | `POST /schedule`, `DELETE /schedule/{name}` | An app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list (`400` invalid, `409` a taken name); delete one (`409` for a task file, `404` unknown) → the list (7.8) |
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
@@ -3220,6 +3350,11 @@ added, deleted, at}}`; `POST /changes/jobs/{id}/demo-touch` (`--demo` only). `PO
 - Migration `0020_diff_marks.sql` (6.21): `diff_marks(subject, reviewer, scope, path, hash,
   old_blob, new_blob, viewed_at)`, primary key `(subject, reviewer, scope, path)`; a job's rows go
   when it lands, is discarded or deleted
+- Migration `0021_check_isolation.sql` (6.15, R7-C01): `job_checks` gains `mode` (`worktree` |
+  `isolated`), `tree_before`, `tree_after` (content fingerprints of a worktree check); `projects`
+  gains `check_isolated` and `check_prepare`. kv adds (no migration) `restored.check_command.<id>`,
+  `restored.check_prepare.<id>` and `instructions.restored.<scope>.<key>` (R7-S4), and
+  `budget.grace_at.<job>` (R7-C03)
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.

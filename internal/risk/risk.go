@@ -245,7 +245,7 @@ func (c *Classifier) Classify(tool string, input json.RawMessage, ctx Context) R
 			hits = append(hits, hit{rule.Level, rule.Reason, false})
 		}
 	}
-	hits = append(hits, shapeHits(tool, fields, commands, readable)...)
+	hits = append(hits, shapeHits(tool, fields, commands, readable, ctx.JobRoot)...)
 	if !c.disabled[CheckProtectedHost] {
 		if host := guard.HostNamed(ctx.ProtectedHosts, strings.Join(stringsIn(fields), "\n")); host != "" {
 			hits = append(hits, hit{Dangerous, "Names " + host + ", a protected (production) host", false})
@@ -340,14 +340,14 @@ func (r Rule) matches(tool string, fields map[string]any, plain []string) bool {
 // line read with confidence whose every command is on the list (shape.go). A line too long to
 // show whole on a lock screen, or carrying bidi controls that can reorder what is shown, is not
 // low either: low is what a notification may allow.
-func shapeHits(tool string, fields map[string]any, commands []guard.Command, readable bool) []hit {
+func shapeHits(tool string, fields map[string]any, commands []guard.Command, readable bool, root string) []hit {
 	var hits []hit
 	switch {
 	case tool == "Bash" && !readable:
 		hits = append(hits, hit{Elevated, "crowsnest cannot read this command with confidence (an unterminated quote, a shell reading a script or stdin, or deep nesting)", true})
 	case tool == "Bash":
 		for _, cmd := range commands {
-			if reason := commandShape(cmd); reason != "" {
+			if reason := commandShape(cmd, root); reason != "" {
 				hits = append(hits, hit{Elevated, reason, true})
 				break
 			}

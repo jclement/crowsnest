@@ -80,14 +80,44 @@ export function isRoutine(question: Pick<Question, "kind" | "multi" | "files" | 
  */
 const GATE_CONTEXT_KEYS = ["land_for", "land_action", "land_token", "approval_for", "requested_by", "task_review", "task_hash", "crowsnest_gate"];
 /** Words that grant something: a question whose option keys, labels or title use one is a gate (R6-S9). */
-const GRANTING_WORDS = new Set(["allow", "allowed", "approve", "approved", "approval", "merge", "land", "push", "deploy", "delete", "grant", "permit"]);
+// The same words, inflections, phrase and normalisation as questions.GrantingText (R7-S6).
+const GRANTING_WORDS = new Set(
+  `allow allows allowed allowing approve approves approved approving approval merge merges merged merging land lands landed
+  landing push pushes pushed pushing deploy deploys deployed deploying deployment delete deletes deleted deleting deletion
+  grant grants granted granting permit permits permitted permitting`.split(/\s+/),
+);
+const GRANTING_PHRASES = ["go ahead"];
 
-/** True when text uses a granting word (whole words, any case): the same rule as questions.GrantingText. */
-export function grantingText(text: string): boolean {
-  return text
+/** Cyrillic and Greek letters that look like Latin ones, folded onto those (part of UTS #39's skeleton). */
+const CONFUSABLES = new Map<number, string>([
+  [0x0430, "a"], [0x0435, "e"], [0x043e, "o"], [0x0440, "p"], [0x0441, "c"], [0x0443, "y"], [0x0445, "x"], [0x0456, "i"],
+  [0x0458, "j"], [0x0455, "s"], [0x0501, "d"], [0x04cf, "l"], [0x0261, "g"], [0x0251, "a"], [0x0410, "a"], [0x0415, "e"],
+  [0x041e, "o"], [0x0420, "p"], [0x0421, "c"], [0x0425, "x"], [0x0406, "i"], [0x0408, "j"], [0x0405, "s"], [0x041c, "m"],
+  [0x041d, "h"], [0x0422, "t"], [0x0412, "b"], [0x041a, "k"], [0x03bf, "o"], [0x03b1, "a"], [0x03b5, "e"], [0x03b9, "i"],
+  [0x03ba, "k"], [0x03bd, "v"], [0x03c1, "p"], [0x03c4, "t"], [0x03c5, "u"], [0x039f, "o"], [0x0391, "a"], [0x0392, "b"],
+  [0x0395, "e"], [0x0397, "h"], [0x0399, "i"], [0x039a, "k"], [0x039c, "m"], [0x039d, "n"], [0x03a1, "p"], [0x03a4, "t"],
+  [0x03a7, "x"], [0x0131, "i"],
+]);
+
+/** Text as grantingText reads it: NFKC, format characters removed, look-alikes folded, lowercased, split into words. */
+function normalisedWords(text: string): string[] {
+  let out = "";
+  for (const char of text.normalize("NFKC")) {
+    if (/\p{Cf}/u.test(char)) continue;
+    out += CONFUSABLES.get(char.codePointAt(0) ?? 0) ?? char;
+  }
+  return out
     .toLowerCase()
     .split(/[^\p{L}]+/u)
-    .some((word) => GRANTING_WORDS.has(word));
+    .filter(Boolean);
+}
+
+/** True when text uses a granting word or phrase (whole words, any case, normalised): the same rule as questions.GrantingText. */
+export function grantingText(text: string): boolean {
+  const words = normalisedWords(text);
+  if (words.some((word) => GRANTING_WORDS.has(word))) return true;
+  const joined = ` ${words.join(" ")} `;
+  return GRANTING_PHRASES.some((phrase) => joined.includes(` ${phrase} `));
 }
 /** Option keys that refuse: choosing one never needs the gate's confirmation. */
 const REFUSING_KEYS = new Set(["deny", "no", "reject", "cancel", "later", "not_yet"]);

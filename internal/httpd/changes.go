@@ -13,8 +13,8 @@
 package httpd
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -93,7 +93,7 @@ func (s *Server) handleChangesFile(w http.ResponseWriter, r *http.Request, ask c
 	}
 	query := r.URL.Query()
 	fileAsk := changes.FileAsk{Path: query.Get("path"), Scope: query.Get("scope"), IgnoreWhitespace: query.Get("ws") == "ignore",
-		Since: query.Get("since") == "1"}
+		Since: query.Get("since") == "1", Hash: query.Get("hash")}
 	if raw := query.Get("context"); raw != "" {
 		context, err := strconv.Atoi(raw)
 		if err != nil || context < 0 || context > 100000 {
@@ -211,18 +211,19 @@ func (s *Server) handleDemoTouch(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, map[string]bool{"touched": true})
 }
 
-// landUnviewed is the Land gate's view of the diff: with "require all files viewed before
-// Land" on, a merge or push of a job with files not viewed is refused (409 UNVIEWED). Off, or
-// with no diff service, it never refuses.
-func (s *Server) landUnviewed(ctx context.Context, w http.ResponseWriter, id, action string) bool {
-	if s.deps.Changes == nil || action == "discard" || s.deps.RequireViewed == nil || !s.deps.RequireViewed() {
+// writeLandRefusal answers a Land the Viewed gate refused (the gate itself is in the jobs
+// service, so every Land passes it, R7-C07): 409 UNVIEWED when files are not viewed, 409
+// UNVIEWED_UNKNOWN when crowsnest could not count them at the commit being landed (R7-S9: it
+// fails closed). It reports whether err was such a refusal.
+func writeLandRefusal(w http.ResponseWriter, err error) bool {
+	var refusal *changes.LandRefusal
+	if !errors.As(err, &refusal) {
 		return false
 	}
-	unviewed, total, err := s.deps.Changes.Unviewed(ctx, id)
-	if err != nil || unviewed == 0 {
-		return false
+	code := "UNVIEWED"
+	if refusal.Unknown {
+		code = "UNVIEWED_UNKNOWN"
 	}
-	writeError(w, http.StatusConflict, "UNVIEWED", strconv.Itoa(unviewed)+" of "+strconv.Itoa(total)+
-		" files are not marked viewed, and Settings require every file viewed before Land. Mark them on the Review tab, or turn the setting off.")
+	writeError(w, http.StatusConflict, code, refusal.Message+".")
 	return true
 }

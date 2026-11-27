@@ -17,6 +17,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -99,9 +100,13 @@ func (s *Service) parseWake(ctx context.Context, r *store.JobRecord, input Updat
 		if State(other.State).Terminal() {
 			return invalid("job %s is already %s; read its result (it is not worth waiting on)", FormatID(target), other.State)
 		}
-		if chain := s.waitChain(ctx, target, r.ID); chain != "" {
+		chain, unsure := s.waitChain(ctx, target, r.ID)
+		if chain != "" {
 			// R6-C09: waiting on a job that (through others) waits on this one never ends.
 			return invalid("until_job %s would wait in a circle (%s → %s): neither job could ever wake the other. Wait on something else, or ask the human", FormatID(target), FormatID(r.ID), chain)
+		}
+		if unsure {
+			return invalid("until_job %s: crowsnest could not follow what that job waits on, so it cannot rule out a circle. Try again, or wait on something else", FormatID(target))
 		}
 		r.WakeKind, r.WakeJob = WakeJob, target
 	default:
@@ -289,12 +294,17 @@ func (s *Service) wakeWaiters(ctx context.Context, job Job) {
 // wake brings a blocked job back to running and types why. due is the wake-up's time (zero for
 // a dependency). While paused it waits (journalled once); the tick tries again after.
 func (s *Service) wake(ctx context.Context, id string, due time.Time, text string) {
-	if s.heldWhilePaused(ctx, "wake:"+id, "waking "+id+" (its blocked wake-up is due)") {
+	// R7-C04: a held job keeps its wake-up, blocked, until the hold is lifted; nothing is typed.
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		s.noteHeldContinuation(ctx, id, "its wake-up", why)
 		return
 	}
 	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		if State(r.State) != StateBlocked {
 			return errSkip
+		}
+		if len(effectiveHolds(*r, c.questions)) > 0 {
+			return errSkip // a hold placed since the check above: the wake-up stays for later
 		}
 		if !due.IsZero() && (r.WakeKind != WakeTime || !r.WakeAt.Equal(due)) {
 			return errSkip // a newer declaration replaced the wake-up this pass saw
@@ -313,6 +323,12 @@ func (s *Service) wake(ctx context.Context, id string, due time.Time, text strin
 	if err != nil || job.PaneID == "" {
 		return
 	}
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		// Held in the moment since the wake: the job's holds put it in front of whoever lifts
+		// them; the text is not typed into a held job.
+		_ = s.Journal(ctx, id, EventWake, "The wake-up was not typed: the job became "+why, nil)
+		return
+	}
 	if err := s.sendText(ctx, job.PaneID, job.AgentName, text); err != nil {
 		_ = s.Journal(ctx, id, EventWake, "The wake-up could not be typed: "+oneLine(err.Error(), 160)+"; the supervisor keeps it going", nil)
 	}
@@ -326,6 +342,9 @@ func (s *Service) WakeNow(ctx context.Context, id string) (Job, error) {
 	}
 	if detail.State != StateBlocked {
 		return Job{}, invalid("job %s is not blocked", id)
+	}
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		return Job{}, invalid("job %s cannot be woken now: it is %s", id, why)
 	}
 	s.wake(ctx, id, time.Time{}, fmt.Sprintf("[crowsnest recheck] The human asks you to look again at what blocked job %s (%s): check whether it has cleared, and carry on or block again.",
 		id, oneLine(detail.BlockedReason, 200)))
@@ -375,7 +394,7 @@ func (s *Service) checkInvariant(ctx context.Context, r store.JobRecord, now tim
 			if _, err := s.opts.Store.GetJob(ctx, r.WakeJob); err != nil {
 				return "blocked on a job that does not exist"
 			}
-			if chain := s.waitChain(ctx, r.WakeJob, r.ID); chain != "" {
+			if chain, _ := s.waitChain(ctx, r.WakeJob, r.ID); chain != "" {
 				s.breakCycle(ctx, FormatID(r.ID), FormatID(r.ID)+" → "+chain)
 				return "waited in a circle (" + FormatID(r.ID) + " → " + chain + "); now waits on the human"
 			}
@@ -469,30 +488,42 @@ func (s *Service) WaitViolations() ([]Violation, time.Time) {
 	return append([]Violation{}, s.inv.list...), s.inv.at
 }
 
-// maxWaitChain bounds how far a chain of until_job waits is followed.
-const maxWaitChain = 32
+// maxWaitWalk is a safety stop only: each job waits on at most one other, so the visited set ends
+// every walk long before this. Reaching it, like a job that cannot be read, means "cannot tell".
+const maxWaitWalk = 100_000
 
 // waitChain follows until_job waits from start and returns the chain in words ("j_2 → j_1") when
 // it comes back to self, else "" (R6-C09). Only blocked jobs waiting on a job continue a chain.
-func (s *Service) waitChain(ctx context.Context, start, self int64) string {
+// The walk ends on a job already visited, not after a number of hops (R7-C06: 33 jobs in a ring
+// used to pass a 32-hop walk). unsure is true when the walk could not finish (a job that could not
+// be read, or the safety stop): a new wait is then refused, since a circle cannot be ruled out.
+func (s *Service) waitChain(ctx context.Context, start, self int64) (chain string, unsure bool) {
 	path := []string{FormatID(start)}
 	seen := map[int64]bool{}
-	for current, hops := start, 0; hops < maxWaitChain; hops++ {
+	for current := start; ; {
 		if current == self {
-			return strings.Join(path, " → ")
+			return strings.Join(path, " → "), false
 		}
 		if seen[current] {
-			return "" // a circle that does not include self: its own jobs find it
+			return "", false // a circle that does not include self: its own jobs find it
+		}
+		if len(seen) >= maxWaitWalk {
+			return "", true
 		}
 		seen[current] = true
 		record, err := s.opts.Store.GetJob(ctx, current)
-		if err != nil || State(record.State) != StateBlocked || record.WakeKind != WakeJob || record.WakeJob == 0 {
-			return ""
+		if errors.Is(err, store.ErrNotFound) {
+			return "", false
+		}
+		if err != nil {
+			return "", true
+		}
+		if State(record.State) != StateBlocked || record.WakeKind != WakeJob || record.WakeJob == 0 {
+			return "", false
 		}
 		current = record.WakeJob
 		path = append(path, FormatID(current))
 	}
-	return ""
 }
 
 // breakCycle turns a job's circular until_job wait into a wait on the human, and tells them

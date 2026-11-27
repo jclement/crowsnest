@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/transcript"
@@ -73,6 +74,7 @@ func TestNewInstructionsRestartAnIdleAgent(t *testing.T) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.WriteFile(path, []byte("{}\n"), 0o600)
 	_ = f.SetStatus(first.PaneID, herdr.StatusIdle)
+	_ = f.SetScreen(first.PaneID, fleet.StripANSI(emptyInput), emptyInput) // idle: Claude's empty input box
 
 	rig.orch.Watch(ctx)
 	if len(f.Starts()) != 1 || rig.orch.Status().InstructionsStale {
@@ -119,6 +121,14 @@ func TestAdoptedAgentFromBeforeIsStale(t *testing.T) {
 		t.Fatal("restarted mid-turn")
 	}
 	_ = f.SetStatus(pane, herdr.StatusIdle)
+	// R7-S13: a screen whose input box crowsnest does not recognise is not "no draft".
+	_ = f.SetScreen(pane, "something crowsnest does not recognise", "something crowsnest does not recognise")
+	now.advance(time.Minute)
+	rig.orch.Watch(ctx)
+	if len(f.Starts()) != 0 {
+		t.Fatal("restarted with an unrecognised screen: /exit could land in a draft")
+	}
+	_ = f.SetScreen(pane, fleet.StripANSI(emptyInput), emptyInput)
 	now.advance(time.Minute)
 	rig.orch.Watch(ctx)
 	if len(f.Starts()) != 1 {
@@ -185,18 +195,28 @@ func TestResumedConversationGetsItsNewInstructions(t *testing.T) {
 	if _, err := rig.orch.Restart(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if notice := rig.orch.InstructionsNotice(ctx); notice != "" {
+	if notice, _ := rig.orch.InstructionsNotice(ctx); notice != "" {
 		t.Fatalf("a resume with the same instructions left a notice: %q", notice)
 	}
 	tmpl.set("Codeword: PELICAN.")
 	if _, err := rig.orch.Restart(ctx); err != nil {
 		t.Fatal(err)
 	}
-	notice := rig.orch.InstructionsNotice(ctx)
-	if !strings.Contains(notice, "PELICAN") || !strings.Contains(notice, "replaces") {
-		t.Fatalf("notice %q", notice)
+	notice, version := rig.orch.InstructionsNotice(ctx)
+	if !strings.Contains(notice, "PELICAN") || !strings.Contains(notice, "replaces") || version == "" {
+		t.Fatalf("notice %q (version %q)", notice, version)
 	}
-	if again := rig.orch.InstructionsNotice(ctx); again != "" {
-		t.Fatal("the notice was given twice")
+	// R7-C11: a reply that never reached the agent (no ack) is delivered again at the next start.
+	if again, _ := rig.orch.InstructionsNotice(ctx); !strings.Contains(again, "PELICAN") {
+		t.Fatal("an unacknowledged notice was dropped")
+	}
+	if rig.orch.AckInstructionsNotice(ctx, "an-older-version") {
+		t.Fatal("an ack of another version was taken")
+	}
+	if !rig.orch.AckInstructionsNotice(ctx, version) {
+		t.Fatal("the ack was refused")
+	}
+	if again, _ := rig.orch.InstructionsNotice(ctx); again != "" {
+		t.Fatal("the notice was given after it was acknowledged")
 	}
 }

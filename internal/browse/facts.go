@@ -139,8 +139,9 @@ func (s *Service) gitFacts(dir, rootDir string, inRoots func(string) bool, facts
 	}
 	if body, err := s.opts.FS.ReadFile(filepath.Join(gitDir, "HEAD"), metadataLimit); err == nil {
 		head := strings.TrimSpace(string(body))
+		head, _, _ = strings.Cut(head, "\n") // one line, whatever the file holds (R7-S10)
 		if ref, isRef := strings.CutPrefix(head, "ref: "); isRef {
-			facts.Branch = strings.TrimPrefix(ref, "refs/heads/")
+			facts.Branch = strings.TrimSpace(strings.TrimPrefix(ref, "refs/heads/"))
 		} else if head != "" {
 			facts.Detached = true
 		}
@@ -222,18 +223,27 @@ func originURL(config []byte) string {
 	return first
 }
 
-// cleanRemote removes credentials from a remote URL (https://user:token@host/…).
+// cleanRemote removes credentials from a remote URL: the userinfo of https://user:token@host/…,
+// a query (?token=…) and a fragment (R7-S12), and the password of an scp-like
+// user:token@host:path (the user, as in git@, is kept: it is how the host is told).
 func cleanRemote(remote string) string {
 	if !strings.Contains(remote, "://") {
-		return remote
+		at := strings.LastIndex(remote, "@")
+		if at < 0 {
+			return remote
+		}
+		user := remote[:at]
+		if colon := strings.Index(user, ":"); colon >= 0 {
+			user = user[:colon]
+		}
+		return user + remote[at:]
 	}
 	parsed, err := url.Parse(remote)
 	if err != nil {
 		return ""
 	}
-	if parsed.User != nil {
-		parsed.User = nil
-	}
+	parsed.User, parsed.RawQuery, parsed.Fragment, parsed.RawFragment = nil, "", "", ""
+	parsed.ForceQuery = false
 	return parsed.String()
 }
 

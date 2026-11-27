@@ -108,7 +108,8 @@ test.describe.serial("the supervisor and the human, with real Claude", () => {
       await expect(page.getByRole("status").filter({ hasText: "Already answered." })).toBeVisible();
       const outcome = page.getByRole("region", { name: "Outcome" });
       await expect(outcome).toContainText(/red/i);
-      await expect(outcome.getByLabel("Answer receipt")).toContainText("Received", { timeout: 2 * 60_000 });
+      // exact: the manual's "Help: answer receipts" button sits beside it.
+      await expect(outcome.getByLabel("Answer receipt", { exact: true })).toContainText("Received", { timeout: 2 * 60_000 });
       await page.screenshot({ path: "screenshots/e2e-claude-decide-received-390x844.png" });
 
       const done = await waitForJob(page, instance, id, (job) => ["done", "failed", "cancelled"].includes(job.state), 5 * 60_000, "the job applies the answer");

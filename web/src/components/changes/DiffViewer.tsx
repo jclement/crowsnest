@@ -31,6 +31,7 @@ import {
   RefreshCw,
   Rows3,
   Space,
+  TriangleAlert,
   WrapText,
   X,
 } from "lucide-react";
@@ -54,6 +55,8 @@ import {
   type ViewerPrefs,
 } from "../../lib/changes";
 import { changesApi, changesKeys, useDiffFile, useDiffSummary, useMarks } from "../../lib/changes-queries";
+import { describeHidden, findHidden, hidesSomething } from "../../lib/hidden";
+import { Revealed } from "../ui/Revealed";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMediaQuery } from "../../lib/media";
 import { focusContext, isMacPlatform } from "../../lib/hotkeys";
@@ -564,8 +567,13 @@ function FileList({ files, all, current, filter, setFilter, onPick, onToggleView
             >
               <StatusBadge status={file.status} />
               <span className={cn("min-w-0 flex-1 truncate font-mono text-2xs", file.viewed ? "text-muted" : "text-body")} dir="rtl">
-                <bdi>{file.path}</bdi>
+                <bdi>
+                  <Revealed text={file.path} />
+                </bdi>
               </span>
+              {hidesSomething(findHidden(file.path, file.old_path)) && (
+                <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-danger" aria-label="its name hides characters" role="img" />
+              )}
               {file.changed_since_viewed && <FileWarning className="h-3.5 w-3.5 shrink-0 text-warning" aria-label="changed since you viewed it" />}
               <StatBar file={file} />
             </button>
@@ -653,12 +661,21 @@ function FileSection(props: FileSectionProps) {
         <h3 className="min-w-0 flex-1 basis-[55%] break-all font-mono text-xs text-heading">
           {file.old_path && file.old_path !== file.path ? (
             <>
-              <span className="text-muted">{file.old_path}</span> → {file.path}
+              <span className="text-muted">
+                <Revealed text={file.old_path} />
+              </span>{" "}
+              → <Revealed text={file.path} />
             </>
           ) : (
-            file.path
+            <Revealed text={file.path} />
           )}
         </h3>
+        {hidesSomething(findHidden(file.path, file.old_path)) && (
+          <Chip tone="danger" title={describeHidden(findHidden(file.path, file.old_path))}>
+            <TriangleAlert className="mr-1 inline h-3 w-3" aria-hidden />
+            name hides characters
+          </Chip>
+        )}
         {file.churn && <Chip title={`Collapsed by default: ${file.churn_why}`}>{file.churn_why}</Chip>}
         {file.changed_since_viewed && (
           <Chip tone="warning" title={file.viewed_at ? `You viewed it ${new Date(file.viewed_at).toLocaleString()}` : undefined}>
@@ -693,7 +710,7 @@ function LazyBody(props: FileSectionProps) {
     return () => observer.disconnect();
   }, [near]);
   const skip = file.too_large || (file.binary && !props.since);
-  const query = useDiffFile(props.who, file.path, file.hash, props.scope, { context, ignoreWhitespace: props.ignoreWhitespace, since: props.since }, props.base, near && !skip);
+  const query = useDiffFile(props.who, file.path, file.hash, props.scope, { context, ignoreWhitespace: props.ignoreWhitespace, since: props.since, baseline: file.viewed_at }, props.base, near && !skip);
   let body: ReactNode;
   if (file.too_large) body = <p className="px-3 py-2 text-xs text-muted">{file.note ?? "Too large to show."}</p>;
   else if (file.binary) body = <p className="px-3 py-2 text-xs text-muted">Binary file ({file.status}); not shown.</p>;

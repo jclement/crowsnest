@@ -27,9 +27,11 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/hub"
@@ -68,6 +70,12 @@ const (
 	debounce = 1500 * time.Millisecond
 	// WatchFor is how long after its last request a subject is still read in the background.
 	WatchFor = 2 * time.Minute
+	// maxReadings is how many checkouts are read with git at once across every subject and base
+	// (R7-C09): each reading is several git processes over a repository the agent controls.
+	maxReadings = 2
+	// evictAfter drops an entry nobody has asked about for this long (any base string the browser
+	// sent makes one, R7-C09); a later request reads it again.
+	evictAfter = 30 * time.Minute
 	// tick is how often watched subjects are read again without any activity.
 	tick = 10 * time.Second
 	// largeChange is the line count past which a file is collapsed by default.
@@ -97,6 +105,8 @@ type Target struct {
 	Walkthrough string `json:"-"`
 	// BaseRef is the base asked for on a main checkout (BaseUpstream, BaseSession or a ref).
 	BaseRef string `json:"-"`
+	// Worktree is set for a job in a worktree of its own: its root must be its repository's top.
+	Worktree bool `json:"-"`
 }
 
 // Resolver turns subjects into targets. Errors it returns are shown to the human as they are.
@@ -121,6 +131,9 @@ type Options struct {
 	Now      func() time.Time
 	// MinInterval overrides MinInterval (tests shorten it).
 	MinInterval time.Duration
+	// Home is the user's home directory: a repository whose top is home or above it is never
+	// read as a subject's (R7-S8). "" skips that check.
+	Home string
 }
 
 // Service is the live diff and its marks.
@@ -129,18 +142,106 @@ type Service struct {
 	mu      sync.Mutex
 	entries map[string]*entry // by cache key: subject + "\x00" + base
 	marked  map[string]bool   // subjects known to have marks
+	slots   chan struct{}     // a reading holds one while git runs (maxReadings)
+}
+
+// readCheckoutSlotted is readCheckout under the global bound on concurrent readings; a reading
+// that cannot get a slot before ctx ends fails.
+func (s *Service) readCheckoutSlotted(ctx context.Context, target Target, now time.Time) (*reading, error) {
+	select {
+	case s.slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for a turn to read the diff: %w", ctx.Err())
+	}
+	defer func() { <-s.slots }()
+	root, err := s.repositoryTop(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	return readCheckout(ctx, target, root, now)
+}
+
+// repositoryTop is the top of the repository a subject's root is in, refusing one that is not the
+// subject's own (R7-S8): a worktree job whose top is anywhere but its own root (its .git file was
+// deleted, so git found the repository around it), and any repository whose top is the home
+// directory or above it (a dotfiles repository in ~ would make every untracked file under home
+// part of the diff, and each reading would write blobs into it). A directory job or a project
+// inside a larger repository reads that repository: it is the one the work is in.
+func (s *Service) repositoryTop(ctx context.Context, target Target) (string, error) {
+	top, err := landing.Root(ctx, target.Root)
+	if err != nil {
+		return "", fail("not_found", "%s is not in a git repository", target.Root)
+	}
+	if top == "" {
+		return target.Root, nil
+	}
+	resolvedTop, resolvedRoot := resolvedPath(top), resolvedPath(target.Root)
+	if target.Worktree && resolvedTop != resolvedRoot {
+		return "", fail("not_found", "%s is not a worktree of its own any more (git finds the repository at %s around it); crowsnest does not read that repository as this job's", target.Root, top)
+	}
+	if s.opts.Home != "" {
+		home := resolvedPath(s.opts.Home)
+		if resolvedTop == home || strings.HasPrefix(home, resolvedTop+string(filepath.Separator)) || resolvedTop == "/" {
+			return "", fail("not_found", "%s is inside the repository at %s, which holds your home folder; crowsnest does not read it as this checkout's diff", target.Root, top)
+		}
+	}
+	return top, nil
+}
+
+// resolvedPath is path with its links resolved (path itself when it cannot be).
+func resolvedPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
+}
+
+// evictIdle drops the entries nobody has asked about in evictAfter and that no reading holds.
+func (s *Service) evictIdle(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, e := range s.entries {
+		last := e.lastOf().at
+		if e.asked.After(last) {
+			last = e.asked
+		}
+		if now.Sub(last) < evictAfter || !e.mu.TryLock() {
+			continue
+		}
+		if e.timer != nil {
+			e.timer.Stop()
+		}
+		delete(s.entries, key)
+		e.mu.Unlock()
+	}
 }
 
 // entry is one subject's last reading.
 type entry struct {
 	key, subject string
-	mu           sync.Mutex // held while reading git
-	reading      *reading
-	err          error
-	at           time.Time // when reading or err was taken
-	asked        time.Time // the last request: watched until asked + WatchFor
-	target       Target
-	timer        *time.Timer
+	mu           sync.Mutex // held while reading git; only the reader holding it replaces last
+	// last is the latest reading, its error and when it was taken, as one immutable value (R7-C08):
+	// written by the reader under mu, read by anyone without it (ProgressAll, refreshWatched),
+	// so no field is read under one lock while it is written under another.
+	last   atomic.Pointer[taken]
+	asked  time.Time // the last request: watched until asked + WatchFor (under Service.mu)
+	target Target
+	timer  *time.Timer
+}
+
+// taken is one entry's last reading (nil before the first), its error, and when it was taken.
+type taken struct {
+	reading *reading
+	err     error
+	at      time.Time
+}
+
+// lastOf is e's last reading, or an empty one.
+func (e *entry) lastOf() taken {
+	if last := e.last.Load(); last != nil {
+		return *last
+	}
+	return taken{}
 }
 
 // reading is one git reading of a checkout.
@@ -171,7 +272,7 @@ func New(opts Options) *Service {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	return &Service{opts: opts, entries: map[string]*entry{}, marked: map[string]bool{}}
+	return &Service{opts: opts, entries: map[string]*entry{}, marked: map[string]bool{}, slots: make(chan struct{}, maxReadings)}
 }
 
 // ---- Errors --------------------------------------------------------------------------------
@@ -264,17 +365,17 @@ func (s *Service) read(ctx context.Context, target Target, force, ask bool) (*re
 	if force {
 		interval /= 2
 	}
-	if !e.at.IsZero() && now.Sub(e.at) < interval {
-		return e.reading, e.err
+	last := e.lastOf()
+	if !last.at.IsZero() && now.Sub(last.at) < interval {
+		return last.reading, last.err
 	}
-	previous := e.reading
-	next, err := readCheckout(ctx, target, now)
-	e.at = s.opts.Now()
+	previous := last.reading
+	next, err := s.readCheckoutSlotted(ctx, target, now)
 	if err != nil {
-		e.err = err
-		return e.reading, err
+		e.last.Store(&taken{reading: previous, err: err, at: s.opts.Now()})
+		return previous, err
 	}
-	e.reading, e.err = next, nil
+	e.last.Store(&taken{reading: next, at: s.opts.Now()})
 	if previous != nil && previous.fingerprint != next.fingerprint {
 		s.publish(target.Subject, next.fingerprint)
 	}
@@ -287,14 +388,8 @@ func (s *Service) publish(subject, revision string) {
 	}
 }
 
-// readCheckout takes one reading of target's checkout.
-func readCheckout(ctx context.Context, target Target, now time.Time) (*reading, error) {
-	root := target.Root
-	if top, err := landing.Root(ctx, root); err != nil {
-		return nil, fail("not_found", "%s is not in a git repository", root)
-	} else if top != "" {
-		root = top
-	}
+// readCheckout takes one reading of target's checkout, whose repository's top is root.
+func readCheckout(ctx context.Context, target Target, root string, now time.Time) (*reading, error) {
 	r := &reading{head: landing.HeadTree(ctx, root), at: now, scopes: map[string][]landing.DiffFile{}}
 	r.base, r.baseLabel, r.baseChoices = chooseBase(ctx, root, target)
 	work, skipped, err := landing.WorkTree(ctx, root)
@@ -644,6 +739,10 @@ type FileAsk struct {
 	IgnoreWhitespace bool
 	// Since asks for the comparison from the version last viewed to now.
 	Since bool
+	// Hash, when set, is the file's hash the browser asks for (R7-C12): a reading where the file
+	// has another hash answers stale instead of serving a body the browser would file under the
+	// wrong version.
+	Hash string
 }
 
 // FileView is one file's diff, with both sides' whole text when small enough (the browser
@@ -698,14 +797,17 @@ func (s *Service) File(ctx context.Context, ask Ask, fileAsk FileAsk) (FileView,
 		return FileView{}, fail("not_found", "%s is not one of the files in this diff", fileAsk.Path)
 	}
 	file := *found
+	if fileAsk.Hash != "" && fileAsk.Hash != file.Hash {
+		return FileView{}, fail("stale", "%s changed since the list was read; the list is being read again", file.Path)
+	}
 	view := FileView{Path: file.Path, OldPath: file.OldPath, Status: file.Status, Hash: file.Hash, Binary: file.Binary, TooLarge: file.TooLarge,
 		Note: file.Note, Context: fileAsk.Context}
 	if file.TooLarge {
 		return view, nil
 	}
-	root := target.Root
-	if top, err := landing.Root(ctx, root); err == nil && top != "" {
-		root = top
+	root, err := s.repositoryTop(ctx, target)
+	if err != nil {
+		return FileView{}, err
 	}
 	opts := landing.PatchOptions{Context: fileAsk.Context, IgnoreWhitespace: fileAsk.IgnoreWhitespace}
 	oldBlob, newBlob := file.OldBlob, file.NewBlob
@@ -892,6 +994,85 @@ func (s *Service) Unviewed(ctx context.Context, jobID string) (int, int, error) 
 	return summary.Total - summary.Viewed, summary.Total, nil
 }
 
+// LandRefusal is the Land gate's refusal with "require all files viewed" on (R7-C07, R7-S9).
+// Unknown is true when crowsnest could not count every file at the head being landed (an error,
+// more files than a reading lists, a reading at another commit): that refuses too.
+type LandRefusal struct {
+	Unknown  bool
+	Unviewed int
+	Total    int
+	Message  string
+}
+
+func (e *LandRefusal) Error() string { return e.Message }
+
+// LandViewed is the Land gate with "require all files viewed before Land" on. It takes a fresh
+// reading (not the cached one, which can be seconds old), and refuses unless that reading is at
+// head (the commit being landed), lists every file of the committed work, and every one of them
+// is viewed. Every failure to tell refuses, saying why: the gate fails closed. A job with no
+// checkout left to read (landed, gone) passes: Land refuses those for its own reasons.
+func (s *Service) LandViewed(ctx context.Context, jobID, head string) error {
+	target, err := s.resolve(ctx, Ask{Kind: KindJob, Ref: jobID})
+	if err != nil {
+		if e, ok := AsError(err); ok && (e.Kind == "gone" || e.Kind == "not_found") {
+			return nil
+		}
+		return unknownViewed("crowsnest could not find the job's checkout to count its viewed files: " + err.Error())
+	}
+	r, err := s.readFresh(ctx, target)
+	switch {
+	case err != nil:
+		return unknownViewed("crowsnest could not read the diff to count its viewed files: " + err.Error())
+	case head == "" || r.head != head:
+		return unknownViewed(fmt.Sprintf("the diff crowsnest could read is at %s, not at %s, the commit being landed: open the review again", shortCommit(r.head), shortCommit(head)))
+	case r.truncated:
+		return unknownViewed(fmt.Sprintf("the branch changes more than %d files, more than a diff lists, so crowsnest cannot tell that every file was viewed", landing.MaxChangedFiles))
+	}
+	marks, err := s.opts.Store.ListDiffMarks(ctx, target.Subject)
+	if err != nil {
+		return unknownViewed("crowsnest could not read the viewed marks: " + err.Error())
+	}
+	summary := s.summarize(target, r, marks, ScopeCommitted)
+	if unviewed := summary.Total - summary.Viewed; unviewed > 0 {
+		return &LandRefusal{Unviewed: unviewed, Total: summary.Total,
+			Message: fmt.Sprintf("%d of %d files are not marked viewed, and Settings require every file viewed before Land. Mark them on the Review tab, or turn the setting off", unviewed, summary.Total)}
+	}
+	return nil
+}
+
+func unknownViewed(why string) *LandRefusal {
+	return &LandRefusal{Unknown: true, Message: why + "; Settings require every file viewed before Land, so it is refused"}
+}
+
+func shortCommit(commit string) string {
+	if commit == "" {
+		return "no commit"
+	}
+	if len(commit) > 10 {
+		return commit[:10]
+	}
+	return commit
+}
+
+// readFresh takes a reading now, whatever the throttle says (the Land gate), and keeps it as the
+// subject's latest.
+func (s *Service) readFresh(ctx context.Context, target Target) (*reading, error) {
+	e := s.entryFor(target)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	previous := e.lastOf().reading
+	next, err := s.readCheckoutSlotted(ctx, target, s.opts.Now())
+	if err != nil {
+		e.last.Store(&taken{reading: previous, err: err, at: s.opts.Now()})
+		return nil, err
+	}
+	e.last.Store(&taken{reading: next, at: s.opts.Now()})
+	if previous != nil && previous.fingerprint != next.fingerprint {
+		s.publish(target.Subject, next.fingerprint)
+	}
+	return next, nil
+}
+
 // ---- Progress and a project's jobs ---------------------------------------------------------
 
 // Progress is a job's viewed count from its last reading (no git is run for it).
@@ -912,8 +1093,8 @@ func (s *Service) ProgressAll(ctx context.Context) (map[string]Progress, error) 
 	}
 	pairs := []pair{}
 	for _, e := range s.entries {
-		if e.target.Kind == KindJob && e.reading != nil {
-			pairs = append(pairs, pair{e.target, e.reading})
+		if last := e.lastOf(); e.target.Kind == KindJob && last.reading != nil {
+			pairs = append(pairs, pair{e.target, last.reading})
 		}
 	}
 	s.mu.Unlock()
@@ -1088,10 +1269,11 @@ func (s *Service) schedule(ctx context.Context, subject string) {
 // refreshWatched reads every watched subject whose reading is older than age.
 func (s *Service) refreshWatched(ctx context.Context, age time.Duration) {
 	now := s.opts.Now()
+	s.evictIdle(now)
 	s.mu.Lock()
 	due := []Target{}
 	for _, e := range s.entries {
-		if now.Sub(e.asked) <= WatchFor && now.Sub(e.at) >= age {
+		if now.Sub(e.asked) <= WatchFor && now.Sub(e.lastOf().at) >= age {
 			due = append(due, e.target)
 		}
 	}
