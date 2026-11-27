@@ -23,7 +23,8 @@ too, when the agent calls `job_adopt`.
 
 ## States
 
-The state is on every card, as a chip.
+A job's state, and crowsnest's own check of it, are in the job's Overview. A card carries one chip
+instead: [what happens next](#the-cards-chip), which comes from the state.
 
 | State | What it means for you |
 |---|---|
@@ -32,18 +33,36 @@ The state is on every card, as a chip.
 | **Needs you** | Every line of work is waiting on you: a question, an approval, a terminal dialog, a budget, a failed check or review. The card says which, and the job is in your [queue](attention-and-now.md). |
 | **Blocked** | Waiting on something that is not you: another job, an outage, a time. It always says what it waits on and when crowsnest will wake it ("rechecks at 07:12"). |
 | **In review** | The agent said done. crowsnest is running the project's check, or a reviewer agent is reading the change. |
-| **Done** | Finished. For a coding job, look at the acceptance chip beside it (below). |
+| **Done** | Finished. For a coding job, look at crowsnest's check of it in the Overview (below). |
 | **Failed** | The agent declared it cannot be done, or it kept dying (three restarts in an hour). The reason is on the card. |
 | **Cancelled** | You stopped it. Its pane stays open. |
 
-A running job can also show **Stuck** instead of Running: the agent is not actually moving. The
-card says why and the job view offers the one action that fits. [The supervisor](supervisor.md#stuck-causes)
-lists every cause.
+A running job can also be **stuck**: the agent is not actually moving. The card says why and the
+job view offers the one action that fits. [The supervisor](supervisor.md#stuck-causes) lists every
+cause.
 
-### Acceptance on the card
+### The card's chip
 
-A coding job's **done** is the agent's claim. crowsnest checks it and shows its own verdict beside
-the state:
+One chip per card says what happens next, and its tooltip says who has it (you, the agent,
+crowsnest or a reviewer). The commonest:
+
+| Chip | What happens next |
+|---|---|
+| **Running** | The agent is working. |
+| **Waiting on you** | A question, an approval, a dialog or a fix only you can make (a login). It is in your [queue](attention-and-now.md). |
+| **Fixing check** | crowsnest's check failed and the agent is fixing it. |
+| **Checking** / **In review** | crowsnest is running the check / a reviewer agent is reading the change. |
+| **Ready to land** | Done in its worktree: yours to review and land (amber when the project has no check, so nothing was run). |
+| **Check failed** / **Review objects** / **Needs rebase** / **Re-check to land** | Done or stopped, and yours to sort out before landing. |
+| **Held: budget**, **Held: paused**, **Held: usage limit**, **Held: spend ceiling**, **Held: machine busy**, **Waiting for a slot**, **Held for you**, **Approve to start** | Not moving until the hold lifts ([held](#held)); the ones that say budget, paused, ceiling, "for you" or approve are yours. |
+| **Retrying** / **Stuck** | crowsnest retries a limit or an API error by itself / nudges a stalled agent. |
+| **Waiting on a job** / **Waiting** / **Blocked** | Waiting on another job, a time, or something the agent named. |
+| **Merged**, **PR open**, **Discarded**, **Done**, **Failed**, **Cancelled** | Finished. |
+
+### Acceptance in the Overview
+
+A coding job's **done** is the agent's claim. crowsnest checks it and shows its own verdict in the
+job's Overview, beside the state (the card folds it into its one chip):
 
 | Chip | Meaning |
 |---|---|

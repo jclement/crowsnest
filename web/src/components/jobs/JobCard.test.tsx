@@ -28,7 +28,8 @@ describe("JobCard", () => {
 
   it("shows nudges, open questions and a retry countdown when there are any", () => {
     renderCard(makeJob({ nudges: 2, open_questions: 1, stuck: true, cause: "limit", cause_text: "Hit a usage or rate limit", retry_at: new Date(Date.now() + 4 * 60_000 + 5000).toISOString() }));
-    expect(screen.getByText("Stuck")).toBeInTheDocument();
+    // One chip, what happens next: crowsnest retries the limit by itself.
+    expect(screen.getByText("Retrying")).toBeInTheDocument();
     expect(screen.getByText("2 nudges")).toBeInTheDocument();
     expect(screen.getByText("1 question")).toBeInTheDocument();
     expect(screen.getByText("Retry in 4 min")).toBeInTheDocument();
@@ -43,7 +44,7 @@ describe("JobCard", () => {
 });
 
 describe("JobCard: acceptance, budgets and waits (DESIGN.md 6.15 to 6.18)", () => {
-  it("shows accepted, unverified and failed-check distinctly", () => {
+  it("shows one chip saying what happens next, not the state and the check apart (R8)", () => {
     const { unmount } = render(
       <ul>
         <JobCard job={makeJob({ state: "done", accept_state: "accepted", result_md: "Added it" })} onSelect={vi.fn()} />
@@ -51,9 +52,13 @@ describe("JobCard: acceptance, budgets and waits (DESIGN.md 6.15 to 6.18)", () =
         <JobCard job={makeJob({ id: "j_3", state: "running", accept_state: "failed", check_rounds: 1 })} onSelect={vi.fn()} />
       </ul>,
     );
-    expect(screen.getByText("Accepted")).toBeInTheDocument();
-    expect(screen.getByText("Unverified")).toBeInTheDocument();
-    expect(screen.getByText("Check failed (round 1)")).toBeInTheDocument();
+    expect(screen.getAllByText("Ready to land")).toHaveLength(2);
+    expect(screen.getAllByText("Ready to land")[0]).toHaveAttribute("title", "Next: Ready to land. Waiting on you.");
+    expect(screen.getByText("Fixing check")).toBeInTheDocument();
+    // The facts (Accepted, Unverified, the round) are the detail's, not the card's.
+    expect(screen.queryByText("Accepted")).toBeNull();
+    expect(screen.queryByText("Unverified")).toBeNull();
+    expect(screen.queryByText("Done")).toBeNull();
     unmount();
   });
 
@@ -82,7 +87,7 @@ describe("JobCard: acceptance, budgets and waits (DESIGN.md 6.15 to 6.18)", () =
 
   it("shows a job held by the fleet's usage limit as held, not stuck", () => {
     renderCard(makeJob({ stuck: true, cause: "limit", cause_text: "Hit a usage or rate limit", cause_detail: "claude's usage limit resets at 15:00" }));
-    expect(screen.getByText("Held")).toBeInTheDocument();
+    expect(screen.getByText("Held: usage limit")).toBeInTheDocument();
     expect(screen.queryByText("Stuck")).not.toBeInTheDocument();
   });
 });

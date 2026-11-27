@@ -1,11 +1,13 @@
-// JobCard: one row of the board (DESIGN.md 12): title, state chip, the progress line, "active 2m
-// ago", open questions, nudges when there were any, the estimated spend, and the agent. A stuck
-// job says why in words, and a job waiting on a retry counts down to it.
+// JobCard: one row of the board (DESIGN.md 12): title, its one chip (what happens next and who
+// owns it, lib/jobs.ts nextStep; R8 replaced the state chip plus the acceptance chip), the
+// progress line, "active 2m ago", open questions, nudges when there were any, the estimated
+// spend, and the agent. A stuck job says why in words, and a job waiting on a retry counts down
+// to it. The job's detail keeps the full facts.
 import { Bot, FolderKanban, MessageCircleQuestion, RotateCcw, Zap } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/format";
-import { acceptChip, budgetChip } from "../../lib/accept";
-import { cardLine, retryLabel, stateChip, type Job } from "../../lib/jobs";
+import { budgetChip } from "../../lib/accept";
+import { cardLine, nextOwnerText, nextStep, retryLabel, type Job } from "../../lib/jobs";
 import { LastMessage } from "./AcceptPanels";
 import { SpendChip } from "../spend/SpendChip";
 import { Chip } from "../ui/Chip";
@@ -22,11 +24,11 @@ interface JobCardProps {
 }
 
 export function JobCard({ job, selected, onSelect, projectName, progress }: JobCardProps) {
-  const chip = stateChip(job);
+  const chip = nextStep(job);
   const line = cardLine(job);
   const retry = retryLabel(job);
-  const accept = acceptChip(job);
-  const budget = budgetChip(job.budget);
+  // The budget's own chip, unless the one chip already says the budget holds it.
+  const budget = chip.label === "Held: budget" ? null : budgetChip(job.budget);
   // A job held by the fleet's usage limit is one banner, not a red card each (6.17).
   const limitHeld = job.cause === "limit" && /usage limit/.test(job.cause_detail);
   const active = job.last_activity_at ?? job.started_at ?? job.created_at;
@@ -40,12 +42,9 @@ export function JobCard({ job, selected, onSelect, projectName, progress }: JobC
       >
         <span className="flex w-full items-start gap-2">
           <span className="min-w-0 flex-1 break-words text-sm font-medium text-heading">{job.title}</span>
-          {accept && job.state !== "in_review" && (
-            <Chip tone={accept.tone} title={accept.title}>
-              {accept.label}
-            </Chip>
-          )}
-          <Chip tone={limitHeld ? "neutral" : chip.tone}>{limitHeld ? "Held" : chip.label}</Chip>
+          <Chip tone={chip.tone} title={`Next: ${chip.label}. ${nextOwnerText(chip.owner)}.`}>
+            {chip.label}
+          </Chip>
         </span>
         {line && <span className={cn("line-clamp-2 text-xs", (job.stuck && !limitHeld) || job.state === "needs_you" ? "text-warning" : "text-body")}>{line}</span>}
         {job.wake && job.state === "blocked" && (

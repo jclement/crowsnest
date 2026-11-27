@@ -95,10 +95,10 @@ describe("doItems", () => {
 });
 
 describe("buildItems", () => {
-  it("builds job items with state chips and the secondary actions", () => {
+  it("builds job items with their one chip and the secondary actions", () => {
     const items = buildItems(sources());
     const job = items.find((item) => item.id === "job:j_3");
-    expect(job?.chip).toEqual({ label: "Stuck", tone: "warning" });
+    expect(job?.chip).toMatchObject({ label: "Retrying", tone: "warning", owner: "crowsnest" });
     expect(job?.command).toEqual({ kind: "navigate", to: "/jobs", search: { job: "j_3" } });
     expect(job?.actions?.map((action) => action.id)).toEqual(["open", "resume", "nudge", "message", "cancel"]);
     // ⌘Enter never does something risky by default: no alt on a job (it opens the actions instead).

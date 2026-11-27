@@ -146,7 +146,7 @@ test("jumping to a job by its title or id opens it", async ({ page }, testInfo) 
   await openWithButton(page);
   await input(page).fill("settings form kit");
   await expect(activeOption(page)).toContainText("Migrate the settings page to the new form kit");
-  await expect(activeOption(page)).toContainText("Stuck");
+  await expect(activeOption(page)).toContainText("Stuck"); // the needs-you row ("Stuck job") ranks first
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/job=j_3/);
   if (isPhone(testInfo)) await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();

@@ -10,9 +10,10 @@ A finished worktree job is **Ready to land** in your queue (can wait), the board
 button counts it, and its Overview says, for example, "Finished in its worktree, review approved:
 merge it, open a pull request, or discard it" with **Review and land**.
 
-Before you look at the diff, check two things on the card and the Overview:
+Before you look at the diff, check two things in the Overview (the card's one chip says **Ready to
+land** when both are fine):
 
-- the acceptance chip: **Accepted** (crowsnest's check passed at this commit), **Unverified** (no
+- crowsnest's check, beside the state: **Accepted** (crowsnest's check passed at this commit), **Unverified** (no
   check command), or a problem (**Check failed**, **Evidence stale**, **Needs rebase**);
 - the result's **Not verified (reported by the agent)**: what the agent says it did not test.
 

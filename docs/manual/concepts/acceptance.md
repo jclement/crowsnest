@@ -87,8 +87,9 @@ its account, not crowsnest's evidence. Read **Not verified** before you land.
 
 ## Where you see it
 
-- The card's chip: **Checking**, **Accepted**, **Unverified**, **Check failed (round N)**,
-  **Evidence stale**, **Needs rebase**.
+- The job's Overview, beside its state: **Checking**, **Accepted**, **Unverified**, **Check failed
+  (round N)**, **Evidence stale**, **Needs rebase**. The card folds it into its one chip:
+  **Ready to land**, **Fixing check**, **Check failed**, **Re-check to land**, **Needs rebase**.
 - The job view's **crowsnest's check** panel: the verdict, the command, the commit, the exit code
   and duration, the end of its output, **Run the check again**, and **Ask an agent to rebase** when
   needed.

@@ -6,8 +6,8 @@
 // first, each labelled with its project and job, each with "Snooze 10 min" (kept on the server).
 //
 // Desktop (md and up): docked, a column at the right of the layout beside the view, never floating
-// over it (R8: the old bottom-right stack covered the chips of a project's job cards). It lists
-// every item and folds into a slim strip (folded to begin with below lg, where a column would
+// over it (R8: the old bottom-right stack covered the chips of a project's job cards). It shows the
+// top three ("Show all N" for the rest) and folds into a slim strip (folded to begin with below lg, where a column would
 // squeeze the view). Phone: a slim bar in the page's flow above the bottom nav (so it covers
 // nothing) that opens a sheet. It replaces nothing in the Inbox, which stays the full list
 // and the history, and reuses the Inbox's cards.
@@ -37,6 +37,9 @@ import { Chip } from "../ui/Chip";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
 
+
+/** How many items the docked tray shows before "Show all". */
+const STACK = 3;
 
 /** Views that show the whole queue themselves, so the tray would only repeat it (R4 Fable 1.5), and the decision packet, whose answer bar it would crowd. */
 const QUEUE_VIEWS = new Set(["/", "/inbox", "/decide"]);
@@ -76,6 +79,7 @@ export function TrayPanel() {
     const saved = sessionStorage.getItem("crowsnest-tray-folded");
     return saved === null ? !(window.matchMedia?.(LARGE_QUERY).matches ?? true) : saved === "1";
   });
+  const [all, setAll] = useState(false);
   const [sound, setSound] = useState(traySoundOn);
   const [bump, setBump] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
@@ -155,7 +159,12 @@ export function TrayPanel() {
         </span>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <TrayList items={items} fresh={fresh} />
+        <TrayList items={all ? items : items.slice(0, STACK)} fresh={fresh} />
+        {items.length > STACK && (
+          <button type="button" onClick={() => setAll(!all)} className="w-full border-t border-border px-3 py-2 text-left text-xs text-accent hover:bg-hover">
+            {all ? "Show fewer" : `Show all ${items.length}`}
+          </button>
+        )}
       </div>
     </aside>
   );

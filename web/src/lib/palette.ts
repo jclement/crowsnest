@@ -11,7 +11,7 @@ import { chipText } from "./spend";
 import { fuzzyMatch, PERFECT_CHAR_SCORE, queryTokens } from "./fuzzy";
 import { relaunchConfirmations } from "./conversation";
 import { cwdTail, cleanTitle } from "./fleet";
-import { cardLine, isFinished, stateChip, stateLabels, type Job } from "./jobs";
+import { cardLine, isFinished, nextStep, stateLabels, type Job } from "./jobs";
 import { kindLabels, type Question } from "./questions";
 import { leadAgentName, leadChip, leadRunning, type ProjectView } from "./projects";
 import type { SearchHit } from "./manual";
@@ -242,7 +242,7 @@ function jobItem(job: Job): PaletteItem {
     subtitle: [job.id, chipText(job.spend)?.text ?? "", cardLine(job)].filter(Boolean).join(" · "),
     keywords: [job.id, stateLabels[job.state], job.agent_name, job.dir, job.work_dir, job.role, job.engine, job.stuck ? "stuck" : ""].filter(Boolean),
     icon: "job",
-    chip: stateChip(job),
+    chip: nextStep(job),
     command: open,
     verb: "Open",
     actions,

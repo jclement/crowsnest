@@ -14,13 +14,16 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: `screenshots/accept-${name}-${isPhone(testInfo) ? 375 : 1440}.png`, animations: "disabled", caret: "hide" });
 }
 
+/** A board card by its title (in the view: the docked tray beside it lists some of the same jobs). */
 function card(page: Page, title: string) {
-  return page.getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
+  return page.getByRole("main").getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
 }
 
-test("the board tells accepted, unverified and failed-check apart, and shows waits and last words", async ({ page }, testInfo) => {
+test("the board says what happens next on each card (one chip), and shows waits and last words", async ({ page }, testInfo) => {
   await page.goto("/jobs?project=all");
-  await expect(card(page, "Retry widget fetches with back-off")).toContainText("Accepted");
+  // Accepted and done: yours to land. The check's verdict itself is the detail's (below).
+  await expect(card(page, "Retry widget fetches with back-off")).toContainText("Ready to land");
+  await expect(card(page, "Retry widget fetches with back-off")).not.toContainText("Accepted");
   await expect(card(page, "Render widgets at three sizes")).toContainText("Check failed");
   await expect(card(page, "Render widgets at three sizes")).toContainText("Should I disable that lint rule?");
   await expect(card(page, "Upgrade the Postgres driver")).toContainText(/rechecks at \d\d:\d\d/);
@@ -94,21 +97,29 @@ test("the System page lists waits without an owner", async ({ page }) => {
 test.describe("under the fleet's usage limit", () => {
   test.use({ appOptions: { demo: true, env: { CROWSNEST_DEMO_LIMIT: "1" } } });
 
-  test("one banner with the countdown, and the limited job reads Held", async ({ page }, testInfo) => {
+  test("one banner with the countdown, and the limited job reads Held: usage limit", async ({ page }, testInfo) => {
     await page.goto("/jobs?project=all");
     const banner = page.getByRole("status", { name: "claude usage limit" });
     await expect(banner).toContainText(/resets in (49|50) min/);
     await expect(banner).toContainText("1 job waiting");
     const limited = card(page, "Migrate the settings page to the new form kit");
-    await expect(limited).toContainText("Held");
+    await expect(limited).toContainText("Held: usage limit");
     await expect(limited).not.toContainText("Stuck");
     await expectNoSidewaysScroll(page);
     await shot(page, testInfo, "limit");
   });
 });
 
-test("Now lists a failed check as an attention item", async ({ page }, testInfo) => {
+test("Now lists a failed check as an attention item (a phone: behind Review all, in the Inbox)", async ({ page }, testInfo) => {
   await page.goto("/");
+  if (isPhone(testInfo)) {
+    // A phone's Now draws the top three; the failed check ranks below them (R8).
+    await page.getByRole("link", { name: /^Review all \d+$/ }).click();
+    const row = page.locator("[data-attention-item='job:j_23']").first();
+    await expect(row).toContainText("Render widgets at three sizes");
+    await shot(page, testInfo, "now");
+    return;
+  }
   const item = page.locator("[data-tray-item='job:j_23']").first();
   await expect(item).toContainText("Render widgets at three sizes");
   await expect(item).toContainText("Check failed");

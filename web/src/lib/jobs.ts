@@ -209,6 +209,144 @@ export function stateChip(job: Pick<Job, "state" | "stuck"> & { accept_state?: A
   return { label: stateLabels[job.state], tone: tones[job.state] };
 }
 
+// ---- The one chip: what happens next, and who owns it ---------------------------------------
+
+/** Who moves a job on from where it is (the chip's title says so in words). */
+export type NextOwner = "you" | "agent" | "crowsnest" | "reviewer" | "nobody";
+
+/** A job's one chip on a card (R8): what happens next, in words, its tone and who owns it. */
+export interface NextStep {
+  label: string;
+  tone: ChipTone;
+  owner: NextOwner;
+}
+
+const ownerWords: Record<NextOwner, string> = {
+  you: "Waiting on you",
+  agent: "The agent has it",
+  crowsnest: "crowsnest has it",
+  reviewer: "A reviewer has it",
+  nobody: "Nothing left to do",
+};
+
+/** The chip's title: who owns the next step. */
+export function nextOwnerText(owner: NextOwner): string {
+  return ownerWords[owner];
+}
+
+/** The fields nextStep reads: the job's state and everything that qualifies it. */
+export type NextStepInput = Pick<Job, "state" | "stuck" | "cause" | "cause_detail" | "worktree_branch"> &
+  Partial<Pick<Job, "accept_state" | "land_state" | "torn_down_at" | "review_of" | "wake_kind">>;
+
+// The hold reasons a queued, held job carries (internal/jobs/holds.go and holdset.go).
+const PAUSED_HOLD = "crowsnest's automation is paused";
+const LIMIT_HOLD = "usage limit: ";
+const CEILING_HOLD = "spend ceiling: ";
+const LOAD_HOLD = "waiting:";
+const HUMAN_HOLD = "held: ";
+
+/**
+ * The one chip a job card shows (R8: "one chip that says what happens next and who owns it"),
+ * derived from the job's state, cause, crowsnest's acceptance check, its landing and its wait.
+ * The job's detail keeps the full facts (state, the acceptance chip, the cause in words); a card
+ * needs only this. Every combination the API can produce maps to a label (lib/jobs.test.ts walks
+ * them all).
+ */
+export function nextStep(job: NextStepInput): NextStep {
+  switch (job.state) {
+    case "cancelled":
+      return { label: "Cancelled", tone: "neutral", owner: "nobody" };
+    case "failed":
+      return { label: "Failed", tone: "danger", owner: "you" };
+    case "done":
+      return finishedStep(job);
+    case "queued":
+      return queuedStep(job);
+    case "in_review":
+      return job.accept_state === "checking" ? { label: "Checking", tone: "accent", owner: "crowsnest" } : { label: "In review", tone: "accent", owner: "reviewer" };
+    case "needs_you":
+      return needsYouStep(job);
+    case "blocked":
+      if (job.wake_kind === "human") return { label: "Waiting on you", tone: "danger", owner: "you" };
+      if (job.wake_kind === "job") return { label: "Waiting on a job", tone: "warning", owner: "agent" };
+      if (job.wake_kind === "time") return { label: "Waiting", tone: "neutral", owner: "crowsnest" };
+      return { label: "Blocked", tone: "warning", owner: "agent" };
+    case "running":
+      return runningStep(job);
+  }
+}
+
+function finishedStep(job: NextStepInput): NextStep {
+  if (job.land_state === "merged") return { label: "Merged", tone: "success", owner: "nobody" };
+  if (job.land_state === "pr") return { label: "PR open", tone: "success", owner: "nobody" };
+  if (job.land_state === "discarded") return { label: "Discarded", tone: "neutral", owner: "nobody" };
+  if (!job.worktree_branch || job.review_of || job.torn_down_at) return { label: "Done", tone: "success", owner: "nobody" };
+  switch (job.accept_state) {
+    case "needs_rebase":
+      return { label: "Needs rebase", tone: "warning", owner: "you" };
+    case "stale":
+      return { label: "Re-check to land", tone: "warning", owner: "you" };
+    case "failed":
+      return { label: "Check failed", tone: "danger", owner: "you" };
+    case "checking":
+      return { label: "Checking", tone: "accent", owner: "crowsnest" };
+    case "unverified":
+      return { label: "Ready to land", tone: "warning", owner: "you" };
+    default:
+      return { label: "Ready to land", tone: "success", owner: "you" };
+  }
+}
+
+function queuedStep(job: NextStepInput): NextStep {
+  if (job.cause === "approval") return { label: "Approve to start", tone: "danger", owner: "you" };
+  if (job.cause !== "held") return { label: "Queued", tone: "neutral", owner: "crowsnest" };
+  const why = job.cause_detail;
+  if (why.startsWith(PAUSED_HOLD)) return { label: "Held: paused", tone: "neutral", owner: "you" };
+  if (why.startsWith(LIMIT_HOLD)) return { label: "Held: usage limit", tone: "neutral", owner: "crowsnest" };
+  if (why.startsWith(CEILING_HOLD)) return { label: "Held: spend ceiling", tone: "warning", owner: "you" };
+  if (why.startsWith(LOAD_HOLD)) return { label: "Held: machine busy", tone: "neutral", owner: "crowsnest" };
+  if (why.startsWith(HUMAN_HOLD)) return { label: "Held for you", tone: "danger", owner: "you" };
+  return { label: "Waiting for a slot", tone: "neutral", owner: "crowsnest" };
+}
+
+function needsYouStep(job: NextStepInput): NextStep {
+  switch (job.cause) {
+    case "budget":
+      return { label: "Held: budget", tone: "danger", owner: "you" };
+    case "check":
+      return { label: "Check failed", tone: "danger", owner: "you" };
+    case "review":
+      return job.worktree_branch && !job.review_of ? { label: "Review objects", tone: "danger", owner: "you" } : { label: "Waiting on you", tone: "danger", owner: "you" };
+    default:
+      return { label: "Waiting on you", tone: "danger", owner: "you" };
+  }
+}
+
+function runningStep(job: NextStepInput): NextStep {
+  if (job.cause === "approval-tool" || job.cause === "approval" || job.cause === "questions" || job.cause === "dialog") return { label: "Waiting on you", tone: "danger", owner: "you" };
+  if (job.stuck) {
+    switch (job.cause) {
+      case "limit":
+        return /usage limit/.test(job.cause_detail) ? { label: "Held: usage limit", tone: "neutral", owner: "crowsnest" } : { label: "Retrying", tone: "warning", owner: "crowsnest" };
+      case "server_error":
+      case "exited":
+        return { label: "Retrying", tone: "warning", owner: "crowsnest" };
+      case "budget":
+        return { label: "Held: budget", tone: "danger", owner: "you" };
+      case "auth":
+      case "config":
+      case "launch":
+      case "permissions":
+        return { label: "Waiting on you", tone: "danger", owner: "you" };
+      default:
+        return { label: "Stuck", tone: "warning", owner: "crowsnest" };
+    }
+  }
+  if (job.accept_state === "failed") return { label: "Fixing check", tone: "warning", owner: "agent" };
+  if (job.accept_state === "checking") return { label: "Checking", tone: "accent", owner: "crowsnest" };
+  return { label: "Running", tone: "accent", owner: "agent" };
+}
+
 export function isFinished(state: JobState): boolean {
   return state === "done" || state === "failed" || state === "cancelled";
 }
