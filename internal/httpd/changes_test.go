@@ -34,6 +34,19 @@ func (o oneJob) Retired(context.Context, string) bool                          {
 
 func changesHarness(t *testing.T) *harness {
 	t.Helper()
+	dir := changesRepo(t)
+	db, err := store.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	service := changes.New(changes.Options{Store: db, Resolver: oneJob{root: dir}})
+	return newHarness(t, harnessOptions{changes: service})
+}
+
+// changesRepo is a repository on branch job/1 whose one commit adds func A to a.go.
+func changesRepo(t *testing.T) string {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -60,13 +73,7 @@ func changesHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	git("commit", "-q", "-am", "A")
-	db, err := store.OpenMemory(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	service := changes.New(changes.Options{Store: db, Resolver: oneJob{root: dir}})
-	return newHarness(t, harnessOptions{changes: service})
+	return dir
 }
 
 func TestChangesRoutesNeedASession(t *testing.T) {
