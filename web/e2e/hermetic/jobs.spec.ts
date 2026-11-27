@@ -288,8 +288,8 @@ test("choosing Codex for a job says plainly what it runs without (R8), from GET 
   await form.getByRole("button", { name: /To the orchestrator/ }).click();
   const note = form.getByTestId("engine-note");
   await expect(note).toHaveCount(0);
-  await form.getByLabel("Engine").selectOption("codex");
+  await form.getByRole("combobox", { name: /^Engine/ }).selectOption("codex");
   await expect(note).toContainText(/^Codex runs without /);
-  await form.getByLabel("Engine").selectOption("claude");
+  await form.getByRole("combobox", { name: /^Engine/ }).selectOption("claude");
   await expect(note).toHaveCount(0);
 });

@@ -381,6 +381,9 @@ func TestQuestionLabelAgreesWithTheQueue(t *testing.T) {
 		if got := QuestionLabel(q, stopped); got != item.Label {
 			t.Errorf("%s: push says %s, the queue %s", q.ID, got, item.Label)
 		}
+	}
+}
+
 // A folder-trust question is said as the decision it is: who asks, about which folder (8.2.1).
 func TestBuildNamesATrustQuestion(t *testing.T) {
 	agent := dialogAgent("w1:p1", "job-1")
