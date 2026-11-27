@@ -689,7 +689,16 @@ A project is a repository's main checkout: a name, its directory, defaults for t
 it (role, engine, model, worktree or not), its own instruction layer, and optionally a **lead**:
 a long-lived Claude agent in that checkout, kept exactly as the orchestrator is (same hooks, MCP
 tools, SAY line, recovery), with Remote Control named `<instance> <project>`. Make them in the
-**Projects** view ("New project" picks from directories you have used); archive, never delete.
+**Projects** view ("New project" has a folder picker, Browse…, or takes a typed path); archive, never delete.
+
+**The folder picker** browses your home, the directories projects and jobs already use, and any
+`--browse-root` (`/srv`, `/Volumes`; `/` only when named), read-only and only from your signed-in
+browser (not a read token, not an agent). It floats git repositories to the top, takes a filter
+or a pasted path (`/…`, `~/…`), and before you choose shows what the folder is: "git repo on
+GitHub, branch main, has a check task, AGENTS.md present", what Land can do with its remote (pull
+requests on GitHub only), and a warning when it is not a repository, is inside another project,
+or is your home folder. Choosing one prefills the project's name and check command. It is also
+behind the job form's Where and the palette's "New project in…".
 
 - A job given **to the project** with no directory goes to its lead, which plans it and may
   delegate child jobs inside the project's directory (anything wider asks you first). Given
@@ -1086,6 +1095,9 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /jobs/{id}/restart-agent` | session | Restart the job's agent on the same conversation with fresh instructions |
 | `GET /voice/agents`, `PUT /voice/agents/{agent}` | session | Each standing agent's voice (`{voice_id}`, empty for the instance's) |
 | `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
+| `GET /browse?path=&files=1&hidden=1` | session only (no read token; not on the agent socket) | The folder picker: one directory's folders (and, asked, files: names only), repositories marked, links resolved, under the roots alone; 500 entries at most, 3 s at most (`504` on a slow mount) |
+| `GET /browse/facts?path=` | session only | A folder's facts: git repo, branch, base branch guess, remote host (credentials removed), check command, AGENTS.md / CLAUDE.md, Claude's trust, the project holding it or inside it |
+| `GET /browse/places` | session only | Home, favourites and roots for the picker |
 | `GET /instructions`, `GET /instructions/{scope}/{key}` | session | Instruction layers: every layer with its source (`none`, `builtin`, `db`, `file`) and text; one layer with its revisions. The global layer's key is `-` |
 | `PUT /instructions/{scope}/{key}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` | session | `{body_md}` (at most 32 KB): a new revision; reset a role to its built-in; `{revision}`: that text again. `409` for a role that comes from a file |
 | `POST /instructions/role/{name}/file-seen` | session | `{hash}`: mark a role file's text read, which clears its "changed, review" badge → the layer. `409` when the file changed since |
