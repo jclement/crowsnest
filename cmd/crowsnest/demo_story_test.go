@@ -55,7 +55,12 @@ func seedDemoWorld(t *testing.T) demoWorld {
 	}})
 	// Wired as newApprovals wires it: the job's directory is the root its calls are judged by, and
 	// a change moves the job's state.
-	approvalService := approvals.New(approvals.Options{Store: db, Logger: logger,
+	questionService := questions.New(questions.Options{Store: db, Logger: logger})
+	wiring := &projectWiring{service: projects.New(projects.Options{Store: db})}
+	links := &approvalWiring{projects: wiring.service}
+	links.jobs.Store(jobService)
+	var approvalService *approvals.Service
+	approvalService = approvals.New(approvals.Options{Store: db, Logger: logger, Scope: links.scope,
 		RiskContext: func(ctx context.Context, jobID string) risk.Context {
 			job, err := jobService.Get(ctx, jobID)
 			if err != nil {
@@ -64,10 +69,12 @@ func seedDemoWorld(t *testing.T) demoWorld {
 			return risk.Context{JobRoot: firstNonEmpty(job.WorkDir, job.Dir)}
 		},
 		OnChange: func(ctx context.Context, a approvals.Approval, change string) {
-			_ = jobService.SetApprovalWaiting(ctx, a.JobID, change == "requested", a.Summary)
+			summary := a.Summary
+			if change != "requested" {
+				summary = approvalService.WaitingSummary(ctx, a.JobID)
+			}
+			_ = jobService.SetApprovalWaiting(ctx, a.JobID, change == "requested", summary)
 		}})
-	questionService := questions.New(questions.Options{Store: db, Logger: logger})
-	wiring := &projectWiring{service: projects.New(projects.Options{Store: db})}
 
 	projectOf := seedDemoProjects(ctx, config.Config{StateDir: t.TempDir()}, wiring, logger)
 	startJobs(ctx, jobService, demo, projectOf, t.TempDir(), logger)
@@ -176,8 +183,21 @@ func checkDemoDialogs(t *testing.T, w demoWorld) {
 }
 
 func checkDemoApprovals(t *testing.T, w demoWorld) {
+	// ap_4 is the call the demo's project rule allowed (DESIGN.md 8.7, Policy): settled at once,
+	// by policy, from the Crowsnest reviewer's job; the other three wait for a human.
+	var pending []approvals.Approval
+	for _, approval := range w.approvals {
+		if approval.ID == "ap_4" {
+			if approval.Status != approvals.StatusAllowed || approval.DecidedVia != approvals.ViaPolicy || !strings.Contains(approval.StatusReason, "(project Crowsnest)") {
+				t.Errorf("the demo's auto-allowed call: %+v", approval)
+			}
+			continue
+		}
+		pending = append(pending, approval)
+	}
+	w.approvals = pending
 	if len(w.approvals) != 3 {
-		t.Fatalf("%d approvals", len(w.approvals))
+		t.Fatalf("%d approvals waiting for a human", len(w.approvals))
 	}
 	// One of each risk the tray shows differently: two low (one answerable from a notification),
 	// and the dangerous one that needs a second confirmation.

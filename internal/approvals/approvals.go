@@ -354,6 +354,18 @@ func (s *Service) PendingForJob(ctx context.Context, jobID string) bool {
 	return err == nil && count > 0
 }
 
+// WaitingSummary is what a job's "approval-tool" cause should say after a change: the summary of
+// its newest approval still pending ("" when none). A settled call's own summary is the wrong
+// answer while another call of the job still waits.
+func (s *Service) WaitingSummary(ctx context.Context, jobID string) string {
+	for _, approval := range s.pending(ctx) {
+		if approval.JobID == jobID {
+			return approval.Summary
+		}
+	}
+	return ""
+}
+
 // Wait long-polls one approval: it returns as soon as it is no longer pending, or after max with
 // it still pending. Each call counts as the hook being alive.
 func (s *Service) Wait(ctx context.Context, id string, max time.Duration) (Approval, error) {
