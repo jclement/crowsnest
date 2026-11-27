@@ -710,7 +710,7 @@ function LazyBody(props: FileSectionProps) {
     return () => observer.disconnect();
   }, [near]);
   const skip = file.too_large || (file.binary && !props.since);
-  const query = useDiffFile(props.who, file.path, file.hash, props.scope, { context, ignoreWhitespace: props.ignoreWhitespace, since: props.since }, props.base, near && !skip);
+  const query = useDiffFile(props.who, file.path, file.hash, props.scope, { context, ignoreWhitespace: props.ignoreWhitespace, since: props.since, baseline: file.viewed_at }, props.base, near && !skip);
   let body: ReactNode;
   if (file.too_large) body = <p className="px-3 py-2 text-xs text-muted">{file.note ?? "Too large to show."}</p>;
   else if (file.binary) body = <p className="px-3 py-2 text-xs text-muted">Binary file ({file.status}); not shown.</p>;

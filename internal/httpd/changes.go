@@ -93,7 +93,7 @@ func (s *Server) handleChangesFile(w http.ResponseWriter, r *http.Request, ask c
 	}
 	query := r.URL.Query()
 	fileAsk := changes.FileAsk{Path: query.Get("path"), Scope: query.Get("scope"), IgnoreWhitespace: query.Get("ws") == "ignore",
-		Since: query.Get("since") == "1"}
+		Since: query.Get("since") == "1", Hash: query.Get("hash")}
 	if raw := query.Get("context"); raw != "" {
 		context, err := strconv.Atoi(raw)
 		if err != nil || context < 0 || context > 100000 {

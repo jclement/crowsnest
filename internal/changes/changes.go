@@ -700,6 +700,10 @@ type FileAsk struct {
 	IgnoreWhitespace bool
 	// Since asks for the comparison from the version last viewed to now.
 	Since bool
+	// Hash, when set, is the file's hash the browser asks for (R7-C12): a reading where the file
+	// has another hash answers stale instead of serving a body the browser would file under the
+	// wrong version.
+	Hash string
 }
 
 // FileView is one file's diff, with both sides' whole text when small enough (the browser
@@ -754,6 +758,9 @@ func (s *Service) File(ctx context.Context, ask Ask, fileAsk FileAsk) (FileView,
 		return FileView{}, fail("not_found", "%s is not one of the files in this diff", fileAsk.Path)
 	}
 	file := *found
+	if fileAsk.Hash != "" && fileAsk.Hash != file.Hash {
+		return FileView{}, fail("stale", "%s changed since the list was read; the list is being read again", file.Path)
+	}
 	view := FileView{Path: file.Path, OldPath: file.OldPath, Status: file.Status, Hash: file.Hash, Binary: file.Binary, TooLarge: file.TooLarge,
 		Note: file.Note, Context: fileAsk.Context}
 	if file.TooLarge {

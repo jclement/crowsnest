@@ -395,6 +395,28 @@ func TestLandViewedFailsClosed(t *testing.T) {
 	}
 }
 
+// TestFileServesOnlyTheHashAsked is R7-C12: the browser asks for a file's body by the hash the
+// list showed; after an edit the server's reading has another hash, and it answers stale rather
+// than a body the browser would cache under the old version.
+func TestFileServesOnlyTheHashAsked(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	summary, err := f.svc.Summary(ctx, job1, ScopeAll, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown, _ := fileOf(summary, "b.go")
+	if view, err := f.svc.File(ctx, job1, FileAsk{Path: "b.go", Scope: ScopeAll, Hash: shown.Hash}); err != nil || view.Hash != shown.Hash {
+		t.Fatalf("the version shown: %+v %v", view.Hash, err)
+	}
+	write(t, f.wt, "b.go", "package app\n\nfunc B() { println(2) }\n")
+	f.later()
+	_, err = f.svc.File(ctx, job1, FileAsk{Path: "b.go", Scope: ScopeAll, Hash: shown.Hash})
+	if e, ok := AsError(err); !ok || e.Kind != "stale" {
+		t.Fatalf("an edited file asked by its old hash: %v", err)
+	}
+}
+
 // TestConcurrentReadsAreRaceFree is R7-C08: a reading being replaced while the progress route and
 // the watch tick look at it. Run with -race (mise run test does): before the fix, the entry's
 // reading and time were written under the entry's lock and read under the service's.

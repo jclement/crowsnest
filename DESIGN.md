@@ -1623,7 +1623,11 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
   watched job is read again 1.5 s after its `job` event (the agent's tool calls make those), and
   every watched subject on a 10 s tick; a reading whose fingerprint changed publishes `changes`
   `{subject, revision}`, and the browser refetches the summary. A file's diff is cached in the
-  browser by its hash, so only files that changed are fetched again.
+  browser by its hash, so only files that changed are fetched again. That cache holds only the
+  version it is keyed by (R7-C12): the request names the hash (`?hash=`), the server answers
+  `409 STALE` when its reading has another, the browser refuses to cache an answer for another
+  hash, and either way reads the summary again; a since-viewed diff is keyed by when the file was
+  viewed too.
 - **Hidden characters are never silent** (R7-S3, "Trojan Source"). Every Unicode format character
   (bidi embeddings, overrides and isolates, LRM/RLM, zero-width space and joiners, BOM, soft
   hyphen, tags), the line and paragraph separators and the invisible fillers are drawn as a chip
