@@ -64,7 +64,7 @@ func IsGate(context map[string]string) bool {
 // grants anything.
 var grantingWords = map[string]bool{
 	"allow": true, "allowed": true, "approve": true, "approved": true, "approval": true, "merge": true, "land": true,
-	"push": true, "deploy": true, "delete": true, "grant": true, "permit": true, "release": true, "publish": true,
+	"push": true, "deploy": true, "delete": true, "grant": true, "permit": true,
 }
 
 // GrantingText reports whether text uses a granting word (whole words, any case).

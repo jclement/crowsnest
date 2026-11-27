@@ -80,7 +80,7 @@ export function isRoutine(question: Pick<Question, "kind" | "multi" | "files" | 
  */
 const GATE_CONTEXT_KEYS = ["land_for", "land_action", "land_token", "approval_for", "requested_by", "task_review", "task_hash", "crowsnest_gate"];
 /** Words that grant something: a question whose option keys, labels or title use one is a gate (R6-S9). */
-const GRANTING_WORDS = new Set(["allow", "allowed", "approve", "approved", "approval", "merge", "land", "push", "deploy", "delete", "grant", "permit", "release", "publish"]);
+const GRANTING_WORDS = new Set(["allow", "allowed", "approve", "approved", "approval", "merge", "land", "push", "deploy", "delete", "grant", "permit"]);
 
 /** True when text uses a granting word (whole words, any case): the same rule as questions.GrantingText. */
 export function grantingText(text: string): boolean {

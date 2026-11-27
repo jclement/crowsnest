@@ -505,7 +505,7 @@ What holds now:
   had no `recommend`, so every real request was refused by validation: it is Deny now.
 - **Gates are never answered from a notification** (R5-S2). `questions.GateShaped` is a gate key,
   or any option key or label, or the title, that uses a granting word (`allow`, `approve`, `merge`,
-  `land`, `push`, `deploy`, `delete`, `grant`, `permit`, `release`, `publish`, …; R6-S9: an agent
+  `land`, `push`, `deploy`, `delete`, `grant`, `permit`; R6-S9: an agent
   could put "Allow: merge j_5" on a key "y"). Agents may not set any `land_`, `task_`,
   `approval_` or `crowsnest_` context key (R6-I1). Such a question's
   notice gets no buttons and no action token (`internal/push/decision.go`), and `/push/action`
