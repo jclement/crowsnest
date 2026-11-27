@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -80,5 +81,39 @@ func TestPrepareUpgradeRefusesANewerDatabase(t *testing.T) {
 	}
 	if copies, _ := UpgradeBackups(dir, "crowsnest"); len(copies) != 0 {
 		t.Errorf("copied a database it refused: %v", copies)
+	}
+}
+
+// TestUpgradeCopyIsScrubbed is R5-S8: the pre-migration copy carries none of the credentials a
+// backup leaves out, and no staging directory is left behind.
+func TestUpgradeCopyIsScrubbed(t *testing.T) {
+	ctx := context.Background()
+	dbPath := openedDatabase(t, "v1.0.0")
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustDo(t, db.SetKV(ctx, "push.vapid", "private-key"))
+	mustDo(t, db.SetKV(ctx, "settings.notify-url", "https://ntfy.sh/secret-topic"))
+	mustDo(t, db.Close())
+	dir := filepath.Join(t.TempDir(), "backups")
+	check, err := PrepareUpgrade(ctx, dbPath, dir, "crowsnest", "v1.1.0", time.Date(2026, 11, 27, 1, 0, 0, 0, time.UTC))
+	if err != nil || check.BackupPath == "" {
+		t.Fatalf("%+v %v", check, err)
+	}
+	rows, err := store.ReadKVPrefix(ctx, check.BackupPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"push.vapid", "settings.notify-url"} {
+		if _, ok := rows[key]; ok {
+			t.Errorf("the pre-upgrade copy kept %s", key)
+		}
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			t.Errorf("a staging directory was left: %s", entry.Name())
+		}
 	}
 }

@@ -71,16 +71,41 @@ func PrepareUpgrade(ctx context.Context, dbPath, dir, session, version string, n
 	}
 	name := fmt.Sprintf("%s%s-%s-s%d-%s%s", upgradePrefix, session, Stamp(now), inspection.SchemaVersion, safeVersion(check.LastVersion), upgradeSuffix)
 	check.BackupPath = filepath.Join(dir, name)
-	if err := store.VacuumFileInto(ctx, dbPath, check.BackupPath); err != nil {
+	if err := writeUpgradeCopy(ctx, dbPath, dir, check.BackupPath); err != nil {
 		return check, err
-	}
-	if err := os.Chmod(check.BackupPath, 0o600); err != nil {
-		return check, fmt.Errorf("making %s private: %w", check.BackupPath, err)
 	}
 	if _, err := Prune(dir, upgradePrefix+session+"-", upgradeSuffix, UpgradeKeep); err != nil {
 		return check, err
 	}
 	return check, nil
+}
+
+// writeUpgradeCopy makes the pre-migration copy at final (R5-S8): it is written to a private
+// temporary file in a 0700 directory of its own, scrubbed of credentials exactly like a backup
+// (sessions, agent and API token hashes, machine tokens, the Web Push private key, the notify
+// URL: DESIGN.md 4.17), and only then renamed into place, so no unscrubbed copy ever sits beside
+// the backups people are told are safe to copy elsewhere. A downgrade loses only what a restore
+// loses: signing in again, and re-entering a machine token.
+func writeUpgradeCopy(ctx context.Context, dbPath, dir, final string) error {
+	staging, err := os.MkdirTemp(dir, ".upgrade-")
+	if err != nil {
+		return fmt.Errorf("making a private staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	if err := os.Chmod(staging, 0o700); err != nil {
+		return fmt.Errorf("making the staging directory private: %w", err)
+	}
+	temp := filepath.Join(staging, "copy.db")
+	if err := store.VacuumFileInto(ctx, dbPath, temp); err != nil {
+		return err
+	}
+	if err := store.ScrubSnapshot(ctx, temp); err != nil {
+		return err
+	}
+	if err := os.Rename(temp, final); err != nil {
+		return fmt.Errorf("putting the pre-upgrade copy in place: %w", err)
+	}
+	return nil
 }
 
 // safeVersion makes a version usable in a file name.

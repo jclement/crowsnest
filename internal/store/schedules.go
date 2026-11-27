@@ -184,3 +184,13 @@ func (s *Store) ApproveTaskFile(ctx context.Context, path, hash string, at time.
 	}
 	return tx.Commit()
 }
+
+// ClearTaskReviews forgets every task file approval. A restore calls it on the database it is
+// about to install: an approval is the human's word about a file on this machine, and a backup
+// from elsewhere (or a crafted one) must not arrive with its own task files pre-approved.
+func (s *Store) ClearTaskReviews(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM task_reviews`); err != nil {
+		return fmt.Errorf("clearing task reviews: %w", err)
+	}
+	return nil
+}
