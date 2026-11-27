@@ -404,7 +404,7 @@ func TestBashRuleMatchesTheFullCommandOnly(t *testing.T) {
 	if !strings.HasSuffix(approval.Summary, "…") {
 		t.Fatalf("the summary should be cut for this test to mean anything: %q", approval.Summary)
 	}
-	bidi := h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "go test ./... ‮"})
+	bidi := h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "go test ./... \u202e"})
 	if bidi.Status != StatusPending {
 		t.Fatal("a command with a bidi control was allowed")
 	}
