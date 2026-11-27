@@ -104,6 +104,17 @@ type Config struct {
 	CompactAt        int    // compact the orchestrator past this many tokens; 0 off
 	FreshAt          int    // daily new conversation, minutes after local midnight; -1 off
 
+	// ---- Day thirty: terminal reach, Tailscale sign-in, backups, retention (ops.go) ----
+
+	// TerminalMachines lets the Terminal view's herdr client show the user's saved SSH machines
+	// (--terminal-machines). Off: the client gets a state directory of crowsnest's own.
+	TerminalMachines bool
+	TailscaleAuth    bool          // accept Tailscale identity headers from a local serve proxy (--tailscale-auth)
+	BackupEvery      time.Duration // automatic backup interval; 0 off
+	BackupKeep       int           // automatic backups kept
+	ArchiveAfterDays int           // settled jobs leave the boards after this many days; 0 never
+	DeleteAfterDays  int           // settled history is deleted after this many days; 0 never
+
 	// ---- The guard hook and approvals (guard.go) ----
 
 	ProtectedHosts     []string // --protected-host; the file's hosts are added by the caller (guard.ReadHostsFile)

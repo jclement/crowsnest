@@ -344,7 +344,7 @@ func terminals(cfg config.Config) term.Launcher {
 	if cfg.Demo {
 		return term.DemoLauncher{}
 	}
-	return term.HerdrLauncher{Session: cfg.Session}
+	return term.HerdrLauncher{Session: cfg.Session, ClientStateDir: cfg.TerminalClientStateDir()}
 }
 
 // cleanSessions deletes expired sessions every hour until ctx ends.
