@@ -55,7 +55,12 @@ for (const size of [
     await card.getByRole("button", { name: "Publish" }).click();
     await expect(card.getByText("publishing", { exact: true })).toBeVisible();
     await expect(card.getByRole("link", { name: /https:\/\/quark\.tail1234\.ts\.net/ })).toHaveAttribute("href", "https://quark.tail1234.ts.net");
-    await expect(card.getByRole("img", { name: "QR code for https://quark.tail1234.ts.net" })).toBeVisible();
+    const qr = card.getByRole("img", { name: "QR code for https://quark.tail1234.ts.net" });
+    await expect(qr).toBeVisible();
+    // Decoded, not a broken image: the CSP (img-src 'self' data: blob:) lets the data: PNG through.
+    await expect.poll(() => qr.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth)).toBeGreaterThan(100);
+    const csp = (await page.request.get(`${app.baseURL}/system`)).headers()["content-security-policy"] ?? "";
+    expect(csp).toContain("img-src 'self' data:");
     const pid = foregroundPID(tsDir);
     expect(alive(pid), "the fake tailscale serve runs").toBe(true);
     const argv = readFileSync(join(tsDir, "argv.log"), "utf8");
