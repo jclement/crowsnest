@@ -71,20 +71,20 @@ type Pane struct {
 type Agent struct {
 	Name string `json:"name"` // herdr agent name; empty for an unnamed agent
 	// Target is how to address this agent in /agents/{target}: its name, or its pane id.
-	Target           string            `json:"target"`
-	Kind             string            `json:"kind"` // claude, codex, …
-	Status           herdr.AgentStatus `json:"status"`
-	SessionID        string            `json:"session_id,omitempty"` // Claude's session id
-	Title            string            `json:"title"`
-	HasDialog        bool              `json:"has_dialog"`
+	Target    string            `json:"target"`
+	Kind      string            `json:"kind"` // claude, codex, …
+	Status    herdr.AgentStatus `json:"status"`
+	SessionID string            `json:"session_id,omitempty"` // Claude's session id
+	Title     string            `json:"title"`
+	HasDialog bool              `json:"has_dialog"`
 	// TrustFolder is the folder a folder-trust question on screen asks about (8.2.1); "" when the
 	// dialog is something else, or none.
-	TrustFolder      string            `json:"trust_folder,omitempty"`
+	TrustFolder string `json:"trust_folder,omitempty"`
 	// TrustPrompt says the dialog on screen is a folder-trust question (TrustFolder may still be
 	// "" when the folder could not be read).
-	TrustPrompt      bool              `json:"trust_prompt,omitempty"`
-	HasTranscript    bool              `json:"has_transcript"` // a Claude session id is known
-	InteractiveReady bool              `json:"interactive_ready"`
+	TrustPrompt      bool `json:"trust_prompt,omitempty"`
+	HasTranscript    bool `json:"has_transcript"` // a Claude session id is known
+	InteractiveReady bool `json:"interactive_ready"`
 }
 
 // AgentEntry is an agent with where it lives, for the flat list.

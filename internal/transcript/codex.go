@@ -69,7 +69,7 @@ type codexTokens struct {
 func codexParser(cursor *FileCursor) func([]byte) (UsageEntry, bool) {
 	return func(line []byte) (UsageEntry, bool) {
 		line = bytes.TrimSpace(line)
-		if len(line) == 0 || line[0] != '{' || !(bytes.Contains(line, []byte(`"token_count"`)) || bytes.Contains(line, []byte(`"turn_context"`))) {
+		if len(line) == 0 || line[0] != '{' || (!bytes.Contains(line, []byte(`"token_count"`)) && !bytes.Contains(line, []byte(`"turn_context"`))) {
 			return UsageEntry{}, false
 		}
 		var rec codexLine

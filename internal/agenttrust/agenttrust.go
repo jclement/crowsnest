@@ -110,7 +110,7 @@ func trustClaude(path string, dirs []string) Result {
 			return result
 		}
 		if attempt >= attempts {
-			return failed(result, errors.New("Claude Code kept rewriting its config; the trust was not kept"))
+			return failed(result, errors.New("the trust was not kept: Claude Code kept rewriting its config"))
 		}
 		if err := writeAtomic(path, updated); err != nil {
 			return failed(result, err)
@@ -125,13 +125,13 @@ func claudeWithTrust(original []byte, dirs []string) ([]byte, bool, error) {
 	top := map[string]json.RawMessage{}
 	if len(bytes.TrimSpace(original)) > 0 {
 		if err := json.Unmarshal(original, &top); err != nil {
-			return nil, false, fmt.Errorf("Claude's config is not a JSON object, so it was left alone: %w", err)
+			return nil, false, fmt.Errorf("the config is not a JSON object, so it was left alone: %w", err)
 		}
 	}
 	projects := map[string]json.RawMessage{}
 	if raw, ok := top["projects"]; ok && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &projects); err != nil {
-			return nil, false, fmt.Errorf("Claude's config has a projects value that is not an object, so it was left alone: %w", err)
+			return nil, false, fmt.Errorf("the config's projects value is not an object, so it was left alone: %w", err)
 		}
 	}
 	changed := false
@@ -139,7 +139,7 @@ func claudeWithTrust(original []byte, dirs []string) ([]byte, bool, error) {
 		entry := map[string]json.RawMessage{}
 		if raw, ok := projects[dir]; ok && string(raw) != "null" {
 			if err := json.Unmarshal(raw, &entry); err != nil {
-				return nil, false, fmt.Errorf("Claude's entry for %s is not an object, so it was left alone: %w", dir, err)
+				return nil, false, fmt.Errorf("the config's entry for %s is not an object, so it was left alone: %w", dir, err)
 			}
 		}
 		if string(entry["hasTrustDialogAccepted"]) == "true" {
@@ -215,7 +215,7 @@ func trustCodex(path string, dirs []string) Result {
 			return result
 		}
 		if attempt >= attempts {
-			return failed(result, errors.New("Codex kept rewriting its config; the trust was not kept"))
+			return failed(result, errors.New("the trust was not kept: Codex kept rewriting its config"))
 		}
 		if err := writeAtomic(path, updated); err != nil {
 			return failed(result, err)
@@ -230,7 +230,7 @@ func trustCodex(path string, dirs []string) Result {
 func codexWithTrust(original []byte, dirs []string) (updated []byte, changed bool, refused string, err error) {
 	var parsed codexConfig
 	if err := toml.Unmarshal(original, &parsed); err != nil {
-		return nil, false, "", fmt.Errorf("Codex's config.toml does not parse, so it was left alone: %w", err)
+		return nil, false, "", fmt.Errorf("config.toml does not parse, so it was left alone: %w", err)
 	}
 	updated = append([]byte{}, original...)
 	for _, dir := range dirs {
@@ -252,11 +252,11 @@ func codexWithTrust(original []byte, dirs []string) (updated []byte, changed boo
 	}
 	var check codexConfig
 	if err := toml.Unmarshal(updated, &check); err != nil {
-		return nil, false, "", fmt.Errorf("adding the trust to Codex's config.toml would not parse (an inline projects table?), so it was left alone: %w", err)
+		return nil, false, "", fmt.Errorf("adding the trust to config.toml would not parse (an inline projects table?), so it was left alone: %w", err)
 	}
 	for _, dir := range dirs {
 		if check.Projects[dir].TrustLevel != "trusted" {
-			return nil, false, "", fmt.Errorf("Codex's config.toml would not read back %s as trusted, so it was left alone", dir)
+			return nil, false, "", fmt.Errorf("config.toml would not read back %s as trusted, so it was left alone", dir)
 		}
 	}
 	return updated, true, "", nil
