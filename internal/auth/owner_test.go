@@ -297,3 +297,14 @@ func TestCompleteSetupRace(t *testing.T) {
 		t.Fatalf("%d setups succeeded, want 1", wins)
 	}
 }
+
+// TestPHCMemoryBound is R5-I2: a stored hash may not ask a login for more than 256 MiB.
+func TestPHCMemoryBound(t *testing.T) {
+	const salt, key = "c2FsdHNhbHRzYWx0", "aGFzaGhhc2hoYXNoaGFzaA"
+	if _, _, _, err := parsePHC("$argon2id$v=19$m=262144,t=3,p=1$" + salt + "$" + key); err != nil {
+		t.Fatalf("256 MiB refused: %v", err)
+	}
+	if _, _, _, err := parsePHC("$argon2id$v=19$m=524288,t=3,p=1$" + salt + "$" + key); err == nil {
+		t.Fatal("a 512 MiB hash was accepted")
+	}
+}

@@ -164,7 +164,7 @@ func parsePHC(hash string) (Argon2Params, []byte, []byte, error) {
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &params.Memory, &params.Time, &params.Threads); err != nil {
 		return params, nil, nil, errors.New("bad argon2 parameters")
 	}
-	if params.Time < 1 || params.Time > 16 || params.Memory < 8 || params.Memory > 1024*1024 || params.Threads < 1 || params.Threads > 16 {
+	if params.Time < 1 || params.Time > 16 || params.Memory < 8 || params.Memory > maxArgonMemoryKiB || params.Threads < 1 || params.Threads > 16 {
 		return params, nil, nil, errors.New("argon2 parameters out of range")
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
@@ -177,6 +177,10 @@ func parsePHC(hash string) (Argon2Params, []byte, []byte, error) {
 	}
 	return params, salt, key, nil
 }
+
+// maxArgonMemoryKiB bounds a stored hash's memory cost (256 MiB, R5-I2): only someone who can
+// write the database can choose it, but a login must not be made to allocate a gigabyte.
+const maxArgonMemoryKiB = 256 * 1024
 
 // dummyHash is verified against when no owner exists, so a login takes as long either way.
 var dummyHash = sync.OnceValue(func() string {

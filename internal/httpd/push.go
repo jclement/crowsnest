@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/push"
 )
 
@@ -129,6 +130,11 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.internalError(w, r, "storing a push subscription", err)
 	default:
+		// A session holder could subscribe a push endpoint of their own and keep receiving notices
+		// (and their action tokens) after the session is gone (R5-I4): every subscription is on
+		// the record, with the device's name, so a stranger's shows up.
+		s.deps.Journal.Add(r.Context(), journal.KindSettings, "A device subscribed to notifications: "+device.UserAgent+" via "+device.Service,
+			map[string]any{"device": device.ID})
 		writeData(w, http.StatusCreated, device)
 	}
 }
