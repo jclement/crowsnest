@@ -1587,6 +1587,17 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
   every watched subject on a 10 s tick; a reading whose fingerprint changed publishes `changes`
   `{subject, revision}`, and the browser refetches the summary. A file's diff is cached in the
   browser by its hash, so only files that changed are fetched again.
+- **Hidden characters are never silent** (R7-S3, "Trojan Source"). Every Unicode format character
+  (bidi embeddings, overrides and isolates, LRM/RLM, zero-width space and joiners, BOM, soft
+  hyphen, tags), the line and paragraph separators and the invisible fillers are drawn as a chip
+  naming the code point (`⟨U+202E⟩`; the character itself is not rendered, so it cannot reorder
+  what follows), and a word mixing Latin with Cyrillic, Greek or Armenian letters gets a wavy
+  underline (`web/src/lib/hidden.ts`, `ui/Revealed.tsx`). The check covers each file's path (in
+  the list, with a warning icon, and in its header, with a chip) and its whole diff text (a
+  warning above the rows says how many, scanned over the whole diff, not only the rows drawn so
+  far). The same chips and warning are on a task file's raw review card and on a layer's restored
+  or effective text. Not done: the Land gate does not treat such a file specially; the human sees
+  the warning when the file's body loads, before ticking Viewed.
 - **Reading order** as 6.11: files the walkthrough names first, then by group, churn last.
   Churn and changes over 3,000 lines start collapsed with the reason (a lockfile, generated code,
   snapshots, vendored code, build output, an image or font, a large change).
