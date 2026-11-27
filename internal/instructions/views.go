@@ -27,6 +27,10 @@ type Layer struct {
 	Revision  int        `json:"revision"` // the saved revision, 0 when nothing is saved
 	UpdatedAt *time.Time `json:"updated_at"`
 	Size      int        `json:"size"` // bytes of EffectiveMD
+	// FileHash names a role file's text; FileChanged is true until the human has marked that
+	// exact text read (R5-S14): the UI shows it loudly, since the file outranks the app's text.
+	FileHash    string `json:"file_hash,omitempty"`
+	FileChanged bool   `json:"file_changed"`
 }
 
 // Listing is GET /instructions.
@@ -134,6 +138,7 @@ func layerView(scope, key, name string, layer resolved) Layer {
 		Scope: scope, Key: key, Name: name, Source: layer.Source, EffectiveMD: layer.Text, SavedMD: layer.Saved,
 		BuiltinMD: layer.Builtin, FilePath: layer.FilePath, Editable: layer.Source != SourceFile,
 		Revision: layer.Revision, Size: len(layer.Text),
+		FileHash: layer.FileHash, FileChanged: layer.Source == SourceFile && !layer.FileSeen,
 	}
 	if !layer.UpdatedAt.IsZero() {
 		at := layer.UpdatedAt

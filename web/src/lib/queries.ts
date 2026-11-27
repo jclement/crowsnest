@@ -356,13 +356,14 @@ export function useInstructionLayer(scope: LayerScope, key: string, enabled = tr
   return useQuery({ queryKey: queryKeys.instructionLayer(scope, key), queryFn: () => endpoints.instructionLayer(scope, key), enabled });
 }
 
-/** Save, reset to the built-in, or restore a revision. Every instruction query refreshes after. */
+/** Save, reset to the built-in, restore a revision, or mark a role file read (R5-S14). Every instruction query refreshes after. */
 export function useInstructionEdit(scope: LayerScope, key: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (change: { kind: "save"; body: string } | { kind: "reset" } | { kind: "restore"; revision: number }) => {
+    mutationFn: (change: { kind: "save"; body: string } | { kind: "reset" } | { kind: "restore"; revision: number } | { kind: "file-seen"; hash: string }) => {
       if (change.kind === "save") return endpoints.saveInstruction(scope, key, change.body);
       if (change.kind === "reset") return endpoints.resetRole(key);
+      if (change.kind === "file-seen") return endpoints.roleFileSeen(key, change.hash);
       return endpoints.restoreInstruction(scope, key, change.revision);
     },
     onSuccess: (detail) => queryClient.setQueryData(queryKeys.instructionLayer(scope, key), detail),

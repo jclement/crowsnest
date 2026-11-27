@@ -16,6 +16,8 @@ package instructions
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -119,6 +121,10 @@ type resolved struct {
 	Revision  int    // the saved revision (0 when nothing is saved)
 	UpdatedAt time.Time
 	FilePath  string
+	// FileHash is the hex SHA-256 of a role file's text; FileSeen says the human marked that
+	// exact text read (R5-S14). A file nobody has looked at, or one changed since, is shown loudly.
+	FileHash string
+	FileSeen bool
 }
 
 // roleSet reads the roles as a job start would see them: the embedded ones with the override
@@ -150,6 +156,10 @@ func (s *Service) resolve(ctx context.Context, roles *jobs.Roles, scope, key str
 	switch {
 	case roles.FromFile(key):
 		out.Source, out.Text, out.FilePath = SourceFile, text, filepath.Join(s.opts.RolesDir, key+".md")
+		out.FileHash = fileHash(text)
+		if seen, err := s.opts.Store.GetKV(ctx, fileSeenKey(key)); err == nil && seen == out.FileHash {
+			out.FileSeen = true
+		}
 	case err == nil:
 		out.Source, out.Text = SourceDB, out.Saved
 	case exists:
@@ -158,6 +168,43 @@ func (s *Service) resolve(ctx context.Context, roles *jobs.Roles, scope, key str
 		return resolved{}, failure(ErrNotFound, "There is no role %q.", key)
 	}
 	return out, nil
+}
+
+// ---- Role files the human has read (R5-S14) -----------------------------------------------
+
+// fileSeenKey is the kv row holding the hash of a role file's text the human marked read.
+func fileSeenKey(role string) string { return "instructions.file-seen." + role }
+
+func fileHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+// ErrFileChanged is returned when a role file changed after the human looked at it.
+var ErrFileChanged = errors.New("the role file changed since you looked at it")
+
+// MarkFileSeen records that the human read role's file as it is now. hash names the text they
+// were shown; a file that has changed since is refused, so they read the new text first. A role
+// file outranks the app's text, and any agent that can write ~/.config/crowsnest/roles can change
+// it: without this, an edit there reached every later agent with nothing to say so.
+func (s *Service) MarkFileSeen(ctx context.Context, role, hash string) error {
+	layer, err := s.resolve(ctx, s.roleSet(), ScopeRole, role)
+	if err != nil {
+		return err
+	}
+	if layer.Source != SourceFile {
+		return failure(ErrNotFound, "Role %q does not come from a file.", role)
+	}
+	if hash == "" || hash != layer.FileHash {
+		return ErrFileChanged
+	}
+	if err := s.opts.Store.SetKV(ctx, fileSeenKey(role), hash); err != nil {
+		return err
+	}
+	if s.opts.Hub != nil {
+		s.opts.Hub.Publish(hub.Event{Type: EventType, Data: map[string]any{"at": s.opts.Now().UTC()}})
+	}
+	return nil
 }
 
 // ---- Validation ----------------------------------------------------------------------------

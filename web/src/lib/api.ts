@@ -332,6 +332,7 @@ export const endpoints = {
   saveInstruction: (scope: LayerScope, key: string, body: string) =>
     api<LayerDetail>(`/instructions/${scope}/${encodeURIComponent(key)}`, { method: "PUT", body: { body_md: body } }),
   /** Back to the built-in text (roles only). */
+  roleFileSeen: (name: string, hash: string) => api<LayerDetail>(`/instructions/role/${encodeURIComponent(name)}/file-seen`, { method: "POST", body: { hash } }),
   resetRole: (name: string) => api<LayerDetail>(`/instructions/role/${encodeURIComponent(name)}`, { method: "DELETE" }),
   restoreInstruction: (scope: LayerScope, key: string, revision: number) =>
     api<LayerDetail>(`/instructions/${scope}/${encodeURIComponent(key)}/restore`, { method: "POST", body: { revision } }),

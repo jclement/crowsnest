@@ -31,6 +31,9 @@ export interface Layer {
   updated_at: string | null;
   /** Bytes of effective_md. */
   size: number;
+  /** A role file's text hash, and whether it is unread or changed since it was read (R5-S14). */
+  file_hash?: string;
+  file_changed?: boolean;
 }
 
 /** GET /instructions. */
@@ -120,10 +123,12 @@ export function layerId(layer: Pick<Layer, "scope" | "key">): string {
 }
 
 /** The badge for where a layer's text comes from. */
-export function sourceBadge(layer: { scope: string; source: LayerSource }): { label: string; tone: ChipTone } {
+export function sourceBadge(layer: { scope: string; source: LayerSource; file_changed?: boolean }): { label: string; tone: ChipTone } {
   switch (layer.source) {
     case "file":
-      return { label: "from file", tone: "warning" };
+      // A role file outranks the app's text and any agent may write it (R5-S14): unread or
+      // changed on disk, it says so loudly.
+      return layer.file_changed ? { label: "from file: changed, review", tone: "danger" } : { label: "from file", tone: "warning" };
     case "db":
       return { label: layer.scope === "role" ? "edited" : "saved", tone: "accent" };
     case "builtin":

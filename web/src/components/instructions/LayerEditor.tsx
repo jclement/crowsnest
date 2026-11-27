@@ -102,8 +102,20 @@ function Editor({ detail, scope, apiKey, maxBytes, hint }: { detail: LayerDetail
         </span>
       </div>
       {layer.source === "file" && (
-        <Banner tone="warning" className="rounded">
-          From file <code className="break-all font-mono">{layer.file_path}</code>: read-only here; edit the file. It applies at each agent's next start.
+        <Banner
+          tone={layer.file_changed ? "danger" : "warning"}
+          className="rounded"
+          action={
+            layer.file_changed && layer.file_hash ? (
+              <Button compact onClick={() => void report("Marked read", edit.mutateAsync({ kind: "file-seen", hash: layer.file_hash ?? "" }))} disabled={edit.isPending}>
+                I've read it
+              </Button>
+            ) : undefined
+          }
+        >
+          {layer.file_changed && <strong>Changed on disk since you last read it, or never read. </strong>}
+          From file <code className="break-all font-mono">{layer.file_path}</code>: read-only here; edit the file. It applies at each agent's next start
+          {layer.file_changed ? ", and it outranks the app's text: any agent that can write that file can change what every later agent of this role is told. Read the Text tab." : "."}
           {layer.saved_md && " Text saved in the app is kept and applies again if the file goes."}
         </Banner>
       )}
