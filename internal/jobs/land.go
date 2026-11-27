@@ -442,6 +442,9 @@ func (s *Service) discard(ctx context.Context, job Job, by string) (LandResult, 
 		return LandResult{}, err
 	}
 	result := LandResult{Job: landed, Action: LandDiscard, Detail: "Discarded"}
+	if landed.State == StateCancelled {
+		s.cancelQuestions(ctx, landed.ID, "the job was discarded")
+	}
 	result.TornDown, result.TeardownError = s.teardown(ctx, landed, false, true)
 	result.Job = s.jobNow(ctx, job.ID, landed)
 	return result, nil

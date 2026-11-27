@@ -121,6 +121,9 @@ describe("routine questions", () => {
     expect(isGate(confirm)).toBe(false);
     expect(isGate({ ...confirm, context: { land_for: "j_3" } })).toBe(true);
     expect(isGate({ ...confirm, options: [{ key: "Approve", label: "Approve" }] })).toBe(true);
+    // R6-S9: a label or the title that grants makes it a gate too.
+    expect(isGate({ ...confirm, options: [{ key: "y", label: "Allow: merge j_5" }] })).toBe(true);
+    expect(isGate({ ...confirm, title: "OK to deploy now?" })).toBe(true);
     expect(grants("allow")).toBe(true);
     expect(grants("deny")).toBe(false);
     expect(grants("No")).toBe(false);

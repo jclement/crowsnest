@@ -89,6 +89,9 @@ type Options struct {
 	// ApprovalPending reports whether a job has a tool call waiting for approval (8.7); the tick
 	// uses it to bring back a job whose "settled" callback was lost. nil: never.
 	ApprovalPending func(ctx context.Context, jobID string) bool
+	// CancelQuestions cancels a job's open questions, with reason as their note and nothing typed
+	// back (a cancelled job's questions must not wait in Needs you); nil: they stay open.
+	CancelQuestions func(ctx context.Context, jobID, reason string)
 	// Activity reads transcript activity for the heartbeat; nil disables it.
 	Activity ActivityFunc
 	// Notify tells Jeff something (serve wires --notify-url). It must not block.
@@ -189,6 +192,9 @@ type Service struct {
 
 	checksMu sync.Mutex
 	checks   map[string]bool // jobs whose check this process is running (accept.go)
+
+	landingMu  sync.Mutex
+	landingNow map[string]bool // jobs whose allowed land this process is running (landrequest.go)
 
 	watchMu sync.Mutex
 	watch   map[string]*jobWatch // per-job supervisor memory: spinning samples, budget reads (spinning.go)
@@ -462,6 +468,7 @@ func (s *Service) mutateLocked(ctx context.Context, id string, fn func(record *s
 		return Job{}, err
 	}
 	open := s.reconcileQuestionsLocked(&record, &c)
+	applyHoldsLocked(&record) // a held job stays in the state its holds imply (holdset.go)
 	if err := CheckTransition(State(before.State), State(record.State)); err != nil && before.State != record.State {
 		return Job{}, err
 	}

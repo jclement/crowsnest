@@ -178,7 +178,11 @@ func (o *Orchestrator) checkRemoteControl(ctx context.Context, paneID string) {
 	}
 	o.mu.Lock()
 	o.rcLook = look.after(now, url != "")
+	changed := o.status.SessionID != status.SessionID
 	o.mu.Unlock()
+	if changed {
+		return // the conversation changed while it was read: this URL may be the old one's (R6-S10)
+	}
 	if url == "" && note == status.RemoteControlNote {
 		return
 	}
@@ -196,14 +200,20 @@ func (o *Orchestrator) lookForRemoteControl(ctx context.Context, paneID, session
 	read, err := o.opts.Client.PaneRead(readCtx, paneID, herdr.ReadOptions{Source: herdr.SourceRecent, Lines: 200})
 	cancel()
 	url, banner := "", false
+	paneURL := ""
 	if err == nil {
 		text := sinceLastStart(read.Text)
-		url, banner = ParseRemoteControlURL(text), strings.Contains(strings.ToLower(text), remoteControlBanner)
+		paneURL, banner = ParseRemoteControlURL(text), strings.Contains(strings.ToLower(text), remoteControlBanner)
 	}
-	if url == "" && (late || banner) && sessionID != "" && o.opts.ClaudeConfigDir != "" {
+	// The transcript's bridge status is the trusted source (R6-S10): it is read first whenever the
+	// session is known; the screen's banner is the fallback.
+	if sessionID != "" && o.opts.ClaudeConfigDir != "" && (late || banner || paneURL != "") {
 		if path, err := transcript.Locate(o.opts.ClaudeConfigDir, o.opts.Dir, sessionID); err == nil {
 			url = TranscriptRemoteControlURL(path)
 		}
+	}
+	if url == "" {
+		url = paneURL
 	}
 	return url, banner
 }

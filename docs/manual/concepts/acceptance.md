@@ -45,6 +45,12 @@ check finish as unverified."
 **It proves:** at that commit, the tree was clean, the branch had commits, and the project's own
 check command exited 0 when crowsnest ran it, not when the agent said it did.
 
+The job view says it plainly under the check: "Accepted means the project's own check passed on
+this commit, in a clean tree. The branch can change that check, so it is not independent evidence:
+the reviewer and you are the independent part." When the branch changed its own check definition
+(its mise tasks, its test configuration), the panel names those files: then the pass is the
+branch's word about itself, and you should read those changes.
+
 **It does not prove:**
 
 - that the change does what you asked: the check knows nothing of the brief;

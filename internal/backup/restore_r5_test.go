@@ -126,3 +126,61 @@ func TestRestoreRefusesAnOversizedManifest(t *testing.T) {
 		t.Error("a refused restore wrote the database")
 	}
 }
+
+// TestRestoreRevokesRulesAndSeenMarksAndScrubsTheOld is R6-S5 and R6-S6: a restored database
+// allows nothing by the backup's approval rules (kept, revoked), shows its role files as unread,
+// carries no Remote Control link, and the database a forced restore replaced is scrubbed.
+func TestRestoreRevokesRulesAndSeenMarksAndScrubsTheOld(t *testing.T) {
+	ctx := context.Background()
+	src, dir := populated(t)
+	_, err := src.DB.InsertApprovalRule(ctx, store.ApprovalRuleRecord{Scope: "project", ProjectID: 1, Kind: "bash", Pattern: "python3 -c *", MaxRisk: "elevated", CreatedAt: time.Now(), CreatedVia: "browser"})
+	mustDo(t, err)
+	mustDo(t, src.DB.SetKV(ctx, "instructions.file-seen.builder", "abc123"))
+	mustDo(t, src.DB.SetKV(ctx, "orchestrator.remote_control", "https://claude.ai/code/session_abcdefghijklmnopqrstuv"))
+	path := filepath.Join(dir, "backup.tar.gz")
+	if _, err := Create(ctx, src, path); err != nil {
+		t.Fatal(err)
+	}
+	target := freshTarget(t)
+	result, err := Restore(ctx, path, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RevokedRules != 1 || result.ForgotSeen != 1 {
+		t.Fatalf("revoked %d rules and forgot %d marks, want 1 and 1", result.RevokedRules, result.ForgotSeen)
+	}
+	db, err := store.Open(ctx, target.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := db.ListApprovalRules(ctx, store.ApprovalRuleFilter{})
+	mustDo(t, err)
+	if len(rules) == 0 {
+		t.Fatal("the rules were dropped instead of kept revoked")
+	}
+	for _, rule := range rules {
+		if rule.RevokedAt.IsZero() {
+			t.Fatalf("a restored rule is in force: %+v", rule)
+		}
+	}
+	if seen, _ := db.GetKV(ctx, "instructions.file-seen.builder"); seen != "" {
+		t.Fatal("a restored role file arrived already marked read")
+	}
+	if link, _ := db.GetKV(ctx, "orchestrator.remote_control"); link != "" {
+		t.Fatal("the backup carried a Remote Control session link")
+	}
+	// A forced restore over this one keeps the replaced database scrubbed.
+	mustDo(t, db.SetKV(ctx, "push.vapid", "private-key"))
+	_ = db.Close()
+	target.Force = true
+	result, err = Restore(ctx, path, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Replaced == "" || !store.Scrubbed(ctx, result.Replaced) {
+		t.Fatalf("the replaced database %q was not scrubbed", result.Replaced)
+	}
+	if rows, _ := store.ReadKVPrefix(ctx, result.Replaced, "push.vapid"); rows[""] != "" {
+		t.Fatal("the replaced database kept the push key")
+	}
+}

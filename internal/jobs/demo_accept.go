@@ -73,7 +73,9 @@ func SeedDemoLimit(ctx context.Context, s *Service) {
 			jobID = FormatID(r.ID)
 		}
 	})
-	state := s.opts.Limits.Note(ctx, EngineClaude, jobID, "5-hour limit reached: try again in 50 minutes")
+	s.opts.Limits.Note(ctx, EngineClaude, jobID, "5-hour limit reached: try again in 50 minutes")
+	// A second job agrees, so the limit holds the fleet (R6-S3: one job's word holds only itself).
+	state := s.opts.Limits.Note(ctx, EngineClaude, "j_demo_second", "5-hour limit reached: try again in 50 minutes")
 	if jobID != "" {
 		_, _ = s.mutate(ctx, jobID, func(r *store.JobRecord, _ *change) error {
 			r.RetryAt, r.CauseDetail = state.ResetAt, limitText(state)

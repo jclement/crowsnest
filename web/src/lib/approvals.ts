@@ -25,7 +25,7 @@ export interface Approval {
   /** The policy rules that allowed it, when decided_via is "policy" (8.7 Policy). */
   rule_ids?: string[];
   /** What "Allow and remember for this job" proposes; only on a pending, non-dangerous call of a live job. */
-  remember?: { kind: "bash" | "edit" | "tool"; pattern: string };
+  remember?: { kind: "bash" | "edit" | "tool"; pattern: string; exact?: boolean };
   created_at: string;
   settled_at?: string | null;
   expires_at: string;

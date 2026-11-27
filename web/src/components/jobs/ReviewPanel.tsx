@@ -15,6 +15,7 @@ import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
+import { AcceptedMeans } from "./AcceptPanels";
 import { Chip } from "../ui/Chip";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
@@ -142,6 +143,7 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
           Overview; landing it anyway needs an explicit override.
         </Banner>
       )}
+      {job.accept_state && job.accept_state !== "unverified" && <AcceptedMeans evidence={job.evidence} />}
       {options.base_protected && (
         <p className="mb-2 text-xs text-warning">{options.base} is protected: Land never merges into it. Use the pull request.</p>
       )}

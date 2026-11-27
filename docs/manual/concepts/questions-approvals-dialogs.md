@@ -99,8 +99,8 @@ A form (several fields) opens the terminal instead.
 ## Gates: questions that grant something
 
 Some questions are crowsnest's own gates: "land this job?", "start this job outside its
-directory?", a scheduled task file to approve, or any question whose options include allow,
-approve, merge, land, push or grant. These are **never answerable from a notification** (no
+directory?", a scheduled task file to approve, or any question whose title or options use a
+granting word: allow, approve, approval, merge, land, push, deploy, delete, grant or permit. These are **never answerable from a notification** (no
 buttons, and the server refuses one), and the decision screen asks "This widens what agents may
 do… Yes, <label>" before it answers. See [Safety](../safety.md).
 
@@ -111,6 +111,8 @@ do… Yes, <label>" before it answers. See [Safety](../safety.md).
 - **An approval disappeared.** It was answered in the terminal, or the agent's turn ended
   (approvals are superseded then).
 - **The same call keeps asking.** Add an [approval rule](../how-to/projects.md#approval-rules), or
-  use **Allow and remember for this job** on the card.
+  use **Allow and remember for this job** on the card. That remembers a low-risk call's shape; an
+  elevated call only as exactly itself; a call crowsnest does not recognise not at all (write a
+  rule on the project page for those).
 
 How to answer from each place: [Answer questions and approvals](../how-to/answer.md).

@@ -68,6 +68,25 @@ A different hold: a job an agent asked for *outside its own directory* (or with 
 waits for your **Allow** in the Inbox before it starts at all. That one reads "Waiting for your
 approval: an agent asked for it".
 
+## Holds: what an agent cannot clear by itself
+
+Some reasons a job waits are **holds**, kept apart from the state the agent declares, so an agent
+cannot talk its way out of them (by declaring blocked and then running, say). Each says who lifts
+it:
+
+| Hold | Lifted by |
+|---|---|
+| An agent's job beyond its limits, waiting for your Allow | you |
+| crowsnest is running the check, or a review round | crowsnest (the result) |
+| A budget reached (its own, or a parent's) | you: raise it, let it finish its step, or stop it |
+| The check still fails after the last round | you: run it again, land or discard |
+| The reviewer still objects after the last round | you: a message, land or discard |
+| A tool call waiting for approval, a blocking question open | crowsnest, when you answer |
+| The usage limit | crowsnest's paced retry, or you (**Clear hold**) |
+
+Under a hold the agent can still report progress and ask, but its blocked, running, done and fail
+are refused, naming the hold and who lifts it.
+
 ## Who owns a job
 
 The job view shows its chain from you down, for example "you → lead Crowsnest → tester j_6", each

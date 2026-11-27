@@ -65,7 +65,9 @@ agent to hit it records one **fleet limit** with its reset time ("resets 3pm"; w
 gives none, a guess of 30 minutes, said to be a guess). Until the reset: new jobs are held, every
 turn may end without a nudge, retries wait, and the standing agents are not poked. One banner with
 a countdown replaces a stuck card per agent (their cards read **Held**). After the reset, the
-waiting jobs get "continue" one at a time, 20 seconds apart.
+waiting jobs get "continue" one at a time, 20 seconds apart. The reset time is read from what
+the agent reported, so the banner also has **Clear hold**: if you know the limit has reset (or the
+guess is wrong), it forgets the limit and lets the held jobs go, one at a time.
 
 ## Waits always have an owner
 

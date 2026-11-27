@@ -155,7 +155,7 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 		if message := strings.TrimSpace(input.LastAssistant); message != "" {
 			r.LastMessage, r.LastMessageAt = capRunes(message, maxLastMessageRunes), s.opts.Now()
 		}
-		if budgetStopLocked(r, c) {
+		if s.budgetStopLocked(r, c) {
 			// The human let it finish its step (6.16): the step is over, the turn may end.
 			r.LastStopAt = s.opts.Now()
 			reply = HookReply{}
@@ -163,7 +163,14 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 		}
 		if held, state := s.limitHeld(ctx, r.Engine); held && !State(r.State).Terminal() {
 			// Every agent of this engine is under the usage limit (6.17): a nudge would only hit it.
+			// The stop is registered for the reset (R6-C08): a usage-limit hold and a retry at the
+			// reset, so the paced resume continues this job too, not only the ones that reported it.
 			r.LastStopAt = s.opts.Now()
+			if State(r.State) == StateRunning && !r.Waiting {
+				s.placeHoldLocked(r, c, HoldUsageLimit, limitText(state), "")
+				r.Stuck, r.Cause, r.CauseDetail = true, string(CauseLimit), oneLine(limitText(state), 300)
+				r.RetryAt = state.ResetAt
+			}
 			c.event(EventHook, "Turn ended (usage limit: "+limitText(state)+"; resumed after the reset)", map[string]any{"rule": RuleLimitHeld})
 			reply = HookReply{}
 			return nil
@@ -317,6 +324,7 @@ func (s *Service) stopFailureLocked(ctx context.Context, r *store.JobRecord, c *
 		if state, ok := s.noteLimitLocked(ctx, r, firstNonEmpty(input.ErrorDetails, input.Error)); ok {
 			r.CauseDetail = oneLine(limitText(state), 300)
 		}
+		s.placeHoldLocked(r, c, HoldUsageLimit, r.CauseDetail, "")
 	case "authentication_failed", "billing_error", "oauth_org_not_allowed", "account_on_hold", "cloud_credential_error":
 		r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseAuth), summary
 		r.Stuck, r.RetryAt = false, zeroTime

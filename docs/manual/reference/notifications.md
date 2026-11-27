@@ -40,7 +40,7 @@ safe cases:
 | Low-risk approval whose command fits uncut | Allow, Deny |
 | Low-risk approval whose command was cut | Snooze |
 | Elevated or dangerous approval | none |
-| A gate: a question that lands, allows, approves, merges, pushes or grants | none |
+| A gate: a question that lands, allows, approves, merges, pushes, deploys, deletes, grants or permits | none |
 | Routine question (one choice, no files, short) with a recommendation | the recommended option, Snooze |
 | Any other question, a dialog | Snooze |
 

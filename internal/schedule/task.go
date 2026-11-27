@@ -89,6 +89,9 @@ type Task struct {
 	// Hash is the hex SHA-256 of a task file's bytes ("" for an app schedule): what the human
 	// approves for a file that needs review (review.go, R5-S3).
 	Hash string `json:"hash,omitempty"`
+	// Raw is the file exactly as read (frontmatter, HTML and comments included): what the hash
+	// covers, and what a review shows (R6-S7).
+	Raw string `json:"-"`
 }
 
 // Target is who carries out a task.
@@ -148,7 +151,8 @@ func Parse(path, origin string, content []byte) (Task, error) {
 		return Task{}, err
 	}
 	sum := sha256.Sum256(content)
-	task := Task{Name: name, Path: path, Origin: origin, As: RunAsPoke, Body: body, Title: titleOf(body, name), Hash: hex.EncodeToString(sum[:])}
+	task := Task{Name: name, Path: path, Origin: origin, As: RunAsPoke, Body: body, Title: titleOf(body, name), Hash: hex.EncodeToString(sum[:]),
+		Raw: strings.ToValidUTF8(string(content), "\uFFFD")}
 	if err := task.apply(front); err != nil {
 		return Task{}, err
 	}

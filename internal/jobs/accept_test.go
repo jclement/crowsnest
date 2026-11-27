@@ -124,8 +124,8 @@ func TestAcceptRoundsThenHuman(t *testing.T) {
 	if len(r.Notices()) == 0 {
 		t.Fatal("the human was not told")
 	}
-	if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "fine", State: "running"}); err != nil {
-		t.Fatal(err)
+	if _, err := r.svc.Update(ctx, job.ID, UpdateInput{Progress: "fine", State: "running"}); err == nil {
+		t.Fatal("declaring running past a failed check was not refused")
 	}
 	if d = r.get(job.ID); d.State != StateNeedsYou {
 		t.Fatal("the agent lifted a failed check by declaring running")

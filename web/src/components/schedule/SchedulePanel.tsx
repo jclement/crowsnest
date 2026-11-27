@@ -250,7 +250,12 @@ function Outcome({ task }: { task: ScheduleTask }) {
 function Review({ task }: { task: ScheduleTask }) {
   const approve = useScheduleApprove();
   const toast = useToast();
+  const [formatted, setFormatted] = useState(false);
   if (task.review !== "needed" || !task.hash) return null;
+  // The raw file is what the hash covers and what is shown by default (R6-S7): formatted Markdown
+  // drops HTML and comments, which could carry instructions approved unseen.
+  const source = task.source ?? task.body_md ?? "";
+  const hidesSomething = /<[!a-z/]/i.test(source);
   const go = () =>
     approve
       .mutateAsync({ name: task.name, hash: task.hash ?? "" })
@@ -267,9 +272,26 @@ function Review({ task }: { task: ScheduleTask }) {
         )}
         {task.role && ` as ${task.role}`}, {task.schedule}. Any agent can write this file, so it does not run until you approve what it says:
       </div>
+      {hidesSomething && (
+        <p role="note" className="text-warning">
+          This file contains HTML or comments, which the formatted view does not show. Read the raw text below: it is what you approve.
+        </p>
+      )}
       <div className="max-h-64 overflow-auto rounded border border-border bg-surface-raised p-2">
-        <Markdown className="text-xs">{task.body_md ?? ""}</Markdown>
+        {formatted ? (
+          <Markdown className="text-xs">{task.body_md ?? ""}</Markdown>
+        ) : (
+          <pre aria-label={`Raw text of ${task.name}`} className="whitespace-pre-wrap break-words font-mono text-2xs text-body">
+            {source}
+          </pre>
+        )}
       </div>
+      <p className="text-muted">
+        Approval covers this text only. If it tells the job to follow another file, that file is not reviewed and can change later.{" "}
+        <button type="button" className="underline" onClick={() => setFormatted((on) => !on)}>
+          {formatted ? "Show the raw text" : "Show it formatted"}
+        </button>
+      </p>
       <div>
         <Button compact variant="primary" icon={Check} onClick={() => void go()} disabled={approve.isPending} aria-label={`Approve ${task.name}`}>
           Approve as it reads now

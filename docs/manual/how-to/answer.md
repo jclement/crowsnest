@@ -46,8 +46,8 @@ Now.
 - **Manual**: write in **Your answer**, then **Send answer**.
 - Add a **note** for context or a condition. The agent receives `[crowsnest answer q_7] <title> →
   <answer> (note: …)`.
-- A **gate** (a land request, a job outside its directory, anything that allows, approves, merges or
-  pushes) asks "This widens what agents may do… Yes, <label>" before it answers.
+- A **gate** (a land request, a job outside its directory, anything that allows, approves, merges,
+  pushes, deploys, deletes, grants or permits) asks "This widens what agents may do… Yes, <label>" before it answers.
 
 Then watch the [receipt](../concepts/questions-approvals-dialogs.md#receipts): **Received** means
 the agent took it in.
@@ -57,7 +57,8 @@ the agent took it in.
 - **Allow once**: runs that one call. A **dangerous** call asks again ("Yes, allow"), and the
   server checks it.
 - **Deny**: with a note (**Note (sent with a deny)**) telling the agent what to do instead.
-- **Allow and remember for this job**: allows it and every call like it for the rest of this job.
+- **Allow and remember for this job**: allows it and calls like it for the rest of this job (an
+  elevated call is remembered only as exactly itself; one crowsnest does not recognise, not at all).
 - A standing rule for the project: [approval rules](projects.md#approval-rules).
 
 The same call is also on the agent's terminal as Claude's dialog; answering either is fine.
@@ -85,7 +86,7 @@ packet. Buttons appear only where the phone shows them (never on iOS), and only 
 | Low-risk approval whose command fits uncut | Allow, Deny |
 | Low-risk approval whose command was cut | Snooze |
 | Elevated or dangerous approval | none |
-| A gate (land, allow, approve, merge, push, grant) | none |
+| A gate (land, allow, approve, merge, push, deploy, delete, grant, permit) | none |
 | Routine question with a recommendation | the recommended option, Snooze |
 | Any other question, a dialog | Snooze |
 

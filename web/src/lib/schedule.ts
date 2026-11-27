@@ -43,6 +43,8 @@ export interface ScheduleTask {
   review?: "needed" | "approved";
   /** The content hash Approve must name. */
   hash?: string;
+  /** The whole file as the hash covers it, for a task that needs review (R6-S7). */
+  source?: string;
   /** An app schedule hidden by a task file of the same name: it never runs. */
   shadowed?: boolean;
   enabled: boolean;

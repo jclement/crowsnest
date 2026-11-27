@@ -79,20 +79,29 @@ export function isRoutine(question: Pick<Question, "kind" | "multi" | "files" | 
  * authority (the push action endpoint refuses what it calls a gate).
  */
 const GATE_CONTEXT_KEYS = ["land_for", "land_action", "land_token", "approval_for", "requested_by", "task_review", "task_hash", "crowsnest_gate"];
-/** Option keys that grant something: a question offering one is treated as a gate. */
-const GATE_OPTION_KEYS = new Set(["allow", "approve", "merge", "land", "push", "grant"]);
+/** Words that grant something: a question whose option keys, labels or title use one is a gate (R6-S9). */
+const GRANTING_WORDS = new Set(["allow", "allowed", "approve", "approved", "approval", "merge", "land", "push", "deploy", "delete", "grant", "permit"]);
+
+/** True when text uses a granting word (whole words, any case): the same rule as questions.GrantingText. */
+export function grantingText(text: string): boolean {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .some((word) => GRANTING_WORDS.has(word));
+}
 /** Option keys that refuse: choosing one never needs the gate's confirmation. */
 const REFUSING_KEYS = new Set(["deny", "no", "reject", "cancel", "later", "not_yet"]);
 
 /**
  * A question that widens what agents may do (crowsnest's land and delegation gates, or anything
- * whose options allow, approve, merge or push). Mirrors internal/push.GateShaped: such a question
+ * whose options or title allow, approve, merge, push, deploy or delete). Mirrors questions.GateShaped: such a question
  * is never answerable from a notification or a row, and in the packet a granting choice takes a
  * second, deliberate tap (R5-S2).
  */
-export function isGate(question: Pick<Question, "context" | "options">): boolean {
+export function isGate(question: Pick<Question, "context" | "options"> & { title?: string }): boolean {
   if (GATE_CONTEXT_KEYS.some((key) => key in (question.context ?? {}))) return true;
-  return question.options.some((option) => GATE_OPTION_KEYS.has(option.key.toLowerCase()));
+  if (question.title && grantingText(question.title)) return true;
+  return question.options.some((option) => grantingText(option.key) || grantingText(option.label));
 }
 
 /** True when choosing this key on a gate question needs the second tap. */

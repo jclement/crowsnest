@@ -64,6 +64,11 @@ func (s *Service) heldWhilePaused(ctx context.Context, key, what string) bool {
 // startHoldLocked returns why r may not start now, or "" when it may (s.mu held: the counts are
 // read inside the launch claim).
 func (s *Service) startHoldLocked(ctx context.Context, r store.JobRecord) string {
+	if hold, ok := humanHold(r); ok && hold.Kind != HoldApproval {
+		// A hold only the human lifts (a budget above it ran out, R6-C05) keeps it from starting,
+		// Start anyway included: raising that budget is the way past it.
+		return holdPrefix + hold.Why
+	}
 	if r.StartAnyway {
 		return ""
 	}
@@ -72,6 +77,11 @@ func (s *Service) startHoldLocked(ctx context.Context, r store.JobRecord) string
 	}
 	if held, state := s.limitHeld(ctx, r.Engine); held {
 		return limitHoldPrefix + limitText(state) + "; it starts after the reset (or Start anyway)"
+	}
+	if s.opts.Limits != nil && s.opts.Limits.resuming(ctx, r.Engine) && !s.opts.Limits.mayResume(r.Engine) {
+		// After the reset the waiting starts go one at a time with the retries (R6-C08), not all
+		// into the spare slots at once.
+		return limitHoldPrefix + r.Engine + "'s usage limit has reset; jobs resume one at a time (or Start anyway)"
 	}
 	if reached, why := s.FleetCeilingReached(ctx); reached {
 		return ceilingHoldPrefix + why + "; it starts tomorrow, when the ceiling is raised, or with Start anyway"
@@ -141,6 +151,9 @@ func (s *Service) StartAnyway(ctx context.Context, id string) (Job, error) {
 		}
 		if Cause(r.Cause) == CauseApproval {
 			return invalid("job %s waits for your approval in the Inbox, not for a slot", FormatID(r.ID))
+		}
+		if hold, ok := humanHold(*r); ok {
+			return invalid("job %s is held (%s: %s); Start anyway does not pass that: lift it first (raise the budget)", FormatID(r.ID), hold.Kind, oneLine(hold.Why, 160))
 		}
 		r.StartAnyway = true
 		if Cause(r.Cause) == CauseHeld {

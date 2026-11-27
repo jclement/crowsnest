@@ -300,8 +300,40 @@ func (s *Service) suggest(ctx context.Context, approval *Approval) {
 	if !scope.JobLive {
 		return
 	}
-	suggestion := Suggest(approval.ToolName, approval.ToolInput, scope.Root)
-	approval.Remember = &suggestion
+	suggestion, ok := s.rememberable(*approval, scope.Root)
+	if ok {
+		approval.Remember = &suggestion
+	}
+}
+
+// rememberable is what "Allow and remember for this job" may store for an approval (R6-S1). A low
+// call gets the usual suggestion (a prefix, a directory, a tool), capped at low. An elevated call
+// is remembered only as itself: its exact command, or its exact tool name; never an edit, never a
+// command with a glob character in it (a * would widen it), and never a call that is elevated only
+// because crowsnest does not recognise it: that rule belongs in the project's settings, written
+// by the human.
+func (s *Service) rememberable(approval Approval, root string) (Suggestion, bool) {
+	if approval.Risk != risk.Elevated {
+		return Suggest(approval.ToolName, approval.ToolInput, root), true
+	}
+	if s.opts.Classifier != nil && s.opts.Classifier.Classify(approval.ToolName, approval.ToolInput, risk.Context{}).Unrecognised {
+		return Suggestion{}, false
+	}
+	switch kind := KindFor(approval.ToolName); kind {
+	case KindBash:
+		var fields struct {
+			Command string `json:"command"`
+		}
+		_ = json.Unmarshal(approval.ToolInput, &fields)
+		command := strings.TrimSpace(fields.Command)
+		if command == "" || strings.ContainsAny(command, "*?[\n") {
+			return Suggestion{}, false
+		}
+		return Suggestion{Kind: kind, Pattern: command, Exact: true}, true
+	case KindTool:
+		return Suggestion{Kind: kind, Pattern: approval.ToolName, Exact: true}, true
+	}
+	return Suggestion{}, false
 }
 
 // Get returns one approval.
@@ -481,6 +513,11 @@ func (s *Service) allowAndRemember(ctx context.Context, approval Approval, decis
 		return approval, refused("Job %s has ended, so there is nothing to remember it for.", approval.JobID)
 	}
 	kind := KindFor(approval.ToolName)
+	if allowed, ok := s.rememberable(approval, scope.Root); !ok {
+		return approval, refused("crowsnest does not remember this call from a card (it is elevated and not a call it recognises, or an edit outside the job's directory): allow it once, or write a rule in the project's settings")
+	} else if allowed.Exact && strings.TrimSpace(*decision.Remember) != allowed.Pattern {
+		return approval, refused("An elevated call is remembered only as itself, exactly: %q", allowed.Pattern)
+	}
 	if _, err := NormalizeRule(kind, *decision.Remember, approval.Risk); err != nil {
 		return approval, err
 	}
@@ -767,6 +804,14 @@ func HookOutput(approval Approval) string {
 	}
 	body, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PermissionRequest", "decision": decision}})
 	return string(body)
+}
+
+// SummaryCut reports whether Summary cuts the call (R6-I2): computed from the call, not by
+// looking at how the summary ends.
+func SummaryCut(input json.RawMessage) bool {
+	var fields map[string]any
+	_ = json.Unmarshal(input, &fields)
+	return len([]rune(termtext.Clean(risk.SummaryText(fields)))) > risk.MaxSummaryRunes
 }
 
 // Summary renders a tool call in one line.

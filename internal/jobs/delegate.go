@@ -166,9 +166,13 @@ func (s *Service) CreateForAgent(ctx context.Context, input CreateInput, caller 
 	if len(wider) > 0 {
 		record.Cause = string(CauseApproval)
 		record.CauseDetail = "Asked the human to allow it: " + strings.Join(wider, "; ")
+		setHolds(&record, []Hold{{Kind: HoldApproval, Lift: LiftHuman, Why: oneLine(record.CauseDetail, 500), Since: s.opts.Now().UTC()}})
 	}
 	s.mu.Lock()
 	err = s.checkLimitsLocked(ctx, who, len(wider) > 0)
+	if err == nil && who.parent != nil {
+		err = s.agentGateByIDLocked(ctx, who.parent.ID, VerbCreate) // R6-C01: a held job delegates nothing past its hold
+	}
 	if err == nil {
 		err = s.insertLocked(ctx, &record)
 	}
@@ -676,6 +680,7 @@ func (s *Service) approve(ctx context.Context, jobID, questionID string) {
 		if State(r.State) != StateQueued || Cause(r.Cause) != CauseApproval {
 			return errNotHeld
 		}
+		liftHoldLocked(r, c, HoldApproval, LiftHuman, nil)
 		r.Cause, r.CauseDetail = "", ""
 		c.event(EventState, "Allowed by the human ("+questionID+")", nil)
 		return nil
@@ -705,6 +710,7 @@ func (s *Service) cancelHeld(ctx context.Context, jobID, why string) {
 		c.event(EventState, "Not started: "+why, nil)
 		return nil
 	})
+	s.cancelQuestions(ctx, jobID, "the job was not started: "+why)
 }
 
 // ReconcileApprovals applies decisions on every held job, all of them, a page at a time (serve

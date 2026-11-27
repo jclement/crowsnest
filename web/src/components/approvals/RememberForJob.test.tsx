@@ -27,13 +27,27 @@ describe("Allow and remember for this job", () => {
     const field = screen.getByRole("textbox", { name: /Pattern/ });
     expect(field).toHaveValue("go test *");
     expect(screen.getByTestId("remember-sentence").textContent).toBe(
-      "Until j_12 ends, crowsnest will allow Bash commands matching `go test *` without asking. Dangerous calls are always asked.",
+      "Until j_12 ends, crowsnest will allow Bash commands matching `go test *` without asking, but only while each call is low risk. Elevated and dangerous calls are always asked.",
     );
     await user.clear(field);
     await user.type(field, "go test ./internal/*");
     expect(screen.getByTestId("remember-sentence").textContent).toContain("`go test ./internal/*`");
     await user.click(screen.getByRole("button", { name: "Allow and remember" }));
     await waitFor(() => expect(calls.find((call) => call.method === "POST")?.body).toEqual({ decision: "allow", remember: { pattern: "go test ./internal/*" } }));
+  });
+
+  it("offers an elevated call only as itself, read-only (R6-S1)", async () => {
+    stubDecide();
+    const user = userEvent.setup();
+    const push: Approval = { ...bash, risk: "elevated", remember: { kind: "bash", pattern: "git push origin feature/x", exact: true } };
+    renderWithClient(<ApprovalCard approval={push} />);
+    await user.click(screen.getByRole("button", { name: "Allow and remember for this job" }));
+    const field = screen.getByRole("textbox", { name: /Pattern/ });
+    expect(field).toHaveValue("git push origin feature/x");
+    expect(field).toHaveAttribute("readonly");
+    const sentence = screen.getByTestId("remember-sentence").textContent ?? "";
+    expect(sentence).toContain("exactly this command, word for word");
+    expect(sentence).toContain("an interpreter");
   });
 
   it("can be cancelled without deciding anything", async () => {

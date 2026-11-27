@@ -50,6 +50,8 @@ func TestClassify(t *testing.T) {
 		{"edit inside", "Edit", map[string]any{"file_path": filepath.Join(root, "a.go"), "old_string": "a", "new_string": "b"}, Low},
 		{"edit outside", "Edit", map[string]any{"file_path": "/etc/hosts", "old_string": "a", "new_string": "b"}, Elevated},
 		{"write outside", "Write", map[string]any{"file_path": filepath.Join(filepath.Dir(root), "x.txt"), "content": "c"}, Elevated},
+		// R6-C03: a .. is not cleaned away (the OS follows a link before it).
+		{"write through ..", "Write", map[string]any{"file_path": root + "/sub/../x.txt", "content": "c"}, Elevated},
 		{"read outside is not a write", "Read", map[string]any{"file_path": "/etc/hosts"}, Low},
 		{"secrets read", "Read", map[string]any{"file_path": filepath.Join(root, ".env")}, Elevated},
 		{"secrets in command", "Bash", map[string]any{"command": "cat ~/.ssh/id_ed25519"}, Elevated},

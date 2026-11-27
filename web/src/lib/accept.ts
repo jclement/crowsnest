@@ -17,6 +17,8 @@ export interface Evidence {
   finished_at: string | null;
   head?: string;
   stale: boolean;
+  /** Files of the branch's own diff that define its check (R6-S4). */
+  definition_changed?: string[];
 }
 
 export interface BudgetLimits {
@@ -65,6 +67,8 @@ export interface FleetLimit {
   detail: string;
   held: number;
   resuming: boolean;
+  /** Two jobs agree, so every agent of the engine is held (R6-S3). */
+  fleet?: boolean;
 }
 
 export interface Violation {

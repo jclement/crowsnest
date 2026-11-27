@@ -381,13 +381,12 @@ func (s *Service) applyBudget(ctx context.Context, id string, view BudgetView) {
 		}
 		what := describeBudget(view)
 		switch {
-		case view.Share >= 1 && r.BudgetState != BudgetExceeded && r.BudgetState != BudgetGrace:
+		case view.Share >= 1 && r.BudgetState != BudgetGrace && !hasOwnBudgetHold(*r):
 			r.BudgetState, r.BudgetDetail = BudgetExceeded, "Used "+what
 			c.event(EventBudget, "Reached its budget: used "+what+"; the agent was told to stop at a safe point", map[string]any{"over": view.Over})
-			if state == StateRunning || state == StateBlocked {
-				r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseBudget), "Used "+what+": raise the budget, stop the job, or let it finish the step it is in"
-				r.Stuck = false
-			}
+			// A hold, not just a state (R6-C01): nothing the agent declares lifts it, and a job
+			// crowsnest is checking is held the moment the check sends it back to work.
+			s.placeHoldLocked(r, c, HoldBudget, "Used "+what+": raise the budget, stop the job, or let it finish the step it is in", "")
 			c.notify = fmt.Sprintf("crowsnest: job %s reached its budget (%s): %s", FormatID(r.ID), what, oneLine(r.Title, 80))
 			exceeded = true
 			message = fmt.Sprintf("[crowsnest budget] Job %s has used %s. Stop at a safe point: finish the step you are in, commit what is safe to keep, "+
@@ -410,9 +409,20 @@ func (s *Service) applyBudget(ctx context.Context, id string, view BudgetView) {
 	}
 	if exceeded {
 		// The budget covers the jobs below it: they stop at a safe point too.
-		s.exceedBelow(ctx, id, describeBudget(view), 0)
+		s.exceedBelow(ctx, id, id, describeBudget(view), 0)
 	}
 	s.tellBudget(ctx, job, message)
+}
+
+// hasOwnBudgetHold reports whether r is held by its own budget (not one a job above it reached):
+// a child its parent's budget stopped is still held by its own when that runs out (R6-C05).
+func hasOwnBudgetHold(r store.JobRecord) bool {
+	for _, hold := range holdsOf(r) {
+		if hold.Kind == HoldBudget && hold.From == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // tellBudget types a budget notice to a job's agent (not while paused: the card says it).
@@ -426,8 +436,10 @@ func (s *Service) tellBudget(ctx context.Context, job Job, message string) {
 }
 
 // exceedBelow puts the live jobs below parent in front of the human with it: their spend is
-// part of the budget that ran out.
-func (s *Service) exceedBelow(ctx context.Context, parent, what string, depth int) {
+// part of the budget that ran out. Each gets a budget hold from root (the job whose budget ran
+// out), queued ones too, so a child waiting for a slot does not start past it (R6-C05); raising
+// root's budget lifts them (liftBudgetBelow).
+func (s *Service) exceedBelow(ctx context.Context, root, parent, what string, depth int) {
 	numeric, err := ParseID(parent)
 	if err != nil || depth >= maxBudgetDepth {
 		return
@@ -442,14 +454,17 @@ func (s *Service) exceedBelow(ctx context.Context, parent, what string, depth in
 		}
 		id := FormatID(child.ID)
 		job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
-			if State(r.State).Terminal() || r.BudgetState == BudgetExceeded {
+			if State(r.State).Terminal() {
 				return errSkip
 			}
-			r.BudgetState, r.BudgetDetail = BudgetExceeded, "Its parent "+parent+" used "+what
-			c.event(EventBudget, "Its parent "+parent+" reached its budget; told to stop at a safe point", nil)
-			if state := State(r.State); state == StateRunning || state == StateBlocked {
-				r.State, r.Cause, r.CauseDetail, r.Stuck = string(StateNeedsYou), string(CauseBudget), r.BudgetDetail, false
+			if held, ok := holdOf(*r, HoldBudget); ok && held.From == root {
+				return errSkip
 			}
+			if r.BudgetState != BudgetExceeded {
+				r.BudgetState, r.BudgetDetail = BudgetExceeded, "Its parent "+parent+" used "+what
+			}
+			c.event(EventBudget, "Its parent "+parent+" reached its budget; told to stop at a safe point", nil)
+			s.placeHoldLocked(r, c, HoldBudget, "Its parent "+parent+" used "+what+": raise "+root+"'s budget, or stop the job", root)
 			return nil
 		})
 		if err != nil {
@@ -457,7 +472,43 @@ func (s *Service) exceedBelow(ctx context.Context, parent, what string, depth in
 		}
 		s.tellBudget(ctx, job, fmt.Sprintf("[crowsnest budget] Job %s's parent %s reached its budget (it counts yours). Stop at a safe point: finish the step you are in, "+
 			"commit what is safe, call job_update with where you got to, and end your turn.", id, parent))
-		s.exceedBelow(ctx, id, what, depth+1)
+		s.exceedBelow(ctx, root, id, what, depth+1)
+	}
+}
+
+// liftBudgetBelow lifts the budget holds root's exhausted budget put on the jobs below it, now
+// that root is under its budget again (the human raised it).
+func (s *Service) liftBudgetBelow(ctx context.Context, root, parent string, depth int) {
+	numeric, err := ParseID(parent)
+	if err != nil || depth >= maxBudgetDepth {
+		return
+	}
+	children, err := s.opts.Store.ListChildJobs(ctx, numeric)
+	if err != nil {
+		return
+	}
+	for _, child := range children {
+		if State(child.State).Terminal() {
+			continue
+		}
+		id := FormatID(child.ID)
+		job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+			if !liftHoldLocked(r, c, HoldBudget, LiftHuman, func(h Hold) bool { return h.From == root }) {
+				return errSkip
+			}
+			if !hasHold(*r, HoldBudget) && r.BudgetState == BudgetExceeded {
+				r.BudgetState, r.BudgetDetail = BudgetOK, ""
+			}
+			c.event(EventBudget, root+"'s budget was raised; this job may carry on", nil)
+			if State(r.State) == StateRunning {
+				s.markProgressLocked(r)
+			}
+			return nil
+		})
+		if err == nil && job.State == StateRunning && job.PaneID != "" {
+			_ = s.sendText(ctx, job.PaneID, job.AgentName, fmt.Sprintf("[crowsnest budget] The human raised the budget of %s, which covers job %s. Carry on with the work.", root, id))
+		}
+		s.liftBudgetBelow(ctx, root, id, depth+1)
 	}
 }
 
@@ -522,8 +573,10 @@ func (s *Service) SetJobBudget(ctx context.Context, id string, input BudgetInput
 		if share >= budgetWarnAt {
 			r.BudgetState, r.BudgetDetail = BudgetWarned, fmt.Sprintf("Used %.0f%%", share*100)
 		}
-		if State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseBudget {
-			r.State, r.Cause, r.CauseDetail = string(StateRunning), "", ""
+		// The human's raise lifts the hold of this job's own budget; one its parent's budget put
+		// on it stays until that budget is raised.
+		liftHoldLocked(r, c, HoldBudget, LiftHuman, func(h Hold) bool { return h.From == "" })
+		if State(r.State) == StateRunning && !hasHold(*r, HoldBudget) {
 			s.markProgressLocked(r)
 			resumed = true
 		}
@@ -531,6 +584,9 @@ func (s *Service) SetJobBudget(ctx context.Context, id string, input BudgetInput
 	})
 	if errors.Is(err, errSkip) {
 		err = nil // nothing waited on the budget: the change itself is recorded
+	}
+	if err == nil && share < 1 {
+		s.liftBudgetBelow(ctx, id, id, 0)
 	}
 	if err == nil && resumed && job.PaneID != "" {
 		_ = s.sendText(ctx, job.PaneID, job.AgentName, fmt.Sprintf("[crowsnest budget] The human raised job %s's budget. Carry on with the work.", job.ID))
@@ -542,10 +598,13 @@ func (s *Service) SetJobBudget(ctx context.Context, id string, input BudgetInput
 // its next end of turn puts it in front of the human again.
 func (s *Service) BudgetFinishStep(ctx context.Context, id string) (Job, error) {
 	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
-		if State(r.State) != StateNeedsYou || Cause(r.Cause) != CauseBudget {
+		if !hasHold(*r, HoldBudget) {
 			return invalid("job %s is not waiting on its budget", FormatID(r.ID))
 		}
-		r.State, r.Cause, r.CauseDetail = string(StateRunning), "", ""
+		liftHoldLocked(r, c, HoldBudget, LiftHuman, nil)
+		if State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseBudget {
+			r.State, r.Cause, r.CauseDetail = string(StateRunning), "", ""
+		}
 		r.BudgetState = BudgetGrace
 		s.markProgressLocked(r)
 		c.event(EventBudget, "You let it finish the step it is in; its next end of turn comes back to you", nil)
@@ -561,15 +620,15 @@ func (s *Service) BudgetFinishStep(ctx context.Context, id string) (Job, error) 
 	return job, nil
 }
 
-// budgetStopLocked applies a grace stop at the Stop hook (s.mu held): the step is over, so the
-// job is back in front of the human. It reports whether it did.
-func budgetStopLocked(r *store.JobRecord, c *change) bool {
+// budgetStopLocked applies a grace stop at an observed end of turn (s.mu held): the Stop hook,
+// or the backstop for an agent without hooks (R6-C06). The step is over, so the job is held for
+// the human again. It reports whether it did.
+func (s *Service) budgetStopLocked(r *store.JobRecord, c *change) bool {
 	if r.BudgetState != BudgetGrace || State(r.State) != StateRunning {
 		return false
 	}
 	r.BudgetState = BudgetExceeded
-	r.State, r.Cause = string(StateNeedsYou), string(CauseBudget)
-	r.CauseDetail = firstNonEmptyDir(r.BudgetDetail, "Reached its budget") + "; it finished the step it was in"
+	s.placeHoldLocked(r, c, HoldBudget, firstNonEmptyDir(r.BudgetDetail, "Reached its budget")+"; it finished the step it was in", "")
 	c.event(EventBudget, "Finished the step it was in; back to you for the budget", nil)
 	return true
 }
