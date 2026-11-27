@@ -175,11 +175,11 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 			Render:   func() (string, error) { return w.leadInstructions(deps.cfg.Session, project, true) },
 			Guidance: func() (string, error) { return w.leadInstructions(deps.cfg.Session, project, false) },
 			// An adopted lead started with older instructions is restarted for them (7.5).
-			AutoInstructionRestart: deps.ctl.instructionRestart,
-			HeldJobBusy:            func(ctx context.Context) bool { return heldJobBusy(deps.db, agent)(ctx) },
-			Paused:                 deps.ctl.paused,
-			Gate:                   herdrGate(deps.client),
-			ExtraEnv:               deps.ctl.heavyEnv(),
+			AutoInstructionRestart: deps.ctl.instructionRestart, AdoptAsCurrent: deps.cfg.Demo,
+			HeldJobBusy: func(ctx context.Context) bool { return heldJobBusy(deps.db, agent)(ctx) },
+			Paused:      deps.ctl.paused,
+			Gate:        herdrGate(deps.client),
+			ExtraEnv:    deps.ctl.heavyEnv(),
 			OnStatus: func(status orch.Status) {
 				if deps.onStatus != nil {
 					deps.onStatus(project, status)

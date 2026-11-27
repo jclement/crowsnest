@@ -91,9 +91,9 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 		Render: render, Paused: ctl.paused, ExtraEnv: ctl.heavyEnv(),
 		// An adopted orchestrator started with older instructions is restarted for them (7.5).
 		Guidance:               func() (string, error) { return compose(false) },
-		AutoInstructionRestart: ctl.instructionRestart,
-		HeldJobBusy:            func(ctx context.Context) bool { return heldJobBusy(db, orchestrator)(ctx) },
-		Client:                 client, KV: db, Hub: events, Journal: journalLog, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
+		AutoInstructionRestart: ctl.instructionRestart, AdoptAsCurrent: cfg.Demo,
+		HeldJobBusy: func(ctx context.Context) bool { return heldJobBusy(db, orchestrator)(ctx) },
+		Client:      client, KV: db, Hub: events, Journal: journalLog, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
 		StateDir: cfg.StateDir, Model: cfg.Model, PermissionMode: cfg.PermissionMode, Version: version,
 		RemoteControlName: orchestratorRemoteControl(cfg), Gate: gate.gate, Launch: gate.launch, DemoRemoteControl: demoRemoteControl(cfg, "crowsnest", "orchestrator"),
 		BinDir: binDir, Executable: executable, AgentSocket: agentSocket, BasePath: os.Getenv("PATH"), ClaudeConfigDir: claudeDir, Disabled: cfg.NoOrchestrator, Identity: identity, Guard: guardRules,

@@ -194,6 +194,9 @@ type Options struct {
 	// HeldJobBusy reports a step crowsnest is taking on a job the agent holds; such an agent is
 	// not restarted for new instructions until it is over. Nil: never.
 	HeldJobBusy func(ctx context.Context) bool
+	// AdoptAsCurrent counts an adopted agent with no recorded start as started with the current
+	// instructions (--demo, whose fleet is made up: nothing there was started with older ones).
+	AdoptAsCurrent bool
 }
 
 // agentName is the herdr name of the agent this Orchestrator keeps.

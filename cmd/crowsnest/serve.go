@@ -254,6 +254,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	if err != nil {
 		return err
 	}
+	if cfg.Demo {
+		seedDemoLayers(ctx, refs.instructions, logger) // before any demo agent starts with them
+	}
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions,
 		orchGate{gate: sys.Gate, launch: sys.LaunchSettings(orchestratorRemoteControl)}, ctl, logger)
 	sys.SetOrchestrator(orchestrator)
@@ -323,7 +326,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	})
 	approvalLinks.leads.Store(leads)
 	if cfg.Demo {
-		go seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
+		// Before the server answers (it serves "starting" until Run): a page opened at once finds
+		// the demo's leads already launched, rather than racing a goroutine that starts them.
+		seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
 	}
 
 	attentionService, nowSources := startAttention(ctx, attentionDeps{

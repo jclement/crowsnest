@@ -100,6 +100,10 @@ func (o *Orchestrator) instructionsStale(ctx context.Context) (bool, error) {
 	if err != nil {
 		have = ""
 	}
+	if have == "" && o.opts.AdoptAsCurrent {
+		o.recordFingerprint(ctx, body)
+		return false, nil
+	}
 	return have != o.fingerprint(body), nil
 }
 
