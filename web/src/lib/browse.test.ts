@@ -51,7 +51,7 @@ describe("folderWarnings", () => {
     expect(texts(facts({ git: false, git_top: "/h/acme" }))[0]).toMatch(/Inside the repository \/h\/acme/);
   });
   it("refuses home and / for a project", () => {
-    expect(folderWarnings(facts({ is_home: true, git: false }))[0]).toEqual(expect.objectContaining({ tone: "danger", text: expect.stringMatching(/home folder/) }));
+    expect(folderWarnings(facts({ is_home: true, git: false }))).toEqual([expect.objectContaining({ tone: "danger", text: expect.stringMatching(/home folder/) })]);
     expect(texts(facts({ is_filesystem_root: true }))[0]).toMatch(/is \/ itself/);
   });
   it("names an overlapping project, which only informs for a job", () => {

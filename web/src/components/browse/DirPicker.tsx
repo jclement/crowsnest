@@ -4,7 +4,7 @@
 // choices), repositories badged and floated to the top, and the facts about the highlighted folder
 // with what to watch out for, beside a "Select this folder" button that never scrolls away.
 //
-// Keys, wherever focus is in the picker: ↑/↓ move the highlight, Enter (or →) opens it, Backspace
+// Keys, in the filter box or on a row: ↑/↓ move the highlight, Enter (or →) opens it, Backspace
 // in an empty box (or ←) goes up, Cmd/Ctrl+Enter selects. A click highlights, a double click or
 // the row's chevron opens. Selecting picks the highlighted folder, or the open one when nothing is
 // highlighted. Navigation fetches first and moves only on success, so a refused path leaves the
@@ -78,6 +78,7 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
   const [options, setOptions] = useState<BrowseOptions>({ files: false, hidden: false });
   const filterRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const places = useBrowsePlaces();
   const listing = useBrowse(path, options);
   const home = places.data?.home;
@@ -85,10 +86,12 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
   /** Fetches path and moves there on success; on a refusal keeps the listing and says why. */
   const go = useCallback(
     async (target: string, select?: string | null): Promise<boolean> => {
+      // What the box held as the move began: cleared on arrival, unless something new was typed.
+      const typed = filterRef.current?.value ?? "";
       try {
         const next = await queryClient.fetchQuery({ queryKey: queryKeys.browse(target, options), queryFn: () => endpoints.browse(target, options), staleTime: 5_000 });
         setPath(next.path);
-        setFilter("");
+        setFilter((current) => (current === typed ? "" : current));
         setHighlight(select ?? null);
         setError(null);
         return true;
@@ -100,12 +103,13 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
     [queryClient, options],
   );
 
-  // Start at the given path, else home.
+  // Start at the given path, else home; then the box has focus, unless the person already moved
+  // it inside the picker (whatever opened the picker, the palette say, may have taken it back).
   useEffect(() => {
     const start = initialPath?.trim();
     void (async () => {
-      if (start && (await go(start))) return;
-      await go("~");
+      if (!(start && (await go(start)))) await go("~");
+      if (!rootRef.current?.contains(document.activeElement)) filterRef.current?.focus();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, at opening
   }, []);
@@ -148,7 +152,9 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const inBox = event.target === filterRef.current;
     const boxEmpty = filter === "";
-    if (event.target instanceof HTMLInputElement && !inBox) return; // the checkboxes
+    // The keys belong to the box and the rows; every other button (Select, a place, a toggle)
+    // keeps its own Enter and Space.
+    if (!inBox && !listRef.current?.contains(event.target as Node)) return;
     switch (event.key) {
       case "ArrowDown":
       case "ArrowUp":
@@ -179,7 +185,7 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
 
   const recent = recentFolders();
   return (
-    <div className="flex h-full flex-col md:h-[72vh]" onKeyDown={onKeyDown}>
+    <div ref={rootRef} className="flex h-full flex-col md:h-[72vh]" onKeyDown={onKeyDown}>
       <div className="flex shrink-0 flex-col gap-2 border-b border-border p-2">
         <Breadcrumb listing={data} onGo={(crumb) => void go(crumb)} onUp={up} />
         <div className="flex items-center gap-2">
@@ -244,12 +250,20 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
 
 // ---- Pieces ---------------------------------------------------------------------------------
 
+/** An on/off button (Hidden, Files): a 44 px target on a phone, unlike a bare checkbox. */
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <label className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1 text-2xs text-muted md:min-h-8">
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 accent-accent" />
+    <button
+      type="button"
+      aria-pressed={checked}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded border px-2 text-2xs font-medium md:min-h-8",
+        checked ? "border-accent bg-accent/10 text-accent" : "border-border text-muted hover:bg-hover hover:text-heading",
+      )}
+    >
       {label}
-    </label>
+    </button>
   );
 }
 
@@ -281,7 +295,7 @@ function Breadcrumb({ listing, onGo, onUp }: { listing?: Listing; onGo: (path: s
                   {crumb.name}
                 </span>
               ) : (
-                <button type="button" onClick={() => onGo(crumb.path)} className="min-h-11 rounded px-1 text-accent hover:bg-hover md:min-h-7">
+                <button type="button" onClick={() => onGo(crumb.path)} className="min-h-11 min-w-11 rounded px-1 text-accent hover:bg-hover md:min-h-7 md:min-w-0">
                   {crumb.name}
                 </button>
               )}

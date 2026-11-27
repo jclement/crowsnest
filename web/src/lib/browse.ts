@@ -167,7 +167,8 @@ export function folderWarnings(facts: FolderFacts, purpose: "project" | "job" = 
   const out: FolderWarning[] = [];
   if (facts.is_filesystem_root) out.push({ tone: "danger", text: "This is / itself: projects refuse it." });
   else if (facts.is_home) out.push({ tone: "danger", text: "This is your home folder: too wide for a project (it would claim every job)." });
-  if (!facts.git) {
+  // Home and / are refused outright; whether they are repositories adds nothing.
+  if (!facts.git && !facts.is_home && !facts.is_filesystem_root) {
     out.push(
       facts.git_top
         ? { tone: "warning", text: `Inside the repository ${facts.git_top}, not its top folder: worktrees are made from the top.` }
