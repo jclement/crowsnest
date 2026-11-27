@@ -62,6 +62,15 @@ describe("RescuePanel", () => {
     await waitFor(() => expect(idle.filter((call) => call.path === "/agents/w3%3Ap1/prompt").map((call) => call.body)).toContainEqual({ text: "/model haiku" }));
   });
 
+  it("over its budget, pushing the agent is not offered; the advice says what will help", async () => {
+    stub("idle");
+    renderWithClient(<RescuePanel job={{ ...job, cause: "budget" }} defaultOpen />);
+    expect(await screen.findByTestId("rescue-advice")).toHaveTextContent(/budget/);
+    expect(screen.getByRole("button", { name: /^Nudge/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Continue/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Interrupt/ })).toBeEnabled();
+  });
+
   it("starts folded unless asked", () => {
     stub("idle");
     renderWithClient(<RescuePanel job={job} />);

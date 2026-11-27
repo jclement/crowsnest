@@ -162,7 +162,7 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
       <StuckBanner job={job} openTerminal={openTerminal} openReview={openReview} />
       {/* Rescue buttons for a job's own agent; a standing agent (a lead, the orchestrator) has
           its own controls, and restart-agent refuses its jobs. */}
-      {!isFinished(job.state) && job.pane_id && !job.agent_name.startsWith("lead-") && job.agent_name !== "orchestrator" && (
+      {!isFinished(job.state) && job.pane_id && !job.agent_name.startsWith("lead-") && job.agent_name !== "orchestrator" && job.accept_state !== "checking" && (
         <RescuePanel job={job} defaultOpen={job.stuck || job.state === "needs_you"} />
       )}
       <LastMessage job={job} />

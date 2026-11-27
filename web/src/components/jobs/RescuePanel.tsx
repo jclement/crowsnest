@@ -18,7 +18,25 @@ import { cn } from "../../lib/cn";
 import type { Job } from "../../lib/jobs";
 
 /** What the panel needs of a job: a board card's job will do, not only the full detail. */
-type RescueJob = Pick<Job, "id" | "pane_id" | "agent_name" | "stuck">;
+type RescueJob = Pick<Job, "id" | "pane_id" | "agent_name" | "stuck"> & Partial<Pick<Job, "cause" | "accept_state">>;
+
+/**
+ * What the job's cause (main's acceptance branch, DESIGN.md 6.15 to 6.19) means for rescue, in a
+ * line, and whether pushing the agent can help at all: over its budget or held by the fleet's usage
+ * limit, a nudge is refused or wasted; spinning wants an interrupt and a different instruction.
+ */
+function causeAdvice(job: RescueJob): { text: string; push: boolean } | null {
+  switch (job.cause) {
+    case "budget":
+      return { text: "It reached its budget: raise it (above) to let it go on; a nudge or Continue would be refused.", push: false };
+    case "limit":
+      return { text: "Held by the usage limit: crowsnest resumes it at the reset by itself; Get it moving tries now.", push: false };
+    case "spinning":
+      return { text: "It is repeating itself: Interrupt, then send it a different instruction (the message box), or Restart.", push: true };
+    default:
+      return null;
+  }
+}
 import { useAgentScreen, useFleet, useJobAction, useJobMessage, useRestartWithInstructions, useSendKeys } from "../../lib/queries";
 import { DialogCard, ScreenText } from "../fleet/DialogCard";
 import { useToast } from "../ui/toast-context";
@@ -79,16 +97,23 @@ function RescueBody({ job, openTerminal }: { job: RescueJob; openTerminal: () =>
   };
   const typeCommand = (name: string, text: string, done: string) => run(name, () => endpoints.prompt(job.pane_id, { text }), done);
   const dialog = screen.data?.dialog;
+  const advice = causeAdvice(job);
+  const canPush = advice?.push ?? true;
 
   return (
     <div className="flex flex-col gap-3 border-t border-border p-3">
       {dialog?.present && screen.data && (
         <DialogCard target={job.pane_id} agentName={job.agent_name} screen={screen.data} onOpenTerminal={openTerminal} />
       )}
+      {advice && (
+        <p className="text-xs font-medium text-warning" data-testid="rescue-advice">
+          {advice.text}
+        </p>
+      )}
       <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2" aria-label="Rescue actions">
         <Action icon={OctagonX} label="Interrupt (Esc)" hint="Stops the current turn; the agent then waits for you." disabled={!!busy} onPress={() => run("Interrupt", () => keys.mutateAsync({ keys: ["esc"], screen_hash: "" }), "Sent Esc")} />
-        <Action icon={StepForward} label="Continue" hint="Tells it to carry on where it left off." disabled={!!busy} onPress={() => run("Continue", () => message.mutateAsync({ text: CONTINUE_TEXT }), "Told it to continue")} />
-        <Action icon={Zap} label="Nudge" hint="Reminds it of the job and asks for a status line." disabled={!!busy} onPress={() => run("Nudge", () => action.mutateAsync("nudge"), "Nudged")} />
+        <Action icon={StepForward} label="Continue" hint="Tells it to carry on where it left off." disabled={!!busy || !canPush} onPress={() => run("Continue", () => message.mutateAsync({ text: CONTINUE_TEXT }), "Told it to continue")} />
+        <Action icon={Zap} label="Nudge" hint="Reminds it of the job and asks for a status line." disabled={!!busy || !canPush} onPress={() => run("Nudge", () => action.mutateAsync("nudge"), "Nudged")} />
         {job.stuck && (
           <Action icon={Play} label="Get it moving" hint="Retry now after a limit, restart a gone agent, else nudge." disabled={!!busy} onPress={() => run("Get it moving", () => action.mutateAsync("resume"), "Moving it")} />
         )}
