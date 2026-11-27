@@ -4988,7 +4988,7 @@ visible screen when nothing is selected (a long-press selection in xterm on a ph
 The touch default font is 11 px (about 54 columns at 390 px; it was 13, 44 columns). Not done:
 horizontal pan at 80 columns.
 
-### 23.3 Voice: a job by voice, the readback, earcons; walk mode specified
+### 23.3 Voice: a job by voice, the readback, earcons
 
 **A job by voice** (`components/jobs/VoiceJob.tsx`, `lib/voice/jobIntent.ts`; on Now's job box
 when talk mode is on): hold the mic (a tap locks it on, the next stops), speak; the transcript is
@@ -5004,23 +5004,8 @@ with Undo for 8 s (cancels it). Pressing the mic stops a readback (barge-in).
 Heard, sent and error play in the voice job box; needs you plays when the queue's count rises with
 speak mode on (`AppFrame`).
 
-**Walk mode: specified, not built** (Fable 4.1 item 2, Codex V2). It is larger than the rest of
-this branch together and needs a real phone to tune. What it must be when built:
-- A full-screen page (`/walk`) holding a screen wake lock, large controls only: Talk, Repeat, Skip,
-  Stop; a listening indicator that cannot be missed (colour and shape and an earcon).
-- It reads the queue aloud in the server's order, blocking first: "<project>, <agent> asks:
-  <ask>. Recommended: <label>. Say <options>, skip or later." Then it listens automatically.
-- A spoken answer is matched to option labels and numbers for that question id only, read back
-  ("Answer Website's question with Short headline?") and committed after "yes" or two seconds
-  without "cancel"; silence is never consent; a generic "yes" after another item interrupted is
-  rejected.
-- Approvals above low risk, gates and anything with a diff are never answered by voice: "this one
-  needs your eyes", and it moves on. Free speech goes to the orchestrator as a job request through
-  23.3's readback.
-- Barge-in: talking stops speech; anything missed while talking is summarised, never dropped.
-- Platform ceiling, said plainly: a web page cannot hold the microphone with the screen locked on
-  iOS; for driving, the Claude app's own voice mode on a Remote Control session may be the better
-  tool (unverified).
+**Walk mode** (a hands-free page reading the queue aloud) was specified here and never built; R8
+deleted the specification until someone wants it (Fable 4.1 item 2, Codex V2 have the idea).
 
 ### 23.4 The lock screen: decision-grade notices
 

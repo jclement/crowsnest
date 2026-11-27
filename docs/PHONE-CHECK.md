@@ -47,5 +47,4 @@ Write down every failure as a failure (Codex top-ten 7): a line per item, with w
 
 Paste the table back with ✔ or ✘ and a few words per row into the next brief. Known limits that are
 not failures: iOS shows no notification buttons (Allow/Deny/Snooze are Chrome on Android and
-desktop only); the microphone does not work with the screen locked; walk mode is specified
-(DESIGN.md 23.3) but not built.
+desktop only); the microphone does not work with the screen locked.
