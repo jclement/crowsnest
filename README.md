@@ -42,7 +42,12 @@ about to ask for a permission, a `PermissionRequest` hook turns the request into
 a Bash command with its directory, an edit as a diff, a URL, an MCP call, rated low, elevated or
 dangerous. Allow it once or deny it with a note from a tray that sits on every view (bottom-right
 on a desktop, a bar above the bottom nav on a phone; `g` then `n` focuses it), from the Inbox, or,
-for low-risk ones, from a notification's buttons. The agent waits on the hook and goes on with no
+for low-risk ones, from a notification's buttons. **Low** means the call matched a list of
+known-harmless shapes (reading files, read-only git, `go test`, the test and lint scripts…), read
+after quoting, wrappers, `sh -c` strings and git's global options are taken apart. Anything else
+is at least elevated, and so is a summary too long to show whole. Questions that grant something
+(a land request, a held job, any allow or approve) are never answered from a notification
+(DESIGN.md 4.22). The agent waits on the hook and goes on with no
 terminal dialog to answer; the dialog is still on its terminal meanwhile, and whichever is
 answered first wins. A dangerous call needs a second confirmation, "always allow" is only in the
 terminal, and anything that goes wrong falls back to Claude's own dialog, never to an allow.
@@ -415,7 +420,10 @@ arrives through serve for that login and the login is still allowed, so removing
 their sessions at once. Only a browser signed in with the password can change the list. Password
 sign-in always remains. What it does not protect against: any program on this machine can open a
 loopback connection and send the header (it already runs as you; on a shared machine, leave the
-option off). DESIGN.md 4.20 has the threat notes.
+option off). Another local proxy is the same kind of risk: a request carrying Cloudflare's or a
+`Forwarded` header is never believed, and `--tailscale-auth` refuses to start with
+`--trusted-proxy-header cf-connecting-ip`. Do not run another loopback proxy (Caddy, nginx) that
+forwards a client's Host beside this option. DESIGN.md 4.20 and 4.22 have the threat notes.
 
 ## Backup and restore
 
@@ -443,7 +451,11 @@ crowsnest) unless `--force`, and then keeps the replaced database beside it
 with the panes herdr really has (the journal says which still have one), and the pause switch
 holds every job start, restart, retry, poke and scheduled task until you resume (account menu,
 or the pause banner). Every browser signs
-in again; every device turns notifications on again.
+in again; every device turns notifications on again. A restore is all or nothing: every file is
+prepared beside its destination first, a replaced file is kept as `.before-restore-<time>`, and a
+failure part-way puts everything back as it was. A backup listing more than 32 GiB or 200,000
+files is refused. Treat a backup from somewhere else as you would a script: it carries its own
+login, role, task and `risk.yaml` files.
 
 **Automatic backups** are off by default: `--backup-every 24h` (or Settings, Backups and
 storage) writes `auto-<session>-<time>.tar.gz` into `<data-dir>/backups` and keeps the newest
@@ -453,7 +465,7 @@ fresh one to the browser.
 **Upgrades.** Migrations only go forward. Before a start that will change the database's schema,
 or the first start of a different crowsnest version, crowsnest copies the database to
 `<data-dir>/backups/pre-migration-<session>-<time>-s<schema>-<version>.db` (the newest three are
-kept). A database written by a newer crowsnest is refused with what to do (run that version
+kept), with the same credentials removed as a backup. A database written by a newer crowsnest is refused with what to do (run that version
 again, or restore a backup). After an update the System page shows "Updated from vA to vB" with
 a link to the release notes until dismissed.
 
@@ -731,6 +743,12 @@ What to do, in plain words. The orchestrator (or the job's agent) reads this fil
 - `project: <slug>` sends a poke task to that project's lead instead of the orchestrator (same
   due rules, stamps and gate), and files an `as: job` task's job under the project. A slug that
   names no live project is a problem.
+- **A task file that starts a job (`as: job`) or pokes a lead (`project:`) runs only after you
+  approve it.** Agents can write files, including the orchestrator's `tasks/` and
+  `~/.config/crowsnest/tasks`, so such a file is listed as **new or changed: review**, with its
+  text, until you press **Approve as it reads now** in the Schedule view. Any edit asks again, and
+  Run now does not approve. Poke tasks for the orchestrator and schedules made in the app need no
+  review. A restore forgets every approval.
 - A file that cannot be used (no frontmatter, an unknown key, `every: 1w`, an unknown project)
   is skipped and reported once in the Journal, and listed in the Schedule view.
 - **App schedules** are made, edited and deleted in the app (`POST`/`PUT`/`DELETE /schedule`)
@@ -762,7 +780,9 @@ directory.
   named only; beside it the agent's result, evidence and walkthrough, and the review rounds.
   **Merge** (into the base branch in the main checkout; `--merge merge|ff`), **Push and open
   PR** (GitHub with `gh`; no reviewers assigned; other hosts are pushed only) or **Discard**,
-  each after a confirmation saying exactly what happens. Then the agent is stopped, the
+  each after a confirmation saying exactly what happens. crowsnest's own git calls run none of
+  the repository's hooks, fsmonitor, external diff or textconv commands, so **no hook runs on a
+  Land** (a merge driver, a filter, ssh and gpg still can; DESIGN.md 4.22). Then the agent is stopped, the
   worktree and its workspace removed through herdr (a dirty tree is refused, never forced) and
   the branch deleted when merged or discarded. "N to land" above the board lists finished jobs
   whose worktrees are still around. Agents can only *ask* to land (`job_land`): you decide.
@@ -1028,7 +1048,8 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /orchestrator/compact` | session | "Compact now": `/compact` with the focus, at any size → the context as above; `409 CONFLICT` when the orchestrator is busy, at a dialog or has a draft |
 | `GET /schedule?project=` | session | Scheduled tasks: `{tasks: [{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md, shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs: [{at, outcome, job_id}]}], problems: [{path, name, error}], dirs}`; `project=<id>` keeps one project's tasks (`0`: the orchestrator's and unfiled) |
 | `POST /schedule` | session | A new app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list. `400` invalid, `409` the name is taken (by a file or app schedule) |
-| `POST /schedule/{name}/run` | session | Run now: a poke task goes with the next poke the orchestrator can take, a job task starts its job → the list. `404` for an unknown name |
+| `POST /schedule/{name}/run` | session | Run now: a poke task goes with the next poke the orchestrator can take, a job task starts its job → the list. `404` for an unknown name, `409` for a task file waiting for review |
+| `POST /schedule/{name}/approve` | session | `{hash}` as the list showed it: approve a task file that starts a job or pokes a lead → the list. `409` when the file changed since, or it needs no review |
 | `PUT /schedule/{name}` | session | `{enabled}`: switch a task off or on (kept by crowsnest; a file is untouched); and/or every field of `POST /schedule` (but `name`) to replace an app schedule → the list. `409` "read-only: edit the file" for a task file's edit |
 | `DELETE /schedule/{name}` | session | Delete an app schedule (its history stays) → the list. `409` for a task file, `404` unknown |
 | `GET /spend?from=&to=&group=` | session | Spend for the local days `from`..`to` (YYYY-MM-DD, inclusive; default this week, Monday to today, at most a year) grouped by `job` (the orchestrator is its own row), `model` or `day`: `{from, to, group, rows: [{key, label, …summary}], total, prices_checked, prices_source, prices_file, note}`. A summary is `{measured, reason, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, total_tokens, turns, tool_calls, wall_seconds, cost_usd (null when unknown), cost_partial, unpriced_tokens, cache_hit_share, models, first_at, last_at}` |
@@ -1066,6 +1087,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
 | `GET /instructions`, `GET /instructions/{scope}/{key}` | session | Instruction layers: every layer with its source (`none`, `builtin`, `db`, `file`) and text; one layer with its revisions. The global layer's key is `-` |
 | `PUT /instructions/{scope}/{key}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` | session | `{body_md}` (at most 32 KB): a new revision; reset a role to its built-in; `{revision}`: that text again. `409` for a role that comes from a file |
+| `POST /instructions/role/{name}/file-seen` | session | `{hash}`: mark a role file's text read, which clears its "changed, review" badge → the layer. `409` when the file changed since |
 | `GET /agents-instructions/{subject}` | session | `j_<n>`, `orchestrator` or `lead:<slug>`: the layers it was started with, `changed` since, and the instruction files Claude loaded (paths only) |
 | `POST /voice/stt` | session | Talk mode. The body is one recording as MediaRecorder made it (`audio/webm`, `audio/mp4`, `audio/ogg`, …; up to five minutes: at most 8.2 MB, and it must arrive within 2 minutes) → `{text}`. 12 a minute per session (`429` with `Retry-After`); ElevenLabs failures are `502`/`503`/`422` with code `VOICE_UPSTREAM` and never its own error text |
 | `GET /voice/tts?text_id=` | session | The speech of a server-held text (a `say`, a SAY line, a read-aloud), streamed (`audio/mpeg`). `404` for an unknown or expired id (texts live an hour). 30 a minute per session; a replay comes from a cache |

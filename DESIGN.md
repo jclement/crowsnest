@@ -222,6 +222,13 @@ relative `/setup#token=…`, so the token travels only in that one loopback resp
 fragment as with the printed link, and the relative Location keeps working through a
 port-rewriting tunnel. Anything wrong with the id lands on the plain setup page.
 
+**The limit (R5-S11):** the id itself is on the opener's argv (and a cold-started browser's),
+which every local user can read with `ps`. On a machine shared with other users, one who polls
+`ps` and redeems the id before the browser does gets the setup token. There is no secret the
+browser holds beforehand that the redemption could be bound to, since anything handed to the
+opener is on its argv. So on a multi-user host, start with `--open never` and use the printed
+link. The browser then fails to load setup, which is visible, but the race is already lost.
+
 ### 3.4 Doctor, and starting on a machine that is not ready
 
 `crowsnest doctor` (`internal/doctor`, `cmd/crowsnest/doctor.go`) is one list of read-only checks,
@@ -468,6 +475,99 @@ name or loopback; summaries are fetched by the server in parallel (5 s, no redir
 64 KiB), so the browser needs no cross-origin access and never sees a token; errors are crowsnest's
 own sentences, never the remote's text. No remote control of another instance. A machine's token
 is kept as given (it must be presented) in the 0600 database, and blanked in backups.
+
+### 4.22 The human gates must mean something (R5, `wip/fix-r5`)
+
+R5's two reviews found that a prompt-injected agent could satisfy several human gates by itself.
+What holds now:
+
+- **Reserved context keys** (`internal/questions/gate.go`). `land_for`, `land_action`,
+  `land_token`, `approval_for`, `requested_by`, `task_review`, `task_hash` and `crowsnest_gate`
+  are crowsnest's. An agent's `ask` carrying any of them is refused (`400`, any case or surrounding
+  space) at the socket, which every agent ask goes through (CLI, MCP tool). So a question with a
+  gate key was made by crowsnest (`questions.IsGate`).
+- **A land request is bound to its question** (`internal/jobs/landrequest.go`, R5-S1, C01, C09).
+  Reserve: under the jobs lock, a job with no request takes one with a fresh 128-bit token and the
+  head commit it is for (R5-S4's pin). A second request is refused. Ask: the question carries the
+  job, the action and the token. Settle: an answer runs the land only if, under the lock, the job
+  still holds a request for that action with that token, and consumes it in the same mutation. So
+  the land runs at most once, and a stale, forged or unrelated answer matches nothing.
+  `ReconcileLandRequests` (at start and on every tick) applies an answer the callback missed,
+  links a question by its token, and drops a request never asked after a minute. Only a job's own
+  agent, its parent, its project's lead or the orchestrator may ask. Before R5 the land question
+  had no `recommend`, so every real request was refused by validation: it is Deny now.
+- **Gates are never answered from a notification** (R5-S2). `questions.GateShaped` is a gate key,
+  or any option keyed `allow`, `approve`, `merge`, `land`, `push` or `grant`. Such a question's
+  notice gets no buttons and no action token (`internal/push/decision.go`), and `/push/action`
+  refuses one (`403`). The endpoint is the authority.
+- **Task files that start a job or poke a lead are reviewed** (`internal/schedule/review.go`,
+  R5-S3). Every file task with `as: job` or a `project:` runs only once the human has approved
+  that exact content (a SHA-256 of the file) in the Schedule view: "new or changed: review", with
+  the body shown and `POST /schedule/{name}/approve {hash}`. An edit is a new hash and is held
+  again, and only the content approved last may run. Run now is not an approval. Orchestrator
+  poke files are not reviewed (they add a line to a poke the orchestrator gets anyway). App
+  schedules are never reviewed (only the human makes one). A restore forgets every approval
+  (`task_reviews`), so a backup cannot arrive with its own task files pre-approved.
+- **Low means a known-benign shape** (`internal/risk/shape.go`, R5-C03, R5-S7). A Bash call is
+  read with `guard.Parse`: quotes removed, env prefixes and wrappers (`sudo`, `env`, `command`,
+  `exec`, `nohup`, `xargs`, `heavy`, …) set aside, `sh -c` and `eval` strings read as the
+  commands in them, git's global options (`-C`, `-c`, `--git-dir`, `--work-tree`) resolved,
+  redirections read as such (`2>&1` is not a separator). The table's rules match the line as
+  written and each command written plainly. The call stays low only if every command is on the
+  allowlist: read-only tools, read-only git (plus add, commit, fetch, a new branch), `go
+  test|build|vet`, the `test|lint|build|check` scripts and mise tasks, and so on. An output
+  redirect to a file, an unreadable line (unterminated quote, a shell reading a script or stdin),
+  an inline git `-c`, a tool not on the list, bidi controls, and a summary over 160 characters
+  are all at least elevated. The approval summary drops format characters and says how much is
+  cut. The approval policy (`internal/approvals/policy.go`) and the push buttons sit on this level.
+- **The guard follows the line** (`internal/guard/guard.go`, R5-C02). A `cd` moves the directory
+  the next git command runs in, and `checkout`/`switch` changes the branch the next commit lands
+  on. Where that cannot be followed (a cd to a variable or inside a subshell, `--git-dir`,
+  `GIT_DIR`, an inline alias), a commit, merge, pull or push is refused while protected branches
+  are configured. Plain git in the repository's own directory always works.
+- **crowsnest's own git calls run no repository commands** (`internal/landing/git.go`, R5-S5):
+  `-c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c
+  protocol.ext.allow=never -c core.pager=cat -c core.alternateRefsCommand=`, plus `--no-ext-diff
+  --no-textconv` on diff, log and show. **What still runs:** a merge driver or a clean/smudge
+  filter the repository configures and its `.gitattributes` names, `core.sshCommand` and
+  credential helpers on push, and `gpg.program` when commits are signed. **No hook runs on a
+  Land** (a project's pre-merge or post-merge hooks included). A remote spelled like an option is
+  refused.
+- **The review gate's states have owners** (`internal/jobs/review.go`, R5-C05, C07, C08). A
+  reviewer records the round it reviews. The tick starts a round's missing reviewer (after a
+  minute) and replays a settled reviewer's verdict. A late reviewer of an earlier round is
+  ignored. After a failed final review (`needs_you`, cause review) an agent's `done` is refused.
+  The human lands it, discards it, or sends it back with a message, which is the explicit reset.
+  While paused, a changes verdict waits in `in_review` and is delivered at the first tick after
+  the resume.
+- **A claimed launch holds its slot** (R5-C06): a directory job whose launch is claimed but whose
+  pane does not exist yet counts against the limit, in the check and in the counts shown.
+- **Restore is all or nothing** (4.17, R5-C04, S9). Every file is staged beside its destination
+  on that filesystem, and the pause, the pending reconciliation and the cleared task approvals are
+  written into the staged database before anything is installed. Replaced files are kept as
+  `.before-restore-<stamp>`, and a failure undoes the renames already made. A manifest promising
+  more than 32 GiB or 200,000 entries is refused before anything is staged. **Pre-upgrade copies
+  are scrubbed** like a backup (4.18, R5-S8).
+- **Sign in with Tailscale refuses another proxy** (4.20, R5-S6). Serve strips and fills the
+  identity headers itself, but from crowsnest's side its request is a loopback connection with a
+  header, like any local proxy's. So `--tailscale-auth` with `--trusted-proxy-header
+  cf-connecting-ip` (Cloudflare declared in front) is a start error, and a request carrying
+  `Cf-Connecting-Ip`, `Cf-Ray`, `Cdn-Loop`, `Cf-Ipcountry`, `Forwarded` or `X-Forwarded-Host` is
+  not believed. `--trusted-proxy loopback` stays allowed, since that is how serve itself is set
+  up, and it cannot tell serve from any other loopback proxy. A second local proxy that adds none
+  of those headers and forwards a client-chosen Host is the remaining limit: do not run one beside
+  `--tailscale-auth`.
+- **Role files are shown loudly** (21.3, R5-S14): a role whose text comes from a file is flagged
+  "from file: changed, review" until the human marks that exact text read (`POST
+  /instructions/role/{name}/file-seen {hash}`). It still applies meanwhile: the file is the
+  explicit mechanism.
+- **Smaller ones.** Self-update accepts a signature only from the release workflow at exactly the
+  tag being installed. The release's web build runs with npm install scripts off, and the image is
+  signed by digest with provenance (16, R5-S10). Notification links are parsed and must be
+  same-origin, control characters are refused, and 198.18/15, 192.0.0/24, 240/4, 6to4 and Teredo
+  are not public push endpoints (R5-S13). Thumbnails are decoded outside the quota lock, at most
+  16 megapixels (R5-S12). A failed spend write forgets the cached cursor (R5-C10). Argon2 memory
+  is capped at 256 MiB (R5-I2). A new push device is journalled (R5-I4).
 
 ## 5. Driving herdr
 
@@ -2484,7 +2584,9 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /spend?from=&to=&group=job\|model\|day`, `GET /spend/summary` | Spend for a range of local days, grouped; today, this week and the orchestrator's line (7.11). Jobs carry `spend` on `/jobs` and `/jobs/{id}` (with `spend_turns` there) |
 | `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control`, `remote_control_note` and `remote_control_url` (the session's `https://claude.ai/code/session_…` link once captured, else absent; 7.10.1) |
 | `GET /orchestrator/context`, `POST /orchestrator/compact` | The orchestrator's context size and upkeep `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}`; Compact now (409 when it cannot take it) (7.9) |
-| `GET /schedule?project=`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md (app only), shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs:[{at, outcome, job_id}]}], problems:[{path, name, error}], dirs}`, `project=<id>` keeping one project's tasks (0: the orchestrator's and unfiled); Run now; `{enabled}` for any task and/or every field of an app schedule (a full replacement; a task file's edit is `409` "read-only: edit the file") (7.8). A `schedule` event (`{at}`) says a stamp, switch or app schedule changed |
+| `GET /schedule?project=`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md (app schedules, and task files waiting for review), shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs:[{at, outcome, job_id}], review: ""\|needed\|approved, hash}], problems:[{path, name, error}], dirs}`, `project=<id>` keeping one project's tasks (0: the orchestrator's and unfiled); Run now (`409` for a task file waiting for review); `{enabled}` for any task and/or every field of an app schedule (a full replacement; a task file's edit is `409` "read-only: edit the file") (7.8). A `schedule` event (`{at}`) says a stamp, switch or app schedule changed |
+| `POST /schedule/{name}/approve` | `{hash}`: approve a task file that starts a job or pokes a lead, as the view showed it (4.22, R5-S3) → the list. `409` when the file changed since (read it again) or the task needs no review. Session only: the agent socket has no such verb |
+| `POST /instructions/role/{name}/file-seen` | `{hash}`: mark a role file's text read (4.22, R5-S14) → the layer. `409` when the file changed since, `404` for a role with no file |
 | `POST /schedule`, `DELETE /schedule/{name}` | An app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list (`400` invalid, `409` a taken name); delete one (`409` for a task file, `404` unknown) → the list (7.8) |
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
@@ -2624,6 +2726,7 @@ or push, and answers `409 EVIDENCE_HEAD_MOVED` when the branch moved past it (R5
 
 - Migration `0015_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
 - Migration `0017_approval_rules.sql` (8.7 Policy): `approval_rules(id, scope project|job, project_id, job_id, kind bash|edit|tool, pattern, max_risk low|elevated, note, created_at, created_via browser|demo, revoked_at)`, revoked rather than deleted; `approvals` gains `rule_ids` (the rules that allowed a `policy` approval). Deleting a job (retention) deletes its rules.
+- Migration `0018_gates.sql` (4.22, R5): `jobs` gains `land_token` (binds a land request to its question) and `land_requested_at` (when it was reserved), with a partial index on `land_request`; new `task_reviews(path, hash, state, question_id, at)` (the human's approval of a task file's exact content; a restore empties it). kv adds `instructions.file-seen.<role>` (the hash of the role file text the human marked read)
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
