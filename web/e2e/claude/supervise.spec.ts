@@ -174,12 +174,14 @@ test.describe.serial("the supervisor and the human, with real Claude", () => {
 
     await banner.getByRole("button", { name: "Resume" }).click();
     await expect(banner).toBeHidden();
-    // It starts on its own, and the open job says so without a reload.
+    // It is launched on its own (the hold is gone at once; the launch is crowsnest's wait) and
+    // runs to done; the open job follows it there without a reload.
     await expect(detail.getByRole("alert").filter({ hasText: "Waiting to start" })).toHaveCount(0, { timeout: 60_000 });
-    expect((await getJob(page, instance, id)).state).not.toBe("queued");
     const done = await waitForJob(page, instance, id, (job) => ["done", "failed", "cancelled"].includes(job.state), 5 * 60_000, "the resumed job finishes");
     expect(done.state).toBe("done");
+    expect(done.timeline.some((event) => /queued → running/.test(event.summary))).toBe(true);
     expect(readFileSync(join(scratch.repo, "resumed.txt"), "utf8")).toContain("resumed");
+    if (!page.url().includes(`job=${id}`)) await page.goto(`${instance.baseURL}/jobs?job=${id}`); // a trust prompt answered on the way moved the page
     await expect(detail.getByText("Done", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
   });
 });

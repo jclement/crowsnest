@@ -144,8 +144,10 @@ test.describe.serial("the orchestrator, with real Claude", () => {
     await page.getByRole("region", { name: "Selected item" }).getByRole("button", { name: /^Yes/ }).click();
     const outcome = page.getByRole("region", { name: "Outcome" });
     await expect(outcome).toContainText("Yes");
-    // A waiting asker gets it through the long-poll, not typed into its pane.
-    await expect(outcome).toContainText("The agent was waiting and got the answer at once.");
+    // A waiting asker gets it through the long-poll, not typed into its pane: its own call
+    // returning the answer is the receipt (DESIGN.md 6.19), Received at once.
+    await expect(outcome.getByLabel("Answer receipt")).toContainText("Received");
+    await expect(outcome).not.toContainText("Typed into the agent");
     await page.goto(`${instance.baseURL}/chat`);
     await expect(page.getByRole("article", { name: "Reply" }).last()).toContainText(/answered/i, { timeout: 180_000 });
     await expect(page.getByRole("article", { name: "Reply" }).last()).toContainText(/yes, from the browser|"yes"/i);
