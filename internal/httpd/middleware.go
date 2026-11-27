@@ -20,10 +20,11 @@ import (
 // contentSecurityPolicy is DESIGN.md 4.7 verbatim. 'unsafe-inline' styles are for xterm.js and
 // mermaid; there is no inline script anywhere, which is why the theme bootstrap is a file.
 // worker-src and manifest-src name what default-src already allows, so a later loosening of
-// default-src cannot widen where the service worker (/sw.js, Web Push) may come from.
+// default-src cannot widen where the service worker (/sw.js, Web Push) may come from. base-uri,
+// form-action and object-src do not fall back to default-src, so they are named (R7-S14).
 const contentSecurityPolicy = "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; " +
 	"media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; " +
-	"manifest-src 'self'; frame-ancestors 'none'"
+	"manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 // csrfHeader must be on every state-changing request. A cross-site HTML form cannot set custom
 // headers, and a cross-site fetch that sets one triggers a CORS preflight that crowsnest never
