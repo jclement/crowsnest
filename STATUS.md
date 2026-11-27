@@ -1,88 +1,84 @@
 # Crowsnest: status
 
-Living record kept by the lead agent. Last updated: 2026-11-26 04:55 by the machine's clock (CST), end of the overnight build. Earlier revisions of this file carried times I estimated instead of reading; they ran about two hours fast.
+Living record kept by the lead agent. Last updated: 2026-11-27 02:20 (CST, read from the clock), during the second overnight run.
 
 ## In one paragraph
 
-Crowsnest is built and on `main` (code tip `4fe6655`; later commits are this file only): one Go binary that starts a herdr session and a Claude orchestrator and serves a phone-friendly web app with Jobs, Chat, Inbox, Fleet, Terminal and talk mode. The centre is the job supervisor: an agent that ends a turn without declaring done, blocked or waiting is refused by a Stop hook and sent back to work, and this was proven against real Claude. Three review rounds by Codex and Opus found and fixed about 90 issues. It has not been used by a human yet, never touched a real phone, and the last review still holds an honest "not fully sound" on crash-recovery edges (below).
+Crowsnest is one Go binary that starts a herdr session and a Claude orchestrator and serves a phone-friendly web app for running coding agents across several projects. `v0.1.0` was released on 2026-11-26 and its pipeline worked first time (binaries, cosign signature, Homebrew cask, ghcr image). Since then `main` has roughly doubled: first-run setup, attachments, spend, a command palette, voice with per-agent voices, schedules, compaction, projects with lead agents, structured tool approvals, a Now home with one attention queue, landing with a review gate, throttling, a pause switch, backup and retention, a doctor command and a guided first run. All of that is merged and green on `main`, but **`main` is not fit to tag yet**: last night's code and security reviews found that a prompt-injected agent could satisfy several human gates by itself. Fixes are in progress (below).
 
 ## Try it
 
 ```sh
-cd ~/Work/crowsnest
-mise run setup && mise run build
-./bin/crowsnest --demo --no-auth                 # scripted fleet, no herdr or Claude: look around
-CROWSNEST_PASSWORD=... ./bin/crowsnest --username jeff --session crowsnest   # the real thing, http://localhost:2769
+brew install jclement/tap/crowsnest      # v0.1.0; the install itself is untested by me
+# or, from the repo, the current main:
+mise run setup && mise run dev           # builds one binary, runs it on http://localhost:2769 against herdr session crowsnest-dev
+mise run dev:demo                        # scripted five-project demo, no herdr or Claude needed
+crowsnest doctor                         # what is installed, signed in, and how each setting was decided
 ```
 
-For a phone on the tailnet: `--bind tailnet`, and `tailscale serve` in front if you want the microphone (it needs HTTPS). `README.md` has every flag; `DESIGN.md` is the design as built; `docs/TESTING.md` says what each test tier proves.
+A narrated tour of the product (3 min 50 s, recorded from the real app in demo mode) is at `~/Downloads/crowsnest-tour.mp4`; the project that regenerates it is `promo/`.
 
-## What is built, and how each part was verified
+## What is on main, and how it was verified
 
-"Lead ran" means I ran it myself on `8d93449`, the last commit that changed product code (`4fe6655` after it changes one browser test); otherwise it is the builder's run, which I read but did not repeat.
+"Lead ran" means I ran it myself on `main` after the merge. Every merge was followed by `mise run check` and the hermetic browser suite on `main`; the latest full run was 490 unit tests and 468 browser tests (desktop Chromium, mobile Chromium, mobile WebKit), all passing. CI on GitHub is green at `0e68362`.
 
-| Part | State | Verified how |
+| Area | Verified how | Not verified |
 |---|---|---|
-| Config, auth, sessions, origin and host checks | merged | Lead ran `mise run check` (21 Go packages with `-race`, 232 web tests): green. Hermetic browser suite covers login, lockout, cross-origin POST and WebSocket refusals |
-| herdr client, fleet cache | merged | Lead ran `mise run test:integration` against real herdr in throwaway sessions: 7 tests pass. Also passed on Linux in a container (builder) |
-| Orchestrator, transcript, Chat | merged | Lead ran `mise run test:claude` (real Claude, haiku) and `mise run e2e:claude` (real Claude through the browser): chat round trip passes |
-| Terminals (herdr TUI and single pane) | merged | Lead ran `mise run e2e:real` (real herdr, browser): 11 pass. A Linux-only hang was found by CI and fixed |
-| Questions, Inbox, agent CLI and MCP tools | merged | Real Claude asked through the MCP tool, the answer was given in the Inbox, and it reached the agent (lead ran, both real-Claude suites). `crowsnest ask --wait` proven through the browser |
-| **Jobs and the never-stop supervisor** | merged | **The stop test, lead ran, real Claude: (a) an agent told to stop without declaring was refused and nudged; (b) a job that called `done` finished cleanly with evidence; (c) ask, answer, done.** Same three journeys pass through the browser |
-| Pokes, journal, backstop for agents without hooks | merged | Real Claude received and answered a manual poke (lead ran). Timer and event pokes, and the backstop, only against the fake herdr |
-| Talk mode | merged | Browser test against a fake ElevenLabs passes (lead ran, in the hermetic suite). **Never spoken to the real ElevenLabs: no key was available** |
-| Hermetic browser suite | merged | Lead ran `mise run e2e`: 202 pass on desktop Chromium, mobile Chromium and mobile WebKit at 375 px, with accessibility checks |
-| Release pipeline (GoReleaser, workflow) | merged | `mise run snapshot` built four archives and the darwin one served the app (builder). **The release workflow has never run: it needs a tag, which I left to you** |
-| Devbox image | merged | Built locally (about 1 GB, arm64); container proof by the builder: health, login, refusals, non-root, mise installed Claude Code. **Nothing pushed to ghcr; amd64 build untried** |
-| CI on GitHub | see "CI" below | The `check` job (lint, Go and web unit tests on Linux) is green. The new browser job failed its first complete run on one test of mine-to-fix kind: the Jobs board test asserted an exact "Finished today" list, true only in the first five hours after midnight. Fixed (it now passes under four timezones on three browsers locally); CI is green with the fix (see the end of this file) |
+| Jobs and the never-stop supervisor | Real-Claude stop test (refused stop, clean done, ask-answer-done), run by me several times and by every builder since | Recovery from a real usage limit, API error or crash |
+| First-run setup (locked start, one-time link, argon2 owner) | Real browser against real herdr and real Claude: link, password, checklist, trust card, greeting in Chat (builder); container proof with curl | A human doing it |
+| Doctor, System page, guided checklist, in-app Settings, header machine stats | `crowsnest doctor` on this machine (lead ran): accurate | A Codex-only machine; Linux |
+| Tailscale (MagicDNS name auto-allowed; optional sign-in) | Proxy-shaped requests and a faked `tailscale serve` only | **A real `tailscale serve`**: nobody has run it |
+| Attachments and paste | Real Claude read a pasted PNG and answered from it (builder) | Real phone camera and library; a job agent reading its inbox |
+| Spend per job | Real-Claude run: crowsnest's totals equal the transcript's own sums (builder) | Codex spend ("not measured") |
+| Voice: hold to talk, 5 minutes, SAY captions, speak mode, per-agent voices, one queue | **Real ElevenLabs round trip with Jeff's key**: transcription correct, first audio in 0.23 s (builder) | Safari and iOS; a human holding a key; haiku skipped the SAY line in 2 of 5 runs |
+| Command palette, Now home, one attention queue, lead-first routing | Hermetic journeys at 390 px and 1440 px; screenshots reviewed by me | |
+| Projects and lead agents | Real Claude lead started, took a job, finished it under the hooks (builder) | |
+| Structured approvals, needs-you tray, guard hooks | Real Claude: an approval allowed through the API let the command run with no terminal dialog; the hook held 11 minutes (builder) | See "Not fit to tag" |
+| Landing: review tab, reviewer job, merge / PR / discard, teardown | Real Claude: builder done, reviewer approved read-only, Land merged, worktree gone (builder) | A reviewer that asks for changes with real agents; a real `gh pr create` |
+| Throttling, `crowsnest heavy`, pause switch, presence, daily digest | Unit and hermetic tests; pause checked with real Claude | Load hold on Linux |
+| Scheduled work, compaction, Remote Control naming | Real Claude: a scheduled task rode a poke; Remote Control reported active | **Compaction against a real Claude**; the name as shown in claude.ai |
+| Web Push | A real Chrome received one real push through Google's service once; two later headless runs delivered nothing | Firefox, Safari, any phone |
+| Backup and restore, retention, read-only Machines list | Round-trip tests; real binary backup then restore | A real 30-day database; two real instances |
+| Release pipeline (`v0.1.0`) | Workflow green; checksum and cosign verified; released binary runs and self-update check works (lead ran) | `brew install`; the amd64 image |
+| Real-herdr suites on main | `mise run test:integration` and `mise run e2e:real` (lead ran, tonight): pass | |
 
-## Reviews
+## Not fit to tag: what the reviews found
 
-Findings and verdicts are in `reviews/`. Three rounds, each by Codex (correctness) and Opus (security), each followed by a fix builder who had to show the regression test failing before the fix.
+Six review rounds are in `reviews/`. R1 to R3 (the supervisor and the first security passes) were fixed and verified. Last night:
 
-| Round | Found | Outcome |
-|---|---|---|
-| R1 | Codex 2 high, 8 medium; Opus 1 high, 3 medium | All fixed and verified by both reviewers |
-| R1b | Codex 2 high, 7 medium; Opus 1 high, 2 medium | All fixed and verified |
-| R2 (jobs supervisor) | Codex 9 high, 7 medium; Opus 1 high, 2 medium | 14 of 17 Codex findings verified fixed, 3 partly; security mostly fixed |
-| R3 | Codex 4 high, 4 medium; Opus 1 high, 2 medium | Fixed by the last builder, **not re-reviewed**: there was no fourth review round |
-
-Codex's closing judgement in R3, before the last fixes: the never-stop promise was "not yet sound" for crash boundaries (crowsnest itself dying mid-restart). The last fix builder addressed those findings and the stop test still passes, but no independent reviewer has looked at that final diff.
-
-## Not verified
-
-- No human has used it. Nothing was tried on a real phone, real Safari or iOS (WebKit only in Playwright).
-- Real ElevenLabs. Codex jobs (only against the fake). The orchestrator taking a job from the text box with real Claude.
-- Recovery from a real usage limit, API error, auth failure, crashed agent or compaction: unit-tested with the documented hook shapes only.
-- Real permission dialogs from Claude (none appeared in `auto` mode); dialog detection has real screens for idle, draft and trust only.
-- The release workflow and the image job on GitHub; the amd64 image; anything on Linux beyond a container run of the Go suite, the demo binary and the herdr integration tests.
-- TLS serving has a test; `tailscale serve` in front has not been tried.
-
-## Known holes (also in DESIGN.md section 20)
-
-- A job can still end up stopped with nobody told when: no browser is open and `--notify-url` is not set (Web Push is not built); the agent declares itself `blocked` (a resting state by design); a usage limit lasts for days; herdr itself is unreachable.
-- Two open review findings: poke reasons can be lost in a narrow window after an event-stream overflow; the token sweeper can miss a pane id herdr reused.
-- Agents in one session run as one user and are not isolated from each other: an agent that reads another's token file can act as it. The token scheme stops accidents, not a hostile agent.
-- The Terminal view is herdr's own TUI, so it shows every machine in your herdr config. Anyone who can sign in to crowsnest reaches those too.
-- Not built: budgets, review gates, Web Push (planned as M12), scheduled tasks, passkeys.
-
-## Decisions waiting for you
-
-1. **Cut a tag to prove the release workflow?** `mise run release` is yours. I did not tag: a tag also publishes the devbox image to ghcr. Recommendation: `v0.1.0-rc.1` when you have looked at the app.
-2. **Cosign, the Homebrew tap and self-update** are in the config but off while the repo is private (keyless cosign writes the repo identity to a public log, permanently). Turn on when you make it public.
-3. **The name.** The front door picked "crowsnest"; a rename is cheap now and less so later.
-
-## Things I did that you should know
-
-- Accepted Codex's "trust this folder" prompt for `~/Work/crowsnest` so the Codex reviews could run; that trust is saved in Codex's settings.
-- Declined two prompts rather than approve them for you: a convoluted `git stash` command from a builder, and your git guard hook when it could not evaluate a command. Both builders did the work another way.
-- Real-Claude tests ran on haiku in throwaway herdr sessions named `crowsnest-test-*`, all stopped and deleted. Your `default` session and the `orchestrator` were not touched; claude-agent, earshot and meatprompt were not modified.
-- Commits: 187 on `main`, signed, pushed to the private repo `jclement/crowsnest`. No tag, no release, nothing published.
+- **R4, product reviews (Fable and Codex)**. Shared verdict: the supervisor turned "silently stopped" into "declared something", but nothing checked the declaration, so the risk was a board of jobs that are done on paper; the app was organised around mechanisms rather than "what needs me, per project, right now"; nothing has run on a real phone. In response: the Now home and single attention queue, lead-first routing, backup and retention are merged; acceptance checks and budgets, and the phone work, are being built.
+- **R5, code (Codex) and security (Opus) review of everything since `v0.1.0`**. Fine against network attackers. Not fit to tag because an agent could satisfy human gates itself: approve its own land request (the approval was not bound to the request), have a land or delegation request allowed from a lock-screen notification button, and start jobs by writing scheduled-task files. Also: common git spellings downgraded dangerous commands to low risk; Land merged whatever the branch was at click time rather than the reviewed commit; restore was not all-or-nothing. **All of these are with fix builders now; none is fixed on main yet.**
 
 ## In flight
 
-Nothing. All worktrees, branches, agents and review tabs I created are closed.
+| Agent | Branch | Doing |
+|---|---|---|
+| `crow-fix5` | `wip/fix-r5` | The R5 findings: gates bound to their request, no notification buttons on gate questions, task files that start jobs need approval, risk and guard normalisation, protective git flags, restore safety |
+| `crow-accept` | `wip/accept` | Make "done" mean something: a check command run by crowsnest and pinned to a commit, Land only the reviewed commit, budgets that pause and ask, a spinning detector, a fleet-wide usage-limit state, every wait with an owner and a wake-up |
+| `crow-phone` | `wip/phone` | The phone: a decision screen with a sticky answer bar, rescue buttons instead of the terminal, giving a job by voice with confirmation, "Open in Claude" Remote Control links, per-project approval policy, and a ten-minute real-phone checklist (`docs/PHONE-CHECK.md`) |
 
-## CI
+After those land: a verification pass by the reviewers on the R5 fixes, the full real-Claude suites on the merged tip, and this file updated with the result.
 
-Green at `4fe6655`: both jobs passed on GitHub (`check`: lint plus Go and web unit tests; `e2e`: the hermetic browser suite on desktop Chromium, mobile Chromium and mobile WebKit, its first complete run on Linux). The commit that records this line is documentation only.
+## Decisions and things only Jeff can do
+
+1. **Use it from a real phone for ten minutes.** Both product reviews rank this first. It needs `tailscale serve` in front (crowsnest prints the command; I have not run it, because it publishes the instance to your tailnet), the app added to the Home Screen on iOS, then push, voice and the terminal key bar tried for real.
+2. **The ghcr image is still private**: an anonymous `docker manifest inspect ghcr.io/jclement/crowsnest:0.1.0` returned "unauthorized" when last checked. Package settings, Change visibility, Public.
+3. **The next tag.** `main` is far beyond `v0.1.0`. I will not tag it: the reviews say not yet, and releases are yours. When the fixes above are merged and verified, `v0.2.0` is the natural cut.
+4. **Pomicons** (11 glyphs in the bundled terminal symbols font) are under an OFL licence with a reserved font name; the builder judged redistribution fine because the font carries Nerd Fonts' name. Say if you would rather drop that range.
+
+## Things I did that you should know
+
+- **Declined, never approved, prompts from your git guard hook.** It misreads literal git text inside a shell heredoc (test data such as `git push *`) as a real git operation, and stopped four builders. I pressed "No" each time and told the builders to write such files with their file tools. My watcher script now declines that one specific prompt automatically; any other dialog still stops and waits for a human.
+- **Kept the machine awake** with `caffeinate` for the night (it had slept for seven hours earlier and stalled two builders).
+- **Removed a 43 MB built binary** that a builder had committed at the repo root back in the questions milestone. It is out of the tree and ignored; it remains in history and in the `v0.1.0` tag.
+- **Stopped one leftover test herdr server** from the first night (a throwaway home under `/tmp`, so it never showed in your session list). `/tmp/cn-*` scratch directories from test runs are still there.
+- **Fixed five tests that failed only on a loaded or slow machine** (CI and local): each was a timing or ordering assumption in the test, reproduced before being changed. One CI failure was a real environment bug: the demo's Land needed a git identity the CI runner does not have.
+- Repeated "Connection lost mid-response" API errors silently ended several builders' turns. A watcher now resumes any builder that goes idle without having written its report. This is the same failure crowsnest's own supervisor exists to catch; these builders are plain herdr agents, not crowsnest jobs.
+- The real ElevenLabs key was read from `~/Downloads/eleven.env` for the voice check and the film's narration (about 2,400 characters), never printed or committed. It is also in the gitignored `mise.local.toml` so `mise run dev` has voice.
+
+## Known holes (DESIGN.md has the full list)
+
+- Agents in one session run as one user and are not isolated from each other; the token scheme stops accidents, not a hostile agent.
+- Codex agents get no hooks: no stop-hook guarantee, no structured approvals, no spend measurement.
+- Two older review findings remain open and documented: poke reasons can be lost in a narrow window after an event-stream overflow, and the token sweeper can miss a pane id herdr reused.
+- Sign in with Tailscale trusts any local process that can open a loopback connection; leave it off on shared machines and on hosts that also run another local proxy.
