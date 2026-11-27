@@ -10,12 +10,14 @@
 // header, the choice in the URL (/chat?target=lead-<slug>). A lead's conversation works exactly
 // as the orchestrator's does (it is a herdr agent addressed by its pane id); its menu acts on the
 // lead's routes. With --no-orchestrator (status "disabled") Chat defaults to the first running
-// lead. A lead that is off offers Start lead instead of a conversation.
+// lead. A lead that is off offers Start lead instead of a conversation. When the agent's Remote
+// Control link is known the header has "Open in Claude" (DESIGN.md 7.10).
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { MessageSquare, Play, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ChatMenu } from "../components/chat/ChatMenu";
 import { ChatStatusChip } from "../components/chat/ChatStatusChip";
+import { OpenInClaude } from "../components/remote/OpenInClaude";
 import { ConversationView } from "../components/chat/ConversationView";
 import { AgentSpeakToggle } from "../components/voice/SpeakMode";
 import { VoiceComposer } from "../components/voice/VoiceComposer";
@@ -68,11 +70,13 @@ export function ChatView() {
         switcher={switcher}
         state={<ChatStatusChip state={state} />}
         sessionId={orchestrator.session_id}
+        remote={orchestrator.state !== "disabled" ? <OpenInClaude status={orchestrator} noFallback /> : null}
         speak={voice && orchestrator.state !== "disabled" ? <AgentSpeakToggle agent={ORCHESTRATOR} name="the orchestrator" /> : null}
         menu={
           <ChatMenu model={orchestrator.model} showThinking={showThinking} onToggleThinking={() => setShowThinking((value) => !value)} canRelaunch={orchestrator.state !== "disabled"} />
         }
       />
+      {orchestrator.state !== "disabled" && <OpenInClaude status={orchestrator} fallbackOnly className="border-b border-border px-3 py-0.5" />}
       {orchestrator.detail && (state === "needs_terminal" || state === "failed") && <TerminalBanner state={state} detail={orchestrator.detail} openTerminal={openTerminal} />}
       {orchestrator.state === "disabled" ? (
         <EmptyState icon={MessageSquare} title="The orchestrator is off">
@@ -144,9 +148,11 @@ function LeadChat({ slug, project, pending, switcher, voice, showThinking, onTog
         switcher={switcher}
         state={<ChatStatusChip state={state} hint={running ? undefined : "The lead is not running; start it to talk to it"} />}
         sessionId={running ? lead.session_id : ""}
+        remote={running ? <OpenInClaude status={lead} noFallback /> : null}
         speak={voice ? <AgentSpeakToggle agent={agent} name={name} /> : null}
         menu={<ChatMenu model={lead.model} showThinking={showThinking} onToggleThinking={onToggleThinking} canRelaunch={running} lead={project} />}
       />
+      {running && <OpenInClaude status={lead} fallbackOnly className="border-b border-border px-3 py-0.5" />}
       {lead.detail && (state === "needs_terminal" || state === "failed") && <TerminalBanner state={state} detail={lead.detail} openTerminal={openTerminal} />}
       {!running ? (
         <EmptyState
@@ -183,7 +189,21 @@ function LeadChat({ slug, project, pending, switcher, voice, showThinking, onTog
   );
 }
 
-function ChatHeader({ switcher, state, sessionId, speak, menu }: { switcher: ReactNode; state?: ReactNode; sessionId?: string; speak?: ReactNode; menu?: ReactNode }) {
+function ChatHeader({
+  switcher,
+  state,
+  sessionId,
+  remote,
+  speak,
+  menu,
+}: {
+  switcher: ReactNode;
+  state?: ReactNode;
+  sessionId?: string;
+  remote?: ReactNode;
+  speak?: ReactNode;
+  menu?: ReactNode;
+}) {
   return (
     <header className="sticky top-0 z-10 flex min-h-11 shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-surface-raised px-3 md:static">
       {switcher}
@@ -194,6 +214,7 @@ function ChatHeader({ switcher, state, sessionId, speak, menu }: { switcher: Rea
         </span>
       )}
       <div className="ml-auto flex items-center gap-1.5">
+        {remote}
         {speak}
         {menu}
       </div>
