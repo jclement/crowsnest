@@ -257,3 +257,41 @@ func TestFinishStepEndsAtTheBackstop(t *testing.T) {
 		t.Fatal("nudged again")
 	}
 }
+
+// TestWaitCyclesAreRefusedAndBroken (R6-C09): a job may not wait on a job that, through others,
+// waits on it; a circle that exists anyway (an older crowsnest) is broken by the invariant check,
+// which moves the job to wait on the human and tells them.
+func TestWaitCyclesAreRefusedAndBroken(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	a := r.create(CreateInput{Brief: "A", Dir: t.TempDir()})
+	b := r.create(CreateInput{Brief: "B", Dir: t.TempDir()})
+	c := r.create(CreateInput{Brief: "C", Dir: t.TempDir()})
+	block := func(id, on string) error {
+		_, err := r.svc.Update(ctx, id, UpdateInput{Progress: "waiting", State: "blocked", Reason: "needs " + on, UntilJob: on})
+		return err
+	}
+	if err := block(a.ID, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := block(b.ID, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := block(c.ID, a.ID); err == nil || !strings.Contains(err.Error(), "circle") {
+		t.Fatalf("a circular wait was accepted: %v", err)
+	}
+	// An existing circle (written directly, as an older crowsnest could have left it).
+	r.edit(c.ID, func(rec *store.JobRecord) {
+		rec.State, rec.WakeKind, rec.WakeJob = string(StateBlocked), WakeJob, mustParse(a.ID)
+	})
+	r.svc.tickInvariants(ctx)
+	broken := 0
+	for _, id := range []string{a.ID, b.ID, c.ID} {
+		if r.record(id).WakeKind == WakeHuman {
+			broken++
+		}
+	}
+	if broken == 0 || len(r.Notices()) == 0 {
+		t.Fatalf("the circle was not broken or the human not told (%d broken, notices %v)", broken, r.Notices())
+	}
+}
