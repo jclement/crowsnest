@@ -1546,7 +1546,11 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
   not ignored (`ls-files --others --exclude-standard`; regular files and links up to 2 MB, the
   first 1,000; larger or other ones are listed as "too large", with a size-and-mtime stamp in
   place of a blob), then `git write-tree`. The real index, HEAD and refs are never written and
-  no lock of the agent's is held; the trace is loose objects that gc collects.
+  no lock of the agent's is held; the trace is loose objects that gc collects. The index file is
+  the agent's (R7-S2): it is copied only when it is a regular file, not a link, of at most 256
+  MiB, opened with `O_NOFOLLOW|O_NONBLOCK` and read through a limit; otherwise the temporary index
+  is built from HEAD (`read-tree HEAD`), so a FIFO or a link to `/dev/zero` cannot hang the
+  reading or fill the disk.
 - **Protection.** Every call carries landing's protective configuration (4.22, R5-S5), and the
   **clean, smudge and process filters** the configuration defines (at any level) are switched off
   by name (`filter.<name>.clean=` …, read with `git config --get-regexp`, which runs nothing),

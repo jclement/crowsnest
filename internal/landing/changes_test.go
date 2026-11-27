@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // changesFixture is a worktree with one commit on its branch (feature.go added, README.md
@@ -318,5 +320,66 @@ func TestFirstCommitAgainstEmpty(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].Status != "added" {
 		t.Fatalf("files = %+v", files)
+	}
+}
+
+// TestWorkTreeDistrustsTheIndexFile is R7-S2: the checkout's index is the agent's file. A FIFO in
+// its place must not block the reading, a link to /dev/zero must not be copied, and an oversized
+// file is not copied either; each time the snapshot is built from HEAD instead and still shows
+// the work.
+func TestWorkTreeDistrustsTheIndexFile(t *testing.T) {
+	ctx := context.Background()
+	for _, kind := range []string{"fifo", "dev-zero", "huge"} {
+		t.Run(kind, func(t *testing.T) {
+			r, _ := changesFixture(t)
+			index := strings.TrimSpace(run(t, r.worktree, "git", "rev-parse", "--path-format=absolute", "--git-path", "index"))
+			if err := os.Remove(index); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "fifo":
+				if err := syscall.Mkfifo(index, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "dev-zero":
+				if err := os.Symlink("/dev/zero", index); err != nil {
+					t.Fatal(err)
+				}
+			case "huge":
+				file, err := os.Create(index)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := file.Truncate(maxIndexBytes + 1); err != nil {
+					t.Fatal(err)
+				}
+				_ = file.Close()
+			}
+			type result struct {
+				work string
+				err  error
+			}
+			done := make(chan result, 1)
+			go func() {
+				work, _, err := WorkTree(ctx, r.worktree)
+				done <- result{work, err}
+			}()
+			var got result
+			select {
+			case got = <-done:
+			case <-time.After(15 * time.Second):
+				t.Fatal("WorkTree did not return: it is reading the index file")
+			}
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			files, _, err := Compare(ctx, r.worktree, HeadTree(ctx, r.worktree), got.work)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if listed := byPath(files); listed["server.go"].Status != "modified" || listed["notes.txt"].Status != "added" {
+				t.Fatalf("the snapshot lost the work: %+v", files)
+			}
+		})
 	}
 }

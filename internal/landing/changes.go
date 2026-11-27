@@ -33,6 +33,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -49,6 +50,10 @@ const (
 	// MaxBlobBytes is the largest side of a file whose whole text is served (for highlighting and
 	// expanding context in the browser).
 	MaxBlobBytes = 256 << 10
+	// maxIndexBytes bounds the copy of a checkout's index (R7-S2). git's index for the 1,500
+	// files a diff lists is well under a megabyte; a repository of a few hundred thousand files
+	// is still under this.
+	maxIndexBytes = 256 << 20
 	// NullBlob is git's id for "no file on this side".
 	NullBlob = "0000000000000000000000000000000000000000"
 )
@@ -248,12 +253,7 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath); _ = os.Remove(tmpPath + ".lock") }()
-	copied := false
-	if source, err := os.Open(realIndex); err == nil { //nolint:gosec // the checkout's own index, read only
-		_, copyErr := io.Copy(tmp, source)
-		_ = source.Close()
-		copied = copyErr == nil
-	}
+	copied := copyIndex(realIndex, tmp) == nil
 	if err := tmp.Close(); err != nil {
 		return "", nil, err
 	}
@@ -313,6 +313,38 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 		return "", nil, err
 	}
 	return strings.TrimSpace(out), skipped, nil
+}
+
+// copyIndex copies the checkout's index into tmp (R7-S2). The index is a file the agent controls:
+// a link to /dev/zero would copy until the disk is full, and a FIFO would block open(2) forever
+// while the subject's reading holds its lock. So it must be a regular file, not a link, opened
+// without blocking, no larger than maxIndexBytes, and the copy reads at most that much. Any refusal
+// is an error, and the caller builds the temporary index from HEAD instead (slower, trusts nothing).
+func copyIndex(path string, tmp *os.File) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxIndexBytes {
+		return fmt.Errorf("the index %s is not a regular file of at most %s", path, humanBytes(maxIndexBytes))
+	}
+	source, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // the checkout's own index, read only
+	if err != nil {
+		return err
+	}
+	defer func() { _ = source.Close() }()
+	opened, err := source.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return fmt.Errorf("the index %s changed while it was opened", path)
+	}
+	written, err := io.Copy(tmp, io.LimitReader(source, maxIndexBytes+1))
+	if err != nil {
+		return err
+	}
+	if written > maxIndexBytes {
+		return fmt.Errorf("the index %s grew past %s", path, humanBytes(maxIndexBytes))
+	}
+	return nil
 }
 
 func appendCapped(addable []string, skipped *[]Skipped, name string, info os.FileInfo) []string {
