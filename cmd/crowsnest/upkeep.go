@@ -125,7 +125,7 @@ func (a scheduleTasks) Delivered(ctx context.Context, at time.Time, names []stri
 func startSchedule(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, journalLog *journal.Journal, jobService *jobs.Service, client herdr.Client, kick *atomic.Pointer[orch.Poker], ctl *controls, logger *slog.Logger) *schedule.Service {
 	options := schedule.Options{
 		Paused: ctl.paused,
-		KV: db, Sources: taskSources(cfg), Journal: journalLog, Hub: events, Logger: logger,
+		KV:     db, Sources: taskSources(cfg), Journal: journalLog, Hub: events, Logger: logger,
 		Store: db, StateDir: cfg.StateDir, Projects: liveProjects(db, logger),
 		Picture: fleetPicture(client, jobService),
 		Kick: func() {

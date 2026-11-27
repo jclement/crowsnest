@@ -167,7 +167,9 @@ func (c *controls) pauseOrNil() *pause.Switch {
 // ---- The digest ----------------------------------------------------------------------------
 
 // digestProxy lets the agent socket, built before the digest service, reach it once it exists.
-type digestProxy struct{ service atomic.Pointer[digest.Service] }
+type digestProxy struct {
+	service atomic.Pointer[digest.Service]
+}
 
 // Submit implements agentapi.DigestSubmitter.
 func (p *digestProxy) Submit(ctx context.Context, day, body string) error {

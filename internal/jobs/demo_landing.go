@@ -100,7 +100,7 @@ func demoReady() demoWork {
 		branch: "job/91-retry-with-back-off", title: "Retry widget fetches with back-off",
 		brief: "Retry widget fetches with back-off\n\nFetch fails on a flaky network. Retry three times with exponential back-off, and test it.",
 		files: map[string]string{
-			"retry.go": "package widgets\n\nimport \"time\"\n\n// Fetch gets a widget, retrying a failed call three times with exponential back-off\n// (100 ms, 200 ms, 400 ms): the widget service drops about one call in fifty.\nfunc Fetch(id string) (string, error) {\n\tvar err error\n\tfor attempt := 0; attempt < 4; attempt++ {\n\t\tvar body string\n\t\tif body, err = get(id); err == nil {\n\t\t\treturn body, nil\n\t\t}\n\t\ttime.Sleep(time.Duration(100<<attempt) * time.Millisecond)\n\t}\n\treturn \"\", err\n}\n",
+			"retry.go":      "package widgets\n\nimport \"time\"\n\n// Fetch gets a widget, retrying a failed call three times with exponential back-off\n// (100 ms, 200 ms, 400 ms): the widget service drops about one call in fifty.\nfunc Fetch(id string) (string, error) {\n\tvar err error\n\tfor attempt := 0; attempt < 4; attempt++ {\n\t\tvar body string\n\t\tif body, err = get(id); err == nil {\n\t\t\treturn body, nil\n\t\t}\n\t\ttime.Sleep(time.Duration(100<<attempt) * time.Millisecond)\n\t}\n\treturn \"\", err\n}\n",
 			"retry_test.go": "package widgets\n\nimport \"testing\"\n\nfunc TestFetchRetriesThenSucceeds(t *testing.T) {\n\tfails = 2\n\tif _, err := Fetch(\"w1\"); err != nil {\n\t\tt.Fatal(err)\n\t}\n}\n\nfunc TestFetchGivesUpAfterFourTries(t *testing.T) {\n\tfails = 9\n\tif _, err := Fetch(\"w1\"); err == nil {\n\t\tt.Fatal(\"want an error\")\n\t}\n}\n",
 			"docs/retry.md": "# Retries\n\nFetch retries three times: 100, 200 and 400 ms apart.\n",
 		},
