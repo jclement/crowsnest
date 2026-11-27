@@ -42,3 +42,11 @@ ALTER TABLE jobs ADD COLUMN pending_feedback TEXT NOT NULL DEFAULT '';
 -- configuration and tasks, a Makefile, package.json, CI files, a script the command names), so the
 -- evidence says when the branch changed what "passing" means (R6-S4). Comma-separated; '' none.
 ALTER TABLE job_checks ADD COLUMN definition_changed TEXT NOT NULL DEFAULT '';
+
+-- fix_applied is, on a job, the newest finished rebase (fix) job whose completion was applied to
+-- it (R6-C11): the tick replays any finished fix newer than this into exactly one re-check, so a
+-- crash between the fix's done and its parent's re-check loses nothing. Existing rows count every
+-- fix that already finished as applied.
+ALTER TABLE jobs ADD COLUMN fix_applied INTEGER NOT NULL DEFAULT 0;
+UPDATE jobs SET fix_applied = COALESCE((SELECT MAX(f.id) FROM jobs f WHERE f.fix_of = jobs.id
+    AND f.state IN ('done', 'failed', 'cancelled')), 0);

@@ -414,8 +414,21 @@ func TestReceiptFromTheTranscript(t *testing.T) {
 	if err != nil || len(list) != 2 {
 		t.Fatalf("unreceived %v %v", list, err)
 	}
-	body := []byte(fmt.Sprintf(`{"type":"user","message":{"content":"[crowsnest answer q_%d] Ship it? → yes"}}`+"\n"+
-		`{"type":"user","message":{"content":"[crowsnest answer q_%d] Rename it? → yes"}}`+"\n", delivered, uncertain))
+	// Transcript lines as Claude Code writes them (a timestamp on each). R6-C12: only an incoming
+	// user message that is the answer line, recorded after the question settled, counts; the
+	// agent's own text, a tool's output and a line from before the answer do not.
+	after := now.Add(5 * time.Second).UTC().Format(time.RFC3339)
+	before := now.Add(-time.Minute).UTC().Format(time.RFC3339)
+	body := []byte(fmt.Sprintf(`{"type":"assistant","uuid":"a1","timestamp":%q,"message":{"content":[{"type":"text","text":"[crowsnest answer q_%d] I am waiting for this"}]}}`+"\n"+
+		`{"type":"user","uuid":"u0","timestamp":%q,"message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"[crowsnest answer q_%d] from a log"}]}}`+"\n"+
+		`{"type":"user","uuid":"u00","timestamp":%q,"message":{"content":"[crowsnest answer q_%d] Later? → yes"}}`+"\n",
+		after, pending, after, pending, before, pending))
+	r.svc.markReceived(ctx, job.ID, []int64{pending}, body)
+	if receipt, _ := r.db.GetQuestionReceipt(ctx, pending); !receipt.ReceivedAt.IsZero() {
+		t.Fatal("a marker in the agent's text, a tool result or an earlier line was taken as the answer's receipt")
+	}
+	body = []byte(fmt.Sprintf(`{"type":"user","uuid":"u1","timestamp":%q,"message":{"content":"[crowsnest answer q_%d] Ship it? → yes"}}`+"\n"+
+		`{"type":"user","uuid":"u2","timestamp":%q,"message":{"content":"[crowsnest answer q_%d] Rename it? → yes"}}`+"\n", after, delivered, after, uncertain))
 	r.svc.markReceived(ctx, job.ID, list, body)
 	for _, id := range []int64{delivered, uncertain} {
 		if receipt, _ := r.db.GetQuestionReceipt(ctx, id); receipt.ReceivedAt.IsZero() {

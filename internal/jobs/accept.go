@@ -798,10 +798,18 @@ func (s *Service) AskRebase(ctx context.Context, id string) (Job, error) {
 		return Job{}, invalid("crowsnest does not know the branch job %s started from", job.ID)
 	}
 	numeric, _ := ParseID(job.ID)
+	applied := int64(0)
+	if record, err := s.opts.Store.GetJob(ctx, numeric); err == nil {
+		applied = record.FixApplied
+	}
 	if fixes, err := s.opts.Store.ListFixJobs(ctx, numeric); err == nil {
 		for _, fix := range fixes {
 			if !State(fix.State).Terminal() {
 				return Job{}, invalid("job %s is already being rebased by %s", job.ID, FormatID(fix.ID))
+			}
+			if fix.ID > applied {
+				// R6-C11: a finished rebase whose result is not applied yet; the tick applies it.
+				return Job{}, invalid("job %s's rebase by %s has finished and is being checked; wait for that result", job.ID, FormatID(fix.ID))
 			}
 		}
 	}
@@ -827,10 +835,12 @@ func (s *Service) fixSettled(ctx context.Context, fix Job) {
 	if fix.FixOf == "" {
 		return
 	}
+	fixID := mustParse(fix.ID)
 	parent, err := s.mutate(ctx, fix.FixOf, func(r *store.JobRecord, c *change) error {
-		if State(r.State) != StateDone || r.LandState != "" {
-			return errSkip
+		if State(r.State) != StateDone || r.LandState != "" || r.FixApplied >= fixID {
+			return errSkip // already taken in (the tick's replay and the callback can both arrive)
 		}
+		r.FixApplied = fixID
 		if fix.State != StateDone {
 			c.event(EventAccept, "The rebase by "+fix.ID+" did not finish ("+string(fix.State)+"); the job still needs one", nil)
 			return nil
@@ -841,6 +851,20 @@ func (s *Service) fixSettled(ctx context.Context, fix Job) {
 	})
 	if err == nil && parent.AcceptState == AcceptChecking {
 		s.startCheck(ctx, parent.ID)
+	}
+}
+
+// reconcileFixes replays finished fix jobs whose parent never took them in (crowsnest stopped
+// between the fix's done and its parent's re-check): exactly one re-check each (R6-C11).
+func (s *Service) reconcileFixes(ctx context.Context) {
+	fixes, err := s.opts.Store.ListUnappliedFixes(ctx, superviseBatch)
+	if err != nil {
+		return
+	}
+	for _, fix := range fixes {
+		job := s.toJob(fix, 0)
+		_ = s.Journal(ctx, job.FixOf, EventAccept, "The rebase by "+job.ID+" finished while its result was not applied (crowsnest stopped); applying it now", nil)
+		s.fixSettled(ctx, job)
 	}
 }
 

@@ -146,6 +146,14 @@ func (s *Store) ListFixJobs(ctx context.Context, id int64) ([]JobRecord, error) 
 	return s.queryJobs(ctx, jobSelect+` WHERE fix_of = ? ORDER BY id`, id)
 }
 
+// ListUnappliedFixes returns finished fix jobs whose completion their parent has not taken in
+// yet (the parent is done, not landed, and its fix_applied is older), oldest first (R6-C11).
+func (s *Store) ListUnappliedFixes(ctx context.Context, limit int) ([]JobRecord, error) {
+	return s.queryJobs(ctx, jobSelect+` WHERE fix_of != 0 AND state IN ('done', 'failed', 'cancelled')
+		AND id > (SELECT p.fix_applied FROM jobs p WHERE p.id = jobs.fix_of AND p.state = 'done' AND p.land_state = '')
+		ORDER BY id LIMIT ?`, limit)
+}
+
 // ListAcceptedJobs returns finished jobs whose evidence matters to Land (accept_state set) and
 // that are not torn down, oldest first: the jobs whose evidence can go stale.
 func (s *Store) ListAcceptedJobs(ctx context.Context, limit int) ([]JobRecord, error) {
