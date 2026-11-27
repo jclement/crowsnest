@@ -264,6 +264,41 @@ func (s *Store) InsertJob(ctx context.Context, record JobRecord) (int64, error) 
 // UpdateJob writes every column of record (identified by its ID). internal/jobs serialises its
 // changes under one lock, so a whole-row write is safe and keeps the store simple.
 func (s *Store) UpdateJob(ctx context.Context, record JobRecord) error {
+	return updateJob(ctx, s.db, record)
+}
+
+// UpdateJobWithEvents writes record and appends events to its timeline in one transaction, so a
+// reader never sees the new state without the events that explain it (a timeline read between
+// the two showed "Brief sent" with the job already running and no "queued → running" entry).
+func (s *Store) UpdateJobWithEvents(ctx context.Context, record JobRecord, events []JobEventRecord) error {
+	if len(events) == 0 {
+		return s.UpdateJob(ctx, record)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("updating job %d: %w", record.ID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := updateJob(ctx, tx, record); err != nil {
+		return err
+	}
+	for _, event := range events {
+		if _, err := insertJobEvent(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("updating job %d: %w", record.ID, err)
+	}
+	return nil
+}
+
+// execer is what a job write needs: the database or a transaction.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func updateJob(ctx context.Context, db execer, record JobRecord) error {
 	cols := jobColumns(&record)
 	sets := make([]string, len(cols))
 	values := make([]any, 0, len(cols)+1)
@@ -273,7 +308,7 @@ func (s *Store) UpdateJob(ctx context.Context, record JobRecord) error {
 	}
 	values = append(values, record.ID)
 	// Column names come from jobColumns (compile-time constants); every value is a parameter.
-	result, err := s.db.ExecContext(ctx, "UPDATE jobs SET "+strings.Join(sets, ", ")+" WHERE id = ?", values...) //nolint:gosec // see above
+	result, err := db.ExecContext(ctx, "UPDATE jobs SET "+strings.Join(sets, ", ")+" WHERE id = ?", values...) //nolint:gosec // see above
 	if err != nil {
 		return fmt.Errorf("updating job %d: %w", record.ID, err)
 	}
@@ -446,10 +481,14 @@ func (s *Store) queryJobs(ctx context.Context, query string, args ...any) ([]Job
 
 // InsertJobEvent appends one event to a job's timeline and returns its id.
 func (s *Store) InsertJobEvent(ctx context.Context, event JobEventRecord) (int64, error) {
+	return insertJobEvent(ctx, s.db, event)
+}
+
+func insertJobEvent(ctx context.Context, db execer, event JobEventRecord) (int64, error) {
 	if event.DetailJSON == "" {
 		event.DetailJSON = "{}"
 	}
-	result, err := s.db.ExecContext(ctx,
+	result, err := db.ExecContext(ctx,
 		`INSERT INTO job_events (job_id, at, kind, summary, detail_json) VALUES (?, ?, ?, ?, ?)`,
 		event.JobID, event.At.Unix(), event.Kind, event.Summary, event.DetailJSON)
 	if err != nil {
