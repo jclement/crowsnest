@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import type { Instance } from "../support/instance";
-import { apiGet, attention, cheapJobs, getJob, makeScratch, realClaudeOnly, removeScratch, startReal, until, waitForJob, type Scratch } from "./rig";
+import { apiGet, attention, cheapJobs, getJob, logSpend, makeScratch, realClaudeOnly, removeScratch, startReal, until, waitForJob, type Scratch } from "./rig";
 
 let scratch: Scratch;
 let instance: Instance;
@@ -60,6 +60,7 @@ test.describe.serial("the supervisor and the human, with real Claude", () => {
   });
 
   test.afterAll(async () => {
+    await logSpend(instance, "supervise");
     await instance?.stop();
     removeScratch(scratch);
   });

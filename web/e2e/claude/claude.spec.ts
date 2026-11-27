@@ -24,7 +24,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { BINARY, type Instance } from "../support/instance";
-import { makeScratch, realClaudeOnly, removeScratch, startReal, trustFolders, type Scratch } from "./rig";
+import { logSpend, makeScratch, realClaudeOnly, removeScratch, startReal, trustFolders, type Scratch } from "./rig";
 
 const CAPTURED = resolve(import.meta.dirname, "captured");
 
@@ -82,6 +82,7 @@ test.describe.serial("the orchestrator, with real Claude", () => {
   });
 
   test.afterAll(async () => {
+    await logSpend(instance, "orchestrator");
     await instance?.stop();
     removeScratch(scratch);
   });

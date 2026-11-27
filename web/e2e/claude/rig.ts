@@ -103,6 +103,22 @@ export async function startReal(scratch: Scratch, options: RealOptions = {}): Pr
   return startInstance({ demo: false, orchestrator: options.orchestrator ?? false, realHome: true, args: [...args, ...(options.args ?? [])] });
 }
 
+/**
+ * Prints what the instance measured its agents spending (an API-equivalent estimate from the
+ * transcripts), so a run's cost is in its log. Called before the instance stops.
+ */
+export async function logSpend(instance: Instance | undefined, label: string) {
+  if (!instance) return;
+  try {
+    const response = await fetch(`${instance.baseURL}/api/v1/spend/summary`);
+    const data = ((await response.json()) as { data: { today: { cost_usd: number | null; turns: number }; orchestrator_today: { cost_usd: number | null } } }).data;
+    const usd = (value: number | null | undefined) => (value === null || value === undefined ? "unknown" : `$${value.toFixed(2)}`);
+    console.log(`spend ${label}: ${usd(data.today.cost_usd)} today in ${data.today.turns} turns (orchestrator ${usd(data.orchestrator_today.cost_usd)})`);
+  } catch (error) {
+    console.log(`spend ${label}: not read (${(error as Error).message})`);
+  }
+}
+
 /** The headers a browser's state-changing request carries. */
 export function writeHeaders(instance: Instance) {
   return { Origin: instance.baseURL, "X-Crowsnest": "1", "Content-Type": "application/json" };

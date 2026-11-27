@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { Instance } from "../support/instance";
-import { cheapJobs, getJob, git, listJobs, makeScratch, realClaudeOnly, removeScratch, startReal, waitForJob, type Scratch } from "./rig";
+import { cheapJobs, getJob, git, listJobs, logSpend, makeScratch, realClaudeOnly, removeScratch, startReal, waitForJob, type Scratch } from "./rig";
 
 // The check: answer.txt (when there is one) must hold exactly 42; land.txt (when there is one) the
 // word landed. Its last line says why it failed, as a real project's check would.
@@ -49,6 +49,7 @@ test.describe.serial("a coding job from Now to landed", () => {
   });
 
   test.afterAll(async () => {
+    await logSpend(instance, "land");
     await instance?.stop();
     removeScratch(scratch);
   });

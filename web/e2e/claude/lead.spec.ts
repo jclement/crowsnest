@@ -11,7 +11,7 @@
 //   - a job given "To the lead" from the project's board is held by lead-<slug> and finished.
 import { expect, test } from "@playwright/test";
 import type { Instance } from "../support/instance";
-import { apiGet, cheapJobs, getJob, makeScratch, realClaudeOnly, removeScratch, startReal, trustFolders, waitForJob, type Scratch } from "./rig";
+import { apiGet, cheapJobs, getJob, logSpend, makeScratch, realClaudeOnly, removeScratch, startReal, trustFolders, waitForJob, type Scratch } from "./rig";
 
 let scratch: Scratch;
 let instance: Instance;
@@ -32,6 +32,7 @@ test.describe.serial("a project with a lead, with real Claude", () => {
   });
 
   test.afterAll(async () => {
+    await logSpend(instance, "lead");
     await instance?.stop();
     removeScratch(scratch);
   });

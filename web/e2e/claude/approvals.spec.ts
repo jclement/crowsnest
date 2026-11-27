@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Instance } from "../support/instance";
-import { apiGet, cheapJobs, getJob, makeScratch, realClaudeOnly, removeScratch, startReal, until, type Scratch } from "./rig";
+import { apiGet, cheapJobs, getJob, logSpend, makeScratch, realClaudeOnly, removeScratch, startReal, until, type Scratch } from "./rig";
 
 let scratch: Scratch;
 let instance: Instance;
@@ -93,6 +93,7 @@ test.describe.serial("structured approvals with real Claude", () => {
   });
 
   test.afterAll(async () => {
+    await logSpend(instance, "approvals");
     await instance?.stop();
     removeScratch(scratch);
   });
