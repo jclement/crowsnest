@@ -369,6 +369,8 @@ workflow does the same on every `v*` tag.
 | `crowsnest health [--json]` | GET `/api/v1/health` on the configured address; exit 0 healthy, 1 not (Docker `HEALTHCHECK`). A server waiting for first-run setup is healthy and says "setup required" |
 | `crowsnest reset-password [--password-file F]` | Set a new password for the login chosen at setup, and sign every browser out (at once, even while crowsnest runs). The password comes from `--password-file` (first line, mode 600), else a piped stdin, else it is asked for twice. Use the same `--session`/`--data-dir` as serve |
 | `crowsnest reset-setup [--yes] [--force]` | Remove the stored login and every session, so the next start is first-run setup again (the instance name is kept). Asks for confirmation (or `--yes`); refused while crowsnest is running unless `--force`, after which nobody can sign in until it is restarted |
+| `crowsnest pause [--until HH:MM] [--reason …]` / `crowsnest resume` / `crowsnest pause --status` | Pause or resume crowsnest's own automation (no pokes, nudges, scheduled tasks, new starts or restarts; agents keep running). Works from your shell with the `--session` in effect; with the server down `pause` writes `~/.config/crowsnest/paused` |
+| `crowsnest heavy [--status] -- <command…>` | Run a build or test suite through the heavy-command gate (two at a time by default, niced, parallelism capped). Uses an outside `heavy` on PATH when there is one (`CROWSNEST_HEAVY_DEFER=0` turns that off). Exit 75: no slot came free |
 | `crowsnest update [--check]` | Install the latest release over this binary after verifying its signature and checksum (see Install, Updating); `--check` only reports. Refused for a development build, in a container and for a Homebrew install |
 
 Exit codes: `0` success, `1` runtime error, `2` usage error.
@@ -507,6 +509,40 @@ on you?), `tidy.md` (hourly: bring the orchestrator's notes up to date) and `dig
 after 17:00: one notice with the day's digest). They do nothing until copied into a tasks
 directory.
 
+## Landing, limits, the pause and the digest
+
+- **Review and land.** A job that ran in its own worktree gets a **Review** tab when it is done:
+  commits ahead of its base, files and lines changed, whether the tree is clean and the branch
+  pushed, every file's diff in the order the change reads best (the agent's walkthrough first,
+  then schema, logic, API, UI, tests, docs; churn last), each opened on demand, binary files
+  named only; beside it the agent's result, evidence and walkthrough, and the review rounds.
+  **Merge** (into the base branch in the main checkout; `--merge merge|ff`), **Push and open
+  PR** (GitHub with `gh`; no reviewers assigned; other hosts are pushed only) or **Discard**,
+  each after a confirmation saying exactly what happens. Then the agent is stopped, the
+  worktree and its workspace removed through herdr (a dirty tree is refused, never forced) and
+  the branch deleted when merged or discarded. "N to land" above the board lists finished jobs
+  whose worktrees are still around. Agents can only *ask* to land (`job_land`): you decide.
+- **Review gate.** Builder jobs in a worktree are reviewed before they count as done
+  (`--review auto`: the other engine when installed, else the same one): a reviewer job runs
+  read-only in the same worktree, its findings go back to the builder, at most two rounds, then
+  done, or it needs you.
+- **Limits.** At most `--max-running-jobs` job agents at once (a quarter of the cores, at least
+  two; leads and the orchestrator not counted); the rest wait queued with the reason and start
+  in order, or you press **Start anyway**. New starts also wait while the load per core stays
+  above `--load-hold` for a minute. Agents run builds and suites through `crowsnest heavy`. The
+  board's "2 of 4 running" opens the Limits sheet.
+- **Pause.** Account menu → Pause automation (or the palette, or `crowsnest pause`): agents keep
+  working, crowsnest stops acting by itself, a banner says so until you resume.
+  `~/.config/crowsnest/paused` pauses it too.
+- **Presence.** Your open tab tells crowsnest whether you are here, maybe, or away (only those
+  states are kept): here, things reach you in the tray and never as a push; away, Web Push and
+  the notify URL. Account menu → Do not disturb holds non-blocking notifications until a time.
+  Agents see `human=here|maybe|away` on their pokes.
+- **Daily digest.** One switch and a time at the top of the Schedule sheet (off by default), or
+  "Digest now" in the palette: what finished, what waits on you, each lead's day, the spend, what
+  is next, written from crowsnest's records (by the orchestrator when it is up), as a notice in
+  the Inbox; past digests under "Past digests".
+
 ## Spend
 
 Every job shows what its agent has used, and the orchestrator's own conversation is a line of
@@ -644,6 +680,14 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /health` | none | `{status, version, setup_required, update_available}`, plus `latest_version` and `release_url` when a newer release was found |
 | `GET /setup` | none | `{required, default_name?, min_password_length}`: whether first-run setup is waiting |
 | `POST /setup` | none (the setup token) | `{token, username, password, name}` → `201` and a session cookie; `403 BAD_TOKEN`, `400` for a field to fix, `429` with `Retry-After` (about five tries a minute, for everyone), `410` once setup is done. While setup waits, every other API route answers `403 SETUP_REQUIRED` and every page redirects to `/setup` |
+| `GET /jobs/{id}/review`, `GET /jobs/{id}/review/diff?path=` | session | The Review tab: what a worktree job produced, the files in reading order, the review rounds, the land actions open (and why not), and one file's diff |
+| `POST /jobs/{id}/land` | session | `{action: merge\|pr\|discard, confirm: true}` → what was done and whether the teardown finished; `409 CONFIRM_REQUIRED` without `confirm`; `400` for a refusal (dirty checkout, conflict, protected branch) with nothing changed |
+| `POST /jobs/{id}/teardown`, `POST /jobs/{id}/start-anyway` | session | Retry a landed job's teardown (`{confirm: true}`); start a held job past the limits |
+| `GET /sweep`, `POST /sweep/discard` | session | Finished jobs whose worktrees are still around; discard several (`{ids, confirm: true}`) |
+| `GET /queue`, `GET\|PUT\|DELETE /throttle`, `GET /system/heavy` | session | Running / limit / waiting; the limits (and back to the flags); the heavy slots |
+| `GET\|POST /pause`, `POST /resume` | session | The pause switch (`{until?, reason?}`) |
+| `GET\|POST /presence`, `POST /presence/gone`, `PUT /presence/dnd` | session | Presence (the browser's heartbeat) and do not disturb (`{until}`) |
+| `GET /digests`, `GET\|PUT /digest/settings`, `POST /digest/now` | session | The digest history, its switch and time, and one now |
 | `GET /account` | session | `{username, source: database\|config\|none, name, name_managed, min_password_length}` |
 | `POST /account/password` | session | `{current_password, new_password}` → signs every other session out and re-issues this browser's cookie; `403 WRONG_PASSWORD` (counted like a failed sign-in), `409` when the login comes from flags or the environment |
 | `PUT /account/name` | session | `{name}` → the instance name, stored; `409` when `--name`/`CROWSNEST_NAME` sets it |
