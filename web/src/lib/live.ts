@@ -44,6 +44,8 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   pause: [queryKeys.pause, queryKeys.jobs],
   presence: [queryKeys.presence],
   throttle: [queryKeys.throttle, queryKeys.jobs],
+  // The fleet's usage limit (6.17): the banner and the held cards.
+  limits: [queryKeys.limits, queryKeys.jobs],
   // sys carries a machine sample, appended to the stats in useLiveQueries; nothing to refetch.
   sys: [],
   system: [systemKeys.system, systemKeys.onboarding],

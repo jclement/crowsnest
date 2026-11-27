@@ -13,6 +13,7 @@ import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } fro
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { Approval, DecideRequest } from "./approvals";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
+import type { BudgetInput, FleetLimit, ProjectAccept, WaitsView } from "./accept";
 import type {
   Digest,
   DigestSettings,
@@ -252,6 +253,21 @@ export const endpoints = {
   land: (id: string, action: LandAction) => api<LandResult>(`/jobs/${encodeURIComponent(id)}/land`, { method: "POST", body: { action, confirm: true } }),
   teardown: (id: string) => api<LandResult>(`/jobs/${encodeURIComponent(id)}/teardown`, { method: "POST", body: { confirm: true } }),
   startAnyway: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/start-anyway`, { method: "POST" }),
+  // ---- Acceptance, budgets, wake-ups, the usage limit, receipt (DESIGN.md 6.15 to 6.19) ----
+  landOverride: (id: string, action: LandAction) =>
+    api<LandResult>(`/jobs/${encodeURIComponent(id)}/land`, { method: "POST", body: { action, confirm: true, override: true } }),
+  recheck: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/recheck`, { method: "POST" }),
+  rebase: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/rebase`, { method: "POST" }),
+  setBudget: (id: string, budget: BudgetInput) => api<Job>(`/jobs/${encodeURIComponent(id)}/budget`, { method: "PUT", body: budget }),
+  finishStep: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/budget/finish-step`, { method: "POST" }),
+  wake: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/wake`, { method: "POST" }),
+  limits: () => api<FleetLimit[]>("/limits"),
+  waits: () => api<WaitsView>("/system/waits"),
+  projectAccept: (id: number) => api<ProjectAccept>(`/projects/${id}/accept`),
+  setProjectAccept: (id: number, value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes">) =>
+    api<ProjectAccept>(`/projects/${id}/accept`, { method: "PUT", body: value }),
+  reconcileAnswer: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}/reconcile`, { method: "POST" }),
+  retypeAnswer: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}/retype`, { method: "POST", body: { confirm: true } }),
   sweep: () => api<SweepItem[]>("/sweep"),
   sweepDiscard: (ids: string[]) =>
     api<Array<{ id: string; ok: boolean; torn_down: boolean; error?: string }>>("/sweep/discard", { method: "POST", body: { ids, confirm: true } }),
@@ -481,6 +497,9 @@ export const queryKeys = {
   queue: ["jobs", "queue"] as const,
   pause: ["pause"] as const,
   throttle: ["throttle"] as const,
+  limits: ["limits"] as const,
+  waits: ["system", "waits"] as const,
+  projectAccept: (id: number) => ["projects", "accept", id] as const,
   presence: ["presence"] as const,
   digests: ["digests"] as const,
   digestSettings: ["digests", "settings"] as const,

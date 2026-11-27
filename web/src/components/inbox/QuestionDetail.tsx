@@ -5,7 +5,8 @@
 import { Ban, Clock, RefreshCw } from "lucide-react";
 import { relativeTime } from "../../lib/format";
 import { answerSummary, kindLabels, statusLabels, type Question } from "../../lib/questions";
-import { useCancelQuestion, useMe, useQuestion } from "../../lib/queries";
+import { useAnswerReceipt, useCancelQuestion, useMe, useQuestion } from "../../lib/queries";
+import { receiptText } from "../../lib/accept";
 import { shownFromAttachment } from "../../lib/attachments";
 import { AttachmentList } from "../attach/AttachmentList";
 import { Markdown } from "../Markdown";
@@ -104,8 +105,63 @@ function Outcome({ question }: { question: Question }) {
         <AttachmentList files={question.answer_attachments.map(shownFromAttachment)} label="Files sent with the answer" />
       )}
       {question.status === "expired" && <p className="text-xs text-muted">Expiry is not consent; the agent was told there is no answer.</p>}
-      {delivered && <p className="text-2xs text-muted">{delivered}</p>}
+      <Receipt question={question} fallback={delivered} />
     </section>
+  );
+}
+
+/** The answer's journey to the agent (DESIGN.md 6.19), with "Did it arrive?" and an explicit
+ * "Type it again" for an uncertain or failed delivery (never automatic: a duplicate is worse). */
+function Receipt({ question, fallback }: { question: Question; fallback: string | null }) {
+  const receipt = receiptText(question.receipt, question.held_reason);
+  const run = useAnswerReceipt(question.id);
+  const toast = useToast();
+  if (!receipt) return fallback ? <p className="text-2xs text-muted">{fallback}</p> : null;
+  const doubtful = question.receipt === "uncertain" || question.receipt === "failed" || question.receipt === "delivered";
+  return (
+    <div aria-label="Answer receipt" className="flex flex-col gap-1">
+      <p className="flex flex-wrap items-center gap-1.5 text-2xs text-muted">
+        <Chip tone={receipt.tone}>{receipt.label}</Chip>
+        <span>{receipt.detail}</span>
+        {question.received_at && <span>· {relativeTime(question.received_at)}</span>}
+      </p>
+      {doubtful && question.job_id && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            compact
+            disabled={run.isPending}
+            onClick={() =>
+              run.mutate("reconcile", {
+                onSuccess: (next) =>
+                  toast.show(
+                    next.receipt === "received"
+                      ? { tone: "success", title: "It arrived", description: "The answer is in the agent's conversation." }
+                      : { tone: "warning", title: "Not in its conversation yet", description: "Look at the agent's terminal before typing it again." },
+                  ),
+                onError: (error) => toast.show({ tone: "danger", title: "Could not tell", description: error.message }),
+              })
+            }
+          >
+            Did it arrive?
+          </Button>
+          {question.receipt !== "delivered" && (
+            <Button
+              compact
+              variant="warning"
+              disabled={run.isPending}
+              onClick={() =>
+                run.mutate("retype", {
+                  onSuccess: () => toast.show({ tone: "info", title: "It will be typed again" }),
+                  onError: (error) => toast.show({ tone: "danger", title: "Not typed again", description: error.message }),
+                })
+              }
+            >
+              Type it again
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

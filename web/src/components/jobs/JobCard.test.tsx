@@ -41,3 +41,48 @@ describe("JobCard", () => {
     expect(screen.getByText("Not released yet.")).toBeInTheDocument();
   });
 });
+
+describe("JobCard: acceptance, budgets and waits (DESIGN.md 6.15 to 6.18)", () => {
+  it("shows accepted, unverified and failed-check distinctly", () => {
+    const { unmount } = render(
+      <ul>
+        <JobCard job={makeJob({ state: "done", accept_state: "accepted", result_md: "Added it" })} onSelect={vi.fn()} />
+        <JobCard job={makeJob({ id: "j_2", state: "done", accept_state: "unverified", result_md: "Added it" })} onSelect={vi.fn()} />
+        <JobCard job={makeJob({ id: "j_3", state: "running", accept_state: "failed", check_rounds: 1 })} onSelect={vi.fn()} />
+      </ul>,
+    );
+    expect(screen.getByText("Accepted")).toBeInTheDocument();
+    expect(screen.getByText("Unverified")).toBeInTheDocument();
+    expect(screen.getByText("Check failed (round 1)")).toBeInTheDocument();
+    unmount();
+  });
+
+  it("shows what a stuck or waiting agent last said, who owns the wait, and its budget", () => {
+    renderCard(
+      makeJob({
+        state: "blocked",
+        blocked_reason: "staging is down",
+        wake: "rechecks at 14:10",
+        wait_owner: "job-1",
+        last_message: "Staging returns 503; I will look again at 14:10.",
+        budget: {
+          limits: { usd: 2, tokens: 0, minutes: 0, turns: 0, source: {}, fleet: false },
+          used: { usd: 1.8, tokens: 1, minutes: 1, turns: 1, measured: true, children: 0 },
+          share: 0.9,
+          over: "usd",
+          state: "warned",
+          detail: "",
+        },
+      }),
+    );
+    expect(screen.getByText(/Waits on job-1: rechecks at 14:10/)).toBeInTheDocument();
+    expect(screen.getByRole("note", { name: "What the agent last said" })).toHaveTextContent("Staging returns 503");
+    expect(screen.getByText("Budget 90%")).toBeInTheDocument();
+  });
+
+  it("shows a job held by the fleet's usage limit as held, not stuck", () => {
+    renderCard(makeJob({ stuck: true, cause: "limit", cause_text: "Hit a usage or rate limit", cause_detail: "claude's usage limit resets at 15:00" }));
+    expect(screen.getByText("Held")).toBeInTheDocument();
+    expect(screen.queryByText("Stuck")).not.toBeInTheDocument();
+  });
+});

@@ -1,4 +1,4 @@
--- 0015: acceptance (crowsnest's own evidence for a finished coding job), budgets, the spinning
+-- 0016: acceptance (crowsnest's own evidence for a finished coding job), budgets, the spinning
 -- detector, wake-ups for every wait, the agent's last words and answer receipt (DESIGN.md 6.15
 -- to 6.19). Times are unix seconds; 0 means unset.
 
