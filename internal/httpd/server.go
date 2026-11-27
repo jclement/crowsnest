@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/approvals"
@@ -39,6 +40,7 @@ import (
 	"github.com/jclement/crowsnest/internal/schedule"
 	"github.com/jclement/crowsnest/internal/setup"
 	"github.com/jclement/crowsnest/internal/spend"
+	"github.com/jclement/crowsnest/internal/sysstat"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/internal/throttle"
 	"github.com/jclement/crowsnest/internal/transcript"
@@ -115,6 +117,11 @@ type Deps struct {
 	// says where each agent's copies go. Nil: the routes answer 503 and sends refuse files.
 	Attachments  *attach.Service
 	AttachLayout attach.Layout
+	// Handoffs redeems the browser opener's one-time setup ids (GET /setup/open/{id}, setup mode
+	// only). Nil: those requests land on the plain setup page.
+	Handoffs interface {
+		Redeem(id string) (string, bool)
+	}
 	// Setup makes this the locked first-run server (setup.go): only /health, the setup
 	// endpoints and the web app's files, nothing else. Nil for the normal server.
 	Setup *setup.Service
@@ -129,6 +136,18 @@ type Deps struct {
 	// it. Nil (dev builds, --demo, containers): update_available stays false and the route
 	// answers 409 with the reason.
 	Updater Updater
+	// System serves /system, /settings and /onboarding (doctor, Settings, the first run). Nil:
+	// they answer 503.
+	System System
+	// OpenShell opens a plain shell pane for the checklist's fix commands. Nil: 503.
+	OpenShell ShellOpener
+	// HerdrVersionNow, when set, reports herdr's version now (it may connect after start);
+	// HerdrVersion is used otherwise.
+	HerdrVersionNow func() string
+	// Stats serves /system/stats (the header's machine strip); Processes measures agents'
+	// process trees for /system/agents. Nil: those answer 503 and an empty list.
+	Stats     *sysstat.Sampler
+	Processes *sysstat.Processes
 	// Instructions serves /instructions and /agents-instructions (DESIGN.md 21.3). Nil: 503.
 	Instructions *instructions.Service
 	// Landing, throttling, the pause, presence and the digest (DESIGN.md 6.11 to 6.14, 7.12).
@@ -240,6 +259,8 @@ func (s *Server) routes() http.Handler {
 	s.registerAttachmentRoutes(mux)
 	s.registerInstructionRoutes(mux)
 	s.registerApprovalRoutes(mux)
+	s.registerSystemRoutes(mux)
+	s.registerStatsRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)
@@ -306,6 +327,11 @@ func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 		if err != nil {
 			for _, open := range listeners {
 				_ = open.Close()
+			}
+			if errors.Is(err, syscall.EADDRINUSE) {
+				return nil, fmt.Errorf("port %d is already in use on %s (from --bind %s): another program (or another crowsnest) has it. "+
+					"Stop it, or run on another port: `crowsnest --port %d` (or CROWSNEST_PORT). `crowsnest doctor` says who answers there",
+					target.Addr.Port(), target.Addr.Addr(), target.Source, target.Addr.Port()+1)
 			}
 			return nil, fmt.Errorf("listening on %s (from --bind %s): %w", target.Addr, target.Source, err)
 		}

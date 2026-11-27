@@ -128,8 +128,8 @@ func (s *Service) ReviewOf(ctx context.Context, id string) (ReviewView, error) {
 // landOptions decides which actions are open for job.
 func (s *Service) landOptions(job Job, produced *landing.Produced) LandOptions {
 	opts := LandOptions{State: job.LandState, Detail: job.LandDetail, TornDown: job.TornDownAt != nil, Base: job.BaseBranch,
-		Branch: job.WorktreeBranch, MergeMode: firstNonEmptyDir(s.opts.Landing.MergeMode, landing.ModeMerge),
-		Protected: slices.Contains(s.opts.Landing.Protected, job.BaseBranch), Request: job.LandRequest,
+		Branch: job.WorktreeBranch, MergeMode: firstNonEmptyDir(s.landing().MergeMode, landing.ModeMerge),
+		Protected: slices.Contains(s.landing().Protected, job.BaseBranch), Request: job.LandRequest,
 		Allowed: map[string]bool{}, Why: map[string]string{}, Confirm: map[string]string{}}
 	for _, action := range []string{LandMerge, LandPR, LandDiscard} {
 		if why := s.landBlocked(job, action, produced); why != "" {
@@ -168,14 +168,14 @@ func (s *Service) landBlocked(job Job, action string, produced *landing.Produced
 		if job.BaseBranch == "" {
 			return "crowsnest does not know the branch this job started from; open a pull request instead"
 		}
-		if slices.Contains(s.opts.Landing.Protected, job.BaseBranch) {
+		if slices.Contains(s.landing().Protected, job.BaseBranch) {
 			return job.BaseBranch + " is a protected branch: Land never merges into it. Open a pull request instead"
 		}
 		if produced != nil && produced.Ahead == 0 {
 			return "the branch has no commits ahead of " + job.BaseBranch + ": nothing to merge (discard it)"
 		}
 	}
-	if action == LandPR && slices.Contains(s.opts.Landing.Protected, job.WorktreeBranch) {
+	if action == LandPR && slices.Contains(s.landing().Protected, job.WorktreeBranch) {
 		return job.WorktreeBranch + " is a protected branch: Land never pushes to it"
 	}
 	return ""
@@ -309,7 +309,7 @@ func (s *Service) landRemote(ctx context.Context, job Job, action string) (strin
 	}
 	if action == LandMerge {
 		result, err := landing.Merge(ctx, landing.MergeInput{MainDir: mainDir, WorkDir: job.WorkDir, Branch: job.WorktreeBranch, Base: job.BaseBranch,
-			Mode: s.opts.Landing.MergeMode, Message: fmt.Sprintf("Merge job %s: %s", job.ID, job.Title), Protected: s.opts.Landing.Protected})
+			Mode: s.landing().MergeMode, Message: fmt.Sprintf("Merge job %s: %s", job.ID, job.Title), Protected: s.landing().Protected})
 		if err != nil {
 			return "", err
 		}
@@ -320,7 +320,7 @@ func (s *Service) landRemote(ctx context.Context, job Job, action string) (strin
 		return fmt.Sprintf("Merged into %s (%s, %s)", job.BaseBranch, how, shortHash(result.Commit)), nil
 	}
 	push, err := landing.Push(ctx, landing.PushInput{WorkDir: job.WorkDir, Branch: job.WorktreeBranch, Base: job.BaseBranch,
-		Title: job.Title, Body: prBody(job), Protected: s.opts.Landing.Protected, GH: s.opts.Landing.GH})
+		Title: job.Title, Body: prBody(job), Protected: s.landing().Protected, GH: s.landing().GH})
 	if err != nil {
 		return "", err
 	}
@@ -389,7 +389,8 @@ func (s *Service) recordLanded(ctx context.Context, id, state, detail, by string
 			return invalid("job %s was already %s", FormatID(r.ID), landWord(r.LandState))
 		}
 		if !State(r.State).Terminal() {
-			if state == LandedDiscarded && !(State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseReview) {
+			waitingAfterReview := State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseReview
+			if state == LandedDiscarded && !waitingAfterReview {
 				r.State = string(StateCancelled)
 			} else {
 				r.State = string(StateDone)
@@ -593,7 +594,7 @@ func (s *Service) RequestLand(ctx context.Context, id, action string, caller que
 		return questions.Question{}, invalid("a land request for job %s is already waiting for the human", job.ID)
 	}
 	body := fmt.Sprintf("An agent asks to **%s** job %s, %q.\n\n%s\n\n", landVerb(action), job.ID, job.Title,
-		confirmText(job, action, firstNonEmptyDir(s.opts.Landing.MergeMode, landing.ModeMerge)))
+		confirmText(job, action, firstNonEmptyDir(s.landing().MergeMode, landing.ModeMerge)))
 	if reason = strings.TrimSpace(reason); reason != "" {
 		body += "Its reason (written by the agent, not crowsnest):\n\n" + indent(oneLine(reason, 600)) + "\n\n"
 	}

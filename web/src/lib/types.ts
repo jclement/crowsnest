@@ -108,7 +108,10 @@ export interface Fleet {
 
 /** One numbered option of a terminal dialog: pressing `key` (a digit) chooses it. */
 export interface DialogOption {
+  /** The digit that picks a numbered option; empty in an arrow-key menu. */
   key: string;
+  /** For an arrow-key menu (Claude's folder-trust question): the keys that pick this option. */
+  keys?: string[];
   label: string;
   /** The highlighted (cursor) option. */
   selected: boolean;
@@ -166,5 +169,5 @@ export interface KeysResponse {
 }
 
 /** The names of the events on /api/v1/events (DESIGN.md section 10). */
-export const eventNames = ["hello", "heartbeat", "job", "fleet", "message", "question", "orchestrator", "poke", "journal", "say", "schedule", "spend", "attachment", "project", "lead", "instructions", "approval", "pause", "presence", "throttle"] as const;
+export const eventNames = ["hello", "heartbeat", "job", "fleet", "message", "question", "orchestrator", "poke", "journal", "say", "schedule", "spend", "attachment", "project", "lead", "instructions", "approval", "sys", "system", "pause", "presence", "throttle"] as const;
 export type EventName = (typeof eventNames)[number];

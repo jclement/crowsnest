@@ -1,4 +1,4 @@
-// `crowsnest digest submit` (DESIGN.md 7.12): how the orchestrator delivers the daily digest it
+// `crowsnest digest submit` (DESIGN.md 7.13): how the orchestrator delivers the daily digest it
 // was asked to write. It runs in the orchestrator's pane and needs its token.
 
 package main

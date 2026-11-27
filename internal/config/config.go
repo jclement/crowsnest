@@ -70,6 +70,12 @@ type Config struct {
 	TLSCert            string // path to a PEM certificate; empty means plain HTTP
 	TLSKey             string // path to the matching PEM key
 
+	// TailnetName is this machine's Tailscale MagicDNS name when it was detected at start (it is
+	// in HostNames, so `tailscale serve` works without --allowed-host); empty otherwise.
+	TailnetName string
+	// NoTailscaleDetect turns that detection off (--no-tailscale-detect).
+	NoTailscaleDetect bool
+
 	// HostNames is every name the Host header may carry: loopback names, bound IPs, this
 	// machine's hostname and AllowedHosts. The host check in httpd reads it (DESIGN.md 4.3).
 	HostNames []string
@@ -83,6 +89,11 @@ type Config struct {
 	PermissionMode string        // orchestrator permission mode
 	PokeInterval   time.Duration // timer poke interval; 0 disables timer pokes
 	NoOrchestrator bool          // serve the UI over the session without starting Claude
+	// Engine is the orchestrator's agent and the default for jobs: EngineAuto, EngineClaude or
+	// EngineCodex. auto is resolved against what is installed when the orchestrator starts.
+	Engine string
+	// Open is whether serve opens a browser at start: OpenAuto, OpenAlways or OpenNever.
+	Open string
 
 	// ---- Name, Remote Control and upkeep (upkeep.go) ----
 
@@ -100,6 +111,7 @@ type Config struct {
 	HeavySlots     int     // heavy commands at once (crowsnest heavy)
 	Review         string  // the review gate's default for isolated builder jobs: auto | off | claude | codex | same
 	MergeMode      string  // Land's merge: merge (a merge commit) | ff (fast-forward only)
+	DigestAt       string  // HH:MM: the daily digest's time; "" off
 
 	// ---- The guard hook and approvals (guard.go) ----
 
@@ -134,6 +146,11 @@ type Config struct {
 	DataDir                string // where the SQLite database lives
 	StateDir               string // logs and runtime state for this session: ~/.local/state/crowsnest/<session>
 	ConfigFile             string // the config file that was read, empty if none
+
+	// Sources says where each option's value came from, by option name: "--port" (a flag), an
+	// environment variable's name, SourceDatabase (saved in the app), the config file's base
+	// name, or "default". SourceKind classifies one. The Settings page and doctor show it.
+	Sources map[string]string
 
 	// Warnings are problems that do not stop the start but should be logged, such as a config
 	// file holding a password that other users can read (R1 L5).

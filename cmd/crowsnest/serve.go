@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/doctor"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
@@ -34,6 +36,8 @@ import (
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/sysstat"
+	"github.com/jclement/crowsnest/internal/system"
 	"github.com/jclement/crowsnest/internal/term"
 	"github.com/jclement/crowsnest/web"
 )
@@ -63,7 +67,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "crowsnest: could not drop secrets from its own environment:", err)
 		}
 	}
-	cfg, err := config.LoadForServe(cmd.Flags(), config.Options{})
+	cfg, err := loadConfig(cmd.Context(), cmd.Flags())
 	config.UnsetSecretEnv() // loaded or refused, nothing after this needs them (R1 H1)
 	if err != nil {
 		return err
@@ -76,11 +80,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer cleanupDemo()
-	logger := newLogger()
+	home, _ := os.UserHomeDir()
+	logs := system.NewLogRing(home)
+	logger := slog.New(logs.Handler(newLogger().Handler()))
 	slog.SetDefault(logger)
 	logger.Info("starting crowsnest", "name", cfg.Name, "version", version, "config", cfg)
 	for _, warning := range cfg.Warnings {
 		logger.Warn(warning)
+	}
+	if cfg.TailnetName != "" {
+		logger.Info("Tailscale name allowed as a host, so `tailscale serve` reaches this crowsnest", "name", cfg.TailnetName, "turn_off", "--no-tailscale-detect")
 	}
 	if err := privateDir(cfg.StateDir); err != nil {
 		return err
@@ -91,7 +100,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return serve(ctx, cfg, logger, defaultServeHooks())
+	hooks := defaultServeHooks()
+	hooks.logs, hooks.reload, hooks.open = logs, reloader(cmd.Flags()), browserOpener(cfg, logger)
+	return serve(ctx, cfg, logger, hooks)
 }
 
 // serveHooks are the seams serve's tests use: how herdr is reached (a test passes a fake and
@@ -99,6 +110,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 type serveHooks struct {
 	connect  func(ctx context.Context, cfg config.Config, logger *slog.Logger) (herdr.Client, string, error)
 	setupURL func(link, token string)
+	// logs keeps recent warnings for the System page (nil in tests); reload re-reads the config
+	// with saved settings (nil: settings cannot be changed in the app).
+	logs   *system.LogRing
+	reload func(stored map[string]string) (config.Config, error)
+	// open opens a URL in the browser (--open); nil never opens (tests).
+	open func(url string)
+	// doctorEnv, when set, is the machine the doctor and the start gate see (tests); nil: the
+	// real one (or --demo's scripted one).
+	doctorEnv *doctor.Env
 }
 
 func defaultServeHooks() serveHooks { return serveHooks{connect: connectHerdr} }
@@ -164,12 +184,15 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	if err != nil {
 		return err
 	}
+	live := &liveServices{}
+	journalLog := journal.New(db, events, logger, nil)
+	sys := newSystem(cfg, db, events, journalLog, client, agentSocketPath(cfg), hooks, live, logger)
 	identity := agentid.New(db, nil)
 	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
-	journalLog := journal.New(db, events, logger, nil)
 	ctl := newControls(cfg, db, events, journalLog, logger)
 	ctl.run(ctx, cfg.Demo)
+	live.ctl.Store(ctl)
 	refs := &jobRefs{ctl: ctl, guard: guardRules(cfg, logger), projects: newProjectWiring(cfg, db, events), instructions: instructions.New(instructions.Options{Store: db, RolesDir: rolesDir(cfg), Hub: events, Logger: logger})}
 	approvalLinks := &approvalWiring{}
 	approvalService, err := newApprovals(cfg, db, events, refs.guard, approvalLinks, logger)
@@ -187,6 +210,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	meter := newSpendMeter(cfg, db, events, refs, jobServiceRef.Load, logger)
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, files, meter, logger)
 	jobServiceRef.Store(jobService)
+	live.jobs.Store(jobService)
+	go live.applyJobDefaults(ctx, cfg)
 	approvalLinks.jobs.Store(jobService)
 	files.jobs = jobService
 	go files.run(ctx, events, refs.questions.Load)
@@ -198,13 +223,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	runApprovals(ctx, approvalService, fleetCache, client, logger)
 	digests := &digestProxy{}
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, ctl, digests, logger)
+		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, ctl, digests, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err
 	}
-	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions, ctl, logger)
+	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions,
+		orchGate{gate: sys.Gate, launch: sys.LaunchSettings(orchestratorRemoteControl)}, ctl, logger)
+	sys.SetOrchestrator(orchestrator)
+	greet := greeter(ctx, client, orchestrator, logger)
+	live.greeter.Store(&greet)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
 	var projectOf func(string) (int64, string)
 	if cfg.Demo {
@@ -215,11 +244,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, ctl, logger)
 	tender := newTender(cfg, client, db, journalLog, orchestrator, conversations, logger)
+	live.tender.Store(tender)
 	poker := startPoker(ctx, cfg, db, events, pokeServices{
 		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
 		tasks: scheduleTasks{service: scheduleService}, tender: tender, leads: refs.projects.leads.Load, ctl: ctl,
 	}, client, logger)
 	pokerRef.Store(poker)
+	live.poker.Store(poker)
 	tasksFor := func(projectID int64) orch.TaskSource {
 		return scheduleTasks{service: scheduleService, projectID: projectID}
 	}
@@ -245,7 +276,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	}
 
 	digestService := startDigest(ctx, digestDeps{cfg: cfg, db: db, journal: journalLog, client: client, orchestrator: orchestrator,
-		questions: questionService, approvals: approvalService, meter: meter, projects: refs.projects.service, ctl: ctl, logger: logger})
+		questions: questionService, approvals: approvalService, meter: meter, projects: refs.projects.service, ctl: ctl, sys: sys, logger: logger})
 	digests.service.Store(digestService)
 	ctl.presence.SetOnDNDEnd(dndSummary(refs.notify))
 	deps := httpd.Deps{
@@ -258,7 +289,14 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Journal: journalLog, Poker: poker, Push: pushService, Schedule: scheduleService, Tender: tender,
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
 		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
+		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
+		Processes: sysstat.NewProcesses(),
 	}
+	var serverRef atomic.Pointer[httpd.Server]
+	deps.Stats = startStats(ctx, cfg, events, fleetCache, func() bool {
+		server := serverRef.Load()
+		return server != nil && server.OpenStreams() > 0
+	}, logger)
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
 	}
@@ -269,6 +307,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	server, err := httpd.New(deps)
 	if err != nil {
 		return err
+	}
+	serverRef.Store(server)
+	var readyOnce sync.Once
+	server.OnListening = func(url string) {
+		readyOnce.Do(func() { logReady(ctx, sys, []string{browsableBase(url)}, logger) })
 	}
 	return server.Run(ctx)
 }
@@ -286,19 +329,23 @@ func connectHerdr(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		logger.Info("demo mode: using the in-memory herdr with a scripted fleet", "herdr_version", fake.Version)
 		return demo, fake.Version, nil
 	}
-	session, err := herdr.EnsureSession(ctx, herdr.SessionOptions{
+	if err := herdr.ValidateSessionName(cfg.Session, cfg.AllowDefaultSession); err != nil {
+		return nil, "", err
+	}
+	// herdr may be missing or slow to start: serve comes up anyway and connects in the
+	// background, so the app can explain and things start once herdr is there (DESIGN.md 3.4).
+	lazy := herdr.NewLazy()
+	go lazy.Connect(ctx, herdr.SessionOptions{
 		Name: cfg.Session, AllowDefault: cfg.AllowDefaultSession, LogDir: cfg.StateDir, Logger: logger,
+	}, func(session *herdr.Session) {
+		logger.Info("connected to herdr", "session", session.Name, "socket", session.SocketPath,
+			"herdr_version", session.Pong.Version, "protocol", session.Pong.Protocol, "started", session.Started)
+		if session.Pong.Protocol != herdr.ProtocolVersion {
+			logger.Warn("herdr speaks a different protocol than crowsnest was built for; some features may misbehave",
+				"herdr_protocol", session.Pong.Protocol, "expected", herdr.ProtocolVersion)
+		}
 	})
-	if err != nil {
-		return nil, "", fmt.Errorf("connecting to herdr session %q: %w", cfg.Session, err)
-	}
-	logger.Info("connected to herdr", "session", session.Name, "socket", session.SocketPath,
-		"herdr_version", session.Pong.Version, "protocol", session.Pong.Protocol, "started", session.Started)
-	if session.Pong.Protocol != herdr.ProtocolVersion {
-		logger.Warn("herdr speaks a different protocol than crowsnest was built for; some features may misbehave",
-			"herdr_protocol", session.Pong.Protocol, "expected", herdr.ProtocolVersion)
-	}
-	return session.Client, session.Pong.Version, nil
+	return lazy, "", nil
 }
 
 // terminals picks the bridges behind the terminal routes. --demo gets the built-in toy: the fake

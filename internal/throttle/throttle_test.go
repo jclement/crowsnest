@@ -67,17 +67,19 @@ func TestSettingsSaveAndReset(t *testing.T) {
 	if got := th.Settings(ctx).MaxRunning; got != 4 {
 		t.Fatalf("default %d", got)
 	}
-	if _, err := th.Save(ctx, Settings{MaxRunning: 0}); err == nil {
-		t.Fatal("a limit of 0 must be refused")
+	if _, err := th.Save(ctx, Settings{ProjectLimits: map[int64]int{2: -1}}); err == nil {
+		t.Fatal("a negative project limit must be refused")
 	}
-	if _, err := th.Save(ctx, Settings{MaxRunning: 6, ProjectLimits: map[int64]int{2: 1, 3: 0}, LoadPerCore: 1.5}); err != nil {
+	if _, err := th.Save(ctx, Settings{ProjectLimits: map[int64]int{2: 1, 3: 0}}); err != nil {
 		t.Fatal(err)
 	}
+	th.SetDefaults(Settings{MaxRunning: 6, LoadPerCore: 1.5}) // a change in Settings, applied live
 	got := th.Settings(ctx)
 	if got.MaxRunning != 6 || got.ProjectLimits[2] != 1 || len(got.ProjectLimits) != 1 || got.LoadPerCore != 1.5 {
 		t.Fatalf("saved %+v", got)
 	}
-	if reset, _ := th.Reset(ctx); reset.MaxRunning != 4 {
+	th.SetDefaults(Settings{})
+	if reset, _ := th.Reset(ctx); reset.MaxRunning != 4 || len(reset.ProjectLimits) != 0 {
 		t.Fatalf("reset %+v", reset)
 	}
 }

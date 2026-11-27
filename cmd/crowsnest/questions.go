@@ -24,13 +24,14 @@ import (
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/system"
 )
 
 // startQuestions builds the question service, starts its background work and the agent socket,
 // and returns the service and a stop function. Everything stops when ctx ends or stop is called;
 // stop returns once the deliverer and the sweeper have finished, and serve calls it before the
 // database closes, so an attempt cut short by shutdown can still record its outcome (R1b-C08).
-func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, pusher *push.Watcher, socket string, sessionContext func(context.Context, string, string) string, files *attachWiring, approvalService *approvals.Service, layers *instructions.Service, subjectOf func(context.Context, string) string, projectsFor agentapi.ProjectReader, ctl *controls, digestService agentapi.DigestSubmitter, logger *slog.Logger) (*questions.Service, func(), error) {
+func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, jobService *jobs.Service, speaker agentapi.Speaker, pusher *push.Watcher, socket string, sessionContext func(context.Context, string, string) string, files *attachWiring, approvalService *approvals.Service, layers *instructions.Service, subjectOf func(context.Context, string) string, projectsFor agentapi.ProjectReader, sys *system.Service, ctl *controls, digestService agentapi.DigestSubmitter, logger *slog.Logger) (*questions.Service, func(), error) {
 	var deliverer *questions.Deliverer
 	var notifyAsked func(questions.Question)
 	if cfg.NotifyURL != "" {
@@ -80,7 +81,8 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 		return nil, stop, err
 	}
 	server := agentapi.NewServer(agentapi.ServerOptions{Questions: service, Identity: identity, Jobs: jobService, Hub: events, Speaker: speaker, Logger: logger, Version: version, SessionContext: sessionContext,
-		Attachments: files.service, AttachRoots: files.roots, Approvals: approvalService, Instructions: layers, SubjectOf: subjectOf, Projects: projectsFor, Pause: ctl.pauseOrNil(), Digest: digestService})
+		Attachments: files.service, AttachRoots: files.roots, Approvals: approvalService, Instructions: layers, SubjectOf: subjectOf, Projects: projectsFor,
+		Pause: ctl.pauseOrNil(), Digest: digestService, OnHook: sys.RecordHook, Live: func(ctx context.Context) any { return sys.Live(ctx) }})
 	go func() {
 		if err := server.Serve(ctx, listener); err != nil {
 			logger.Error("agent socket stopped", "err", err)

@@ -52,7 +52,7 @@ func newHeavyCommand() *cobra.Command {
 				return nil
 			}
 			if len(args) == 0 {
-				return usageError{errors.New("give the command to run after --, e.g. crowsnest heavy -- go test ./...")}
+				return usageError{errors.New("give the command to run after --, for example: crowsnest heavy -- go test ./…")}
 			}
 			return runHeavy(cmd.Context(), dir, timeout, args)
 		},

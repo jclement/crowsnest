@@ -49,6 +49,8 @@ import {
   Volume2,
   FolderKanban,
   BookText,
+  Activity,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
@@ -105,6 +107,8 @@ const icons: Record<PaletteIcon, LucideIcon> = {
   signout: LogOut,
   speak: Volume2,
   voice: Mic,
+  system: Activity,
+  settings: SlidersHorizontal,
   project: FolderKanban,
   instructions: BookText,
   pause: PauseCircle,

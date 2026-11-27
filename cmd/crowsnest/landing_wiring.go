@@ -1,4 +1,4 @@
-// Wiring for the controls added on wip/landing (DESIGN.md 6.11 to 6.14, 7.12): the pause switch,
+// Wiring for the controls added on wip/landing (DESIGN.md 6.11 to 6.14, 7.13): the pause switch,
 // the throttle (slot limit, load hold, the heavy directory), presence, and the review gate and
 // Land settings handed to the jobs service. They are built once, early in serve, and handed to
 // every service that has to respect them; each is nil-safe where a caller may run without it.
@@ -31,6 +31,7 @@ import (
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/system"
 	"github.com/jclement/crowsnest/internal/throttle"
 )
 
@@ -79,6 +80,19 @@ func (c *controls) run(ctx context.Context, demo bool) {
 	go c.presence.Run(ctx)
 	if !demo {
 		go c.throttle.Run(ctx)
+	}
+}
+
+// applyConfig pushes a Settings change of the limit, the load hold, the heavy slots, the review
+// gate and the merge mode into the running services (DESIGN.md 3.2: these apply live).
+func (c *controls) applyConfig(cfg config.Config, jobService *jobs.Service) {
+	c.throttle.SetDefaults(throttle.Settings{MaxRunning: cfg.MaxRunningJobs, LoadPerCore: cfg.LoadHold})
+	if err := throttle.WriteHeavyConfig(c.heavyDir, cfg.HeavySlots); err != nil {
+		c.logger.Warn("writing the heavy-command configuration", "err", err)
+	}
+	c.landing.ReviewDefault, c.landing.MergeMode = cfg.Review, cfg.MergeMode
+	if jobService != nil {
+		jobService.SetLanding(cfg.Review, cfg.MergeMode)
 	}
 }
 
@@ -192,6 +206,7 @@ type digestDeps struct {
 	meter        *spend.Meter
 	projects     *projects.Service
 	ctl          *controls
+	sys          *system.Service
 	logger       *slog.Logger
 }
 
@@ -200,6 +215,19 @@ type digestDeps struct {
 func startDigest(ctx context.Context, d digestDeps) *digest.Service {
 	service := digest.New(digest.Options{
 		Store: d.db, Journal: d.journal, Logger: d.logger, StateDir: d.cfg.StateDir, Paused: d.ctl.paused,
+		At: func() string {
+			if d.sys == nil {
+				return d.cfg.DigestAt
+			}
+			return d.sys.Config().DigestAt
+		},
+		SetAt: func(ctx context.Context, at string) error {
+			if d.sys == nil {
+				return errors.New("settings cannot be changed in this process")
+			}
+			_, err := d.sys.UpdateSetting(ctx, "digest-at", at, false)
+			return err
+		},
 		Notice: func(ctx context.Context, title, body string) (int64, error) {
 			if d.questions == nil {
 				return 0, errors.New("the inbox is not ready")
@@ -264,7 +292,7 @@ func startDigest(ctx context.Context, d digestDeps) *digest.Service {
 	if !d.cfg.Demo {
 		go service.Run(ctx)
 	} else if list, err := service.List(ctx, 1); err == nil && len(list) == 0 {
-		// --demo shows one digest in the list and the Inbox (DESIGN.md 7.12).
+		// --demo shows one digest in the list and the Inbox (DESIGN.md 7.13).
 		if err := service.SeedDemo(ctx); err != nil {
 			d.logger.Warn("seeding the demo digest", "err", err)
 		}

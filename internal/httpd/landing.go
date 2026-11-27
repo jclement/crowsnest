@@ -1,5 +1,5 @@
 // Browser routes for landing, throttling, the pause, presence and the digest (DESIGN.md 6.11 to
-// 6.14, 7.12). Every route needs a session; the state-changing ones pass the origin check and
+// 6.14, 7.13). Every route needs a session; the state-changing ones pass the origin check and
 // need X-Crowsnest like every other. A land or a bulk discard also needs `"confirm": true` in its
 // body (409 CONFIRM_REQUIRED without), so a confirmation the UI shows is also checked here.
 //

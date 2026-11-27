@@ -134,6 +134,10 @@ type harnessOptions struct {
 	// Projects and their leads (projects_test.go); nil: the routes answer 503
 	projects *projects.Service
 	leads    *projects.Leads
+	// Extra allowed Host names (the tailnet name detected at start).
+	hostNames []string
+	// The System page, Settings and the first run (system_test.go); nil: 503
+	system System
 }
 
 var testWeb = fstest.MapFS{
@@ -170,6 +174,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	t.Cleanup(func() { _ = db.Close() })
 	c := &clock{now: time.Now()}
 	cfg := testConfig(opts.noAuth)
+	cfg.HostNames = append(cfg.HostNames, opts.hostNames...)
 	cfg.TrustedProxies = opts.trustedProxies
 	cfg.TrustedProxyHeader = opts.trustedProxyHeader
 	if cfg.TrustedProxyHeader == "" {
@@ -215,6 +220,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Instructions:  opts.instructions,
 		Approvals:     opts.approvals,
 		Actions:       opts.actions,
+		System:        opts.system,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -133,6 +133,8 @@ type Server struct {
 	attachments AgentAttacher
 	attachRoots func(ctx context.Context, caller questions.Caller) []string
 	approvals   *approvals.Service
+	onHook      func(event string)
+	live        func(ctx context.Context) any
 
 	instructions LoadedRecorder
 	subjectOf    func(ctx context.Context, paneID string) string
@@ -152,7 +154,7 @@ type ServerOptions struct {
 	Jobs      *jobs.Service // nil: the job routes answer 503
 	// Pause is the automation's pause switch (DESIGN.md 6.13); nil: the pause routes answer 503.
 	Pause *pause.Switch
-	// Digest takes `crowsnest digest submit` (DESIGN.md 7.12); nil: 503.
+	// Digest takes `crowsnest digest submit` (DESIGN.md 7.13); nil: 503.
 	Digest DigestSubmitter
 	// Identity resolves callers' tokens. nil: every caller is unidentified.
 	Identity *agentid.Registry
@@ -175,6 +177,13 @@ type ServerOptions struct {
 	// Approvals serves the PermissionRequest hook (DESIGN.md 8.7). Nil: those routes answer 503
 	// and every hook falls through to Claude's own dialog.
 	Approvals *approvals.Service
+	// OnHook, when set, is told the event name of every hook that reaches the socket, so the
+	// System page and doctor can say which hooks have been seen firing.
+	OnHook func(event string)
+	// Live, when set, answers GET /api/v1/doctor: the running instance's own view for
+	// `crowsnest doctor` (orchestrator state, hooks seen, recent errors). Nothing in it is a
+	// secret; the socket is this user's alone (0600).
+	Live func(ctx context.Context) any
 	// Instructions records the instruction files agents report loading (the InstructionsLoaded
 	// hook, DESIGN.md 21.3). Nil: those hooks are accepted and dropped.
 	Instructions LoadedRecorder
@@ -207,7 +216,8 @@ func NewServer(opts ServerOptions) *Server {
 		questions: opts.Questions, identity: opts.Identity, jobs: opts.Jobs, hub: opts.Hub, speaker: opts.Speaker,
 		logger: opts.Logger, version: opts.Version, sessionContext: opts.SessionContext,
 		attachments: opts.Attachments, attachRoots: opts.AttachRoots, approvals: opts.Approvals,
-		instructions: opts.Instructions, subjectOf: opts.SubjectOf, projects: opts.Projects, pause: opts.Pause, digest: opts.Digest,
+		instructions: opts.Instructions, subjectOf: opts.SubjectOf, projects: opts.Projects,
+		pause: opts.Pause, digest: opts.Digest, onHook: opts.OnHook, live: opts.Live,
 		asks:    ratelimit.New(askBurst, askRefill, opts.Now),
 		says:    ratelimit.New(sayBurst, sayRefill, opts.Now),
 		creates: ratelimit.New(createBurst, createRefill, opts.Now),
@@ -215,6 +225,7 @@ func NewServer(opts ServerOptions) *Server {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", server.handleHealth)
+	mux.HandleFunc("GET /api/v1/doctor", server.handleLive)
 	mux.HandleFunc("POST /api/v1/questions", server.handleAsk)
 	mux.HandleFunc("GET /api/v1/questions", server.handleList)
 	mux.HandleFunc("GET /api/v1/questions/{id}", server.handleGet)
@@ -295,6 +306,15 @@ type HealthResponse struct {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeData(w, http.StatusOK, HealthResponse{Status: "ok", Version: s.version})
+}
+
+// handleLive is GET /api/v1/doctor: the instance's own view for `crowsnest doctor`.
+func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
+	if s.live == nil {
+		writeError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "This crowsnest does not report its live state.")
+		return
+	}
+	writeData(w, http.StatusOK, s.live(r.Context()))
 }
 
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {

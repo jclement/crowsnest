@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/herdr"
@@ -193,6 +194,8 @@ type pokeState struct {
 type Poker struct {
 	opts PokerOptions
 	kick chan struct{}
+	// liveInterval overrides opts.Interval once SetInterval has been called (Settings).
+	liveInterval atomic.Pointer[time.Duration]
 
 	// step serialises checks: the loop's, a manual "Poke now", and a test's.
 	step sync.Mutex
@@ -457,11 +460,11 @@ func (p *Poker) precheckInput(now time.Time, manual bool) PrecheckInput {
 // timerReason queues the standing picture at each timer tick when it changed since the last
 // timer poke (DESIGN.md 7.4: the timer costs nothing when nothing changed).
 func (p *Poker) timerReason(ctx context.Context, now time.Time) {
-	if p.opts.Interval <= 0 || p.opts.Standing == nil {
+	if p.interval() <= 0 || p.opts.Standing == nil {
 		return
 	}
 	p.mu.Lock()
-	due := !p.lastTimer.IsZero() && now.Sub(p.lastTimer) >= p.opts.Interval
+	due := !p.lastTimer.IsZero() && now.Sub(p.lastTimer) >= p.interval()
 	if p.lastTimer.IsZero() || due {
 		p.lastTimer = now
 	}
@@ -714,4 +717,16 @@ func unixTime(seconds int64) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(seconds, 0)
+}
+
+// SetInterval changes the timer poke interval at once (the app's Settings); 0 turns timer pokes
+// off.
+func (p *Poker) SetInterval(interval time.Duration) { p.liveInterval.Store(&interval) }
+
+// interval is the timer poke interval in effect.
+func (p *Poker) interval() time.Duration {
+	if live := p.liveInterval.Load(); live != nil {
+		return *live
+	}
+	return p.opts.Interval
 }

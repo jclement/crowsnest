@@ -18,6 +18,7 @@ const (
 	optHeavySlots     = "heavy-slots"
 	optReview         = "review"
 	optMerge          = "merge"
+	optDigestAt       = "digest-at"
 )
 
 // Review gate defaults.
@@ -45,6 +46,7 @@ func init() {
 		option{name: optHeavySlots, env: []string{"CROWSNEST_HEAVY_SLOTS"}, kind: kindInt, def: "2", usage: "heavy commands (builds, test suites) that may run at once through `crowsnest heavy`"},
 		option{name: optReview, env: []string{"CROWSNEST_REVIEW"}, def: ReviewAuto, usage: "review gate for builder jobs in a worktree: auto (the other engine if installed), same, claude, codex or off"},
 		option{name: optMerge, env: []string{"CROWSNEST_MERGE"}, def: MergeCommit, usage: "how Land merges a job's branch: merge (a merge commit) or ff (fast-forward only)"},
+		option{name: optDigestAt, env: []string{"CROWSNEST_DIGEST_AT"}, usage: "HH:MM: write the daily digest into the Inbox after this local time (default off)"},
 	)
 }
 
@@ -75,6 +77,14 @@ func (l *loader) loadLanding(cfg *Config) error {
 	cfg.MergeMode = strings.ToLower(strings.TrimSpace(l.str(optMerge)))
 	if cfg.MergeMode != MergeCommit && cfg.MergeMode != MergeFF {
 		return fmt.Errorf("--merge %q: give merge or ff", cfg.MergeMode)
+	}
+	cfg.DigestAt = strings.TrimSpace(l.str(optDigestAt))
+	if cfg.DigestAt != "" {
+		minutes, ok := parseHHMM(cfg.DigestAt)
+		if !ok {
+			return fmt.Errorf("--digest-at %q is not a time of day; use HH:MM, such as 17:00, or leave it empty for off", cfg.DigestAt)
+		}
+		cfg.DigestAt = twoDigits(minutes/60) + ":" + twoDigits(minutes%60)
 	}
 	return nil
 }

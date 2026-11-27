@@ -1,5 +1,5 @@
 -- 0014: landing a finished job, the review gate, start holds and the daily digest (DESIGN.md
--- 6.7, 6.11 to 6.13, 7.12). Times are unix seconds; 0 means unset.
+-- 6.7, 6.11 to 6.13, 7.13). Times are unix seconds; 0 means unset.
 
 -- What a job in a git worktree started from, so its review can show exactly what it produced.
 ALTER TABLE jobs ADD COLUMN base_branch TEXT NOT NULL DEFAULT '';   -- the main checkout's branch at launch

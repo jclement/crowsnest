@@ -29,6 +29,7 @@ const kindTones: Record<JournalKind, ChipTone> = {
   land: "success",
   review: "accent",
   digest: "neutral",
+  settings: "neutral",
 };
 
 export function JournalPanel() {

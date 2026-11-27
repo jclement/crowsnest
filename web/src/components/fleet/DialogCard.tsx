@@ -39,8 +39,9 @@ export function DialogCard({ target, agentName, screen, onOpenTerminal }: Dialog
     // an answered dialog leaves the fleet's needs-you list, which unmounts this card, and React
     // Query drops the callbacks of an unmounted caller. The confirmation was lost every time the
     // dialog cleared quickly (found by the M9 fixtures run). A promise settles regardless.
-    sendKeys.mutateAsync({ keys: [option.key], screen_hash: screen.screen_hash }).then(
-      () => toast.show({ tone: "success", title: `Sent “${option.key}” to ${agentName}`, description: option.label }),
+    const keys = option.keys && option.keys.length > 0 ? option.keys : [option.key];
+    sendKeys.mutateAsync({ keys, screen_hash: screen.screen_hash }).then(
+      () => toast.show({ tone: "success", title: option.key ? `Sent “${option.key}” to ${agentName}` : `Answered ${agentName}`, description: option.label }),
       (error: unknown) => {
         if (error instanceof ApiError && error.status === 409) {
           setConflict(true);
@@ -91,7 +92,7 @@ export function DialogCard({ target, agentName, screen, onOpenTerminal }: Dialog
       ) : (
         <ul aria-label="Options" className="flex flex-col gap-1.5">
           {dialog.options.map((option) => (
-            <li key={option.key}>
+            <li key={option.key || option.label}>
               <OptionButton option={option} disabled={sendKeys.isPending} onPress={() => press(option)} />
             </li>
           ))}
@@ -113,9 +114,11 @@ function OptionButton({ option, disabled, onPress }: { option: DialogOption; dis
         risk ? "border-warning/60 bg-warning/5 hover:bg-warning/10" : "border-border-strong bg-surface hover:border-accent hover:bg-hover",
       )}
     >
-      <kbd className="mt-px inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border-strong bg-surface-sunken font-mono text-2xs font-semibold text-heading">
-        {option.key}
-      </kbd>
+      {option.key && (
+        <kbd className="mt-px inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border-strong bg-surface-sunken font-mono text-2xs font-semibold text-heading">
+          {option.key}
+        </kbd>
+      )}
       <span className="min-w-0 flex-1 break-words text-heading">{option.label}</span>
       {risk && (
         <Chip tone="warning" title={risk} className="mt-px">

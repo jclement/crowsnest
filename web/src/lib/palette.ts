@@ -19,8 +19,8 @@ import type { ChipTone } from "../components/ui/Chip";
 
 // ---- Commands -------------------------------------------------------------------------------
 
-export type ViewPath = "/" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal";
-export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions" | "digests" | "worktrees" | "limits" | "pause";
+export type ViewPath = "/" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal" | "/system";
+export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions" | "settings" | "digests" | "worktrees" | "limits" | "pause";
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
 export type PaletteCommand =
@@ -118,7 +118,9 @@ export type PaletteIcon =
   | "instructions"
   | "pause"
   | "digest"
-  | "worktrees";
+  | "worktrees"
+  | "system"
+  | "settings";
 
 /** A secondary action of an item: reached with → (or the row's chevron), or ⌘Enter for the first. */
 export interface PaletteAction {
@@ -416,6 +418,16 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
   items.push(sheet("spend", "Spend", "spend", ["cost", "tokens", "usage", "money", "budget", "price"]));
   items.push(sheet("instructions", "Instructions", "instructions", ["settings", "roles", "global", "layers", "prompt", "claude.md", "agents.md"]));
   items.push(sheet("shortcuts", "Keyboard shortcuts", "keyboard", ["help", "keys", "?"]));
+  items.push(sheet("settings", "Settings", "settings", ["preferences", "model", "poke", "engine", "permission", "configuration"]));
+  items.push({
+    id: "nav:/system",
+    group: "navigate",
+    title: "System",
+    keywords: ["doctor", "health", "versions", "diagnostics", "check", "status", "cpu", "memory"],
+    icon: "system",
+    command: { kind: "navigate", to: "/system" },
+    verb: "Go",
+  });
   if (sources.voiceSettings) items.push(sheet("voice", "Voice settings", "voice", ["talk", "speak", "elevenlabs", "microphone"]));
   for (const choice of ["system", "light", "dark"] as const) {
     items.push({

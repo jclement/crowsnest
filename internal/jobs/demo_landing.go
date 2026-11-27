@@ -22,6 +22,11 @@ import (
 	"github.com/jclement/crowsnest/internal/store"
 )
 
+func gitInstalled() bool {
+	_, err := exec.LookPath("git")
+	return err == nil
+}
+
 // demoGit runs git in dir for the demo repository, with no global configuration (no signing,
 // no hooks of the user's).
 func demoGit(dir string, args ...string) error {
@@ -45,7 +50,7 @@ func demoWrite(dir, name, body string) error {
 // SeedDemoLanding adds the landing demo under root (the demo's state directory). worktrees is
 // the fake herdr's switch to real git (fake.RealGitWorktrees), called before anything is made.
 func SeedDemoLanding(ctx context.Context, s *Service, root string, worktrees func()) error {
-	if _, err := exec.LookPath("git"); err != nil {
+	if !gitInstalled() {
 		return nil // no git: the rest of the demo still runs
 	}
 	repo := filepath.Join(root, "demo-src", "widgets")

@@ -1,4 +1,4 @@
-// DigestSwitch: the daily digest's row in the Schedule sheet (DESIGN.md 7.12): one switch and a
+// DigestSwitch: the daily digest's row in the Schedule sheet (DESIGN.md 7.13): one switch and a
 // time, off by default.
 import { useState } from "react";
 import { useDigestSettings, useSaveDigestSettings } from "../../lib/queries";

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/opener"
 	"github.com/jclement/crowsnest/internal/setup"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -26,11 +27,12 @@ const ownerPassword = "a long owner password"
 // the normal server over the same database once setup is done.
 type setupHarness struct {
 	*harness
-	db      *store.Store
-	setup   *setup.Service
-	mu      sync.Mutex
-	tokens  []string
-	authSvc *auth.Service
+	db       *store.Store
+	setup    *setup.Service
+	mu       sync.Mutex
+	tokens   []string
+	authSvc  *auth.Service
+	handoffs *opener.Handoffs
 }
 
 func newSetupHarness(t *testing.T) *setupHarness {
@@ -57,8 +59,9 @@ func newSetupHarness(t *testing.T) *setupHarness {
 	logs := &syncBuffer{}
 	cfg := testConfig(false)
 	cfg.Username, cfg.Password = "", ""
+	h.handoffs = opener.NewHandoffs(func() string { return "/setup#token=" + h.token() }, nil)
 	server, err := New(Deps{Config: cfg, Auth: h.authSvc, Hub: hub.New(), Logger: slog.New(slog.NewTextHandler(logs, nil)),
-		Version: "v9.9.9-test", Web: testWeb, Setup: h.setup})
+		Version: "v9.9.9-test", Web: testWeb, Setup: h.setup, Handoffs: h.handoffs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,4 +323,28 @@ func (h *harness) login2(username, password string) *http.Cookie {
 		h.t.Fatalf("login: %d %s", response.Code, response.Body)
 	}
 	return sessionCookieFrom(h.t, response)
+}
+
+// The browser opener's handoff (DESIGN.md 3.3): a one-time id that, from loopback only,
+// redirects relatively to the setup page with the token in the fragment.
+func TestSetupHandoff(t *testing.T) {
+	h := newSetupHarness(t)
+	id := h.handoffs.New()
+	remote := request(http.MethodGet, "/setup/open/"+id, "")
+	remote.RemoteAddr = "192.0.2.7:5000"
+	if location := h.do(remote).Header().Get("Location"); location != "/setup" {
+		t.Fatalf("a remote peer got %q", location)
+	}
+	// The remote attempt spent nothing it could use, but the id is gone (one use, whoever tried).
+	fresh := h.handoffs.New()
+	response := h.do(request(http.MethodGet, "/setup/open/"+fresh, ""))
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/setup#token="+h.token() || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("loopback redemption: %d %q", response.Code, response.Header().Get("Location"))
+	}
+	if again := h.do(request(http.MethodGet, "/setup/open/"+fresh, "")); again.Header().Get("Location") != "/setup" {
+		t.Fatalf("a second use: %q", again.Header().Get("Location"))
+	}
+	if strings.Contains(h.logs.String(), h.token()) {
+		t.Fatal("the token reached the request log")
+	}
 }

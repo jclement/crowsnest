@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/herdr"
@@ -106,6 +107,9 @@ type Options struct {
 	// DefaultModel is the model a Claude job agent gets when its job names none and does not
 	// inherit one from its parent (--job-model). Empty: Claude's own default.
 	DefaultModel string
+	// DefaultEngine is the engine of a job with a directory that names none (--engine, resolved:
+	// claude or codex). Empty: claude. A job without a directory goes to the orchestrator.
+	DefaultEngine string
 	// Attachments hands a job the files the human gave with it (internal/attach, wired in
 	// serve). Nil: a job given with attachments is refused.
 	Attachments BriefAttacher
@@ -150,7 +154,11 @@ type SpendReader interface {
 // Service holds the jobs.
 type Service struct {
 	opts Options
-	mu   sync.Mutex
+	// liveDefaults overrides opts.DefaultModel and the default engine (Settings, SetDefaults).
+	liveDefaults atomic.Pointer[[2]string]
+	// liveLanding overrides opts.Landing's review default and merge mode (Settings, SetLanding).
+	liveLanding atomic.Pointer[LandingOptions]
+	mu          sync.Mutex
 	// instance names this process in the lifecycle claims it writes (lifecycle.go).
 	instance string
 
@@ -617,4 +625,43 @@ func firstNonEmptyDir(dirs ...string) string {
 		}
 	}
 	return ""
+}
+
+// SetDefaults changes, at once, the model of a Claude job agent whose job names none and the
+// engine of a job with a directory that names none (the app's Settings). engine "" or "auto"
+// means claude.
+func (s *Service) SetDefaults(engine, model string) { s.liveDefaults.Store(&[2]string{engine, model}) }
+
+// SetLanding applies a change of the review gate's default or Land's merge mode made in Settings.
+func (s *Service) SetLanding(reviewDefault, mergeMode string) {
+	next := s.landing()
+	next.ReviewDefault, next.MergeMode = reviewDefault, mergeMode
+	s.liveLanding.Store(&next)
+}
+
+// landing is the review and Land settings in force.
+func (s *Service) landing() LandingOptions {
+	if live := s.liveLanding.Load(); live != nil {
+		return *live
+	}
+	return s.opts.Landing
+}
+
+func (s *Service) defaultModel() string {
+	if live := s.liveDefaults.Load(); live != nil {
+		return live[1]
+	}
+	return s.opts.DefaultModel
+}
+
+// defaultEngine is the engine of a job with a directory that names none.
+func (s *Service) defaultEngine() string {
+	engine := s.opts.DefaultEngine
+	if live := s.liveDefaults.Load(); live != nil {
+		engine = live[0]
+	}
+	if engine != EngineCodex {
+		return EngineClaude
+	}
+	return engine
 }

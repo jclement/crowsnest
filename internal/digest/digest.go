@@ -1,4 +1,4 @@
-// Package digest is the daily digest, made real (DESIGN.md 7.12): one short page a day of what
+// Package digest is the daily digest, made real (DESIGN.md 7.13): one short page a day of what
 // finished, what is stuck or waiting on the human, what each project's lead did, what the day
 // cost, and what is queued next. It is a built-in schedule, off by default, with one switch and a
 // time in the Schedule sheet, and a "Digest now" in the palette.
@@ -30,6 +30,8 @@ import (
 
 const (
 	kvSettings = "digest.settings"
+	// kvLastAt remembers the time while the digest is off (with Options.At).
+	kvLastAt = "digest.last_at"
 	// DeliverWithin is how long the orchestrator has to submit a digest before crowsnest sends
 	// its own.
 	DeliverWithin = 15 * time.Minute
@@ -116,6 +118,11 @@ type Options struct {
 	Spend func(ctx context.Context) string
 	// Approvals counts pending tool-call approvals. Nil: 0.
 	Approvals func(ctx context.Context) int
+	// At is the digest's time from the settings (--digest-at, "" off), and SetAt saves a new one
+	// through the Settings layer, so the Schedule switch follows the same precedence as every
+	// setting (a flag or a variable locks it). Nil: the switch and time live in kv here.
+	At    func() string
+	SetAt func(ctx context.Context, at string) error
 }
 
 // Service writes digests.
@@ -143,6 +150,18 @@ func New(opts Options) *Service {
 
 // Settings reads the switch and time.
 func (s *Service) Settings(ctx context.Context) Settings {
+	if s.opts.At != nil {
+		at := s.opts.At()
+		if at != "" {
+			return Settings{Enabled: true, At: at}
+		}
+		// Off: the time last used, remembered so the switch turns it back on at that time.
+		remembered := DefaultAt
+		if raw, err := s.opts.Store.GetKV(ctx, kvLastAt); err == nil && raw != "" {
+			remembered = raw
+		}
+		return Settings{At: remembered}
+	}
 	settings := Settings{At: DefaultAt}
 	if raw, err := s.opts.Store.GetKV(ctx, kvSettings); err == nil && raw != "" {
 		_ = json.Unmarshal([]byte(raw), &settings)
@@ -160,6 +179,17 @@ func (s *Service) SaveSettings(ctx context.Context, settings Settings) (Settings
 	}
 	if _, ok := parseClock(settings.At); !ok {
 		return Settings{}, fmt.Errorf("the digest time %q is not a time of day; use HH:MM", settings.At)
+	}
+	if s.opts.SetAt != nil {
+		_ = s.opts.Store.SetKV(ctx, kvLastAt, settings.At)
+		at := ""
+		if settings.Enabled {
+			at = settings.At
+		}
+		if err := s.opts.SetAt(ctx, at); err != nil {
+			return Settings{}, err
+		}
+		return s.Settings(ctx), nil
 	}
 	body, _ := json.Marshal(settings)
 	if err := s.opts.Store.SetKV(ctx, kvSettings, string(body)); err != nil {

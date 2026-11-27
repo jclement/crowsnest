@@ -147,6 +147,8 @@ export interface Features {
   name?: string;
   /** Upload limits; absent when attachments are off (DESIGN.md 8.6). */
   attachments?: AttachmentLimits;
+  /** True while the first-run checklist is unfinished: the app opens /welcome. */
+  onboarding?: boolean;
 }
 
 export interface Me {

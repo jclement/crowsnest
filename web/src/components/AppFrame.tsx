@@ -21,6 +21,8 @@ import { usePresenceHeartbeat } from "./control/usePresenceHeartbeat";
 import { Footer } from "./Footer";
 import { navItems } from "./nav";
 import { PaletteButton } from "./palette/PaletteButton";
+import { MachineStrip } from "./system/MachineStats";
+import { HeavyChip } from "./control/HeavySlots";
 import { PaletteProvider } from "./palette/PaletteProvider";
 import { ThemeToggle } from "./ThemeToggle";
 import { TrayBar, TrayPanel } from "./tray/NeedsYouTray";
@@ -78,7 +80,7 @@ export function AppFrame() {
         )}
         {me.data && (
           <span
-            className="min-w-0 truncate rounded bg-chrome-hover px-1.5 py-0.5 font-mono text-xs text-chrome-fg"
+            className="hidden min-w-0 truncate rounded bg-chrome-hover px-1.5 py-0.5 font-mono text-xs text-chrome-fg sm:inline"
             title={`herdr session ${me.data.features.session}`}
           >
             {me.data.features.session}
@@ -90,7 +92,9 @@ export function AppFrame() {
             fixtures
           </span>
         )}
-        <PaletteButton className="ml-auto sm:mr-1" />
+        <MachineStrip className="ml-auto" />
+        <HeavyChip />
+        <PaletteButton className="sm:mr-1" />
         <div className="flex items-center">
           <ConnectionState status={stream.status} />
           {voice && <SpeakToggle />}

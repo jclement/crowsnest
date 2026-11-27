@@ -1,5 +1,5 @@
 // Landing, throttling, the pause and the digest as a user drives them (DESIGN.md 6.11 to 6.13,
-// 7.12), against `crowsnest --demo`. The landing demo (internal/jobs/demo_landing.go) is a real,
+// 7.13), against `crowsnest --demo`. The landing demo (internal/jobs/demo_landing.go) is a real,
 // throwaway git repository in the instance's temporary directory: j_11 is done and ready to land,
 // j_12 is in review round 2 with round 1's findings, j_15 waits for a slot.
 //

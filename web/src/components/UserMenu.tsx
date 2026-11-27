@@ -1,14 +1,17 @@
-// The user menu in the header: who is signed in, Account (password and instance name),
+// The user menu in the header: who is signed in, System (the doctor's checks and versions),
+// Settings (what can change while crowsnest runs), Account (password and instance name),
 // Notifications (the Web Push sheet), Instructions (the layers crowsnest adds to every agent it
 // starts, DESIGN.md 21.3), Voice (the
 // voice, speed and model of spoken replies, when voice is on) and "Sign out". With --no-auth there is no one to sign out, so the menu says so instead.
-import { AudioLines, Bell, BellOff, BookText, CircleUser, KeyRound, LogOut, PauseCircle, PlayCircle } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { Activity, AudioLines, Bell, BellOff, BookText, CircleUser, KeyRound, LogOut, PauseCircle, PlayCircle, SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Me } from "../lib/api";
 import { AccountSheet } from "./account/AccountSheet";
 import { DndSheet } from "./control/DndSheet";
 import { PauseSheet } from "./control/PauseSheet";
 import { usePause, useSetPause } from "../lib/queries";
+import { SettingsSheet } from "./system/SettingsSheet";
 import { InstructionsSheet } from "./instructions/InstructionsSheet";
 import { NotificationSettings } from "./push/NotificationSettings";
 import { VoiceSettingsSheet } from "./voice/VoiceSettings";
@@ -19,6 +22,8 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const navigate = useNavigate();
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
   const [dndOpen, setDndOpen] = useState(false);
@@ -55,6 +60,30 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             </p>
             <p className="mt-0.5 truncate font-mono text-2xs text-muted">session {me.features.session}</p>
           </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              void navigate({ to: "/system" });
+            }}
+            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
+          >
+            <Activity className="h-4 w-4 text-muted" aria-hidden />
+            System
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setSettingsOpen(true);
+            }}
+            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
+          >
+            <SlidersHorizontal className="h-4 w-4 text-muted" aria-hidden />
+            Settings
+          </button>
           <button
             type="button"
             role="menuitem"
@@ -147,6 +176,16 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         </div>
       )}
       <AccountSheet open={accountOpen} onClose={() => setAccountOpen(false)} />
+      <SettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onOpen={(sheet) => {
+          setSettingsOpen(false);
+          if (sheet === "account") setAccountOpen(true);
+          if (sheet === "notifications") setNotificationsOpen(true);
+          if (sheet === "voice") setVoiceOpen(true);
+        }}
+      />
       <NotificationSettings open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
       <InstructionsSheet open={instructionsOpen} onClose={() => setInstructionsOpen(false)} />
       <PauseSheet open={pauseOpen} onClose={() => setPauseOpen(false)} />

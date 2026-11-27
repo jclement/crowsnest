@@ -154,7 +154,7 @@ run = [
 ]
 
 [tasks."e2e:claude"]
-description = "Real Claude through the browser (opt-in, costs a few cents, haiku): jobs given from the Jobs box run to done, a question answered in the Inbox, a nudge on the timeline, a chat reply, `crowsnest ask --wait` from a pane. Throwaway crowsnest-test-* herdr session, your real HOME for Claude's login"
+description = "Real Claude through the browser (opt-in, costs a few cents, haiku): jobs given from the Jobs box run to done, a question answered in the Inbox, a nudge on the timeline, a chat reply, `crowsnest ask --wait` from a pane; and a true first run (setup link, password, checklist, Start, the folder-trust card, Chat greeting). Throwaway crowsnest-test-* herdr sessions, your real HOME for Claude's login"
 depends = ["build"]
 run = "npm --prefix web run e2e:claude"
 

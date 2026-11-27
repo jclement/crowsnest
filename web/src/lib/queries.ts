@@ -516,3 +516,8 @@ export function useDigestNow() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.digests }),
   });
 }
+
+/** The heavy-command slots (DESIGN.md 6.12): cheap file reads on the server, polled. */
+export function useHeavy(intervalMs = 5_000) {
+  return useQuery({ queryKey: ["heavy"], queryFn: endpoints.heavy, refetchInterval: intervalMs });
+}

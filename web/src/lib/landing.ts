@@ -1,4 +1,4 @@
-// Landing, throttling, the pause, presence and the digest (DESIGN.md 6.11 to 6.14, 7.12): the
+// Landing, throttling, the pause, presence and the digest (DESIGN.md 6.11 to 6.14, 7.13): the
 // TypeScript mirror of the Go shapes (internal/landing, internal/jobs/land.go, internal/pause,
 // internal/throttle, internal/presence, internal/digest) and the pure helpers the views use.
 

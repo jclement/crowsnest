@@ -12,6 +12,8 @@ import type { QuestionEvent } from "./questions";
 import { useEventStream, type StreamState } from "./sse";
 import { onSayEvent } from "./voice/speak";
 import type { EventName, Fleet } from "./types";
+import { systemKeys } from "./system";
+import { appendSample, isSample, sysKeys, type SysStats } from "./sysstats";
 
 /**
  * What each event invalidates. `null` means everything (hello: a fresh connection may have
@@ -42,6 +44,9 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   pause: [queryKeys.pause, queryKeys.jobs],
   presence: [queryKeys.presence],
   throttle: [queryKeys.throttle, queryKeys.jobs],
+  // sys carries a machine sample, appended to the stats in useLiveQueries; nothing to refetch.
+  sys: [],
+  system: [systemKeys.system, systemKeys.onboarding],
 };
 
 /**
@@ -85,6 +90,10 @@ export function useLiveQueries(): StreamState {
         Object.entries(invalidations).map(([name, keys]) => [
           name,
           (data: unknown) => {
+            if (name === "sys") {
+              if (isSample(data)) queryClient.setQueryData<SysStats>(sysKeys.stats, (previous) => appendSample(previous, data));
+              return;
+            }
             const payload = payloads[name as EventName];
             const written = !!payload && payload.accept(data);
             if (written) queryClient.setQueryData(payload.key, data);

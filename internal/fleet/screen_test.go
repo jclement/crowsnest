@@ -120,12 +120,16 @@ func TestDetectDialogFromANSI(t *testing.T) {
 
 // Claude Code 2.1.332's folder-trust prompt, captured by `mise run e2e:claude` (M9), is an
 // unnumbered list with "No, exit" preselected, unlike the numbered box in claude_trust.txt (an
-// older shape). A digit cannot answer it, so it is not a pressable dialog: the agent still needs
-// you (herdr reports it blocked) and the card says to answer it in the terminal.
-func TestRealTrustPromptIsNotAPressableDialog(t *testing.T) {
+// older shape). Until the guided first run it was not a pressable dialog (a digit cannot answer
+// it); since then it is an arrow-key menu whose options carry the keys that pick them, so the
+// first-run checklist and the Inbox can show it as a card with its buttons (DESIGN.md 4.14.1).
+func TestRealTrustPromptIsAnArrowMenu(t *testing.T) {
 	dialog := DetectDialog(StripANSI(fixture(t, "real_claude_2.1.332_trust.ansi")))
-	if dialog.Present || len(dialog.Options) != 0 {
-		t.Fatalf("the unnumbered trust prompt was read as a pressable dialog: %+v", dialog)
+	if !dialog.Present || len(dialog.Options) != 2 {
+		t.Fatalf("the real trust prompt: %+v", dialog)
+	}
+	if yes := dialog.Options[1]; !strings.Contains(yes.Label, "Yes") || strings.Join(yes.Keys, " ") != "down Enter" || yes.Key != "" {
+		t.Fatalf("the Yes option: %+v", yes)
 	}
 	for _, file := range []string{"real_claude_2.1.332_idle.ansi", "real_claude_2.1.332_typed_draft.ansi"} {
 		if got := DetectDialog(StripANSI(fixture(t, file))); got.Present {
@@ -217,5 +221,47 @@ func TestScreenHash(t *testing.T) {
 	}
 	if ScreenHash("line one\nline 2\n") == base {
 		t.Error("different text, same hash")
+	}
+}
+
+// Claude's folder-trust question is an arrow-key menu, not a numbered one (Claude Code 2.1.332,
+// a fresh folder): the options come with the keys that pick them.
+func TestDetectDialogArrowMenu(t *testing.T) {
+	screen := strings.Join([]string{
+		"❯ claude --session-id abc --model haiku",
+		"",
+		"───────────────────────────────────────────",
+		" Accessing workspace:",
+		"",
+		" /private/tmp/cnm-I6WU/orch",
+		"",
+		" Quick safety check: Is this a project you created or one you trust?",
+		"",
+		" Claude Code'll be able to read, edit, and execute files here.",
+		"",
+		" Security guide",
+		"",
+		" ❯ No, exit",
+		"   Yes, I trust this folder",
+		"",
+		" Enter to confirm · Esc to cancel",
+	}, "\n")
+	dialog := DetectDialog(screen)
+	if !dialog.Present || len(dialog.Options) != 2 {
+		t.Fatalf("%+v", dialog)
+	}
+	no, yes := dialog.Options[0], dialog.Options[1]
+	if no.Label != "No, exit" || !no.Selected || strings.Join(no.Keys, " ") != "Enter" {
+		t.Errorf("first option %+v", no)
+	}
+	if yes.Label != "Yes, I trust this folder" || yes.Selected || strings.Join(yes.Keys, " ") != "down Enter" || yes.Key != "" {
+		t.Errorf("second option %+v", yes)
+	}
+}
+
+// An agent's reply ending in a marked line is not a menu without the footer.
+func TestArrowMenuNeedsTheFooter(t *testing.T) {
+	if dialog := DetectDialog("Some text\n❯ one\n  two\n"); dialog.Present {
+		t.Fatalf("%+v", dialog)
 	}
 }

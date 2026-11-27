@@ -36,9 +36,24 @@ func (s *Server) setupRoutes() http.Handler {
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/setup", s.handleSetupInfo)
 	mux.HandleFunc("POST /api/v1/setup", s.handleSetup)
+	mux.HandleFunc("GET /setup/open/{id}", s.handleSetupHandoff)
 	mux.HandleFunc("/api/", s.handleSetupLocked)
 	mux.Handle("/", setupSPA{next: s.spaHandler()})
 	return mux
+}
+
+// handleSetupHandoff redeems the one-time id the browser opener was given (DESIGN.md 3.3) and
+// redirects, relatively, to the setup page with the token in the fragment. Only a loopback peer
+// may redeem one; anything wrong lands on the plain setup page, where the token can be pasted.
+func (s *Server) handleSetupHandoff(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	target := "/setup"
+	if s.deps.Handoffs != nil && peerAddr(r).IsLoopback() {
+		if redeemed, ok := s.deps.Handoffs.Redeem(r.PathValue("id")); ok {
+			target = redeemed
+		}
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // handleSetupLocked refuses every other API route, the event stream and the terminal sockets

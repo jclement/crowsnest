@@ -211,6 +211,8 @@ type Features struct {
 	Name         string `json:"name"`          // this instance's name (--name, else the short hostname)
 	// Attachments are the upload limits; nil when attachments are off (8.6).
 	Attachments *AttachmentLimits `json:"attachments,omitempty"`
+	// Onboarding is true while the first-run checklist is unfinished: the app opens /welcome.
+	Onboarding bool `json:"onboarding,omitempty"`
 }
 
 func (s *Server) me(ctx context.Context) MeResponse {
@@ -219,9 +221,20 @@ func (s *Server) me(ctx context.Context) MeResponse {
 		Username: s.deps.Auth.Username(ctx),
 		Features: Features{
 			Auth: s.deps.Auth.Enabled(), Voice: cfg.VoiceEnabled(), Demo: cfg.Demo, Session: cfg.Session,
-			HerdrVersion: s.deps.HerdrVersion, Name: s.instanceName(), Attachments: s.attachmentLimits(),
+			HerdrVersion: s.herdrVersion(), Name: s.instanceName(), Attachments: s.attachmentLimits(),
+			Onboarding: s.deps.System != nil && s.deps.System.OnboardingPending(ctx),
 		},
 	}
+}
+
+// herdrVersion is the herdr version to report: now, when herdr connects after start.
+func (s *Server) herdrVersion() string {
+	if s.deps.HerdrVersionNow != nil {
+		if version := s.deps.HerdrVersionNow(); version != "" {
+			return version
+		}
+	}
+	return s.deps.HerdrVersion
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {

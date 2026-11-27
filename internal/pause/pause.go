@@ -142,7 +142,9 @@ func (s *Switch) readLocked(ctx context.Context, now time.Time) State {
 	if saved.Paused && !saved.Until.IsZero() && !now.Before(saved.Until) {
 		// The auto-resume time has passed: resume, once.
 		saved = stored{}
-		s.save(ctx, saved)
+		if err := s.save(ctx, saved); err != nil {
+			s.opts.Logger.Warn("clearing the pause at its auto-resume time", "err", err)
+		}
 		s.record(ctx, "Automation resumed: the auto-resume time came", map[string]any{"by": "auto-resume"})
 	}
 	state := State{File: s.opts.File}

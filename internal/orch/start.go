@@ -201,7 +201,8 @@ func (o *Orchestrator) waitForShell(ctx context.Context, paneID string) error {
 
 // ---- agent.start -----------------------------------------------------------------------
 
-// start writes the start-up files and starts Claude in paneID.
+// start writes the start-up files and starts the orchestrator's agent (Claude, or Codex when the
+// engine says so) in paneID.
 func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (Status, error) {
 	o.mu.Lock()
 	o.launching = paneID
@@ -210,8 +211,12 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 	if err != nil {
 		return o.fail(err)
 	}
+	launch := o.launchSettings()
+	if launch.Engine == EngineCodex {
+		return o.startCodex(ctx, paneID, files, launch)
+	}
 	sessionID, resuming := o.chooseSession(ctx, resume)
-	args := o.startArgs(sessionID, resuming, files)
+	args := o.startArgs(sessionID, resuming, files, launch)
 	o.mu.Lock()
 	prior := o.knownSession
 	o.mu.Unlock()
@@ -225,7 +230,10 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 		// The id passed to Claude is the truth, not herdr's report: that can still be the
 		// previous conversation's, or missing, right after a launch (R1-C02).
 		o.remember(ctx, paneID, sessionID)
-		o.update(func(s *Status) { s.RemoteControl, s.RemoteControlNote = o.opts.RemoteControlName, "" })
+		o.update(func(s *Status) {
+			s.RemoteControl, s.RemoteControlNote = launch.RemoteControlName, ""
+			s.Model, s.Engine = launch.Model, EngineClaude
+		})
 		o.mu.Lock()
 		o.rcCheckUntil = o.opts.Now().Add(remoteControlCheck)
 		o.mu.Unlock()
@@ -235,9 +243,44 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 		return o.update(func(s *Status) {
 			o.launch = newLaunchBaseline(sessionID, prior)
 			s.State, s.Detail, s.PaneID, s.SessionID = StateNeedsTerminal, needsTerminalDetail, paneID, sessionID
+			s.Model, s.Engine = launch.Model, EngineClaude
 		}), nil
 	default:
 		return o.fail(fmt.Errorf("starting Claude in pane %s: %w", paneID, err))
+	}
+}
+
+// startCodex starts Codex as the orchestrator (DESIGN.md 7.12): no hooks, no MCP, no session id
+// to resume. It runs with the same sandbox as Codex job agents and is pointed at CROWSNEST.md by
+// its first prompt.
+func (o *Orchestrator) startCodex(ctx context.Context, paneID string, files startFiles, launch LaunchSettings) (Status, error) {
+	args := []string{"--ask-for-approval", "never", "--sandbox", "workspace-write"}
+	if launch.Model != "" {
+		args = append(args, "--model", launch.Model)
+	}
+	o.opts.Logger.Info("starting the orchestrator on codex", "pane", paneID)
+	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: Name, Kind: "codex", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
+	if err == nil {
+		agent, err = o.waitForLaunch(ctx, agent)
+	}
+	switch {
+	case err == nil:
+		o.remember(ctx, paneID, "")
+		promptCtx, cancel := context.WithTimeout(ctx, herdrCallTimeout*6)
+		_, promptErr := o.opts.Client.AgentPrompt(promptCtx, Name, codexFirstPrompt(files.instructions), nil)
+		cancel()
+		if promptErr != nil {
+			o.opts.Logger.Warn("telling codex where its instructions are", "err", promptErr)
+		}
+		o.update(func(s *Status) { s.Model, s.Engine, s.RemoteControl = launch.Model, EngineCodex, "" })
+		return o.followLaunch(agent, "", ""), nil
+	case errors.Is(err, herdr.ErrAgentNotReady):
+		o.remember(ctx, paneID, "")
+		return o.update(func(s *Status) {
+			s.State, s.Detail, s.PaneID, s.Model, s.Engine = StateNeedsTerminal, needsTerminalDetail, paneID, launch.Model, EngineCodex
+		}), nil
+	default:
+		return o.fail(fmt.Errorf("starting Codex in pane %s: %w", paneID, err))
 	}
 }
 
@@ -349,21 +392,21 @@ type startFiles struct {
 
 // startArgs is Claude's command line. It stays short on purpose: macOS refuses a start command
 // longer than the terminal's line-input limit, so content goes in files (DESIGN.md 7, step 4).
-func (o *Orchestrator) startArgs(sessionID string, resume bool, files startFiles) []string {
+func (o *Orchestrator) startArgs(sessionID string, resume bool, files startFiles, launch LaunchSettings) []string {
 	flag := "--session-id"
 	if resume {
 		flag = "--resume"
 	}
 	args := []string{flag, sessionID}
-	if o.opts.PermissionMode != "" {
-		args = append(args, "--permission-mode", o.opts.PermissionMode)
+	if launch.PermissionMode != "" {
+		args = append(args, "--permission-mode", launch.PermissionMode)
 	}
-	if o.opts.Model != "" {
-		args = append(args, "--model", o.opts.Model)
+	if launch.Model != "" {
+		args = append(args, "--model", launch.Model)
 	}
-	if o.opts.RemoteControlName != "" {
+	if launch.RemoteControlName != "" {
 		// One argv entry for the name: herdr passes args without a shell, so spaces are safe.
-		args = append(args, "--remote-control", o.opts.RemoteControlName)
+		args = append(args, "--remote-control", launch.RemoteControlName)
 	}
 	args = append(args, "--append-system-prompt-file", files.instructions, "--settings", files.settings)
 	if files.mcpConfig != "" {

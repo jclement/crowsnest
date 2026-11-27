@@ -79,7 +79,9 @@ type Status struct {
 	SessionID string `json:"session_id"` // Claude's session id, when known
 	Dir       string `json:"dir"`
 	// Model is the model Claude was started with (--model); empty means Claude's own default.
-	Model  string `json:"model"`
+	Model string `json:"model"`
+	// Engine is the agent it runs on: claude or codex.
+	Engine string `json:"engine,omitempty"`
 	Detail string `json:"detail,omitempty"` // a sentence for the human when something is wrong
 	// RemoteControl is the Remote Control session name Claude was started with ("" when off,
 	// --no-remote-control). Claude turns Remote Control off by itself when the login cannot use
@@ -145,6 +147,12 @@ type Options struct {
 	// orchestrator's conversation). It must not block.
 	OnStatus func(Status)
 	Now      func() time.Time
+	// Gate, when set, is asked before the orchestrator is started or restarted automatically:
+	// "" means go, anything else is the sentence shown while it waits (gate.go).
+	Gate func(ctx context.Context) string
+	// Launch, when set, gives the launch settings at each start (engine, model, permission mode,
+	// Remote Control), so a change in the app's Settings applies on the next start.
+	Launch func() LaunchSettings
 	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): an agent
 	// that exits meanwhile is not restarted automatically (Restart still works). Nil: never.
 	Paused func() bool
@@ -212,6 +220,8 @@ type Orchestrator struct {
 	knownSession string
 	// rcCheckUntil is how long after a start the watch looks for Remote Control's banner.
 	rcCheckUntil time.Time
+	// kick wakes a waiting orchestrator to ask its gate again (Kick).
+	kick chan struct{}
 	// launching is the pane a start is launching Claude in, before the status names it: hooks
 	// that fire during the launch (SessionStart, InstructionsLoaded) are matched to it.
 	launching string
@@ -269,7 +279,7 @@ func New(opts Options) *Orchestrator {
 	if opts.Disabled {
 		state = StateDisabled
 	}
-	return &Orchestrator{opts: opts, status: Status{State: state, Name: nameOr(opts.AgentName), Dir: opts.Dir, Model: opts.Model, UpdatedAt: opts.Now()}}
+	return &Orchestrator{opts: opts, kick: make(chan struct{}, 1), status: Status{State: state, Name: nameOr(opts.AgentName), Dir: opts.Dir, Model: opts.Model, UpdatedAt: opts.Now()}}
 }
 
 // Status returns the current status.
@@ -291,6 +301,9 @@ func (o *Orchestrator) Run(ctx context.Context) {
 	if o.opts.Disabled {
 		return
 	}
+	if !o.waitForGate(ctx) {
+		return
+	}
 	if _, err := o.Ensure(ctx); err != nil {
 		o.opts.Logger.Warn("orchestrator did not start", "err", err)
 	}
@@ -305,6 +318,8 @@ func (o *Orchestrator) Run(ctx context.Context) {
 			o.Watch(ctx)
 		case <-fleetChanged:
 			o.Watch(ctx) // herdr reported a change; follow it now rather than at the next tick
+		case <-o.kick:
+			o.Watch(ctx)
 		}
 	}
 }

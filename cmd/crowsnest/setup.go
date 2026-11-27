@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"net/url"
 	"os"
 	"slices"
@@ -17,8 +18,10 @@ import (
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/httpd"
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/opener"
 	"github.com/jclement/crowsnest/internal/setup"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/system"
 	"github.com/jclement/crowsnest/web"
 )
 
@@ -90,14 +93,15 @@ func runSetupPhase(ctx context.Context, cfg config.Config, db *store.Store, logg
 	if err != nil {
 		return err
 	}
-	announce := &setupAnnouncer{logger: logger, banner: stderrIsTerminal(), onURL: hooks.setupURL}
+	announce := &setupAnnouncer{logger: logger, banner: stderrIsTerminal(), onURL: hooks.setupURL, open: hooks.open}
+	announce.handoffs = opener.NewHandoffs(announce.target, nil)
 	service, err := setup.New(setup.Options{Auth: authService, DefaultName: storedName(ctx, cfg, db).Name, Announce: announce.token})
 	if err != nil {
 		return err
 	}
 	events := hub.New()
 	defer events.Close()
-	deps := httpd.Deps{Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version, Setup: service}
+	deps := httpd.Deps{Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version, Setup: service, Handoffs: announce.handoffs}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
 	}
@@ -122,6 +126,9 @@ func runSetupPhase(ctx context.Context, cfg config.Config, db *store.Store, logg
 	if err := <-served; err != nil {
 		return err
 	}
+	if err := system.MarkOnboardingPending(ctx, db); err != nil {
+		logger.Warn("recording the first-run checklist", "err", err)
+	}
 	logger.Info("setup complete; starting crowsnest")
 	return nil
 }
@@ -132,9 +139,22 @@ type setupAnnouncer struct {
 	logger *slog.Logger
 	banner bool                     // also print a plain block on stderr (a terminal)
 	onURL  func(link, token string) // tests read the link here
-	mu     sync.Mutex
-	value  string
-	bases  []string
+	// open, when set, opens a URL in the browser (serve's --open); handoffs mints the one-time
+	// id it is given instead of the token. opened is set once a browser was asked.
+	open     func(url string)
+	handoffs *opener.Handoffs
+	opened   bool
+	mu       sync.Mutex
+	value    string
+	bases    []string
+}
+
+// target is where a redeemed handoff sends the browser: the setup page with the current token
+// (it may have rotated since the id was minted), relative so a port-rewriting tunnel keeps working.
+func (a *setupAnnouncer) target() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return "/setup#token=" + a.value
 }
 
 func (a *setupAnnouncer) token(token string, rotated bool) {
@@ -158,6 +178,24 @@ func (a *setupAnnouncer) url(listenURL string) {
 	}
 	a.bases = append(a.bases, base)
 	a.print(base)
+	if a.open != nil && !a.opened && isLoopbackBase(base) {
+		a.opened = true
+		a.open(base + "/setup/open/" + a.handoffs.New())
+	}
+}
+
+// isLoopbackBase reports whether a browsable base URL is on a loopback host.
+func isLoopbackBase(base string) bool {
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
 }
 
 // print logs one link. Called with mu held.

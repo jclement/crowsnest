@@ -5,6 +5,7 @@ package httpd
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -93,6 +94,9 @@ func TestRunFailsWhenARequiredAddressIsTaken(t *testing.T) {
 	err = server.Run(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "from --bind 127.0.0.1") {
 		t.Fatalf("expected a bind error naming the bind value, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "already in use") || !strings.Contains(err.Error(), fmt.Sprintf("--port %d", addr.Port()+1)) {
+		t.Fatalf("a port in use should say so and name the fix, got %v", err)
 	}
 }
 

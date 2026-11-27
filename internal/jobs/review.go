@@ -95,16 +95,16 @@ func (s *Service) reviewerFor(r store.JobRecord) string {
 	if r.Role != "builder" {
 		return ""
 	}
-	switch s.opts.Landing.ReviewDefault {
+	switch s.landing().ReviewDefault {
 	case EngineClaude, EngineCodex:
-		return s.opts.Landing.ReviewDefault
+		return s.landing().ReviewDefault
 	case ReviewDefaultSame:
 		return r.Engine
 	case ReviewDefaultAuto:
 		if r.Engine == EngineCodex {
 			return EngineClaude
 		}
-		if s.opts.Landing.CodexInstalled {
+		if s.landing().CodexInstalled {
 			return EngineCodex
 		}
 		return r.Engine

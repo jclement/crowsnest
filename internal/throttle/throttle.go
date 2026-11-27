@@ -12,8 +12,9 @@
 //
 // The third part, the heavy-command gate (`crowsnest heavy`), is heavy.go.
 //
-// Settings come from flags (--max-running-jobs, --load-hold) and can be changed in the app; the
-// app's values are kept in kv `throttle.settings` and win over the flags until cleared.
+// The limit and the load hold are ordinary settings (--max-running-jobs, --load-hold), changed in
+// the app's Settings with the usual precedence and pushed in live with SetDefaults; per-project
+// limits are kept in kv `throttle.settings`.
 package throttle
 
 import (
@@ -78,9 +79,10 @@ type Options struct {
 type Throttle struct {
 	opts Options
 
-	mu      sync.Mutex
-	samples []loadSample
-	lastErr error
+	mu       sync.Mutex
+	samples  []loadSample
+	lastErr  error
+	defaults Settings // the live settings' limit and load hold (SetDefaults)
 }
 
 type loadSample struct {
@@ -105,7 +107,18 @@ func New(opts Options) *Throttle {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	return &Throttle{opts: opts}
+	return &Throttle{opts: opts, defaults: opts.Defaults}
+}
+
+// SetDefaults applies a change of the limit or the load hold made in Settings (0 for the limit
+// means a quarter of the cores).
+func (t *Throttle) SetDefaults(settings Settings) {
+	if settings.MaxRunning <= 0 {
+		settings.MaxRunning = DefaultMaxRunning(t.opts.Cores)
+	}
+	t.mu.Lock()
+	t.defaults = settings
+	t.mu.Unlock()
 }
 
 // Cores is the core count the defaults and the per-core load use.
@@ -113,32 +126,29 @@ func (t *Throttle) Cores() int { return t.opts.Cores }
 
 // Settings returns the settings in force: the app's saved values, else the flags'.
 func (t *Throttle) Settings(ctx context.Context) Settings {
-	settings := t.opts.Defaults
+	settings := t.Defaults()
+	settings.ProjectLimits = map[int64]int{}
 	if t.opts.KV != nil {
 		if raw, err := t.opts.KV.GetKV(ctx, kvKey); err == nil && raw != "" {
 			var saved Settings
-			if err := json.Unmarshal([]byte(raw), &saved); err == nil && saved.MaxRunning > 0 {
-				settings = saved
+			if err := json.Unmarshal([]byte(raw), &saved); err == nil && saved.ProjectLimits != nil {
+				settings.ProjectLimits = saved.ProjectLimits
 			}
 		}
-	}
-	if settings.ProjectLimits == nil {
-		settings.ProjectLimits = map[int64]int{}
 	}
 	return settings
 }
 
-// Defaults are the flags' values (what Reset goes back to).
-func (t *Throttle) Defaults() Settings { return t.opts.Defaults }
+// Defaults are the limit and the load hold in force (from the settings).
+func (t *Throttle) Defaults() Settings {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return Settings{MaxRunning: t.defaults.MaxRunning, LoadPerCore: t.defaults.LoadPerCore}
+}
 
-// Save validates and stores settings made in the app.
+// Save validates and stores the per-project limits (the instance-wide limit and the load hold
+// are Settings, changed there).
 func (t *Throttle) Save(ctx context.Context, settings Settings) (Settings, error) {
-	if settings.MaxRunning < 1 || settings.MaxRunning > maxLimit {
-		return Settings{}, fmt.Errorf("the running-job limit must be between 1 and %d", maxLimit)
-	}
-	if settings.LoadPerCore < 0 || settings.LoadPerCore > 64 {
-		return Settings{}, fmt.Errorf("the load threshold per core must be between 0 (off) and 64")
-	}
 	clean := map[int64]int{}
 	for project, limit := range settings.ProjectLimits {
 		if limit < 0 || limit > maxLimit {
@@ -148,18 +158,17 @@ func (t *Throttle) Save(ctx context.Context, settings Settings) (Settings, error
 			clean[project] = limit
 		}
 	}
-	settings.ProjectLimits = clean
 	if t.opts.KV == nil {
-		return Settings{}, fmt.Errorf("the throttle settings cannot be saved on this server")
+		return Settings{}, fmt.Errorf("the per-project limits cannot be saved on this server")
 	}
-	body, _ := json.Marshal(settings)
+	body, _ := json.Marshal(Settings{ProjectLimits: clean})
 	if err := t.opts.KV.SetKV(ctx, kvKey, string(body)); err != nil {
-		return Settings{}, fmt.Errorf("saving the throttle settings: %w", err)
+		return Settings{}, fmt.Errorf("saving the per-project limits: %w", err)
 	}
-	return settings, nil
+	return t.Settings(ctx), nil
 }
 
-// Reset forgets the app's settings, so the flags apply again.
+// Reset forgets the per-project limits.
 func (t *Throttle) Reset(ctx context.Context) (Settings, error) {
 	if t.opts.KV != nil {
 		if err := t.opts.KV.DeleteKV(ctx, kvKey); err != nil {

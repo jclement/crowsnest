@@ -1,4 +1,4 @@
-// DigestsSheet: the daily digests, newest first (DESIGN.md 7.12), with "Digest now".
+// DigestsSheet: the daily digests, newest first (DESIGN.md 7.13), with "Digest now".
 import { Newspaper } from "lucide-react";
 import { useDigestNow, useDigests } from "../../lib/queries";
 import { Markdown } from "../Markdown";
