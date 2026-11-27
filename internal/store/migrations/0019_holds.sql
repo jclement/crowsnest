@@ -37,3 +37,8 @@ UPDATE jobs SET holds_json = json_array(json_object('kind', 'reviewing', 'lift',
 -- written with the job's move back to running, typed only while the automation is not paused and
 -- nothing holds the job, and cleared only once it was typed (or the agent called done again).
 ALTER TABLE jobs ADD COLUMN pending_feedback TEXT NOT NULL DEFAULT '';
+
+-- definition_changed lists the files the job's own diff changed that define its check (mise
+-- configuration and tasks, a Makefile, package.json, CI files, a script the command names), so the
+-- evidence says when the branch changed what "passing" means (R6-S4). Comma-separated; '' none.
+ALTER TABLE job_checks ADD COLUMN definition_changed TEXT NOT NULL DEFAULT '';
