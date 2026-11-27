@@ -14,6 +14,6 @@ export default defineConfig({
   expect: { timeout: 30_000 },
   forbidOnly: !!process.env.CI,
   reporter: [["list"]],
-  use: { trace: "retain-on-failure", viewport: { width: 1440, height: 900 } },
+  use: { trace: "retain-on-failure", screenshot: "only-on-failure", viewport: { width: 1440, height: 900 } },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
 });
