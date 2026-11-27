@@ -97,6 +97,7 @@ export function StorageCard() {
   return (
     <Card
       title="Storage"
+      aria-label="Storage"
       actions={
         <a href={backupURL} download className="inline-flex min-h-11 items-center gap-1.5 rounded border border-border-strong px-2 text-xs font-medium text-heading hover:bg-hover md:min-h-7">
           <Download className="h-4 w-4" aria-hidden /> Download backup
