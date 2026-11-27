@@ -54,6 +54,8 @@ export interface Summary {
   name: string;
   version: string;
   attention: number;
+  ready_to_land: number;
+  review_objects: number;
   questions: number;
   blocking: number;
   approvals: number;

@@ -394,7 +394,7 @@ is not held by the pause (as for any paused start); they receive no pokes until 
 
 **Scheduled backups** (`backupScheduler`): every minute, a backup when the newest
 `auto-<session>-*.tar.gz` in `<data-dir>/backups` is older than `--backup-every`; then all but
-the newest `--backup-keep` are deleted; each run is journalled. **Download backup** streams a
+the newest `--backup-keep` are deleted; each run is journalled. Held while the pause switch is on (6.13). **Download backup** streams a
 fresh one (`GET /backup`).
 
 ### 4.18 Upgrades
@@ -426,7 +426,7 @@ merged, pr or discarded), may hold unlanded work; it is listed with the reason a
 run (`confirm`), never by the nightly run. Worktrees are never removed here (the landing sweep
 owns them, 6.12 on `wip/landing`, and knows what landed). The nightly run: checked every 15
 minutes, runs in the 03:00 local hour once 20 hours have passed, or at any hour after 48; the
-report is kept in kv `retention.last_run` and journalled.
+report is kept in kv `retention.last_run` and journalled. The nightly run is held while the pause switch is on (6.13); Clean up now, the human's, is not.
 
 ### 4.20 Sign in with Tailscale
 
@@ -2096,7 +2096,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /backup` | A fresh backup as a download (4.17) |
 | `GET /updated`, `POST /updated/seen` | The "what changed" notice `{from, to, at, release_url}` or `null` (4.18) |
 | `GET /storage`, `POST /storage/cleanup` | The Storage card; `{dry_run (default true), confirm: [j_…]}` → the retention report (4.19) |
-| `GET /summary` | Session or a read token (`Authorization: Bearer cnk_…`): `{name, version, attention, questions, blocking, approvals, needs_you, running, jobs, orchestrator, paused, stats, at}` (4.21) |
+| `GET /summary` | Session or a read token (`Authorization: Bearer cnk_…`): `{name, version, attention, questions, blocking, approvals, needs_you, ready_to_land, review_objects, running, jobs, orchestrator, paused, stats, at}` (attention adds jobs ready to land and those whose reviewer still asks for changes, 6.11) (4.21) |
 | `GET`/`POST /tokens`, `DELETE /tokens/{id}` | Scoped tokens; `POST {name}` → `201 {token, record}` (4.21) |
 | `GET`/`POST /machines`, `DELETE /machines/{id}` | Other instances with their summaries or an error (4.21) |
 | `GET`/`PUT /auth/tailscale`, `POST /auth/tailscale/allow-me` | Sign in with Tailscale: state, replace the list, add this request's login; changes need a password session (4.20) |

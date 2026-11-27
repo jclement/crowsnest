@@ -404,7 +404,7 @@ in again; every device turns notifications on again.
 
 **Automatic backups** are off by default: `--backup-every 24h` (or Settings, Backups and
 storage) writes `auto-<session>-<time>.tar.gz` into `<data-dir>/backups` and keeps the newest
-`--backup-keep` (7). **Download backup** (Settings, and the System page's Storage card) streams a
+`--backup-keep` (7); none is made while crowsnest is paused. **Download backup** (Settings, and the System page's Storage card) streams a
 fresh one to the browser.
 
 **Upgrades.** Migrations only go forward. Before a start that will change the database's schema,
@@ -417,7 +417,8 @@ a link to the release notes until dismissed.
 ## Retention
 
 Settled jobs, their timelines, questions, approvals, journal rows, spend detail and attachments
-pile up; crowsnest tidies them once a night (03:00 local, or whenever none ran for two days):
+pile up; crowsnest tidies them once a night (03:00 local, or whenever none ran for two days; not
+while paused):
 
 - **Archive** settled jobs after `--archive-after-days` (14): they leave the boards and stay
   searchable (`GET /api/v1/jobs?archived=1&q=text`).
@@ -911,7 +912,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /updated`, `POST /updated/seen` | session | `{from, to, at, release_url}` after an update until seen, else `null` |
 | `GET /storage` | session | The Storage card: `{areas, tables, policy, last_run, worktrees}` |
 | `POST /storage/cleanup` | session | `{dry_run, confirm: ["j_12"]}` → what it did (or, with `dry_run` true or missing, would do): `{archive, delete_jobs, held, confirmed, sweeps, state_dirs, state_bytes, blobs_freed}` |
-| `GET /summary` | session or a read token (`Authorization: Bearer cnk_…`) | `{name, version, attention, questions, blocking, approvals, needs_you, running, jobs, orchestrator, paused, stats, at}`: what another machine's Machines card shows |
+| `GET /summary` | session or a read token (`Authorization: Bearer cnk_…`) | `{name, version, attention, questions, blocking, approvals, needs_you, ready_to_land, review_objects, running, jobs, orchestrator, paused, stats, at}` (attention adds jobs ready to land and those whose reviewer still asks for changes, 6.11): what another machine's Machines card shows |
 | `GET /tokens`, `POST /tokens`, `DELETE /tokens/{id}` | session | Scoped read tokens: list (never the token), mint `{name}` → `201 {token, record}` (the token shown once), revoke |
 | `GET /machines`, `POST /machines`, `DELETE /machines/{id}` | session | Other instances with their summaries or an error; add `{name, url, token}`; remove |
 | `GET /auth/tailscale`, `PUT /auth/tailscale`, `POST /auth/tailscale/allow-me` | session (changes: a password session) | Sign in with Tailscale: `{enabled, serve_configured, current_login, via_tailscale, allowed}`; replace the list `{logins}`; add this request's own tailnet login. `409` with the option off, `403` from a session signed in with Tailscale |

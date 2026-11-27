@@ -66,8 +66,11 @@ type Options struct {
 	BackupDir      string
 	Policy         func() Policy
 	Journal        *journal.Journal // nil: nothing journalled
-	Logger         *slog.Logger
-	Now            func() time.Time
+	// Paused reports the pause switch (6.13); the nightly run waits while it is on. A run the
+	// human asks for (Clean up now) is not held. Nil: never paused.
+	Paused func() bool
+	Logger *slog.Logger
+	Now    func() time.Time
 }
 
 // Service runs retention. Build it with New.
@@ -404,6 +407,9 @@ func (s *Service) RunNightly(ctx context.Context) {
 
 // due reports whether the nightly sweep should run at now.
 func (s *Service) due(ctx context.Context, now time.Time) bool {
+	if s.opts.Paused != nil && s.opts.Paused() {
+		return false
+	}
 	last := s.LastRun(ctx)
 	if last == nil {
 		return now.Local().Hour() == nightlyHour

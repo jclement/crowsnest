@@ -119,11 +119,12 @@ func (o *opsWiring) Summary(ctx context.Context) (httpd.Summary, error) {
 				default:
 					summary.Jobs[string(job.State)]++
 				}
+				countLanding(&summary, job)
 			}
 		}
 	}
 	summary.NeedsYou, summary.Running = summary.Jobs[string(jobs.StateNeedsYou)], summary.Jobs[string(jobs.StateRunning)]
-	summary.Attention = summary.Questions + summary.Approvals + summary.NeedsYou
+	summary.Attention = summary.Questions + summary.Approvals + summary.NeedsYou + summary.ReadyToLand + summary.ReviewObjects
 	if o.orch != nil {
 		summary.Orchestrator = string(o.orch.Status().State)
 	}
@@ -134,6 +135,21 @@ func (o *opsWiring) Summary(ctx context.Context) (httpd.Summary, error) {
 		}
 	}
 	return summary, nil
+}
+
+// countLanding adds a job to the landing attention items, the rule the web app's readyToLand
+// uses (6.11): a builder job with a worktree, finished, neither landed nor torn down. One whose
+// reviewer still asks for changes is counted as that instead. A job waiting on its review is
+// needs_you already, so it is not counted twice.
+func countLanding(summary *httpd.Summary, job jobs.Job) {
+	if job.WorktreeBranch == "" || job.ReviewOf != "" || job.LandState != "" || job.TornDownAt != nil || job.State != jobs.StateDone {
+		return
+	}
+	if job.ReviewVerdict == "changes" {
+		summary.ReviewObjects++
+		return
+	}
+	summary.ReadyToLand++
 }
 
 // pausedNow reads the pause switch's stored state (kv pause.state).
@@ -149,11 +165,11 @@ func pausedNow(ctx context.Context, db *store.Store) bool {
 }
 
 // newRetention builds the retention service over the live settings.
-func newRetention(cfg func() config.Config, db *store.Store, journalLog *journal.Journal, logger *slog.Logger) *retention.Service {
+func newRetention(cfg func() config.Config, db *store.Store, journalLog *journal.Journal, paused func() bool, logger *slog.Logger) *retention.Service {
 	base := cfg()
 	return retention.New(retention.Options{
 		Store: db, AttachmentsDir: base.DataDir + "/attachments", StateDir: base.StateDir, DataDir: base.DataDir,
-		DatabasePath: base.DatabasePath(), BackupDir: base.BackupDir(), Journal: journalLog, Logger: logger,
+		DatabasePath: base.DatabasePath(), BackupDir: base.BackupDir(), Journal: journalLog, Logger: logger, Paused: paused,
 		Policy: func() retention.Policy {
 			current := cfg()
 			return retention.Policy{ArchiveAfterDays: current.ArchiveAfterDays, DeleteAfterDays: current.DeleteAfterDays}

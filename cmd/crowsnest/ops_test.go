@@ -75,6 +75,9 @@ func TestScheduledBackupWritesAndRotates(t *testing.T) {
 		}
 	}
 	scheduler.tick(ctx, start.Add(6*time.Hour+time.Minute)) // not due: the newest is a minute old
+	held := scheduler
+	held.paused = func() bool { return true }
+	held.tick(ctx, start.Add(30*time.Hour)) // due, but paused: nothing written
 	entries, _ := os.ReadDir(cfg.BackupDir())
 	if len(entries) != 2 {
 		t.Fatalf("%d automatic backups kept, want 2", len(entries))

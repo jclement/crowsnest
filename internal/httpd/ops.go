@@ -62,19 +62,21 @@ type UpdateNotice struct {
 
 // Summary is GET /summary: what another machine's Machines list shows for this one.
 type Summary struct {
-	Name         string         `json:"name"`
-	Version      string         `json:"version"`
-	Attention    int            `json:"attention"` // open questions + pending approvals + jobs that need you
-	Questions    int            `json:"questions"`
-	Blocking     int            `json:"blocking"`
-	Approvals    int            `json:"approvals"`
-	NeedsYou     int            `json:"needs_you"`
-	Running      int            `json:"running"`
-	Jobs         map[string]int `json:"jobs"` // live jobs by state
-	Orchestrator string         `json:"orchestrator"`
-	Paused       bool           `json:"paused"`
-	Stats        *SummaryStats  `json:"stats,omitempty"`
-	At           string         `json:"at"`
+	Name          string         `json:"name"`
+	Version       string         `json:"version"`
+	Attention     int            `json:"attention"`      // open questions + pending approvals + jobs that need you + ready to land + reviewer objects
+	ReadyToLand   int            `json:"ready_to_land"`  // finished jobs whose worktree waits to be landed or discarded (6.11)
+	ReviewObjects int            `json:"review_objects"` // finished jobs whose reviewer still asks for changes
+	Questions     int            `json:"questions"`
+	Blocking      int            `json:"blocking"`
+	Approvals     int            `json:"approvals"`
+	NeedsYou      int            `json:"needs_you"`
+	Running       int            `json:"running"`
+	Jobs          map[string]int `json:"jobs"` // live jobs by state
+	Orchestrator  string         `json:"orchestrator"`
+	Paused        bool           `json:"paused"`
+	Stats         *SummaryStats  `json:"stats,omitempty"`
+	At            string         `json:"at"`
 }
 
 // SummaryStats are the header's machine figures.

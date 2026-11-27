@@ -135,6 +135,10 @@ func TestNightlySchedule(t *testing.T) {
 	if !svc.due(ctx, now.Add(49*time.Hour+5*time.Hour)) {
 		t.Error("not due after two days at another hour")
 	}
+	svc.opts.Paused = func() bool { return true }
+	if svc.due(ctx, now.Add(49*time.Hour+5*time.Hour)) {
+		t.Error("due while the pause switch is on")
+	}
 }
 
 func TestStorageReport(t *testing.T) {

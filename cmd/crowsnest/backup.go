@@ -191,7 +191,9 @@ type backupScheduler struct {
 	cfg     func() config.Config
 	db      *store.Store
 	journal *journal.Journal
-	logger  *slog.Logger
+	// paused reports the pause switch (nil: never paused); a due backup waits while it is on.
+	paused func() bool
+	logger *slog.Logger
 }
 
 // backupCheckEvery is how often the scheduler looks whether a backup is due.
@@ -213,7 +215,7 @@ func (b backupScheduler) run(ctx context.Context) {
 // tick backs up when the newest automatic backup is older than the interval.
 func (b backupScheduler) tick(ctx context.Context, now time.Time) {
 	cfg := b.cfg()
-	if cfg.BackupEvery <= 0 || cfg.Demo {
+	if cfg.BackupEvery <= 0 || cfg.Demo || (b.paused != nil && b.paused()) {
 		return
 	}
 	dir := cfg.BackupDir()

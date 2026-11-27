@@ -303,10 +303,12 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(),
 	}
-	cleanup := newRetention(live.config.get, db, journalLog, logger)
+	// The nightly clean-up and the automatic backup are automation: the pause switch holds both
+	// (DESIGN.md 6.13). Clean up now and Download backup are the human's and are not held.
+	cleanup := newRetention(live.config.get, db, journalLog, ctl.paused, logger)
 	if !cfg.Demo {
 		go cleanup.RunNightly(ctx)
-		go backupScheduler{cfg: live.config.get, db: db, journal: journalLog, logger: logger}.run(ctx)
+		go backupScheduler{cfg: live.config.get, db: db, journal: journalLog, paused: ctl.paused, logger: logger}.run(ctx)
 	}
 	deps.Machines = &machines.Service{Store: db}
 	deps.Tailscale = tsauth.New(tsauth.Options{Enabled: cfg.TailscaleAuth, KV: db, Port: cfg.Port})
