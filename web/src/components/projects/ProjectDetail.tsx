@@ -115,7 +115,7 @@ function ProjectJobs({ project }: { project: ProjectView }) {
   const mine = (jobs.data ?? []).filter((job) => (job.project_id ?? 0) === project.id);
   const sections = boardSections(mine);
   const shown: Job[] = [...sections.attention, ...sections.running, ...sections.today];
-  const open = (id: string) => void navigate({ to: "/", search: { job: id, project: project.slug } });
+  const open = (id: string) => void navigate({ to: "/jobs", search: { job: id, project: project.slug } });
   return (
     <Card
       title={
@@ -130,10 +130,10 @@ function ProjectJobs({ project }: { project: ProjectView }) {
       bodyClassName="p-0"
       actions={
         <>
-          <Button compact variant="ghost" icon={ListTodo} onClick={() => void navigate({ to: "/", search: { project: project.slug } })}>
+          <Button compact variant="ghost" icon={ListTodo} onClick={() => void navigate({ to: "/jobs", search: { project: project.slug } })}>
             Board
           </Button>
-          <Button compact variant="ghost" icon={Plus} onClick={() => void navigate({ to: "/", search: { project: project.slug } })} disabled={project.archived}>
+          <Button compact variant="ghost" icon={Plus} onClick={() => void navigate({ to: "/jobs", search: { project: project.slug } })} disabled={project.archived}>
             New job
           </Button>
         </>

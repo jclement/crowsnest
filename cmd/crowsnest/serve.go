@@ -217,7 +217,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	approvalLinks.pusher.Store(pusher)
-	runApprovals(ctx, approvalService, fleetCache, client, logger)
+	runApprovals(ctx, approvalService, fleetCache, logger)
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
 		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, logger)
 	refs.questions.Store(questionService)
@@ -236,6 +236,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)
 	}
 	startJobs(ctx, jobService, client, projectOf, logger)
+	if demo, ok := client.(*fake.Demo); ok {
+		// After the jobs: each demo approval and question names the job whose pane raised it.
+		inbox := demoInbox{demo: demo, jobs: jobService, approvals: approvalService, questions: questionService, files: files, stateDir: cfg.StateDir}
+		if err := startDemoInbox(ctx, inbox, logger); err != nil {
+			return err
+		}
+	}
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
@@ -252,6 +259,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	}
 	refs.projects.taskSource.Store(&tasksFor)
 	refs.projects.useInstructions(refs.instructions, logger)
+	refs.projects.useUpkeep(leadUpkeep{jobs: jobService, questions: questionService, conversations: conversations, poker: poker, tender: tender})
 	leads := refs.projects.startLeads(ctx, leadDeps{
 		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, guard: refs.guard, logger: logger,
 		onStatus: func(project projects.Project, status orch.Status) {

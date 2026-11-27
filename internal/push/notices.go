@@ -226,7 +226,7 @@ func DialogNotice(paneID, agentName, workspace string) Notice {
 // dedupe key the watcher keeps per job ("failed", "stuck:limit", "done", …); ok is false when the
 // event is not one that is pushed.
 func JobNotice(id, title, state, cause string, stuck bool) (notice Notice, reason string, ok bool) {
-	notice = Notice{Kind: KindJob, Tag: "job:" + id, URL: "/?job=" + url.QueryEscape(id), Urgency: UrgencyHigh, Source: "job:" + id}
+	notice = Notice{Kind: KindJob, Tag: "job:" + id, URL: "/jobs?job=" + url.QueryEscape(id), Urgency: UrgencyHigh, Source: "job:" + id}
 	line := id + ": " + title
 	switch {
 	case state == "failed":

@@ -19,6 +19,7 @@ import {
   ClipboardList,
   CornerDownLeft,
   FilePlus2,
+  Gauge,
   HelpCircle,
   Inbox,
   Keyboard,
@@ -72,11 +73,13 @@ import {
   type RankedItem,
 } from "../../lib/palette";
 import { queryTokens } from "../../lib/fuzzy";
-import { useApprovals, useFleet, useJobs, useMe, useProjects, useQuestions } from "../../lib/queries";
+import { useAttention, useFleet, useJobs, useMe, useProjects } from "../../lib/queries";
+import { activeItems } from "../../lib/attention";
 import { readTheme, THEME_EVENT, type ThemeChoice } from "../../lib/theme";
 import { Chip, StatusDot } from "../ui/Chip";
 
 const icons: Record<PaletteIcon, LucideIcon> = {
+  now: Gauge,
   jobs: ListTodo,
   chat: MessageSquare,
   inbox: Inbox,
@@ -425,8 +428,7 @@ export function CommandPalette({ inputRef, onClose, run, recents, onRan, mac, sp
 /** The live sources, read from the queries the app already keeps fresh. */
 function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolean): PaletteSources {
   const jobs = useJobs();
-  const questions = useQuestions("open");
-  const approvals = useApprovals("pending");
+  const attention = useAttention();
   const fleet = useFleet();
   const me = useMe();
   const orchestrator = useOrchestrator();
@@ -440,8 +442,7 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
   return useMemo(
     () => ({
       jobs: jobs.data,
-      questions: questions.data,
-      approvals: approvals.data,
+      attention: activeItems(attention.data),
       fleet: fleet.data,
       orchestrator: !!orchestrator.data && orchestrator.data.state !== "disabled",
       auth: !!me.data?.features.auth,
@@ -450,7 +451,7 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
       voiceSettings,
       projects: projects.data?.projects,
     }),
-    [jobs.data, questions.data, approvals.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings, projects.data],
+    [jobs.data, attention.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings, projects.data],
   );
 }
 

@@ -348,7 +348,7 @@ export function ScheduleSheet({ open, onClose, projectId }: { open: boolean; onC
   const navigate = useNavigate();
   const openJob = (id: string) => {
     onClose();
-    void navigate({ to: "/", search: { job: id } });
+    void navigate({ to: "/jobs", search: { job: id } });
   };
   return (
     <Sheet open={open} onClose={onClose} title="Schedule">

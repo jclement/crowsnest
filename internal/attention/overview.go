@@ -13,16 +13,17 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/projects"
 )
 
-// Who owns what, in one sentence each (R4 Fable 1.7, Codex C3). The same division is written
-// into the agents' own instructions (internal/orch/templates/CROWSNEST.md).
+// Who owns what, in one sentence each (R4 Fable 1.7, Codex C3). The lead and orchestrator ones
+// are internal/orch's, which also writes the division into the agents' own instructions.
 const (
-	OwnerLead         = "Its lead owns every job here: it hears when one finishes, gets stuck or asks, and escalates to the orchestrator only what it cannot resolve."
+	OwnerLead         = orch.OwnershipLead
 	OwnerNoLead       = "No lead is running: the orchestrator hears about this project's jobs until one is started."
 	OwnerUnfiled      = "Jobs in no project belong to the orchestrator, which hears about each one."
-	OwnerOrchestrator = "The front door: it routes work to projects, summarises across them and takes escalations a lead could not resolve."
+	OwnerOrchestrator = orch.OwnershipOrchestrator
 )
 
 // RowCounts are a row's figures.

@@ -60,7 +60,7 @@ describe("hotkeyFor", () => {
     expect(first.action).toBeNull();
     expect(first.state.gAt).toBe(1000);
     expect(hotkeyFor(key("i"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/inbox" });
-    expect(hotkeyFor(key("j"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/" });
+    expect(hotkeyFor(key("j"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/jobs" });
     expect(hotkeyFor(key("c"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/chat" });
     expect(hotkeyFor(key("f"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/fleet" });
     expect(hotkeyFor(key("t"), page, first.state, 1500).action).toEqual({ kind: "go", to: "/terminal" });

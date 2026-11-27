@@ -20,6 +20,12 @@ import {
   type PaletteSources,
 } from "./palette";
 import { makeQuestion } from "./questionFixtures";
+import { fixtureSnapshot } from "./attentionFixtures";
+import type { AttentionItem } from "./attention";
+import type { Question } from "./questions";
+
+/** The attention items for some questions, as the server would list them. */
+const attentionOf = (questions: Question[]): AttentionItem[] => fixtureSnapshot([], questions).items;
 
 function sources(overrides: Partial<PaletteSources> = {}): PaletteSources {
   return {
@@ -28,11 +34,11 @@ function sources(overrides: Partial<PaletteSources> = {}): PaletteSources {
       makeJob({ id: "j_2", title: "Write release notes", state: "done", settled_at: new Date().toISOString() }),
       makeJob({ id: "j_3", title: "Migrate the database", state: "running", stuck: true, cause: "limit", pane_id: "w2:p1" }),
     ],
-    questions: [
+    attention: attentionOf([
       makeQuestion({ id: "q_7", title: "Deploy to staging?", kind: "confirm", status: "open", urgency: "blocking", options: [{ key: "y", label: "Yes" }, { key: "n", label: "No" }], recommend: "n" }),
       makeQuestion({ id: "q_8", title: "Which colour?", kind: "choice", multi: true, status: "open", options: [{ key: "r", label: "Red" }] }),
       makeQuestion({ id: "q_9", title: "Saw the notice", kind: "ack", status: "open" }),
-    ],
+    ]),
     fleet: makeFleet(),
     orchestrator: true,
     auth: true,
@@ -93,7 +99,7 @@ describe("buildItems", () => {
     const items = buildItems(sources());
     const job = items.find((item) => item.id === "job:j_3");
     expect(job?.chip).toEqual({ label: "Stuck", tone: "warning" });
-    expect(job?.command).toEqual({ kind: "navigate", to: "/", search: { job: "j_3" } });
+    expect(job?.command).toEqual({ kind: "navigate", to: "/jobs", search: { job: "j_3" } });
     expect(job?.actions?.map((action) => action.id)).toEqual(["open", "resume", "nudge", "message", "cancel"]);
     // ⌘Enter never does something risky by default: no alt on a job (it opens the actions instead).
     expect(job?.alt).toBeUndefined();
@@ -116,30 +122,31 @@ describe("buildItems", () => {
     expect(items.find((item) => item.id === "q:q_9")?.actions?.map((action) => action.label)).toEqual(["Open in Inbox", "Acknowledge"]);
   });
 
-  it("orders what needs you as the Inbox does: blocking questions, dialogs, then the rest", () => {
-    const items = buildItems(
-      sources({
-        questions: [
-          makeQuestion({ id: "q_1", title: "A notice", kind: "notice", status: "open", urgency: "low" }),
-          makeQuestion({ id: "q_2", title: "Normal", kind: "manual", status: "open", urgency: "normal" }),
-          makeQuestion({ id: "q_3", title: "Blocking", kind: "confirm", status: "open", urgency: "blocking", options: [{ key: "y", label: "Yes" }] }),
-          makeQuestion({ id: "q_4", title: "Answered", kind: "confirm", status: "answered" }),
-        ],
-      }),
-    );
-    const needs = items.filter((item) => item.group === "needs").map((item) => item.id);
-    expect(needs[0]).toBe("q:q_3");
-    expect(needs[1]).toMatch(/^dialog:/);
-    expect(needs.slice(-2)).toEqual(["q:q_2", "q:q_1"]);
-    expect(needs).not.toContain("q:q_4");
+  it("lists exactly the attention queue, in its order, so the group is the badge's number", () => {
+    const dialog: AttentionItem = {
+      id: "dialog:w3:p1", kind: "dialog", urgency: "blocking", rank: 40, since: "", title: "Dialog: Rebuild the docs", project: { id: 2, slug: "website", name: "Website" },
+      job_id: "j_5", job_title: "Rebuild the docs", pane_id: "w3:p1", action: { kind: "dialog", label: "Answer the dialog" },
+    };
+    const stuck: AttentionItem = {
+      id: "job:j_3", kind: "job", urgency: "can_wait", rank: 15, since: "", title: "Migrate the database", project: null, job_id: "j_3", job_title: "Migrate the database",
+      action: { kind: "retry", label: "Retry now" },
+    };
+    const [blocking, normal] = attentionOf([
+      makeQuestion({ id: "q_3", title: "Blocking", kind: "confirm", status: "open", urgency: "blocking", options: [{ key: "y", label: "Yes" }] }),
+      makeQuestion({ id: "q_2", title: "Normal", kind: "manual", status: "open", urgency: "normal" }),
+    ]);
+    const items = buildItems(sources({ attention: [blocking!, dialog, normal!, stuck] }));
+    const needs = items.filter((item) => item.group === "needs");
+    expect(needs.map((item) => item.id)).toEqual(["q:q_3", "dialog:w3:p1", "q:q_2", "need:job:j_3"]);
+    expect(needs[1]?.subtitle).toContain("Website · Rebuild the docs");
+    expect(needs[1]?.command).toEqual({ kind: "navigate", to: "/inbox", search: { q: "dialog:w3:p1" } });
+    expect(needs[3]?.command).toEqual({ kind: "navigate", to: "/jobs", search: { job: "j_3" } });
   });
 
-  it("lists dialogs, agents and plain panes from the fleet", () => {
+  it("lists agents and plain panes from the fleet (dialogs come from the attention queue)", () => {
     const fleet = makeFleet();
     const items = buildItems(sources({ fleet }));
-    const blocked = fleet.agents.find((agent) => agent.needs_you);
-    expect(blocked).toBeDefined();
-    expect(items.find((item) => item.id === `dialog:${blocked?.pane_id}`)?.command).toEqual({ kind: "navigate", to: "/inbox", search: { q: `dialog:${blocked?.pane_id}` } });
+    expect(items.some((item) => item.group === "needs" && item.id.startsWith("dialog:"))).toBe(false);
     const withTranscript = fleet.agents.find((agent) => agent.has_transcript);
     const agentItem = items.find((item) => item.id === `agent:${withTranscript?.pane_id}`);
     expect(agentItem?.command).toEqual({ kind: "navigate", to: "/fleet", search: { agent: withTranscript?.pane_id, view: "conversation" } });

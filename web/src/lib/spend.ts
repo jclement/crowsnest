@@ -101,7 +101,7 @@ export function costText(spend: Pick<SpendSummary, "cost_usd" | "cost_partial">)
 export function chipText(spend: SpendSummary | undefined): { text: string; title: string } | null {
   if (!spend) return null;
   if (!spend.measured) {
-    if (spend.reason === "orchestrator") return null; // its use is on the orchestrator's line
+    if (spend.reason === "orchestrator" || spend.reason === "lead") return null; // its use is on the standing agent's line
     return { text: "not measured", title: notMeasuredText(spend) };
   }
   if (spend.turns === 0 && spend.total_tokens === 0) return null;
@@ -114,6 +114,7 @@ export function chipText(spend: SpendSummary | undefined): { text: string; title
 export function notMeasuredText(spend: SpendSummary): string {
   if (spend.reason === "codex") return "Not measured: crowsnest does not read Codex's usage records.";
   if (spend.reason === "orchestrator") return "Counted on the orchestrator's line: the orchestrator does this job in its own conversation.";
+  if (spend.reason === "lead") return "Counted on the lead's line: the project's lead does this job in its own conversation.";
   return "Not measured.";
 }
 

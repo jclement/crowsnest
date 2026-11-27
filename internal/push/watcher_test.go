@@ -110,7 +110,7 @@ func TestJobNotices(t *testing.T) {
 		if ok != (c.kind != "") || notice.Kind != c.kind || reason != c.reason {
 			t.Errorf("%s/%s/%v: %+v %q %v", c.state, c.cause, c.stuck, notice, reason, ok)
 		}
-		if ok && (notice.URL != "/?job=j_4" || notice.Tag != "job:j_4") {
+		if ok && (notice.URL != "/jobs?job=j_4" || notice.Tag != "job:j_4") {
 			t.Errorf("deep link/tag: %+v", notice)
 		}
 	}
