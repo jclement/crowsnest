@@ -939,6 +939,9 @@ type ProjectAccept struct {
 	// Effective is the check that would run now in the project's directory, and why.
 	Effective       string `json:"effective"`
 	EffectiveSource string `json:"effective_source"`
+	// RestoredCheckCommand is the command a restore set aside (R7-S4): not run until the human
+	// saves a check command (this one, or another), which clears it.
+	RestoredCheckCommand string `json:"restored_check_command,omitempty"`
 }
 
 // ProjectAcceptOf reads a project's acceptance defaults; dir is its directory, for Effective.
@@ -952,6 +955,9 @@ func (s *Service) ProjectAcceptOf(ctx context.Context, projectID int64, dir stri
 	}
 	out := ProjectAccept{ProjectID: projectID, CheckCommand: stored.CheckCommand, BudgetUSD: stored.BudgetUSD, BudgetMinutes: stored.BudgetMinutes}
 	out.Effective, out.EffectiveSource = s.checkCommandFor(ctx, store.JobRecord{ProjectID: projectID, Dir: dir})
+	if aside, err := s.opts.Store.GetKV(ctx, store.RestoredCheckKey(projectID)); err == nil {
+		out.RestoredCheckCommand = aside
+	}
 	return out, nil
 }
 
@@ -970,7 +976,11 @@ func (s *Service) SetProjectAccept(ctx context.Context, projectID int64, input P
 	if errors.Is(err, store.ErrNotFound) {
 		return ErrNotFound
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// The human has now said which check runs: a command a restore set aside is settled (R7-S4).
+	return s.opts.Store.DeleteKV(ctx, store.RestoredCheckKey(projectID))
 }
 
 // deliverFeedback types a check failure's pending message to the agent (R6-C07): not while the

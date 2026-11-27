@@ -422,7 +422,9 @@ by a newer schema, refuses a data directory that already holds a database (and a
 crowsnest) unless `--force`, and then keeps the replaced database beside it
 (`<session>.db.before-restore-<time>`, scrubbed of sessions and tokens like a backup). The
 backup's approval rules arrive revoked (add back the ones you want), and its role files are marked
-unread. An existing role, task or risk file is left alone unless
+unread. A project's custom check command comes back as automatic, the backup's command shown on
+the project page until you use it or keep the current check, and the backup's instruction layers
+reach no agent until you read and apply each one in Instructions. An existing role, task or risk file is left alone unless
 `--force`. The restored instance **starts paused**: crowsnest first compares the restored jobs
 with the panes herdr really has (the journal says which still have one), and the pause switch
 holds every job start, restart, retry, poke and scheduled task until you resume (account menu,

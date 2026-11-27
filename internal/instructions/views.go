@@ -31,6 +31,11 @@ type Layer struct {
 	// exact text read (R5-S14): the UI shows it loudly, since the file outranks the app's text.
 	FileHash    string `json:"file_hash,omitempty"`
 	FileChanged bool   `json:"file_changed"`
+	// Restored is true for saved text a restore brought back that the human has not applied
+	// (R7-S4): SavedMD shows it, EffectiveMD is what agents get without it; RestoredHash names
+	// it for POST …/apply-restored.
+	Restored     bool   `json:"restored"`
+	RestoredHash string `json:"restored_hash,omitempty"`
 }
 
 // Listing is GET /instructions.
@@ -139,6 +144,7 @@ func layerView(scope, key, name string, layer resolved) Layer {
 		BuiltinMD: layer.Builtin, FilePath: layer.FilePath, Editable: layer.Source != SourceFile,
 		Revision: layer.Revision, Size: len(layer.Text),
 		FileHash: layer.FileHash, FileChanged: layer.Source == SourceFile && !layer.FileSeen,
+		Restored: layer.Restored, RestoredHash: layer.RestoredHash,
 	}
 	if !layer.UpdatedAt.IsZero() {
 		at := layer.UpdatedAt

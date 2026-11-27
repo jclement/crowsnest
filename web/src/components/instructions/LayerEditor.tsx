@@ -119,6 +119,23 @@ function Editor({ detail, scope, apiKey, maxBytes, hint }: { detail: LayerDetail
           {layer.saved_md && " Text saved in the app is kept and applies again if the file goes."}
         </Banner>
       )}
+      {layer.restored && layer.restored_hash && (
+        <Banner
+          tone="danger"
+          className="rounded"
+          action={
+            <Button compact onClick={() => void report("Applied", edit.mutateAsync({ kind: "apply-restored", hash: layer.restored_hash ?? "" }))} disabled={edit.isPending}>
+              Apply it
+            </Button>
+          }
+        >
+          <strong>Restored from a backup and not applied. </strong>
+          No agent gets this text until you have read it and applied it: a backup is not your word on this machine. Saving your own text replaces it.
+          <pre data-testid="restored-text" className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-surface p-2 font-mono text-2xs text-body">
+            {layer.saved_md}
+          </pre>
+        </Banner>
+      )}
       {hint && !readOnly && <p className="text-2xs text-muted">{hint}</p>}
       <Tabs<EditorTab> id={tabsId} label="Instruction views" value={tab} onChange={setTab} items={tabs} className="w-full overflow-x-auto whitespace-nowrap sm:w-auto" />
       <TabPanel id={tabsId} value={tab} className="flex min-w-0 flex-col gap-2">

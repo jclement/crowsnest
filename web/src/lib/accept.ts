@@ -92,6 +92,8 @@ export interface ProjectAccept {
   budget_minutes: number;
   effective: string;
   effective_source: string;
+  /** A check command a restore set aside (R7-S4): not run until a save (this one or another) settles it. */
+  restored_check_command?: string;
 }
 
 export type Receipt = "" | "stored" | "held" | "uncertain" | "failed" | "delivered" | "received";

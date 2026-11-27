@@ -6,6 +6,7 @@
 //	PUT    /instructions/{scope}/{key}            {body_md}: a new revision
 //	DELETE /instructions/role/{name}              reset a role to its built-in
 //	POST   /instructions/{scope}/{key}/restore    {revision}: that text again, as a new revision
+//	POST   /instructions/{scope}/{key}/apply-restored  {hash}: a layer a backup brought may reach agents (R7-S4)
 //	GET    /agents-instructions/{subject}         an agent's layers at start, changed?, files it loaded
 //
 // The global layer's key is "-" in a URL. Only crowsnest's own layers are served as text; the
@@ -35,6 +36,7 @@ func (s *Server) registerInstructionRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/instructions/role/{name}/file-seen", s.requireAuth(http.HandlerFunc(s.handleRoleFileSeen)))
 	mux.Handle("DELETE /api/v1/instructions/role/{name}", s.requireAuth(http.HandlerFunc(s.handleInstructionsReset)))
 	mux.Handle("POST /api/v1/instructions/{scope}/{key}/restore", s.requireAuth(http.HandlerFunc(s.handleInstructionsRestore)))
+	mux.Handle("POST /api/v1/instructions/{scope}/{key}/apply-restored", s.requireAuth(http.HandlerFunc(s.handleApplyRestored)))
 	mux.Handle("GET /api/v1/agents-instructions/{subject}", s.requireAuth(http.HandlerFunc(s.handleAgentInstructions)))
 }
 
@@ -94,6 +96,28 @@ func (s *Server) handleRoleFileSeen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeLayer(w, r, service, instructions.ScopeRole, name)
+}
+
+// handleApplyRestored lets a layer a restore brought back reach agents (R7-S4): the body names
+// the hash of the text the human was shown, and text changed since is refused (409).
+func (s *Server) handleApplyRestored(w http.ResponseWriter, r *http.Request) {
+	service := s.instructionsService(w)
+	if service == nil {
+		return
+	}
+	var input struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&input); err != nil || input.Hash == "" {
+		writeError(w, http.StatusBadRequest, codeValidation, `Send JSON like {"hash": "<the restored_hash the layer showed>"}.`)
+		return
+	}
+	scope, key := layerTarget(r)
+	if err := service.ApplyRestored(r.Context(), scope, key, input.Hash); err != nil {
+		s.instructionsError(w, r, err)
+		return
+	}
+	s.writeLayer(w, r, service, scope, key)
 }
 
 type instructionsPutRequest struct {
@@ -200,7 +224,7 @@ func (s *Server) instructionsError(w http.ResponseWriter, r *http.Request, err e
 		writeError(w, http.StatusBadRequest, codeValidation, err.Error())
 	case errors.Is(err, instructions.ErrNotFound):
 		writeError(w, http.StatusNotFound, codeNotFound, err.Error())
-	case errors.Is(err, instructions.ErrFileChanged):
+	case errors.Is(err, instructions.ErrFileChanged), errors.Is(err, instructions.ErrRestoredChanged):
 		writeError(w, http.StatusConflict, codeConflict, err.Error()+"; read it again")
 	case errors.Is(err, instructions.ErrReadOnly):
 		writeError(w, http.StatusConflict, codeConflict, err.Error())

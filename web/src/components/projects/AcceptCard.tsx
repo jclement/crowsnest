@@ -13,7 +13,7 @@ import { useToast } from "../ui/toast-context";
 export function AcceptCard({ projectId }: { projectId: number }) {
   const query = useProjectAccept(projectId);
   // The form starts from the saved values; keyed so a save (or another tab's) starts it afresh.
-  const key = query.data ? `${query.data.check_command}|${query.data.budget_usd}|${query.data.budget_minutes}` : "loading";
+  const key = query.data ? `${query.data.check_command}|${query.data.budget_usd}|${query.data.budget_minutes}|${query.data.restored_check_command ?? ""}` : "loading";
   return <AcceptForm key={key} projectId={projectId} data={query.data} loading={query.isPending} />;
 }
 
@@ -23,6 +23,14 @@ function AcceptForm({ projectId, data, loading }: { projectId: number; data?: Pr
   const [command, setCommand] = useState(data?.check_command ?? "");
   const [usd, setUsd] = useState(data?.budget_usd ? String(data.budget_usd) : "");
   const [minutes, setMinutes] = useState(data?.budget_minutes ? String(data.budget_minutes) : "");
+  const submit = (checkCommand: string) =>
+    save.mutate(
+      { check_command: checkCommand, budget_usd: Number(usd) || 0, budget_minutes: Number(minutes) || 0 },
+      {
+        onSuccess: () => toast.show({ tone: "success", title: "Saved" }),
+        onError: (error) => toast.show({ tone: "danger", title: "Not saved", description: error.message }),
+      },
+    );
   return (
     <Card
       aria-label="Acceptance and budget"
@@ -37,15 +45,26 @@ function AcceptForm({ projectId, data, loading }: { projectId: number; data?: Pr
         className="flex flex-col gap-2 text-xs"
         onSubmit={(event) => {
           event.preventDefault();
-          save.mutate(
-            { check_command: command.trim(), budget_usd: Number(usd) || 0, budget_minutes: Number(minutes) || 0 },
-            {
-              onSuccess: () => toast.show({ tone: "success", title: "Saved" }),
-              onError: (error) => toast.show({ tone: "danger", title: "Not saved", description: error.message }),
-            },
-          );
+          submit(command.trim());
         }}
       >
+        {data?.restored_check_command && (
+          <div role="alert" className="flex flex-col gap-1 rounded border border-danger/40 bg-danger/10 p-2 text-body">
+            <p>
+              <strong>A restore brought this check command, and crowsnest does not run it</strong> until you say so (it runs on every finished job, and a
+              backup is not your word on this machine). Until then the check is automatic.
+            </p>
+            <code data-testid="restored-check-command" className="break-all font-mono">{data.restored_check_command}</code>
+            <div className="flex flex-wrap gap-2">
+              <Button compact variant="secondary" disabled={save.isPending} onClick={() => submit(data.restored_check_command ?? "")}>
+                Use this command
+              </Button>
+              <Button compact variant="secondary" disabled={save.isPending} onClick={() => submit(command.trim())}>
+                Keep the current check
+              </Button>
+            </div>
+          </div>
+        )}
         <label className="flex flex-col gap-0.5">
           <span className="text-muted">Check command (empty: automatic; "none": no check)</span>
           <input aria-label="Check command" value={command} onChange={(event) => setCommand(event.target.value)} placeholder="mise run check"

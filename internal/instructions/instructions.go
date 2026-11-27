@@ -134,6 +134,10 @@ type resolved struct {
 	// exact text read (R5-S14). A file nobody has looked at, or one changed since, is shown loudly.
 	FileHash string
 	FileSeen bool
+	// Restored marks saved text a restore brought back and the human has not applied (R7-S4):
+	// it is withheld from agents (Text is what applies without it), and RestoredHash names it.
+	Restored     bool
+	RestoredHash string
 }
 
 // roleSet reads the roles as a job start would see them: the embedded ones with the override
@@ -153,9 +157,12 @@ func (s *Service) resolve(ctx context.Context, roles *jobs.Roles, scope, key str
 	case !errors.Is(err, store.ErrNotFound):
 		return resolved{}, err
 	}
+	if err == nil {
+		out.Restored, out.RestoredHash = s.restoredUnreviewed(ctx, scope, key, out.Saved)
+	}
 	if scope != ScopeRole {
 		out.Source, out.Text = SourceNone, ""
-		if err == nil {
+		if err == nil && !out.Restored {
 			out.Source, out.Text = SourceDB, out.Saved
 		}
 		return out, nil
@@ -169,14 +176,62 @@ func (s *Service) resolve(ctx context.Context, roles *jobs.Roles, scope, key str
 		if seen, err := s.opts.Store.GetKV(ctx, fileSeenKey(key)); err == nil && seen == out.FileHash {
 			out.FileSeen = true
 		}
-	case err == nil:
+	case err == nil && !out.Restored:
 		out.Source, out.Text = SourceDB, out.Saved
+	case out.Restored && out.Builtin != "":
+		out.Source, out.Text = SourceBuiltin, out.Builtin
 	case exists:
 		out.Source, out.Text = SourceBuiltin, text
 	default:
 		return resolved{}, failure(ErrNotFound, "There is no role %q.", key)
 	}
 	return out, nil
+}
+
+// ---- Layers a restore brought back (R7-S4) -------------------------------------------------
+
+// restoredUnreviewed reports whether saved is text a restore brought back that the human has not
+// applied: the layer carries a restore mark whose hash is still the saved text's. A save since
+// the restore (the human's) changes the hash, so the mark no longer applies.
+func (s *Service) restoredUnreviewed(ctx context.Context, scope, key, saved string) (bool, string) {
+	mark, err := s.opts.Store.GetKV(ctx, store.RestoredLayerKey(scope, key))
+	if err != nil || mark != store.LayerTextHash(saved) {
+		return false, ""
+	}
+	return true, mark
+}
+
+// ErrRestoredChanged is returned when the restored text changed after the human looked at it.
+var ErrRestoredChanged = errors.New("the layer changed since you looked at it")
+
+// ApplyRestored is the human's word that a layer a restore brought back may reach agents: hash
+// names the text they were shown. Standing agents then see a change and restart for it (7.x,
+// freshness), as for any other new instructions.
+func (s *Service) ApplyRestored(ctx context.Context, scope, key, hash string) error {
+	if _, err := s.checkTarget(ctx, scope, key); err != nil {
+		return err
+	}
+	saved, err := s.opts.Store.GetInstructionLayer(ctx, scope, key)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return failure(ErrNotFound, "That layer has no saved text.")
+		}
+		return err
+	}
+	restored, mark := s.restoredUnreviewed(ctx, scope, key, saved.BodyMD)
+	if !restored {
+		return failure(ErrNotFound, "That layer is not waiting for review after a restore.")
+	}
+	if hash == "" || hash != mark {
+		return ErrRestoredChanged
+	}
+	if err := s.opts.Store.DeleteKV(ctx, store.RestoredLayerKey(scope, key)); err != nil {
+		return err
+	}
+	if s.opts.Hub != nil {
+		s.opts.Hub.Publish(hub.Event{Type: EventType, Data: map[string]any{"at": s.opts.Now().UTC()}})
+	}
+	return nil
 }
 
 // ---- Role files the human has read (R5-S14) -----------------------------------------------
@@ -319,6 +374,10 @@ func (s *Service) Restore(ctx context.Context, scope, key string, revision int) 
 // write records the revision and tells the browsers.
 func (s *Service) write(ctx context.Context, scope, key, body string, deleted bool) error {
 	if _, err := s.opts.Store.SaveInstructionLayer(ctx, scope, key, body, deleted, s.opts.Now(), s.opts.KeepRevisions); err != nil {
+		return err
+	}
+	// The human's own save settles a restored layer: their text is not the backup's.
+	if err := s.opts.Store.DeleteKV(ctx, store.RestoredLayerKey(scope, key)); err != nil {
 		return err
 	}
 	if s.opts.Hub != nil {

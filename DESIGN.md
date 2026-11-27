@@ -394,7 +394,17 @@ once (so newer migrations run), and gets kv `pause.state` `{paused: true, by: "r
 (the pause switch's own row and shape, 6.13 on `wip/landing`) and `restore.pending`. R6-S5: a
 backup is not the human's word on this machine, so its approval rules are kept but **revoked**
 (the CLI says how many; add back the ones you want), its role files' "I've read it" marks are
-dropped, and any Remote Control link goes. The replaced database is **scrubbed** like a backup
+dropped, and any Remote Control link goes. R7-S4: the same for what crowsnest acts on by itself.
+Each project's **custom check command** (a shell command crowsnest runs on every done) goes back
+to automatic, the backup's command kept aside in kv (`restored.check_command.<id>`), named in the
+CLI's summary and shown on the project's Acceptance card with "Use this command" and "Keep the
+current check"; any save of the project's check settles it. Each saved **instruction layer** is
+marked "restored, not applied" (kv `instructions.restored.<scope>.<key>`, the hash of its text):
+while its saved text still has that hash it is **withheld** from every agent (a role falls back to
+its built-in), the layer editor shows the text with **Apply it** (`POST
+/instructions/{scope}/{key}/apply-restored {hash}`, 409 if it changed), and the human's own save
+replaces it. Applying changes what a start would write, so the standing agents restart for new
+instructions as for any other change (7.x freshness). The replaced database is **scrubbed** like a backup
 (sessions, token hashes, the push key, the notify URL): rolling back to it means signing in again.
 R6-S6: snapshots, backups and pre-migration copies drop every `*remote_control` key and carry a
 scrub mark (`snapshot.scrubbed`); a pre-migration copy without the current mark is scrubbed again
