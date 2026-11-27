@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeBoard, makeJob } from "./jobFixtures";
-import { actionFor, boardSections, cardLine, jobAnswerText, retryLabel, sectionOf, stateChip } from "./jobs";
+import { actionFor, boardSections, cardLine, childrenOf, jobAnswerText, ownershipChain, retryLabel, sectionOf, stateChip, type Job } from "./jobs";
 
 describe("the board", () => {
   const now = new Date("2026-11-26T12:00:00Z");
@@ -71,5 +71,21 @@ describe("jobAnswerText", () => {
     expect(jobAnswerText({ ...base, kind: "ack", status: "answered", answer_value: "ack", options: [] })).toBe("Acknowledged");
     expect(jobAnswerText({ ...base, kind: "choice", status: "expired", answer_value: null, options: [] })).toBe("expired with no answer");
     expect(jobAnswerText({ ...base, kind: "choice", status: "cancelled", answer_value: null, options: [] })).toBe("cancelled");
+  });
+});
+
+describe("ownershipChain", () => {
+  const base = { role: "builder", state: "running", created_at: "2026-11-26T00:00:00Z" } as const;
+  const lead = { ...base, id: "j_1", role: "lead", title: "Plan" } as unknown as Job;
+  const child = { ...base, id: "j_2", title: "Build", parent_id: "j_1" } as unknown as Job;
+  const grandchild = { ...base, id: "j_3", role: "reviewer", title: "Review", parent_id: "j_2", created_at: "2026-11-26T01:00:00Z" } as unknown as Job;
+
+  it("runs from the human through the project's lead and every ancestor to the job", () => {
+    expect(ownershipChain(grandchild, [lead, child, grandchild], "Crowsnest").map((link) => link.label)).toEqual(["you", "lead Crowsnest", "lead j_1", "builder j_2", "reviewer j_3"]);
+    expect(ownershipChain(lead, [lead], undefined).map((link) => link.label)).toEqual(["you", "orchestrator", "lead j_1"]);
+  });
+
+  it("lists a job's children", () => {
+    expect(childrenOf(child, [lead, child, grandchild]).map((job) => job.id)).toEqual(["j_3"]);
   });
 });
