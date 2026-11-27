@@ -518,7 +518,11 @@ What holds now:
 - **Gates are never answered from a notification** (R5-S2). `questions.GateShaped` is a gate key,
   or any option key or label, or the title, that uses a granting word (`allow`, `approve`, `merge`,
   `land`, `push`, `deploy`, `delete`, `grant`, `permit`; R6-S9: an agent
-  could put "Allow: merge j_5" on a key "y"). Agents may not set any `land_`, `task_`,
+  could put "Allow: merge j_5" on a key "y"). R7-S6: the text is normalised first (NFKC, format
+  characters such as zero-width joiners removed, Cyrillic and Greek look-alikes folded onto Latin),
+  the words match with their inflections (`merging`, `deploys`, `approved` …), and "go ahead" counts;
+  "ship" does not ("Ship?" is the plain confirm of ordinary questions). The web's `isGate` mirrors
+  it. Agents may not set any `land_`, `task_`,
   `approval_` or `crowsnest_` context key (R6-I1). Such a question's
   notice gets no buttons and no action token (`internal/push/decision.go`), and `/push/action`
   refuses one (`403`). The endpoint is the authority.

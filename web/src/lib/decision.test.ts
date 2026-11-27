@@ -123,6 +123,14 @@ describe("routine questions", () => {
     expect(isGate({ ...confirm, options: [{ key: "Approve", label: "Approve" }] })).toBe(true);
     // R6-S9: a label or the title that grants makes it a gate too.
     expect(isGate({ ...confirm, options: [{ key: "y", label: "Allow: merge j_5" }] })).toBe(true);
+    // R7-S6: look-alike letters, zero-width splits, inflections and "go ahead" do not hide it.
+    const cyrillicA = String.fromCodePoint(0x0410);
+    const zwj = String.fromCodePoint(0x200d);
+    expect(isGate({ ...confirm, options: [{ key: "y", label: `${cyrillicA}llow it` }] })).toBe(true);
+    expect(isGate({ ...confirm, options: [{ key: "y", label: `Al${zwj}low` }] })).toBe(true);
+    expect(isGate({ ...confirm, options: [{ key: "y", label: "Merging j_5" }] })).toBe(true);
+    expect(isGate({ ...confirm, title: "Go ahead with step 3?" })).toBe(true);
+    expect(isGate({ ...confirm, title: "Ship?" })).toBe(false);
     expect(isGate({ ...confirm, title: "OK to deploy now?" })).toBe(true);
     expect(grants("allow")).toBe(true);
     expect(grants("deny")).toBe(false);

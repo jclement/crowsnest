@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // The context keys crowsnest sets on its own questions. The gate keys mark a gate; the others
@@ -58,19 +60,69 @@ func IsGate(context map[string]string) bool {
 	return false
 }
 
-// grantingWords are words that grant something. A question whose option keys, option labels or
-// title use one is treated as a gate for notification purposes, because an agent can word any
-// question to look like one (R3-I4, R6-S9): one tap on a lock screen must never look like it
-// grants anything.
-var grantingWords = map[string]bool{
-	"allow": true, "allowed": true, "approve": true, "approved": true, "approval": true, "merge": true, "land": true,
-	"push": true, "deploy": true, "delete": true, "grant": true, "permit": true,
+// grantingWords are words that grant something, with their inflections. A question whose option
+// keys, option labels or title use one is treated as a gate for notification purposes, because an
+// agent can word any question to look like one (R3-I4, R6-S9): one tap on a lock screen must never
+// look like it grants anything. "go ahead" reads as a grant too (R7-S6); "ship" does not, since
+// "Ship?" is the plain confirm of many ordinary questions.
+var grantingWords = map[string]bool{}
+
+func init() {
+	for _, word := range strings.Fields(`allow allows allowed allowing approve approves approved approving approval
+		merge merges merged merging land lands landed landing push pushes pushed pushing deploy deploys deployed
+		deploying deployment delete deletes deleted deleting deletion grant grants granted granting permit permits
+		permitted permitting`) {
+		grantingWords[word] = true
+	}
 }
 
-// GrantingText reports whether text uses a granting word (whole words, any case).
+// grantingPhrases are granting words of more than one word, matched on the normalised words.
+var grantingPhrases = []string{"go ahead"}
+
+// confusables folds the Cyrillic and Greek letters that look like Latin ones onto those (a small
+// part of Unicode's UTS #39 skeleton: the letters an agent would use to spell "Allow" so that a
+// word list does not see it, R7-S6).
+var confusables = map[rune]rune{
+	'\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
+	'\u0456': 'i', '\u0458': 'j', '\u0455': 's', '\u0501': 'd', '\u04cf': 'l', '\u0261': 'g', '\u0251': 'a',
+	'\u0410': 'a', '\u0415': 'e', '\u041e': 'o', '\u0420': 'p', '\u0421': 'c', '\u0425': 'x', '\u0406': 'i',
+	'\u0408': 'j', '\u0405': 's', '\u041c': 'm', '\u041d': 'h', '\u0422': 't', '\u0412': 'b', '\u041a': 'k',
+	'\u03bf': 'o', '\u03b1': 'a', '\u03b5': 'e', '\u03b9': 'i', '\u03ba': 'k', '\u03bd': 'v', '\u03c1': 'p',
+	'\u03c4': 't', '\u03c5': 'u', '\u039f': 'o', '\u0391': 'a', '\u0392': 'b', '\u0395': 'e', '\u0397': 'h',
+	'\u0399': 'i', '\u039a': 'k', '\u039c': 'm', '\u039d': 'n', '\u03a1': 'p', '\u03a4': 't', '\u03a7': 'x',
+	'\u0131': 'i',
+}
+
+// normalisedWords is text as GrantingText reads it (R7-S6): compatibility-normalised (NFKC, so
+// full-width and styled letters are plain), with every format character (zero-width space and
+// joiners, bidi controls, soft hyphen) removed so it cannot split a word, look-alike letters
+// folded onto Latin ones, lowercased and split into words of letters.
+func normalisedWords(text string) []string {
+	var b strings.Builder
+	for _, r := range norm.NFKC.String(text) {
+		if unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if latin, ok := confusables[r]; ok {
+			r = latin
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return strings.FieldsFunc(b.String(), func(r rune) bool { return !unicode.IsLetter(r) })
+}
+
+// GrantingText reports whether text uses a granting word or phrase (whole words, any case, after
+// normalisation).
 func GrantingText(text string) bool {
-	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) }) {
+	words := normalisedWords(text)
+	for _, word := range words {
 		if grantingWords[word] {
+			return true
+		}
+	}
+	joined := " " + strings.Join(words, " ") + " "
+	for _, phrase := range grantingPhrases {
+		if strings.Contains(joined, " "+phrase+" ") {
 			return true
 		}
 	}
