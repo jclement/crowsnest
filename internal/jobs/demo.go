@@ -94,6 +94,8 @@ func demoJobs(now time.Time, panes DemoPanes) []demoJob {
 
 	nudged := base("Tidy the README install section", "Tidy the README install section: one path per platform.", "builder", "~/src/website", string(StateRunning), panes.Builder, "job-2", 25*time.Minute)
 	nudged.Progress, nudged.Nudges, nudged.NudgeStreak, nudged.LastNudgeAt = "Rewriting the macOS steps", 2, 1, ago(3*time.Minute)
+	nudged.BudgetUSD, nudged.BudgetState, nudged.BudgetDetail = 1, BudgetWarned, "Used 84%: $0.84 of its $1.00 budget"
+	nudged.LastMessage, nudged.LastMessageAt = "The macOS steps are rewritten. Want me to do the Linux ones the same way?", ago(3*time.Minute)
 
 	limit := base("Migrate the settings page to the new form kit", "Migrate the settings page to the new form kit.", "builder", "~/src/crowsnest", string(StateRunning), panes.Linter, "job-3", 2*time.Hour)
 	limit.Stuck, limit.Cause, limit.CauseDetail = true, string(CauseLimit), "Usage limit reached; resets at 14:00"
@@ -110,14 +112,18 @@ func demoJobs(now time.Time, panes DemoPanes) []demoJob {
 	unresponsive := base("Profile the fleet cache", "Profile the fleet cache under 200 panes.", "tester", "~/src/crowsnest", string(StateRunning), panes.Reviewer, "job-6", 3*time.Hour)
 	unresponsive.Stuck, unresponsive.Cause, unresponsive.Nudges, unresponsive.NudgeStreak = true, string(CauseUnresponsive), 3, 3
 	unresponsive.CauseDetail, unresponsive.LastActivityAt = "Ended its turn 4 times in a row without declaring anything or doing any work.", ago(35*time.Minute)
+	unresponsive.LastMessage, unresponsive.LastMessageAt = "Profiling at 200 panes shows the cache rebuilds on every event. I'm not sure how to proceed without changing herdr's event shape.", ago(35*time.Minute)
 
 	blocked := base("Upgrade the Postgres driver", "Upgrade the Postgres driver to v6.", "builder", "~/src/crowsnest", string(StateBlocked), "", "job-7", 5*time.Hour)
 	blocked.BlockedReason, blocked.Progress = "Waiting for the staging database to come back", "Blocked on staging"
+	blocked.WakeKind, blocked.WakeAt, blocked.Rechecks = WakeTime, now.Add(25*time.Minute), 1
+	blocked.LastMessage, blocked.LastMessageAt = "Staging's Postgres answers 503. Blocked; I'll look again at the recheck.", ago(time.Hour)
 
 	done := base("Fix the flaky SSE reconnect test", "Fix the flaky SSE reconnect test.", "builder", "~/src/crowsnest", string(StateDone), "", "job-8", 4*time.Hour)
 	done.SettledAt, done.Progress = ago(2*time.Hour), "Done"
 	done.ResultMD = "Fixed the race in `sse.test.tsx`: the fake timer advanced before the stream opened.\n\n- Branch `job/8-fix-flaky-sse`, one commit\n- The test now waits for `open` before advancing"
 	done.VerifiedJSON, done.NotVerifiedJSON = list("npm test -- sse: 50 runs, 0 failures", "mise run check: green"), list("Safari (no WebKit runner here)")
+	done.AcceptState, done.AcceptDetail = AcceptUnverified, "Finished, unverified: no check command (no mise check task, and none set on a project)"
 
 	failed := base("Port the TUI to Bubble Tea v2", "Port the TUI to Bubble Tea v2.", "builder", "~/src/crowsnest", string(StateFailed), "", "job-9", 6*time.Hour)
 	failed.SettledAt, failed.FailReason = ago(5*time.Hour), "Bubble Tea v2 is not released yet; the beta API changed twice this week."

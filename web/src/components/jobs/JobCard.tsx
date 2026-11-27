@@ -45,7 +45,7 @@ export function JobCard({ job, selected, onSelect, projectName }: JobCardProps) 
           <Chip tone={limitHeld ? "neutral" : chip.tone}>{limitHeld ? "Held" : chip.label}</Chip>
         </span>
         {line && <span className={cn("line-clamp-2 text-xs", (job.stuck && !limitHeld) || job.state === "needs_you" ? "text-warning" : "text-body")}>{line}</span>}
-        {job.wake && (job.state === "blocked" || job.state === "needs_you") && (
+        {job.wake && job.state === "blocked" && (
           <span className="text-2xs text-muted">
             Waits on {job.wait_owner}: {job.wake}
           </span>
