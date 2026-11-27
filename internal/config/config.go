@@ -146,6 +146,10 @@ type Config struct {
 	OrchestratorCeilingUSD  float64 // the orchestrator's ceiling per day; 0 none
 	LeadCeilingUSD          float64 // each lead's ceiling per day; 0 none
 
+	// TrustProjectFolders lets a project created in the app record the agents' folder-trust
+	// answer for its folder (8.2.1). On by default.
+	TrustProjectFolders bool
+
 	// ---- The guard hook and approvals (guard.go) ----
 
 	ProtectedHosts     []string // --protected-host; the file's hosts are added by the caller (guard.ReadHostsFile)

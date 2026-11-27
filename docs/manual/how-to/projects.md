@@ -61,7 +61,7 @@ On **New project**, or **Edit** on the project's page:
 | Field | What it sets |
 |---|---|
 | **Role** | The role a job in this project gets when you do not choose one. |
-| **Engine** | Claude or Codex for its jobs. Choosing Codex shows a note of what it does not get: crowsnest supervises Claude through its hooks, and Codex has none. |
+| **Engine** | Claude or Codex for its jobs. Choosing Codex says what its jobs run without; [what each engine gets](../reference/engines.md). |
 | **Model** | The model for its job agents (empty: crowsnest's default). |
 | **Own worktree** | **Yes, a worktree per job**, or **No, work in the directory**. |
 | **Permission mode** | The lead's Claude Code permission mode. |
@@ -137,7 +137,7 @@ A **dangerous** call is never allowed by a rule. **Remove** deletes one. On an a
   warns about this before you choose.
 - **The folder you want is not in the picker**: it is outside your home and every project. Start
   crowsnest with `--browse-root <dir>`, or type the path.
-- **The lead does not start**: its folder may be waiting at Claude's trust question; open
-  **Terminal** and answer it.
+- **The lead does not start**: its folder may be waiting at the trust question; press **Trust this
+  folder** on its card, or on the project's page (which then covers its jobs too).
 - **Jobs do not join the project**: a job joins only if its directory is inside the project's.
   Give it **For** the project in the job box.

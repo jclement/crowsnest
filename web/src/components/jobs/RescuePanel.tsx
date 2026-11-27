@@ -10,6 +10,10 @@
 // job's pane (only while the agent is idle, because Claude queues input typed during a turn and a
 // queued slash command would arrive as text), and the job's own nudge, resume, message and
 // restart-agent routes.
+//
+// It is engine-aware (DESIGN.md 20.1): GET /engines says which actions the job's engine supports,
+// and only those are drawn; a Codex job gets no restart, compact or model switch (the server
+// refuses them anyway, with the same sentence shown here), and the models offered are the table's.
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, Cpu, LifeBuoy, Minimize2, OctagonX, Play, RotateCcw, SquareTerminal, StepForward, Zap } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -18,7 +22,7 @@ import { cn } from "../../lib/cn";
 import type { Job } from "../../lib/jobs";
 
 /** What the panel needs of a job: a board card's job will do, not only the full detail. */
-type RescueJob = Pick<Job, "id" | "pane_id" | "agent_name" | "stuck"> & Partial<Pick<Job, "cause" | "accept_state">>;
+type RescueJob = Pick<Job, "id" | "pane_id" | "agent_name" | "stuck"> & Partial<Pick<Job, "cause" | "accept_state" | "engine">>;
 
 /**
  * What the job's cause (main's acceptance branch, DESIGN.md 6.15 to 6.19) means for rescue, in a
@@ -37,13 +41,14 @@ function causeAdvice(job: RescueJob): { text: string; push: boolean } | null {
       return null;
   }
 }
-import { useAgentScreen, useApprovals, useFleet, useJobAction, useJobMessage, useRestartWithInstructions, useSendKeys } from "../../lib/queries";
+import { useAgentScreen, useApprovals, useEngines, useFleet, useJobAction, useJobMessage, useRestartWithInstructions, useSendKeys } from "../../lib/queries";
+import { engineInfo, rescueAvailable } from "../../lib/engines";
 import { DialogCard, ScreenText } from "../fleet/DialogCard";
 import { useToast } from "../ui/toast-context";
 import { HelpButton } from "../help/HelpButton";
 
-/** The models "Switch model" offers; Claude Code's /model takes these aliases. */
-const MODELS = ["sonnet", "opus", "haiku"] as const;
+/** The models "Switch model" offers until the engines table has loaded: Claude Code's aliases. */
+const FALLBACK_MODELS = ["sonnet", "opus", "haiku"];
 
 /** What "Continue" types: a plain push to carry on, with the job protocol's reminder. */
 const CONTINUE_TEXT = "Continue where you left off. If you cannot, say why with job_update, or ask with the ask tool.";
@@ -87,7 +92,14 @@ function RescueBody({ job, openTerminal }: { job: RescueJob; openTerminal: () =>
   const restart = useRestartWithInstructions();
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
-  const [model, setModel] = useState<(typeof MODELS)[number]>("sonnet");
+  const info = engineInfo(useEngines().data, job.engine ?? "claude");
+  const engineName = info?.name ?? "Claude";
+  const models = info ? info.models.map((entry) => entry.id) : FALLBACK_MODELS;
+  const canRestart = rescueAvailable(info, "restart");
+  const canCompact = rescueAvailable(info, "compact");
+  const canSwitch = rescueAvailable(info, "model") && models.length > 0;
+  const refused = (info?.rescue ?? []).filter((rescue) => !rescue.available);
+  const [model, setModel] = useState(models[0] ?? "sonnet");
   const status = fleet.data?.agents.find((agent) => agent.pane_id === job.pane_id)?.status;
   const idle = status === "idle" || status === "done";
 
@@ -130,25 +142,25 @@ function RescueBody({ job, openTerminal }: { job: RescueJob; openTerminal: () =>
         {job.stuck && (
           <Action icon={Play} label="Get it moving" hint="Retry now after a limit, restart a gone agent, else nudge." disabled={!!busy} onPress={() => run("Get it moving", () => action.mutateAsync("resume"), "Moving it")} />
         )}
-        {confirmRestart ? (
+        {!canRestart ? null : confirmRestart ? (
           <li className="flex flex-col gap-1 rounded-md border border-warning/60 p-2 sm:col-span-2">
-            <span className="text-xs text-heading">Restart {job.agent_name}'s Claude on the same conversation? A turn in progress is lost; the conversation is kept.</span>
+            <span className="text-xs text-heading">Restart {job.agent_name}&apos;s {engineName} on the same conversation? A turn in progress is lost; the conversation is kept.</span>
             <span className="flex gap-1.5">
               <SmallButton onPress={() => { setConfirmRestart(false); run("Restart", () => restart.mutateAsync({ kind: "job", id: job.id }), "Restarting on the same conversation"); }}>Yes, restart</SmallButton>
               <SmallButton onPress={() => setConfirmRestart(false)}>Cancel</SmallButton>
             </span>
           </li>
         ) : (
-          <Action icon={RotateCcw} label="Restart (same conversation)" hint="Starts its Claude again with --resume: for a hung or crashed agent." disabled={!!busy} onPress={() => setConfirmRestart(true)} />
+          <Action icon={RotateCcw} label="Restart (same conversation)" hint={`Starts its ${engineName} again with --resume: for a hung or crashed agent.`} disabled={!!busy} onPress={() => setConfirmRestart(true)} />
         )}
-        <Action
+        {canCompact && <Action
           icon={Minimize2}
           label="Compact now"
           hint={idle ? "Types /compact: shrinks its context so it can keep going." : "Only while it is idle (a slash command typed mid-turn arrives as text)."}
           disabled={!!busy || !idle}
           onPress={() => typeCommand("Compact now", "/compact", "Typed /compact")}
-        />
-        <li className="flex flex-col gap-1 rounded-md border border-border-strong bg-surface p-2">
+        />}
+        {canSwitch && <li className="flex flex-col gap-1 rounded-md border border-border-strong bg-surface p-2">
           <span className="flex items-center gap-1.5 text-sm font-medium text-heading">
             <Cpu className="h-4 w-4 text-muted" aria-hidden />
             Switch model
@@ -158,10 +170,10 @@ function RescueBody({ job, openTerminal }: { job: RescueJob; openTerminal: () =>
             <select
               aria-label="Model"
               value={model}
-              onChange={(event) => setModel(event.target.value as (typeof MODELS)[number])}
+              onChange={(event) => setModel(event.target.value)}
               className="min-h-11 flex-1 rounded border border-border-strong bg-surface px-2 text-sm text-heading md:min-h-8 md:text-xs"
             >
-              {MODELS.map((name) => (
+              {models.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>
@@ -171,9 +183,14 @@ function RescueBody({ job, openTerminal }: { job: RescueJob; openTerminal: () =>
               Switch
             </SmallButton>
           </span>
-        </li>
+        </li>}
         <Action icon={SquareTerminal} label="Open the terminal" hint="For anything else: the agent's own pane." onPress={openTerminal} />
       </ul>
+      {refused.length > 0 && (
+        <p className="text-2xs text-muted" data-testid="rescue-engine-note">
+          Not offered for a {engineName} job: {refused.map((rescue) => rescue.refusal).join(" ")}
+        </p>
+      )}
       {screen.data && !dialog?.present && (
         <details className="text-xs">
           <summary className="flex min-h-11 cursor-pointer items-center text-muted md:min-h-7">The last screen, as text</summary>

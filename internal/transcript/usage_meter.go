@@ -127,6 +127,10 @@ type FileCursor struct {
 	Path   string `json:"path"`
 	Offset int64  `json:"offset"` // bytes consumed: always at the end of a complete line
 	Inode  uint64 `json:"inode"`  // the file read, so a replaced file is noticed across restarts
+	// Format is "" for a Claude transcript, FormatCodex for a Codex rollout (codex.go).
+	Format string `json:"format,omitempty"`
+	// Model is a Codex rollout's model as its last turn_context named it (codex.go).
+	Model string `json:"model,omitempty"`
 }
 
 // ErrUsageFileGone means the cursor's file no longer exists. What was read stays counted.
@@ -161,12 +165,16 @@ func ReadUsage(cursor *FileCursor, fn func(UsageEntry)) (reset bool, err error) 
 	if _, err := file.Seek(cursor.Offset, io.SeekStart); err != nil {
 		return reset, fmt.Errorf("seeking in transcript: %w", err)
 	}
-	return reset, readUsageLines(file, cursor, fn)
+	parse := ParseUsage
+	if cursor.Format == FormatCodex {
+		parse = codexParser(cursor)
+	}
+	return reset, readUsageLines(file, cursor, parse, fn)
 }
 
 // readUsageLines consumes complete lines from r. cursor.Offset moves to just past each newline,
 // so an unfinished last line is read again, whole, next time.
-func readUsageLines(r io.Reader, cursor *FileCursor, fn func(UsageEntry)) error {
+func readUsageLines(r io.Reader, cursor *FileCursor, parse func([]byte) (UsageEntry, bool), fn func(UsageEntry)) error {
 	buffer := make([]byte, readChunk)
 	position := cursor.Offset // absolute offset of buffer[0] on the next read
 	var pending []byte
@@ -191,7 +199,7 @@ func readUsageLines(r io.Reader, cursor *FileCursor, fn func(UsageEntry)) error 
 				if len(pending) > 0 {
 					line = append(pending, line...)
 				}
-				if entry, ok := ParseUsage(line); ok {
+				if entry, ok := parse(line); ok {
 					fn(entry)
 				}
 			}

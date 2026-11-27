@@ -4,15 +4,24 @@ The real problems seen so far, and what fixes each.
 
 ## The folder-trust prompt
 
-**What you see**: a new lead, job or the orchestrator does not start; its card (or the first-run
-page) shows a dialog: Claude asks whether you trust the files in this folder.
+**What you see**: a new lead, job or the orchestrator does not start; a card says **<agent> asks
+to trust <folder>**, on Now, in the Inbox, on the decision screen, in the job's Rescue panel or on
+the first-run page.
 
-**Why**: Claude Code asks once per directory before it runs anything there. crowsnest never answers
-it for you.
+**Why**: Claude Code and Codex each ask once per folder before they run anything there. crowsnest
+never answers it for you.
 
-**Fix**: press the option on the dialog card (in the Inbox, on Now, or the first-run page), or open
-the agent's terminal and answer it. It is asked once per directory; projects' directories get it
-the first time a lead or job starts there.
+**Fix**: press **Trust this folder** on the card (or **Don't trust**: the agent then exits and the
+job waits). No terminal is needed, on a phone either. The card checks that the question went; if it
+says the agent is still asking, look at the screen it shows.
+
+**Avoid it**: when you create a project in the app, leave **Agents may work in this folder without
+asking** ticked (it is by default): crowsnest records that answer for the project's folder, and every
+job worktree made from it starts trusted, because both agents give a repository's worktrees the
+trust of its checkout. For a project made before, or with the box unticked, press **Trust this
+folder** on the project's page. A git repository inside another one is its own folder and asks on
+its own. The setting **Trust the folders of projects you create** (Settings → Agents) turns this
+off.
 
 ## Claude sign-in expired
 

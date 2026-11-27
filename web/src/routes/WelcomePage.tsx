@@ -189,7 +189,7 @@ export function Checklist({ view, rechecking, onRecheck, onStarted }: ChecklistP
           <p className="mt-1 text-body">
             {trust?.status === "ok"
               ? "Claude already trusts it."
-              : "The first time, Claude asks whether to trust this folder. The question appears on this page with its buttons; answer Yes."}
+              : "The first time, Claude asks whether to trust this folder. The question appears on this page as a card: press Trust this folder."}
           </p>
         </div>
       </section>

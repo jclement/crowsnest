@@ -34,7 +34,8 @@ import type {
 } from "./landing";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
 import type { ContextInfo, ScheduleInput, ScheduleView } from "./schedule";
-import type { LeadAction, LeadStatus, ProjectInput, ProjectList, ProjectView } from "./projects";
+import type { EngineInfo } from "./engines";
+import type { LeadAction, LeadStatus, ProjectCreateInput, ProjectInput, ProjectList, ProjectView } from "./projects";
 import type { AgentInstructions, InstructionsList, LayerDetail, LayerScope } from "./instructions";
 import type { AttachmentLimits } from "./attachments";
 import type { PushDevice, PushKind, PushSettings, PushSubscriptionJSON, PushTestResult } from "./push";
@@ -259,6 +260,8 @@ export const endpoints = {
     }),
   jobAction: (id: string, action: "cancel" | "nudge" | "resume") => api<Job>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
   roles: () => api<RoleInfo[]>("/roles"),
+  /** What each engine gives a job (DESIGN.md 20.1). */
+  engines: () => api<EngineInfo[]>("/engines"),
   dirs: () => api<DirEntry[]>("/dirs"),
   // ---- The folder picker (DESIGN.md 4.23) ----
   browse: (path: string, options: BrowseOptions = {}) =>
@@ -325,7 +328,8 @@ export const endpoints = {
   projects: (archived = false) => api<ProjectList>(`/projects${archived ? "?archived=1" : ""}`),
   /** One project by id or slug; `opened` when the human opens it (applies lead_start=open). */
   project: (ref: string, opened = false) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}${opened ? "?open=1" : ""}`),
-  createProject: (input: ProjectInput) => api<ProjectView>("/projects", { method: "POST", body: input }),
+  createProject: (input: ProjectCreateInput) => api<ProjectView>("/projects", { method: "POST", body: input }),
+  trustProject: (ref: string) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}/trust`, { method: "POST" }),
   updateProject: (ref: string, input: ProjectInput) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}`, { method: "PUT", body: input }),
   leads: () => api<LeadStatus[]>("/leads"),
   /** Start, stop, restart, new conversation: the lead's status. Poke: a PokeResult. */
@@ -530,6 +534,7 @@ export const queryKeys = {
   digests: ["digests"] as const,
   digestSettings: ["digests", "settings"] as const,
   roles: ["roles"] as const,
+  engines: ["engines"] as const,
   dirs: ["dirs"] as const,
   browse: (path: string, options: BrowseOptions) => ["browse", path, !!options.files, !!options.hidden] as const,
   browseFacts: (path: string) => ["browse-facts", path] as const,

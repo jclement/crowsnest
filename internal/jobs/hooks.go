@@ -140,9 +140,16 @@ func (s *Service) jobInPane(ctx context.Context, paneID string) string {
 // touchLocked records activity and adopts a changed session id.
 func (s *Service) touchLocked(r *store.JobRecord, c *change, input HookInput) {
 	r.LastActivityAt = s.opts.Now()
-	if input.SessionID != "" && r.Engine == EngineClaude && !IsStanding(r.AgentName) && input.SessionID != r.ClaudeSessionID {
+	// A Codex job's hooks carry its thread id (codex-cli 0.167), kept in the same column: it is
+	// how the spend meter finds the job's rollout (DESIGN.md 7.11). Nothing reads it as a Claude
+	// session: every Claude-transcript reader checks the engine first.
+	if input.SessionID != "" && (r.Engine == EngineClaude || r.Engine == EngineCodex) && !IsStanding(r.AgentName) && input.SessionID != r.ClaudeSessionID {
 		if r.ClaudeSessionID != "" {
-			c.event(EventSession, "Claude session changed", map[string]any{"from": r.ClaudeSessionID, "to": input.SessionID})
+			what := "Claude session changed"
+			if r.Engine == EngineCodex {
+				what = "Codex thread changed"
+			}
+			c.event(EventSession, what, map[string]any{"from": r.ClaudeSessionID, "to": input.SessionID})
 		}
 		r.ClaudeSessionID = input.SessionID
 	}

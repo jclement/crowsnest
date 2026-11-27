@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/agenttrust"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/projects"
@@ -122,5 +123,78 @@ func TestProjectRoutes(t *testing.T) {
 	}
 	if code, list := send(http.MethodGet, "/api/v1/projects?archived=1", ""); code != http.StatusOK || len(list["projects"].([]any)) != 1 {
 		t.Fatalf("archived listing: %d %v", code, list)
+	}
+}
+
+// fakeFolderTrust records what it was asked to trust.
+type fakeFolderTrust struct {
+	on      bool
+	asked   [][]string
+	trusted map[string]bool
+}
+
+func (f *fakeFolderTrust) Enabled() bool { return f.on }
+func (f *fakeFolderTrust) Trust(dirs []string) []agenttrust.Result {
+	f.asked = append(f.asked, dirs)
+	for _, dir := range dirs {
+		f.trusted[dir] = true
+	}
+	return []agenttrust.Result{{Agent: "claude", Status: agenttrust.StatusTrusted}}
+}
+func (f *fakeFolderTrust) Trusted(dir string) bool { return f.trusted[dir] }
+
+// Creating a project records folder trust only when the human ticked the box and the setting is
+// on; POST …/trust does it for an existing project, and is refused while the setting is off.
+func TestProjectFolderTrust(t *testing.T) {
+	db, err := store.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	home := t.TempDir()
+	mk := func(name string) string {
+		dir := filepath.Join(home, name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		resolved, _ := filepath.EvalSymlinks(dir)
+		return resolved
+	}
+	ticked, unticked, later := mk("ticked"), mk("unticked"), mk("later")
+	trust := &fakeFolderTrust{on: true, trusted: map[string]bool{}}
+	h := newHarness(t, harnessOptions{projects: projects.New(projects.Options{Store: db, Home: home}), folderTrust: trust})
+	cookie := h.login()
+	create := func(name, dir, extra string) (int, map[string]any) {
+		response := h.do(withCookie(request(http.MethodPost, "/api/v1/projects", fmt.Sprintf(`{"name":%q,"dir":%q%s}`, name, dir, extra)), cookie))
+		var out struct {
+			Data map[string]any `json:"data"`
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &out)
+		return response.Code, out.Data
+	}
+	code, view := create("Ticked", ticked, `,"trust_folder":true`)
+	if code != http.StatusCreated || len(trust.asked) != 1 || trust.asked[0][0] != ticked {
+		t.Fatalf("ticked: %d %v asked %v", code, view, trust.asked)
+	}
+	if view["folder_trusted"] != true || view["trust"] == nil {
+		t.Errorf("the view should say the folder is trusted and what was done: %v", view)
+	}
+	code, view = create("Unticked", unticked, ``)
+	if code != http.StatusCreated || len(trust.asked) != 1 || view["folder_trusted"] != false {
+		t.Fatalf("unticked must not write: %d %v asked %v", code, view, trust.asked)
+	}
+	trust.on = false
+	code, _ = create("Later", later, `,"trust_folder":true`)
+	if code != http.StatusCreated || len(trust.asked) != 1 {
+		t.Fatalf("setting off must not write: %d asked %v", code, trust.asked)
+	}
+	response := h.do(withCookie(request(http.MethodPost, "/api/v1/projects/later/trust", ""), cookie))
+	if response.Code != http.StatusConflict || len(trust.asked) != 1 {
+		t.Fatalf("trust with the setting off: %d %s", response.Code, response.Body)
+	}
+	trust.on = true
+	response = h.do(withCookie(request(http.MethodPost, "/api/v1/projects/later/trust", ""), cookie))
+	if response.Code != http.StatusOK || len(trust.asked) != 2 || trust.asked[1][0] != later {
+		t.Fatalf("trust: %d %s asked %v", response.Code, response.Body, trust.asked)
 	}
 }

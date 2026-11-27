@@ -309,7 +309,7 @@ func (s *Service) List(ctx context.Context, states []State) ([]Job, error) {
 // spendInfo is what internal/spend needs to know about a job.
 func spendInfo(job Job) spend.JobInfo {
 	return spend.JobInfo{ID: job.ID, Engine: job.Engine, Orchestrated: IsStanding(job.AgentName),
-		LeadHeld:  strings.HasPrefix(job.AgentName, LeadPrefix),
+		LeadHeld: strings.HasPrefix(job.AgentName, LeadPrefix), SessionKnown: job.SessionID != "",
 		StartedAt: job.StartedAt, SettledAt: job.SettledAt}
 }
 
@@ -655,10 +655,10 @@ func oneLine(text string, limit int) string {
 	return text
 }
 
-// SpendSources lists the jobs the spend meter reads: the board's newest jobs whose own Claude
-// agent has a session. Orchestrator-held jobs are left out (their use is the orchestrator's
-// line), and so are Codex jobs (not measured). A finished job is still listed; the meter marks
-// it final after one last read.
+// SpendSources lists the jobs the spend meter reads: the board's newest jobs whose own agent has
+// a session (a Codex job's once its hooks have told crowsnest its thread id). Orchestrator-held
+// jobs are left out (their use is the orchestrator's line). A finished job is still listed; the
+// meter marks it final after one last read.
 func (s *Service) SpendSources(ctx context.Context) ([]spend.Source, error) {
 	records, err := s.opts.Store.ListJobs(ctx, nil, listLimit)
 	if err != nil {
@@ -667,10 +667,10 @@ func (s *Service) SpendSources(ctx context.Context) ([]spend.Source, error) {
 	var out []spend.Source
 	for _, record := range records {
 		job := s.toJob(record, 0)
-		if job.Engine == EngineCodex || IsStanding(job.AgentName) || job.SessionID == "" {
+		if IsStanding(job.AgentName) || job.SessionID == "" {
 			continue
 		}
-		source := spend.Source{Subject: job.ID, Sessions: []spend.Session{{ID: job.SessionID, Cwd: firstNonEmptyDir(job.WorkDir, job.Dir)}}}
+		source := spend.Source{Subject: job.ID, Sessions: []spend.Session{{ID: job.SessionID, Cwd: firstNonEmptyDir(job.WorkDir, job.Dir), Codex: job.Engine == EngineCodex}}}
 		if job.State.Terminal() {
 			source.Settled = job.SettledAt
 			if source.Settled == nil {

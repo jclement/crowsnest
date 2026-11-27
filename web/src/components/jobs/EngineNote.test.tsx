@@ -1,22 +1,28 @@
-// The Codex note where an engine is chosen (R8): only for Codex, saying what it does not get.
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { CODEX_GAPS, codexNote } from "../../lib/engines";
+// EngineNote where an engine is chosen (R8 cut 8): the sentence comes from GET /engines, nothing
+// for an engine that runs without nothing.
+import { screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithClient, stubApi } from "../../test/render";
 import { EngineNote } from "./EngineNote";
 
+const table = [
+  { id: "claude", name: "Claude", installed: true, summary: "", capabilities: [], rescue: [], models: [], without: [] },
+  { id: "codex", name: "Codex", installed: true, summary: "", capabilities: [], rescue: [], models: [], without: ["Spend in dollars", "The spinning detector"] },
+];
+
 describe("EngineNote", () => {
-  it("says nothing for Claude or the default", () => {
-    const { container, rerender } = render(<EngineNote engine="claude" />);
-    expect(container).toBeEmptyDOMElement();
-    rerender(<EngineNote engine="" />);
-    expect(container).toBeEmptyDOMElement();
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("says what Codex runs without, from the server's table", async () => {
+    stubApi(({ path }) => (path === "/engines" ? { body: { data: table } } : undefined));
+    renderWithClient(<EngineNote engine="codex" />);
+    expect(await screen.findByTestId("engine-note")).toHaveTextContent("Codex runs without spend in dollars and the spinning detector.");
   });
 
-  it("lists every gap for Codex, and what still bounds it", () => {
-    render(<EngineNote engine="codex" />);
-    const note = screen.getByRole("note", { name: "What Codex does not get" });
-    for (const gap of CODEX_GAPS) expect(note).toHaveTextContent(gap);
-    expect(note).toHaveTextContent("Budgets bound it by minutes and turns.");
-    expect(codexNote()).toMatch(/^Codex runs without crowsnest's hooks, so it does not get .+ or answer receipts past “delivered”\. /);
+  it("says nothing for Claude", async () => {
+    stubApi(({ path }) => (path === "/engines" ? { body: { data: table } } : undefined));
+    const { container } = renderWithClient(<EngineNote engine="claude" />);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(container.querySelector("[data-testid=engine-note]")).toBeNull();
   });
 });

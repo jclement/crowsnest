@@ -80,10 +80,19 @@ func (s *Service) writeBrief(ctx context.Context, job Job) (string, error) {
 // Read-only stops an accidental overwrite and a stray editor; it does not stop an agent of the
 // same uid, which can chmod the file back or remove and recreate it (DESIGN 4.6).
 func writeReadOnly(path string, data []byte) error {
+	return writeFresh(path, data, 0o400)
+}
+
+// writeExecutable is writeReadOnly for a script: owner read and execute (0500).
+func writeExecutable(path string, data []byte) error {
+	return writeFresh(path, data, 0o500)
+}
+
+func writeFresh(path string, data []byte, mode os.FileMode) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("replacing %s: %w", path, err)
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o400) //nolint:gosec // path is crowsnest's own, under its 0700 state directory
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, mode) //nolint:gosec // path is crowsnest's own, under its 0700 state directory
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", path, err)
 	}

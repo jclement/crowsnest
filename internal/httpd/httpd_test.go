@@ -139,7 +139,9 @@ type harnessOptions struct {
 	instructions *instructions.Service
 	// Projects and their leads (projects_test.go); nil: the routes answer 503
 	projects *projects.Service
-	leads    *projects.Leads
+	// folderTrust: nil, no folder trust offered.
+	folderTrust FolderTrust
+	leads       *projects.Leads
 	// Extra allowed Host names (the tailnet name detected at start).
 	hostNames []string
 	// The System page, Settings and the first run (system_test.go); nil: 503
@@ -241,6 +243,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Questions:     opts.questions,
 		Jobs:          opts.jobs,
 		Projects:      opts.projects,
+		FolderTrust:   opts.folderTrust,
 		Leads:         opts.leads,
 		Spend:         opts.spend,
 		Voice:         opts.voice,
@@ -265,6 +268,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	server.dialogSettle = 300 * time.Millisecond // a dialog answer's wait for the dialog to go
 	return &harness{t: t, server: server, hub: events, clock: c, logs: logs}
 }
 

@@ -166,7 +166,10 @@ labelled `orchestrator` (cwd `--dir`), resuming the stored conversation when its
 exists. It waits (state `waiting`, with the reason) while the first-run checklist is unfinished,
 herdr is not connected or no agent is installed, and starts by itself when that changes. The
 first start in a new directory stops at Claude's folder-trust question; the checklist, the Inbox
-and Chat show it as a card with its buttons. Conversations are read from
+and Chat show it as a card with **Trust this folder** and **Don't trust**. A project created in the
+app records that answer for its folder (a box, ticked by default; setting
+`--trust-project-folders`), and its jobs' worktrees inherit it, so its agents never ask (DESIGN.md
+8.2.1). Conversations are read from
 Claude's JSONL transcripts in `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
 
 The instance has a name (`--name`, else the short hostname, such as `quark`): it is in the
@@ -882,7 +885,8 @@ Every checkout has a live, syntax-highlighted diff (DESIGN.md 6.21), at any time
   safe point and the job needs you: raise it, let it finish the step, or stop it. Nothing is
   killed. `--daily-ceiling-usd` bounds jobs with no budget and holds new starts once today's
   spend reaches it; `--orchestrator-ceiling-usd` and `--lead-ceiling-usd` hold the standing
-  agents' automatic pokes. Spend that is not measured (Codex) shows as "not measured".
+  agents' automatic pokes. Spend that is not measured (a Codex job whose session crowsnest never
+  learned) shows as "not measured".
 - **Usage limits.** When one agent hits its plan's usage limit, one banner counts down to the
   reset; that engine's new starts, nudges, retries and pokes wait, then resume one at a time.
 - **Spinning.** An agent repeating the same few tool calls for ten minutes or more with no change
@@ -923,9 +927,10 @@ job that is restarted under a new Claude session keeps counting.
   (`{"over": 100000, "input": …}`) is a long-context tier. An unknown key is an error, logged at
   start, and the built-in table is used instead. A model with no price shows its tokens and
   "cost unknown", never $0.
-- **Not measured**: Codex jobs (crowsnest does not read Codex's usage records), shown as "not
-  measured" rather than zero. Jobs the orchestrator holds itself are counted on the
-  orchestrator's line.
+- **Codex jobs** are measured in tokens from Codex's own session log (its thread id comes from
+  the job's hooks), with no cost: crowsnest has no prices for OpenAI's models. One whose session
+  was never learned is "not measured" rather than zero.
+- **Counted elsewhere**: jobs the orchestrator holds itself are counted on the orchestrator's line.
 - **Where it shows**: a chip on each job card; a Spend section in the job's detail (one figure;
   its Details has the breakdown, the share of the prompt read from cache, and a small chart of
   tokens per model call); today's and this week's totals above the board, which open the Spend
@@ -979,6 +984,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--theme` | `CROWSNEST_THEME` | `crowsnest` | the theme a browser gets until it chooses its own: `crowsnest`, `phosphor`, `deep-sea`, `ember` or `contrast` (Settings → Appearance sets it; each browser's own choice wins) |
 | `--check-timeout` | `CROWSNEST_CHECK_TIMEOUT` | `30m` | Longest crowsnest's own check of a finished coding job may run (DESIGN 6.15) |
 | `--require-viewed-before-land` | `CROWSNEST_REQUIRE_VIEWED_BEFORE_LAND` | `false` | Merge and push refuse a job until every file of its diff is marked viewed (off: Land warns); also in Settings (DESIGN 6.21) |
+| `--trust-project-folders` | `CROWSNEST_TRUST_PROJECT_FOLDERS` | `true` | Creating a project in the app (its box left ticked) records Claude Code's and Codex's folder-trust answer for its folder, so its lead and jobs start without the trust prompt; `false` never writes either agent's state; also in Settings (DESIGN 8.2.1) |
 | `--check-rounds` | `CROWSNEST_CHECK_ROUNDS` | `3` | Failed checks sent back to the agent before the job needs you |
 | `--job-budget-usd` | `CROWSNEST_JOB_BUDGET_USD` | `0` (none) | Default budget per job in estimated dollars, its delegated jobs included (DESIGN 6.16) |
 | `--job-budget-minutes` | `CROWSNEST_JOB_BUDGET_MINUTES` | `0` (none) | Default budget per job in minutes since its agent started |
@@ -1152,10 +1158,12 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /jobs/{id}/message` | session | `{text, force_over_draft, attachments}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
 | `POST /jobs/{id}/cancel`, `/nudge`, `/resume` | session | Cancel (Esc to the agent, then `cancelled`; the pane stays), nudge by hand, or resume a stuck job (retry now after a limit, restart a gone agent, else nudge) |
 | `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}`, `PUT /projects/{ref}` | session | Projects with their lead and job counts; create `{name, dir, …}`; one by id or slug (`?open=1` when opened in the app); edit or `{archived}` |
+| `POST /projects` with `trust_folder: true`, `POST /projects/{ref}/trust` | session | Record Claude Code's and Codex's folder trust for the project's folder (DESIGN.md 8.2.1); `409` while `--trust-project-folders` is off. The project view says `folder_trusted` |
 | `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | session | Running leads; a project's lead controls |
 | `POST /jobs/{id}/restart-agent` | session | Restart the job's agent on the same conversation with fresh instructions |
 | `GET /voice/agents`, `PUT /voice/agents/{agent}` | session | Each standing agent's voice (`{voice_id}`, empty for the instance's) |
 | `GET /roles`, `GET /dirs` | session | Role names with a one-line summary; remembered job directories, then the cwds of the session's panes |
+| `GET /engines` | session | What each engine gives a job (DESIGN.md 20.1): its guarantees (available, partly or not, and why), the rescue actions it supports (with the sentence refusing the rest), its models, and the labels of what it runs without |
 | `GET /browse?path=&files=1&hidden=1` | session only (no read token; not on the agent socket) | The folder picker: one directory's folders (and, asked, files: names only), repositories marked, links resolved, under the roots alone; 500 entries at most, 3 s at most (`504` on a slow mount) |
 | `GET /browse/facts?path=` | session only | A folder's facts: git repo, branch, base branch guess, remote host (credentials removed), check command, AGENTS.md / CLAUDE.md, Claude's trust, the project holding it or inside it |
 | `GET /browse/places` | session only | Home, favourites and roots for the picker |
@@ -1194,6 +1202,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
 | `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, the pane and TUI terminal bridges, and the fleet cache following herdr's events. Also self-update's real Sigstore check of a published release's bundle (needs the network) |
 | `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; a manual poke with one synthetic reason is delivered through `POST /orchestrator/poke` and answered; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript; and a PNG with a word drawn in it, uploaded and sent with a prompt under the `default` permission mode, is read (no permission prompt) and the word named. Then **the stop test**: three haiku job agents in a scratch git repo, where an undeclared stop is refused by the Stop hook, `done` stops cleanly, and a non-blocking `ask` answered through the browser API reaches the agent, which finishes. And **the approvals test**: three haiku job agents under the `default` permission mode: a Bash call becomes an approval, is allowed through the API and runs with no terminal answer; another is denied with a note the agent quotes back; and `ssh` to a protected host is refused by the guard hook with no approval asked |
+| `mise run test:codex` | Real-Codex test (opt-in, a few cents on `gpt-5.6-luna`; `CROWSNEST_CODEX_MODEL` picks another): Codex job agents with crowsnest's hooks in a throwaway `crowsnest-test-*` session: a job ends done with its SessionStart hook on the timeline and its spend measured from its rollout (tokens, no cost); an undeclared stop is refused by the Stop hook; a write outside the sandbox becomes an approval allowed through the API; a protected host is refused by the guard. Codex's trust prompt is answered through the trust card's API path. Unset `HERDR_*` first |
 | `mise run fonts:terminal` | Regenerate the terminal's fallback webfonts (`web/src/fonts/terminal/`, committed) with `web/scripts/terminal-fonts.py`: downloads the pinned Nerd Fonts symbols release and Unicode emoji data (checked by SHA-256), reads DejaVu and Noto from the pinned `@fontsource` devDependencies, and writes the unicode-range chunks and their CSS. Run after changing a pin |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |

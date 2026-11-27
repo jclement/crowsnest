@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -41,7 +42,7 @@ func newSpendMeter(cfg config.Config, db *store.Store, events *hub.Hub, refs *jo
 		}
 	}
 	return spend.NewMeter(spend.Options{
-		Store: db, Prices: prices, ClaudeConfigDir: claudeConfigDir(cfg), Hub: events, Logger: logger,
+		Store: db, Prices: prices, ClaudeConfigDir: claudeConfigDir(cfg), CodexHome: codexHome(), Hub: events, Logger: logger,
 		Sources: func(ctx context.Context) ([]spend.Source, error) {
 			service := jobService()
 			if service == nil {
@@ -147,4 +148,16 @@ func maxTime(a, b time.Time) time.Time {
 		return a
 	}
 	return b
+}
+
+// codexHome is where Codex keeps its sessions: $CODEX_HOME, else ~/.codex.
+func codexHome() string {
+	if dir := os.Getenv("CODEX_HOME"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".codex")
 }

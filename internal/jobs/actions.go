@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jclement/crowsnest/internal/engines"
 	"strings"
 	"time"
 
@@ -347,6 +348,8 @@ func (s *Service) RestartAgent(ctx context.Context, id string) (Job, error) {
 		return Job{}, ErrNoAgent
 	case IsStanding(detail.AgentName):
 		return Job{}, invalid("job %s is held by %s; restart that agent itself", id, detail.AgentName)
+	case engines.RescueRefusal(detail.Engine, engines.RescueRestart) != "":
+		return Job{}, invalid("%s", engines.RescueRefusal(detail.Engine, engines.RescueRestart))
 	}
 	if err := s.stopAgent(ctx, detail.PaneID, detail.AgentName); err != nil {
 		return Job{}, err

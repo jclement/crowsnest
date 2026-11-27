@@ -180,16 +180,24 @@ func (c *Cache) fetch(ctx context.Context) (Fleet, []string, error) {
 	return buildFleet(c.opts.Session, snapshot, dialogs), panes, nil
 }
 
+// paneDialog is what one agent's screen showed: a dialog, and whether it is a folder-trust
+// question (and about which folder).
+type paneDialog struct {
+	present bool
+	trust   *TrustPrompt
+}
+
 // readDialogs reads each agent's visible screen and records which show a dialog. A failed read
 // (the pane closed mid-refresh) just means no dialog for that pane this round.
-func (c *Cache) readDialogs(ctx context.Context, agents []herdr.Agent) map[string]bool {
-	dialogs := make(map[string]bool, len(agents))
+func (c *Cache) readDialogs(ctx context.Context, agents []herdr.Agent) map[string]paneDialog {
+	dialogs := make(map[string]paneDialog, len(agents))
 	for _, agent := range agents {
 		callCtx, cancel := context.WithTimeout(ctx, c.opts.CallTimeout)
 		read, err := c.opts.Client.PaneRead(callCtx, agent.PaneID, herdr.ReadOptions{Source: herdr.SourceVisible})
 		cancel()
 		if err == nil {
-			dialogs[agent.PaneID] = DetectDialog(read.Text).Present
+			dialog := DetectDialog(read.Text)
+			dialogs[agent.PaneID] = paneDialog{present: dialog.Present, trust: dialog.Trust}
 		}
 	}
 	return dialogs

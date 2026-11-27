@@ -52,6 +52,7 @@ first session.
 - [Every view](reference/views.md)
 - [Keyboard shortcuts](reference/keyboard-shortcuts.md)
 - [Settings and flags](reference/settings.md)
+- [Claude and Codex: what each engine gets](reference/engines.md)
 - [What agents can do: the CLI and MCP tools](reference/agent-tools.md)
 - [Notifications](reference/notifications.md)
 - [Glossary](reference/glossary.md)

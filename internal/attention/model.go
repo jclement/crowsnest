@@ -371,12 +371,26 @@ func (b *builder) addDialogs(approvalPanes map[string]bool) map[string]bool {
 			Title: name + " is waiting at a dialog", Agent: agent.Name, PaneID: agent.PaneID,
 			Action: Action{Kind: "dialog", Label: "Answer the dialog"}, DialogFor: &agent}
 		job := b.attachJob(&item, "", agent.PaneID)
+		who := name
 		if job != nil {
 			item.Title = "Dialog: " + job.Title
 			item.Detail = job.CauseDetail
 		} else if standing := b.standingByPane(agent.PaneID); standing != nil {
 			item.Title = standing.Label + " is waiting at a dialog"
 			item.Project = b.projectRef(standing.ProjectID)
+			who = standing.Label
+		}
+		if agent.TrustPrompt {
+			// The folder-trust question (DESIGN.md 8.2.1): said as the decision it is.
+			folder := agent.TrustFolder
+			if folder == "" {
+				folder = "its folder"
+			}
+			item.Title = who + " asks to trust " + folder
+			item.Action = Action{Kind: "dialog", Label: "Trust or not"}
+			if job != nil {
+				item.Detail = "Job " + job.ID + ", " + job.Title + ": its agent cannot start until you answer."
+			}
 		}
 		b.items = append(b.items, item)
 	}

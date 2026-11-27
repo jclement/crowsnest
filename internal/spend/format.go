@@ -66,7 +66,7 @@ func Describe(s Summary) string {
 	if !s.Measured {
 		switch s.Reason {
 		case ReasonCodex:
-			return "Not measured: Codex jobs are not measured."
+			return "Not measured: crowsnest never learned this Codex job's session, so it cannot find its log."
 		case ReasonOrchestrator:
 			return "Not measured separately: the orchestrator does this job in its own conversation, so its use is on the orchestrator's line."
 		case ReasonLead:

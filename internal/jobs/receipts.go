@@ -135,7 +135,7 @@ func (s *Service) ReconcileAnswer(ctx context.Context, jobID string, questionID 
 	if err != nil {
 		return false, err
 	}
-	if r.ClaudeSessionID == "" || s.opts.Launch.ClaudeConfigDir == "" {
+	if r.Engine != EngineClaude || r.ClaudeSessionID == "" || s.opts.Launch.ClaudeConfigDir == "" {
 		return false, invalid("crowsnest cannot read job %s's conversation, so it cannot tell; look in its terminal", jobID)
 	}
 	path, err := transcript.Locate(s.opts.Launch.ClaudeConfigDir, workDirOf(r), r.ClaudeSessionID)

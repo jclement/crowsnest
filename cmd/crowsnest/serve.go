@@ -377,6 +377,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(), Attention: attentionService, Now: nowSources,
 		Changes: changeService, RequireViewed: func() bool { return live.config.get().RequireViewedBeforeLand },
+		FolderTrust: newFolderTrust(cfg, live.config.get), Engines: engineCatalog(cfg),
 	}
 	if cfg.Demo {
 		deps.DemoTouch = func(ctx context.Context, id string) error { return jobs.DemoDiffTouch(ctx, jobService, id) }

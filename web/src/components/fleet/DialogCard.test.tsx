@@ -108,3 +108,55 @@ describe("DialogCard conflict", () => {
     expect(calls.filter((call) => call.method === "POST")[1]!.body).toEqual({ keys: ["1"], screen_hash: "h-push-9" });
   });
 });
+
+describe("DialogCard: the folder-trust question", () => {
+  const trustScreen: AgentScreen = {
+    ...pushScreen,
+    text: "Accessing workspace:\n\n/Users/me/Work/new-app\n\n❯ No, exit\n  Yes, I trust this folder\n\nEnter to confirm · Esc to cancel",
+    screen_hash: "h-trust",
+    dialog: {
+      present: true,
+      form: false,
+      warnings: [],
+      options: [
+        { key: "", keys: ["Enter"], label: "No, exit", selected: true },
+        { key: "", keys: ["down", "Enter"], label: "Yes, I trust this folder", selected: false },
+      ],
+      trust: {
+        engine: "claude",
+        folder: "/Users/me/Work/new-app",
+        allow: { key: "", keys: ["down", "Enter"], label: "Yes, I trust this folder", selected: false },
+        deny: { key: "", keys: ["Enter"], label: "No, exit", selected: true },
+      },
+    },
+  };
+
+  it("names the agent and the folder, says what trusting means, and offers Trust and Don't trust", () => {
+    stubApi(() => undefined);
+    renderWithClient(<DialogCard target="job-j_1" agentName="job-j_1" screen={trustScreen} onOpenTerminal={() => {}} />);
+    expect(screen.getByLabelText("Folder trust for job-j_1")).toBeInTheDocument();
+    expect(screen.getByText("job-j_1 asks to trust a folder")).toBeInTheDocument();
+    expect(screen.getByText("/Users/me/Work/new-app")).toBeInTheDocument();
+    expect(screen.getByText(/lets Claude Code read, edit and run files/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Trust this folder" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Don't trust" })).toBeInTheDocument();
+  });
+
+  it("sends the keys that pick Trust, and says so once the dialog went", async () => {
+    const user = userEvent.setup();
+    const calls = stubApi((call) => (call.method === "POST" ? { body: { data: { sent: ["down", "Enter"], dialog_gone: true } } } : undefined));
+    renderWithClient(<DialogCard target="job-j_1" agentName="job-j_1" screen={trustScreen} onOpenTerminal={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Trust this folder" }));
+    await waitFor(() => expect(calls.some((call) => call.method === "POST")).toBe(true));
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({ keys: ["down", "Enter"], screen_hash: "h-trust" });
+    expect(await screen.findByText("job-j_1 may work in /Users/me/Work/new-app")).toBeInTheDocument();
+  });
+
+  it("says the question is still up when the answer did not take", async () => {
+    const user = userEvent.setup();
+    stubApi((call) => (call.method === "POST" ? { body: { data: { sent: ["Enter"], dialog_gone: false } } } : undefined));
+    renderWithClient(<DialogCard target="job-j_1" agentName="job-j_1" screen={trustScreen} onOpenTerminal={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Don't trust" }));
+    expect(await screen.findByText(/same question is still on the agent's screen/)).toBeInTheDocument();
+  });
+});

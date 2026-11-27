@@ -65,6 +65,17 @@ export interface LeadStatus extends RemoteControlFields {
 export interface ProjectView extends Project {
   lead: LeadStatus;
   counts: ProjectCounts;
+  /** Whether Claude Code trusts the project's folder, so its agents start without asking (8.2.1). */
+  folder_trusted?: boolean;
+  /** What recording the folder's trust did, on a create or POST …/trust that asked. */
+  trust?: FolderTrustResult[];
+}
+
+/** One agent's folder-trust record after crowsnest was asked to write it (internal/agenttrust). */
+export interface FolderTrustResult {
+  agent: "claude" | "codex";
+  status: "trusted" | "already" | "skipped" | "failed";
+  detail?: string;
 }
 
 /** GET /projects. */
@@ -89,6 +100,11 @@ export interface ProjectInput {
   permission_mode?: string;
   lead_start?: LeadStart;
   archived?: boolean;
+}
+
+/** POST /projects: a project, and whether its agents may work in its folder without asking. */
+export interface ProjectCreateInput extends ProjectInput {
+  trust_folder?: boolean;
 }
 
 /** The lead actions the server offers (POST /projects/{ref}/lead/{action}). */

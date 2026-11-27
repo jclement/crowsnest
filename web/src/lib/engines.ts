@@ -1,31 +1,56 @@
-// What a Codex agent does not get from crowsnest, said where an engine is chosen (R8: "Codex
-// honestly in the form"): the new-job form, a project's defaults, a schedule's job, and the
-// default engine in Settings.
-//
-// The list is DESIGN.md section 20's (Known limitations): crowsnest supervises Claude through its
-// hooks, and Codex has none. The trust builder (wip/trust) is to own the exact list in one Go
-// function served by GET /api/v1/engines; until that endpoint exists this sentence is the source,
-// and the lead swaps it for the API's (REPORT.md says so).
+// What each engine gives a job (DESIGN.md 20.1): the TypeScript mirror of internal/engines, served
+// by GET /api/v1/engines. The job form, a project's default engine, a Codex job's card and detail,
+// and Rescue all read this one table, so none of them can promise what the server does not do.
 
-/** The engines a job can run on. */
-export type Engine = "claude" | "codex";
-
-/** Each thing a Codex agent does not get, one short clause each, in DESIGN 20's order. */
-export const CODEX_GAPS: readonly string[] = [
-  "a stop crowsnest can refuse (it can only nudge about a minute after Codex stops)",
-  "spend measurement",
-  "spinning detection",
-  "usage-limit reset times",
-  "answer receipts past “delivered”",
-];
-
-/** The note shown beside a Codex choice: what it does not get, and what still bounds it. */
-export function codexNote(): string {
-  return `Codex runs without crowsnest's hooks, so it does not get ${listWords(CODEX_GAPS)}. Budgets bound it by minutes and turns.`;
+export interface EngineCapability {
+  id: string;
+  label: string;
+  available: boolean;
+  /** Holds with a stated gap (the note says which). */
+  partial?: boolean;
+  note: string;
 }
 
-/** "a, b and c". */
-function listWords(items: readonly string[]): string {
-  if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
+export interface EngineModel {
+  id: string;
+  label: string;
+}
+
+export interface EngineRescue {
+  /** interrupt, continue, nudge, unstick, restart, compact or model. */
+  id: string;
+  available: boolean;
+  /** The server's sentence refusing it on this engine. */
+  refusal?: string;
+}
+
+export interface EngineInfo {
+  id: "claude" | "codex" | string;
+  name: string;
+  installed: boolean;
+  summary: string;
+  capabilities: EngineCapability[];
+  rescue: EngineRescue[];
+  models: EngineModel[];
+  /** The labels of the guarantees it runs without. */
+  without: string[];
+}
+
+/** The engine's row, if the table names it. */
+export function engineInfo(table: EngineInfo[] | undefined, id: string): EngineInfo | undefined {
+  return table?.find((engine) => engine.id === (id || "claude"));
+}
+
+/** Whether a rescue action works on the engine; true while the table is not loaded (the server refuses anyway). */
+export function rescueAvailable(info: EngineInfo | undefined, action: string): boolean {
+  const row = info?.rescue.find((rescue) => rescue.id === action);
+  return row ? row.available : true;
+}
+
+/** "Runs without the stop guarantee, …" in one sentence, or "" when it runs without nothing. */
+export function withoutSentence(info: EngineInfo | undefined): string {
+  if (!info || info.without.length === 0) return "";
+  const names = info.without.map((label) => label.charAt(0).toLowerCase() + label.slice(1));
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `${info.name} runs without ${list}.`;
 }

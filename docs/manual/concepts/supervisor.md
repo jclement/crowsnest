@@ -14,8 +14,9 @@ An agent holding a job may end its turn only when it has **declared** something:
 
 crowsnest enforces this with Claude Code's own **Stop hook**. When a turn ends with nothing
 declared, the hook refuses the stop and types back: you have not finished, continue, or call done,
-ask, or job_update with the reason. That is a **nudge**. Agents crowsnest did not give hooks to
-(Codex, or a session it did not start) get the same text from a backstop that watches herdr: an
+ask, or job_update with the reason. That is a **nudge**. Codex job agents get Codex's own Stop hook
+the same way. Agents crowsnest did not give hooks to (a session it did not start) get the same text
+from a backstop that watches herdr: an
 agent idle for 60 seconds with an empty input box while it holds a live job.
 
 Two more refusals, because they are the common ways an agent "stops" while seeming to talk:
@@ -99,7 +100,9 @@ what it was doing. An agent can read the same with `job_get`.
   and nothing is wedged. Supervision resumes when crowsnest is back.
 - **Paused.** While the automation is paused, the Stop hook lets every turn end, so no agent is
   held against a supervisor that will not act. See [the pause](budgets-limits-pause.md#the-pause).
-- **A Codex agent** has no hooks: it relies on the 60-second backstop, and its spend is not
+- **A Codex agent** gets crowsnest's hooks for its session too (the stop guarantee, approvals,
+  the guard), but not everything: [what each engine gets](../reference/engines.md). One started
+  without them relies on the 60-second backstop, and its spend is not
   measured.
 
 [The agent stopped: what now?](../troubleshooting/agent-stopped.md) is the decision tree.

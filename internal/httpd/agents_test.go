@@ -173,6 +173,31 @@ func TestKeysBoundToScreenHash(t *testing.T) {
 	}
 }
 
+// An answer to a dialog says whether the dialog went: false while the same options are still on
+// screen after the settle time, true once the screen moves on.
+func TestKeysReportWhetherTheDialogWent(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	screen := decodeData[ScreenResponse](t, h.do(request(http.MethodGet, "/api/v1/agents/builder/screen", "")).Body.Bytes())
+	if !screen.Dialog.Present {
+		t.Fatal("the harness screen should show a dialog")
+	}
+	response := h.do(request(http.MethodPost, "/api/v1/agents/builder/keys", keysBody(t, []string{"1"}, screen.Hash)))
+	stuck := decodeData[KeysResponse](t, response.Body.Bytes())
+	if response.Code != http.StatusOK || stuck.DialogGone == nil || *stuck.DialogGone {
+		t.Fatalf("an unanswered dialog: %d %s", response.Code, response.Body)
+	}
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = f.SetScreen("w1:p1", "❯ working on it", "")
+	}()
+	response = h.do(request(http.MethodPost, "/api/v1/agents/builder/keys", keysBody(t, []string{"1"}, screen.Hash)))
+	gone := decodeData[KeysResponse](t, response.Body.Bytes())
+	if response.Code != http.StatusOK || gone.DialogGone == nil || !*gone.DialogGone {
+		t.Fatalf("an answered dialog: %d %s", response.Code, response.Body)
+	}
+}
+
 // An agent herdr detected but did not start by name (a Claude started by hand) refuses
 // agent.send_keys with agent_not_ready; the press must still reach its pane (M9 real-herdr e2e).
 func TestKeysFallBackToThePaneForAnAgentHerdrDidNotStart(t *testing.T) {

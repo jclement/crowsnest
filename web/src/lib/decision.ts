@@ -1,3 +1,4 @@
+import type { TrustPrompt } from "./types";
 // The decision packet (R4 Codex P1/P2, Fable 3.2/3.3): one screen per decision that reads top to
 // bottom (where it belongs, what is asked, what each choice does, the evidence, the
 // recommendation) with the answer within thumb reach. This file is the pure part: it turns an
@@ -186,7 +187,8 @@ export function approvalBrief(approval: Approval): DecisionBrief {
 }
 
 /** A dialog's brief: its numbered options, which go to the terminal as digits. */
-export function dialogBrief(paneID: string, title: string, options: { key: string; label: string; warning?: string }[]): DecisionBrief {
+export function dialogBrief(paneID: string, title: string, options: { key: string; label: string; warning?: string }[], trust?: TrustPrompt): DecisionBrief {
+  if (trust) return trustBrief(paneID, title, trust);
   return {
     kind: "dialog",
     ref: paneID,
@@ -199,6 +201,36 @@ export function dialogBrief(paneID: string, title: string, options: { key: strin
     })),
     recommendation: null,
     blocking: "The agent is stopped at this dialog.",
+  };
+}
+
+/**
+ * The folder-trust question (DESIGN.md 8.2.1) as a decision: trust the folder, or not. Neither is
+ * recommended: it is the person's call, about what is in the folder.
+ */
+export function trustBrief(paneID: string, title: string, trust: TrustPrompt): DecisionBrief {
+  const engine = trust.engine === "codex" ? "Codex" : "Claude Code";
+  const folder = trust.folder || "its working folder";
+  return {
+    kind: "dialog",
+    ref: paneID,
+    ask: title,
+    choices: [
+      {
+        key: "trust",
+        label: "Trust this folder",
+        consequence: `${engine} may read, edit and run files in ${folder}, and the folder's own agent settings and hooks run. It remembers the answer for this folder. To spare every new job this question, trust the project's own folder (the project page offers it).`,
+        recommended: false,
+      },
+      {
+        key: "deny",
+        label: "Don't trust",
+        consequence: trust.engine === "codex" ? "Codex goes back to its own launcher; the job waits." : "Claude exits; the job waits.",
+        recommended: false,
+      },
+    ],
+    recommendation: null,
+    blocking: `The agent cannot start until you answer. Trust it if you know what is in ${folder}.`,
   };
 }
 

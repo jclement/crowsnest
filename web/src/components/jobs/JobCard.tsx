@@ -10,6 +10,7 @@ import { budgetChip } from "../../lib/accept";
 import { cardLine, nextOwnerText, nextStep, retryLabel, type Job } from "../../lib/jobs";
 import { LastMessage } from "./AcceptPanels";
 import { SpendChip } from "../spend/SpendChip";
+import { EngineNote } from "./EngineNote";
 import { Chip } from "../ui/Chip";
 import { viewedText, type DiffProgress } from "../../lib/changes";
 
@@ -53,6 +54,7 @@ export function JobCard({ job, selected, onSelect, projectName, progress }: JobC
           </span>
         )}
         {!limitHeld && <LastMessage job={job} clamp />}
+        {job.engine === "codex" && <EngineNote engine={job.engine} compact />}
         {progress && progress.total > 0 && (
           <span className="flex items-center gap-2 text-2xs text-muted">
             <span className="h-1 w-16 overflow-hidden rounded bg-surface-sunken" role="progressbar" aria-label="Files viewed" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.viewed}>

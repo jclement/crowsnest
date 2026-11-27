@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,10 +46,23 @@ const (
 	EventType = "spend"
 )
 
-// Session is one Claude session a subject used.
+// Session is one agent session a subject used: a Claude session, or a Codex thread.
 type Session struct {
-	ID  string // Claude's session id
+	ID  string // Claude's session id, or Codex's thread id
 	Cwd string // the directory Claude ran in; Locate falls back to searching by id
+	// Codex marks a Codex thread, read from its rollout under CodexHome (transcript/codex.go).
+	Codex bool
+}
+
+// codexSessionPrefix marks a Codex thread among a subject's remembered session ids.
+const codexSessionPrefix = "codex:"
+
+// key is how a session is remembered in a subject's state.
+func (s Session) key() string {
+	if s.Codex {
+		return codexSessionPrefix + s.ID
+	}
+	return s.ID
 }
 
 // Source is a subject the Meter should read, as the serve wiring reports it each pass.
@@ -68,10 +82,12 @@ type Options struct {
 	Store           *store.Store
 	Prices          *Prices
 	ClaudeConfigDir string
-	Sources         SourcesFunc
-	Hub             *hub.Hub
-	Logger          *slog.Logger
-	Now             func() time.Time
+	// CodexHome is where Codex keeps its sessions (~/.codex, or $CODEX_HOME).
+	CodexHome string
+	Sources   SourcesFunc
+	Hub       *hub.Hub
+	Logger    *slog.Logger
+	Now       func() time.Time
 	// Location decides which local day a call belongs to; time.Local when nil.
 	Location *time.Location
 	Interval time.Duration
@@ -265,10 +281,10 @@ func (m *Meter) stateLocked(ctx context.Context, subject string) (*subjectState,
 // addSessions remembers session ids not seen before.
 func (s *subjectState) addSessions(sessions []Session) {
 	for _, session := range sessions {
-		if session.ID == "" || contains(s.Sessions, session.ID) {
+		if session.ID == "" || contains(s.Sessions, session.key()) {
 			continue
 		}
-		s.Sessions = append(s.Sessions, session.ID)
+		s.Sessions = append(s.Sessions, session.key())
 		if len(s.Sessions) > maxSessions {
 			s.Sessions = s.Sessions[len(s.Sessions)-maxSessions:]
 		}
@@ -283,6 +299,15 @@ func (m *Meter) discoverFiles(state *subjectState, current []Session) {
 		cwd[session.ID] = session.Cwd
 	}
 	for _, id := range state.Sessions {
+		if thread, ok := strings.CutPrefix(id, codexSessionPrefix); ok {
+			if m.opts.CodexHome == "" {
+				continue
+			}
+			if path, err := transcript.LocateCodex(m.opts.CodexHome, thread); err == nil {
+				state.addCursor(transcript.FileCursor{Path: path, Format: transcript.FormatCodex})
+			}
+			continue
+		}
 		path, err := transcript.Locate(m.opts.ClaudeConfigDir, cwd[id], id)
 		if err != nil {
 			continue
@@ -295,12 +320,16 @@ func (m *Meter) discoverFiles(state *subjectState, current []Session) {
 }
 
 func (s *subjectState) addFile(path string) {
+	s.addCursor(transcript.FileCursor{Path: path})
+}
+
+func (s *subjectState) addCursor(cursor transcript.FileCursor) {
 	for _, file := range s.Files {
-		if file.Path == path {
+		if file.Path == cursor.Path {
 			return
 		}
 	}
-	s.Files = append(s.Files, transcript.FileCursor{Path: path})
+	s.Files = append(s.Files, cursor)
 }
 
 // newBatch starts an empty batch for subject.

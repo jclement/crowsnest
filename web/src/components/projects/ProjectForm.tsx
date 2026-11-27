@@ -6,12 +6,12 @@
 // its remote host (Land opens pull requests only on GitHub), not a repository, overlaps. The defaults its jobs get (role, engine, model, isolation, permission mode) and when
 // its lead starts sit behind one disclosure. The server checks the rest (the directory exists, is
 // not $HOME, does not overlap another project) and its message is shown as it comes.
-import { EngineNote } from "../jobs/EngineNote";
-import { ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { factsSummary, folderWarnings, hostNote, isPathInput, type FolderFacts } from "../../lib/browse";
 import { leadStartLabels, permissionModes, suggestName, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
-import { useDirs, useFolderFacts, useRoles } from "../../lib/queries";
+import { useDirs, useEngines, useFolderFacts, useRoles } from "../../lib/queries";
+import { engineInfo, withoutSentence } from "../../lib/engines";
 import { DirPicker } from "../browse/DirPicker";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
@@ -32,6 +32,8 @@ export interface ProjectExtras {
   checkCommand: string;
   /** What crowsnest found by itself; saving the same again is not needed. */
   detectedCheck: string;
+  /** "Agents may work in this folder without asking": record the agents' folder trust (8.2.1). */
+  trustFolder: boolean;
 }
 
 interface ProjectFormProps {
@@ -69,8 +71,10 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
   const [browsing, setBrowsing] = useState(!!startBrowsing && creating);
   const [checkCommand, setCheckCommand] = useState("");
   const [checkTouched, setCheckTouched] = useState(false);
+  const [trustFolder, setTrustFolder] = useState(true);
   const dirs = useDirs();
   const roles = useRoles();
+  const codexInfo = engineInfo(useEngines().data, "codex");
   const typed = useSettled(creating && isPathInput(dir) ? dir.trim() : "", TYPED_FACTS_DELAY_MS);
   const factsQuery = useFolderFacts(typed);
   const facts = factsQuery.data && typed !== "" ? factsQuery.data : undefined;
@@ -102,7 +106,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
       default_isolate: Number(isolate) as -1 | 0 | 1,
       permission_mode: permission,
       lead_start: leadStart,
-    }, { checkCommand: checkCommand.trim(), detectedCheck: facts?.check_command ?? "" });
+    }, { checkCommand: checkCommand.trim(), detectedCheck: facts?.check_command ?? "", trustFolder: creating && trustFolder });
   };
 
   const remembered = (dirs.data ?? []).slice(0, DIR_CHOICES);
@@ -216,10 +220,10 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
             <select value={engine} onChange={(event) => setEngine(event.target.value)} className={inputClass}>
               <option value="">Default (Claude)</option>
               <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
+              <option value="codex">Codex{codexInfo && !codexInfo.installed ? " (not installed)" : ""}</option>
             </select>
+            {engine === "codex" && codexInfo && <span className="font-normal text-warning">{withoutSentence(codexInfo)}</span>}
           </label>
-          <EngineNote engine={engine} className="sm:col-span-2" />
           <label className={labelClass}>
             Model
             <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Claude's default" className={`${inputClass} font-mono`} />
@@ -254,6 +258,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
           </label>
         </div>
       )}
+      {creating && <TrustFolderBox checked={trustFolder} onChange={setTrustFolder} />}
       {error && (
         <Banner tone="danger" role="alert" className="rounded">
           {error}
@@ -278,6 +283,34 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * "Agents may work in this folder without asking" (DESIGN.md 8.2.1). You chose the folder, so the
+ * agents' own "do you trust this folder?" would only ask you again, from a terminal; ticked,
+ * crowsnest records that answer for Claude Code (and Codex) when it creates the project, and every
+ * job worktree made from it inherits it.
+ */
+function TrustFolderBox({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  // The whole row is the tap target (a phone's 44 px rule): the real checkbox covers it, unseen,
+  // and the drawn box shows its state.
+  return (
+    <label className="relative flex min-h-11 cursor-pointer items-start gap-2 rounded border border-border bg-surface-sunken p-2.5 text-xs has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+      <span aria-hidden className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-accent bg-accent text-accent-fg" : "border-border-strong bg-surface"}`}>
+        {checked && <Check className="h-3 w-3" />}
+      </span>
+      <span className="flex flex-col gap-0.5">
+        <span className="font-medium text-heading">Agents may work in this folder without asking</span>
+        <span className="text-2xs text-muted">
+          Claude Code and Codex each ask once whether to trust a new folder, in their terminal. Trusting lets them read,
+          edit and run files here, and lets the folder&apos;s own agent settings and hooks run. You chose this folder, so
+          crowsnest records that yes for you; job worktrees made from it start trusted too. Untick to answer the
+          question yourself on the agent&apos;s card.
+        </span>
+      </span>
+    </label>
   );
 }
 

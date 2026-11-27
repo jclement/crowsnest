@@ -8,6 +8,7 @@ package agentcfg
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -167,4 +168,57 @@ func resolveExisting(dir string) string {
 // readRule is the allow rule for a directory: Read(//abs/path/**).
 func readRule(dir string) string {
 	return "Read(//" + strings.TrimPrefix(filepath.ToSlash(filepath.Clean(dir)), "/") + "/**)"
+}
+
+// CodexHookScript is the body of a Codex job's hook script (DESIGN.md 20.1): one line that runs
+// `crowsnest hook <event> …` with the job's socket, id and token file, so each hook entry on the
+// command line names only the script and its event. Codex's -c values are typed into the pane,
+// which caps their length; five full hook commands would not fit.
+func CodexHookScript(executable, socket, jobID, tokenFile string) string {
+	return "#!/bin/sh\n# crowsnest: the hooks of job " + jobID + "'s Codex session, written fresh at each start.\nexec " +
+		HookCommand(executable, socket, `"$@"`, jobID, tokenFile) + "\n"
+}
+
+// codexHooks are the Codex events crowsnest hooks (codex-cli 0.167 fires each with Claude Code's
+// input shape and reads Claude Code's output shape; verified in tmux). Codex has no
+// Notification, StopFailure, PermissionDenied or InstructionsLoaded event.
+var codexHooks = []struct {
+	Event, Command, Matcher string
+	Timeout                 int
+}{
+	{"Stop", "stop", "", 30},
+	{"SessionStart", "session-start", "", 30},
+	{"PostToolUse", "post-tool-use", "", 30},
+	{"PermissionRequest", "permission-request", "", PermissionRequestTimeout},
+	// Codex matches apply_patch under Edit and Write too; listing it by name is enough.
+	{"PreToolUse", "pre-tool-use", "Bash|apply_patch", 10},
+}
+
+// CodexHookArgs are the `-c hooks.<Event>=…` overrides that hand a Codex session crowsnest's
+// hooks through script (CodexHookScript), and the flag that lets them run without Codex's
+// per-hook review (--dangerously-bypass-hook-trust: crowsnest wrote them, for this session only).
+// guardRules "" leaves the guard out, as for Claude.
+func CodexHookArgs(script, guardRules string) []string {
+	args := []string{"--dangerously-bypass-hook-trust"}
+	for _, hook := range codexHooks {
+		command := quote(script) + " " + hook.Command
+		if hook.Command == "pre-tool-use" {
+			if guardRules == "" {
+				continue
+			}
+			command += " --rules " + quote(guardRules)
+		}
+		entry := "{"
+		if hook.Matcher != "" {
+			entry += "matcher=" + tomlString(hook.Matcher) + ","
+		}
+		entry += "hooks=[{type=\"command\",command=" + tomlString(command) + ",timeout=" + strconv.Itoa(hook.Timeout) + "}]}"
+		args = append(args, "-c", "hooks."+hook.Event+"=["+entry+"]")
+	}
+	return args
+}
+
+// tomlString is text as a TOML basic string.
+func tomlString(text string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(text) + `"`
 }

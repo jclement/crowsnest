@@ -91,6 +91,18 @@ export interface RealOptions {
   args?: string[];
 }
 
+/**
+ * The Codex home every real instance is given: a folder in the scratch directory, so a project
+ * created in the UI with its trust box ticked records Codex's trust there and never in the real
+ * ~/.codex/config.toml (DESIGN.md 8.2.1). Nothing in this suite runs Codex. Claude's trust is
+ * recorded in the real ~/.claude.json, as answering the prompt would, for scratch folders only.
+ */
+export function scratchCodexHome(scratch: Scratch): string {
+  const dir = join(scratch.dir, "codex-home");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /** A real crowsnest for one spec file: haiku, no pokes, an explicit review gate. */
 export async function startReal(scratch: Scratch, options: RealOptions = {}): Promise<Instance> {
   const args = ["--model", MODEL, "--poke-interval", "0", "--review", options.review ?? "off", "--name", "e2e"];
@@ -100,7 +112,7 @@ export async function startReal(scratch: Scratch, options: RealOptions = {}): Pr
     mkdirSync(orchestratorDir, { recursive: true });
     args.push("--dir", orchestratorDir);
   }
-  return startInstance({ demo: false, orchestrator: options.orchestrator ?? false, realHome: true, args: [...args, ...(options.args ?? [])] });
+  return startInstance({ demo: false, orchestrator: options.orchestrator ?? false, realHome: true, env: { CODEX_HOME: scratchCodexHome(scratch) }, args: [...args, ...(options.args ?? [])] });
 }
 
 /**
@@ -190,7 +202,7 @@ export async function attention(page: Page, instance: Instance): Promise<Attenti
 /**
  * The human's part at a terminal dialog, through the browser: Claude's folder-trust question in a
  * fresh worktree (an arrow-key menu with "No, exit" preselected, which crowsnest never answers by
- * itself) is answered from its decision packet with "Yes, I trust this folder", as a person would
+ * itself) is answered from its decision packet with "Trust this folder", as a person would
  * on the phone. Any other dialog is left alone (a journey that expects one answers it itself).
  * Returns the number answered. The page is left wherever it was.
  */
@@ -201,7 +213,7 @@ export async function trustFolders(page: Page, instance: Instance, jobIds?: stri
   let answered = 0;
   for (const item of items) {
     await page.goto(`${instance.baseURL}/decide?item=${encodeURIComponent(item.id)}`);
-    const trust = page.getByTestId("answer-bar").getByRole("button", { name: /Yes, I trust this folder/ });
+    const trust = page.getByTestId("answer-bar").getByRole("button", { name: /^Trust this folder$/ });
     if (!(await trust.isVisible({ timeout: 5_000 }).catch(() => false))) {
       test.info().annotations.push({ type: "dialog left alone", description: `${item.id}: ${item.title}` });
       continue;

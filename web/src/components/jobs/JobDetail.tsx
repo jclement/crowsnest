@@ -20,6 +20,7 @@ import { AgentTerminal } from "../agent/AgentTerminal";
 import { QuestionDetail } from "../inbox/QuestionDetail";
 import { JobFiles, JobMessageBox } from "./JobMessageBox";
 import { RescuePanel } from "./RescuePanel";
+import { EngineNote } from "./EngineNote";
 import { Markdown } from "../Markdown";
 import { SpendSection } from "../spend/SpendSection";
 import { Banner } from "../ui/Banner";
@@ -109,6 +110,7 @@ function JobHeader({ job }: { job: Detail }) {
         {job.restarts > 0 && <Chip tone="warning">{job.restarts} restarts</Chip>}
       </div>
       <Ownership job={job} />
+      <EngineNote engine={job.engine} />
       <p className="break-all font-mono text-2xs text-muted">
         {job.work_dir || job.dir || (job.project_id ? "the project's lead" : "orchestrator")}
         {job.worktree_branch && ` · ${job.worktree_branch}`}
