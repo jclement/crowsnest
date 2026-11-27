@@ -172,7 +172,7 @@ export function sentText(result: SendResult): string {
     case "fix_job":
       return `${n} went to ${result.fix_job}, a fix job in this worktree; the job is checked again when it is done.`;
     case "waiting":
-      return `${n} wait until the job may continue: ${result.why ?? "it is held"}.`;
+      return `${n} ${result.count === 1 ? "waits" : "wait"} until the job may continue: ${result.why ?? "it is held"}.`;
     case "queued":
       return `${n} queued for the agent behind the turn it is in.`;
     default:

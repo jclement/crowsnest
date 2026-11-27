@@ -36,11 +36,19 @@ const cartView: FileView = {
   new_text: "/* items */\nconst total = price * quantity;\n",
 };
 
-const noComments = { subject: "j_7", kind: "job", label: "j_7: Checkout", comments: [], drafts: 0, sent: 0, outdated: 0 };
+const noComments = { subject: "j_7", kind: "job", label: "j_7: Checkout", comments: [] as unknown[], drafts: 0, sent: 0, outdated: 0 };
 
-function setup(files: DiffFile[], options: { onMark?: (call: Call) => DiffFile[] } = {}) {
+const comment = (extra: Record<string, unknown>) => ({
+  id: 1, path: "web/cart.ts", side: "new", line_start: 2, line_end: 2, quote: "const total = price * quantity;", body: "Call it qty", scope: "all",
+  hash: "web/cart.ts-1", old_blob: "a".repeat(40), new_blob: "b".repeat(40), status: "draft", created_at: "", updated_at: "", pending: true, ...extra,
+});
+
+function setup(files: DiffFile[], options: { onMark?: (call: Call) => DiffFile[]; comments?: typeof noComments & { comments: unknown[] } } = {}) {
   let current = files;
   const calls = stubApi((call) => {
+    if (call.method === "POST" && call.path === "/changes/jobs/j_7/comments") return { status: 201, body: { data: { id: 9, ...(call.body as object), status: "draft", pending: true } } };
+    if (call.method === "POST" && call.path === "/changes/jobs/j_7/comments/send") return { body: { data: { message: "m", count: 1, hidden: 0, sent: true, how: "typed" } } };
+    if (call.path.startsWith("/changes/jobs/j_7/comments")) return { body: { data: options.comments ?? noComments } };
     if (call.method === "PUT" && call.path.startsWith("/changes/jobs/j_7/viewed")) {
       current = options.onMark ? options.onMark(call) : current.map((entry) => ({ ...entry, viewed: true }));
       return { body: { data: summary(current) } };
@@ -57,7 +65,6 @@ function setup(files: DiffFile[], options: { onMark?: (call: Call) => DiffFile[]
       if (call.path.includes("since=1")) return { body: { data: { ...cartView, path, hash, since: true, diff: "@@ -2,1 +2,2 @@\n const total = price * quantity;\n+export const fresh = 1;\n", old_text: cartView.new_text, new_text: cartView.new_text + "export const fresh = 1;\n" } } };
       return { body: { data: { ...cartView, path, hash } } };
     }
-    if (call.path.startsWith("/changes/jobs/j_7/comments")) return { body: { data: noComments } };
     if (call.path.startsWith("/changes/jobs/j_7")) return { body: { data: summary(current) } };
     return undefined;
   });
@@ -148,5 +155,95 @@ describe("DiffViewer", () => {
     await userEvent.click(within(nav).getByRole("button", { name: "Next" }));
     expect(within(nav).getByText("2 / 2")).toBeInTheDocument();
     expect(within(nav).getByRole("checkbox", { name: "Viewed: web/cart.ts" })).toBeInTheDocument();
+  });
+});
+
+describe("DiffViewer line comments", () => {
+  const posted = (calls: Call[]) => calls.find((call) => call.method === "POST" && call.path === "/changes/jobs/j_7/comments")?.body;
+
+  it("in the unified view selects a line, shift-clicks a range, and c opens the editor that saves a draft with the file's hash", async () => {
+    wideScreen(true);
+    localStorage.setItem("crowsnest-diff-prefs", JSON.stringify({ split: false }));
+    const calls = setup([file("web/cart.ts")]);
+    await screen.findByRole("table", { name: "Diff of web/cart.ts" });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Line 1, new side" }));
+    await user.keyboard("{Shift>}");
+    await user.click(screen.getByRole("button", { name: "Line 2, new side" }));
+    await user.keyboard("{/Shift}");
+    expect(screen.getByRole("status")).toHaveTextContent("lines 1–2 of web/cart.ts selected");
+    expect(screen.getByRole("button", { name: "Line 1, new side" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.keyDown(window, { key: "c" });
+    const editor = await screen.findByRole("form", { name: "Comment on lines 1–2 of web/cart.ts" });
+    await userEvent.type(within(editor).getByRole("textbox", { name: "Comment" }), "Name the total");
+    await userEvent.click(within(editor).getByRole("button", { name: "Save comment" }));
+    await waitFor(() =>
+      expect(posted(calls)).toEqual({ path: "web/cart.ts", scope: "all", side: "new", line_start: 1, line_end: 2, body: "Name the total", hash: "web/cart.ts-1" }),
+    );
+  });
+
+  it("in the split view comments on a removed line's old side, and a hunk's Ask for change here takes the hunk", async () => {
+    wideScreen(true);
+    const calls = setup([file("web/cart.ts")]);
+    const table = await screen.findByRole("table", { name: "Diff of web/cart.ts" });
+    expect(table.querySelector("colgroup")).not.toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Line 2, old side" }));
+    await userEvent.click(screen.getByRole("button", { name: "Comment (c)" }));
+    const editor = await screen.findByRole("form", { name: "Comment on line 2 (removed side) of web/cart.ts" });
+    await userEvent.type(within(editor).getByRole("textbox", { name: "Comment" }), "Keep count");
+    await userEvent.click(within(editor).getByRole("button", { name: "Save comment" }));
+    await waitFor(() => expect(posted(calls)).toMatchObject({ side: "old", line_start: 2, line_end: 2 }));
+    await userEvent.click(screen.getByRole("button", { name: /^Ask for change here: the change at line 1/ }));
+    expect(await screen.findByRole("form", { name: "Comment on lines 1–2 of web/cart.ts" })).toBeInTheDocument();
+  });
+
+  it("shows a draft beside its line with a gutter marker, a sent one as sent, and an outdated one under the header with its quote", async () => {
+    wideScreen(true);
+    localStorage.setItem("crowsnest-diff-prefs", JSON.stringify({ split: false }));
+    setup([file("web/cart.ts")], {
+      comments: {
+        ...noComments,
+        drafts: 1,
+        sent: 1,
+        outdated: 1,
+        comments: [
+          comment({ id: 1 }),
+          comment({ id: 2, line_start: 1, line_end: 1, body: "Fine now", status: "sent", pending: false, sent_at: "2026-11-27T09:00:00Z" }),
+          comment({ id: 3, new_blob: "e".repeat(40), body: "Was wrong", quote: "const total = price;", status: "outdated", pending: false, sent_at: "2026-11-27T08:00:00Z" }),
+        ],
+      },
+    });
+    const table = await screen.findByRole("table", { name: "Diff of web/cart.ts" });
+    const draft = await within(table).findByRole("article", { name: "Comment on web/cart.ts, line 2" });
+    expect(draft).toHaveAttribute("data-comment-status", "draft");
+    expect(within(table).getByRole("button", { name: "Line 2, new side, has a comment" })).toBeInTheDocument();
+    expect(within(table).getAllByRole("article").map((card) => card.getAttribute("data-comment-status"))).toEqual(["sent", "draft"]);
+    const section = screen.getByRole("region", { name: "web/cart.ts" });
+    const outdated = within(section).getAllByRole("article").find((card) => card.getAttribute("data-comment-status") === "outdated")!;
+    expect(outdated).toHaveTextContent("const total = price;");
+    expect(within(outdated).getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(within(outdated).getByRole("button", { name: "Re-send" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Comments: 1 to send" })).toBeInTheDocument();
+  });
+
+  it("sends from the Comments sheet", async () => {
+    wideScreen(true);
+    const calls = setup([file("web/cart.ts")], { comments: { ...noComments, drafts: 1, comments: [comment({})] } });
+    await userEvent.click(await screen.findByRole("button", { name: "Comments: 1 to send" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Overall note (optional)" }), "Nearly");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Send 1 comment to the agent" }));
+    await waitFor(() => expect(calls.find((call) => call.path === "/changes/jobs/j_7/comments/send")?.body).toEqual({ overall: "Nearly", dry_run: false, force: false }));
+  });
+
+  it("on a phone a tap selects a line and a second tap extends it", async () => {
+    wideScreen(false);
+    setup([file("web/cart.ts")]);
+    await screen.findByRole("table", { name: "Diff of web/cart.ts" });
+    await userEvent.click(screen.getByRole("button", { name: "Line 1, new side" }));
+    await userEvent.click(screen.getByRole("button", { name: "Line 2, new side" }));
+    expect(screen.getByRole("status")).toHaveTextContent("lines 1–2 of web/cart.ts selected; tap another line number to extend");
+    await userEvent.click(screen.getByRole("button", { name: "Comment" }));
+    expect(await screen.findByRole("form", { name: "Comment on lines 1–2 of web/cart.ts" })).toBeInTheDocument();
   });
 });
