@@ -137,7 +137,7 @@ func seedDemoPolicy(ctx context.Context, service *Service, panes DemoPanes) erro
 // demo keeps one call per agent, as its story and the other specs expect.
 func SeedDemoParallel(ctx context.Context, service *Service, panes DemoPanes) error {
 	for _, command := range []string{
-		`{"command":"npx linkinator ./dist/blog --recurse","description":"Check the blog's links"}`,
+		`{"command":"npm run test:links -- dist/blog","description":"Check the blog's links"}`,
 		`{"command":"ls dist/changelog","description":"See which release pages were built"}`,
 	} {
 		if _, err := service.Request(ctx, panes.request(demoCall{demostory.LinkFixer, "Bash", fixed(command)})); err != nil {

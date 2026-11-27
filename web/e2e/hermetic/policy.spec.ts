@@ -5,7 +5,7 @@
 //
 // The demo seeds Crowsnest's rule r_1 (Bash `go test *`) and the call it allowed, ap_4 from the
 // reviewer j_13 (`go test ./internal/ratelimit/... -run TestLimiter`). ap_1 is Website's j_14
-// (`npx linkinator ./dist --recurse`, low). With CROWSNEST_DEMO_PARALLEL, j_14 also asks ap_5 and
+// (`npm run test:links`, low: a benign shape since R5). With CROWSNEST_DEMO_PARALLEL, j_14 also asks ap_5 and
 // ap_6 (both low), for the batch.
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { detailRegion, expect, expectAccessible, expectNoSidewaysScroll, isPhone, smallTapTargets, test } from "../support/fixtures";
@@ -63,12 +63,12 @@ test("allow and remember for this job, from an approval in the tray", async ({ p
   await page.goto("/jobs");
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible({ timeout: 15_000 });
   const tray = await openTray(page, testInfo);
-  await tray.getByRole("button", { name: /linkinator \.\/dist --recurse/, expanded: false }).first().click();
+  await tray.getByRole("button", { name: /npm run test:links(?! --)/, expanded: false }).first().click();
   const card = tray.locator('[data-approval="ap_1"]');
   await card.getByRole("button", { name: "Allow and remember for this job" }).click();
   const pattern = card.getByRole("textbox", { name: /Pattern/ });
-  await expect(pattern).toHaveValue("npx linkinator *");
-  await expect(card.getByTestId("remember-sentence")).toContainText("Until j_14 ends, crowsnest will allow Bash commands matching `npx linkinator *`");
+  await expect(pattern).toHaveValue("npm run *");
+  await expect(card.getByTestId("remember-sentence")).toContainText("Until j_14 ends, crowsnest will allow Bash commands matching `npm run *`");
   await card.getByRole("button", { name: "Allow and remember" }).click();
 
   await expect.poll(async () => (await approval(page, "ap_1")).status).toBe("allowed");
@@ -76,7 +76,7 @@ test("allow and remember for this job, from an approval in the tray", async ({ p
   await expect.poll(async () => (await approval(page, "ap_5")).decided_via).toBe("policy");
   expect((await approval(page, "ap_6")).status).toBe("pending");
   const rules = (await (await page.request.get("/api/v1/jobs/j_14/approval-rules")).json()) as { data: Array<{ pattern: string; scope: string }> };
-  expect(rules.data).toEqual([expect.objectContaining({ pattern: "npx linkinator *", scope: "job" })]);
+  expect(rules.data).toEqual([expect.objectContaining({ pattern: "npm run *", scope: "job" })]);
 });
 
 test("batch allow: one job's low-risk calls with one confirming tap", async ({ page }, testInfo) => {
@@ -86,7 +86,7 @@ test("batch allow: one job's low-risk calls with one confirming tap", async ({ p
   await tray.getByRole("button", { name: /ls dist\/changelog/, expanded: false }).first().click();
   await tray.getByRole("button", { name: "Allow 3 low-risk calls from job-14" }).click();
   const group = tray.getByRole("group", { name: /Allow 3 calls from job-14/ });
-  await expect(group.getByRole("list", { name: "Calls in the batch" })).toContainText("npx linkinator ./dist/blog --recurse");
+  await expect(group.getByRole("list", { name: "Calls in the batch" })).toContainText("npm run test:links -- dist/blog");
   await group.getByRole("button", { name: "Allow all 3" }).click();
   for (const id of ["ap_1", "ap_5", "ap_6"]) await expect.poll(async () => (await approval(page, id)).status).toBe("allowed");
   // Nothing else was touched: the dangerous force push still waits.
