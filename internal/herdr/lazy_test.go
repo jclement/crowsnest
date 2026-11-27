@@ -14,7 +14,9 @@ import (
 
 type pongClient struct{ Client }
 
-func (pongClient) Ping(context.Context) (Pong, error) { return Pong{Version: "0.9.5", Protocol: ProtocolVersion}, nil }
+func (pongClient) Ping(context.Context) (Pong, error) {
+	return Pong{Version: "0.9.5", Protocol: ProtocolVersion}, nil
+}
 
 func TestLazyUnavailableUntilSet(t *testing.T) {
 	lazy := NewLazy()
