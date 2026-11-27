@@ -27,9 +27,9 @@ export function Heartbeat({ status }: { status: StreamStatus }) {
       role="status"
       title={status === "open" ? "Live updates connected: beats with every event" : "Live updates not connected"}
       data-status={status}
-      className="mr-1 inline-flex items-center gap-1.5 px-1.5 font-mono text-2xs uppercase tracking-wider text-chrome-muted"
+      className="inline-flex items-center gap-1.5 px-1 font-mono sm:mr-1 sm:px-1.5 text-2xs uppercase tracking-wider text-chrome-muted"
     >
-      <svg aria-hidden width="22" height="12" viewBox="0 0 22 12" className={cn("shrink-0 overflow-visible", status === "open" ? "text-chrome-accent" : status === "reconnecting" ? "text-chrome-warning" : "text-chrome-muted")}>
+      <svg aria-hidden viewBox="0 0 22 12" className={cn("h-3 w-3.5 shrink-0 overflow-visible sm:w-[22px]", status === "open" ? "text-chrome-accent" : status === "reconnecting" ? "text-chrome-warning" : "text-chrome-muted")}>
         {status === "open" ? (
           <polyline
             // Restarting the animation on each beat: a new key remounts the line.

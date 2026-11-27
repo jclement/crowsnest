@@ -279,7 +279,9 @@ export function TrayRow({
   }, [open, item.kind]);
   const who = item.item.agent;
   return (
-    <li className={cn(fresh && "animate-tray-pulse")} data-tray-item={item.id}>
+    // Blocking rows carry an edge in the needs-you colour (the word says it too): the eye finds
+    // what stops an agent before what can wait.
+    <li className={cn(fresh && "animate-tray-pulse", item.item.urgency === "blocking" && "shadow-[inset_2px_0_0_var(--color-status-blocked)]")} data-tray-item={item.id}>
       <div className="flex items-start gap-1 pr-1">
         <button
           type="button"
