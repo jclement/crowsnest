@@ -45,8 +45,16 @@ on a desktop, a bar above the bottom nav on a phone; `g` then `n` focuses it), f
 for low-risk ones, from a notification's buttons. The agent waits on the hook and goes on with no
 terminal dialog to answer; the dialog is still on its terminal meanwhile, and whichever is
 answered first wins. A dangerous call needs a second confirmation, "always allow" is only in the
-terminal, and anything that goes wrong falls back to Claude's own dialog, never to an allow. A
-`PreToolUse` guard refuses outright a few commands no agent should run unattended (reaching a
+terminal, and anything that goes wrong falls back to Claude's own dialog, never to an allow.
+
+So the phone is not a tap per test run, crowsnest keeps **approval rules** of its own (DESIGN.md
+8.7, Policy): on a project's page, "Allow Bash commands matching `go test *`", "Allow edits under
+`internal/`", "Allow the tool `WebSearch`", each shown with what it would have matched in the
+project's last week before you save it; "Allow and remember for this job" on a card, gone when the
+job ends; and "Allow N low-risk calls from <agent>" for one job's waiting calls. A matching call is
+allowed by the hook at once and journalled on the job's timeline. A dangerous call is never allowed
+by a rule, and a rule allows an elevated call only when you said so. Pending approvals survive a
+crowsnest restart for 150 s, enough for their hooks to come back. A `PreToolUse` guard refuses outright a few commands no agent should run unattended (reaching a
 protected host, pushing onto a protected branch, `herdr server stop`, another herdr session).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
@@ -974,9 +982,14 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /inbox/summary` | session | `{open, blocking}`: open questions (the badge is the attention count) |
 | `GET /attention`; `POST /attention/snooze`, `/unsnooze`, `/dismiss` `{id}` | session | The one queue of what needs you, with its counts; snooze an item for ten minutes on every device; dismiss a failed job |
 | `GET /now`, `GET /now/since?browser=`, `POST /now/beat`, `POST /now/seen` | session | The Now view's rows; what happened since this browser left; this browser is in use; mark all seen |
-| `GET /approvals?status=` | session | Tool-call approvals (`pending`, the default; `all`; or one status), newest first: `{id, job_id, pane_id, agent_name, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, created_at, settled_at, expires_at, summary}` |
+| `GET /approvals?status=` | session | Tool-call approvals (`pending`, the default; `all`; or one status), newest first: `{id, job_id, pane_id, agent_name, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, rule_ids, remember, created_at, settled_at, expires_at, summary}` (`decided_via` is `browser`, `notification` or `policy`) |
 | `GET /approvals/{id}` | session | One approval |
-| `POST /approvals/{id}/decide` | session | `{decision: "allow"\|"deny", note?, confirm?}` → the approval. `409 CONFLICT` when it is no longer pending; `409 CONFIRM_REQUIRED` for a dangerous allow without `confirm: true`. The note is the deny message the agent gets |
+| `POST /approvals/{id}/decide` | session | `{decision: "allow"\|"deny", note?, confirm?, remember?: {pattern}}` → the approval. `409 CONFLICT` when it is no longer pending, or a remember is refused (a deny, a dangerous call, no job, the job ended); `400` for a bad pattern; `409 CONFIRM_REQUIRED` for a dangerous allow without `confirm: true`. The note is the deny message the agent gets. `remember` also stores a rule for the job and allows its other pending calls the rule matches |
+| `POST /approvals/batch-allow` | session | `{ids}` → the approvals, allowed once each, when all are pending, low risk and from the same job; else `409` with the reason and nothing allowed |
+| `GET /projects/{ref}/approval-rules` | session | The project's live approval rules, each `{id, scope, kind, pattern, max_risk, note, created_at, created_via, sentence, recent}` (`recent`: what it matched in the project's last week) |
+| `POST /projects/{ref}/approval-rules` | session | `{kind: "bash"\|"edit"\|"tool", pattern, max_risk?: "low"\|"elevated", note?}` → `201` the rule; `400` with a sentence when it is not valid |
+| `POST /projects/{ref}/approval-rules/preview` | session | The same body → `{considered, allowed, above_max_risk, dangerous}`: the project's recent calls (last 7 days, at most 50) the pattern matches; dangerous ones are never auto-allowed |
+| `DELETE /approval-rules/{id}`, `GET /jobs/{id}/approval-rules` | session | Remove a project or job rule; a job's remembered rules. None of the rule routes exists on the agent socket |
 | `POST /push/action` | action token | A notification's button: `{token, action}` with the single-use, item-scoped, 15-minute token the push carried (never the session cookie) → `{item, message}`; `403` for a used, expired, forged or out-of-scope token, and for any elevated or dangerous approval |
 | `POST /attachments` | session | One file: the raw body with its name in `X-Filename` (URL-encoded), or multipart `file` → `201` the pending attachment `{id, name, type, size, sha256, image, thumb, inline, …}`. The type is sniffed from the bytes. `413 TOO_LARGE` past `--attachment-max-mb`, `507 QUOTA_FULL` when the quota cannot be freed |
 | `GET /attachments/{id}` | session | The file: inline only for PNG, JPEG, GIF, WebP, BMP, PDF and plain text; everything else (SVG, HTML, …) as a download; always `nosniff`, and a sandboxing CSP on all but an inline PDF. `?download=1` forces a download. `/thumb` is a JPEG thumbnail of a picture, `/meta` the record |

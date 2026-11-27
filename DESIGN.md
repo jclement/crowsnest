@@ -2006,7 +2006,8 @@ the fallback that is always there.
 - **The hook.** Every Claude agent crowsnest starts (orchestrator and jobs) gets `PermissionRequest`
   → `crowsnest hook permission-request` with `"timeout": 86400` (`agentcfg.PermissionRequestTimeout`).
   It posts the hook's input to `POST /api/v1/approvals` on the agent socket (token-identified like
-  every hook; a caller without a known token gets 403 and the hook prints nothing), then long-polls
+  every hook; a caller without a known token gets 403 and the hook prints nothing; a call a policy
+  rule allows comes back settled with its `hook_output`, printed at once), then long-polls
   `GET /api/v1/approvals/{id}?wait=50` (only the pane that asked may poll it). Allowed → `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`;
   denied → `behavior: deny` with `message` "The human denied this tool call in crowsnest. Their
   note: …" (or, with no note, "do not retry it as it was; carry on, or ask"). Anything else
@@ -2025,8 +2026,13 @@ the fallback that is always there.
   too); (b) its PostToolUse reports the same tool with the same input (a "Yes" in the terminal);
   (c) the pane has shown no dialog on two looks in a row, 5 s apart, once the approval is 15 s
   old (the fleet's dialog detection, 8.2); (d) nobody has polled it for 45 s (the hook was killed
-  at its timeout, or the agent went away); (e) crowsnest restarted (the hooks' long-polls died
-  with it). A superseded approval leaves the tray and its hook prints nothing.
+  at its timeout, or the agent went away); (e) crowsnest restarted and its hook did not poll again
+  within the restart grace (150 s from the start; since `wip/phone`, Fable R4 2.11). A restart no
+  longer supersedes on its own: the hook retries failed polls every 2 s for 2 minutes, agent
+  tokens survive restarts (`internal/agentid`), so `RecoverAtStart` gives each hooked pending
+  approval the grace, the first poll ends it, and a decision after the restart reaches the hook
+  as before; only one never polled again is superseded ("crowsnest restarted and the agent's hook
+  did not come back"). A superseded approval leaves the tray and its hook prints nothing.
 - **The job.** While one is pending the job is `needs_you` with cause `approval-tool` ("A tool
   call is waiting for your approval", the call as the detail); when none is, it goes back to
   `running`. The approvals service's change callback does this; the tick re-checks it with
@@ -2057,6 +2063,78 @@ the fallback that is always there.
 - **No "always allow" from the browser.** A browser allow is once. Widening an agent's permanent
   permissions (Claude's options 2 and 3, `permission_suggestions`) is a terminal action: it
   outlives the request, and a phone tap should not be able to grant it. The card says so.
+- **Policy: rules crowsnest keeps, so a tap is not needed for every test run** (built on
+  `wip/phone`; Fable R4 2.6; `internal/approvals/policy.go`, `internal/store/approval_rules.go`,
+  migration `0016_approval_rules.sql`, `internal/httpd/approval_rules.go`, the web app's
+  `lib/policy.ts`, `components/approvals/ApprovalRulesCard.tsx`, `RememberForJob.tsx`,
+  `BatchAllow.tsx`, `JobRulesCard.tsx`). Narrower than "always allow": a rule lives in crowsnest,
+  not in the agent's Claude settings, is scoped to one project or one live job, is journalled
+  every time it allows, and is removed with one tap.
+  - **Where it runs**: in `approvals.Service.Request`, after the risk classification and before
+    anything is stored as pending. A call a rule allows is stored already `allowed`, `decided_via
+    = "policy"`, `rule_ids` naming the rules and `status_reason` saying it in words ("Allowed by
+    rule r_3 (project Crowsnest): Bash commands matching `go test *`"); it is announced as
+    `allowed` (never `requested`, so no push and no tray row), and `POST /api/v1/approvals` on the
+    agent socket answers with its `hook_output`, which the hook prints at once without polling.
+  - **Precedence, fixed**: a dangerous call is never allowed by a rule (the risk table wins,
+    always); then the job's remembered rules; then the project's rules. A rule applies only when
+    the call's risk is at or below its `max_risk`: `low` by default, `elevated` only when the
+    human turned on "also when elevated" for a project rule, or a job rule remembered from an
+    elevated approval. No match: a human is asked, as before. R5's narrowing of "low" (an
+    allowlist of known shapes, unrecognised calls elevated) makes more calls elevated; nothing
+    here loosens to compensate.
+  - **Kinds**. `bash`: a glob over a whole simple command, `*` any run of characters, anchored
+    (`go test *` matches `go test ./...`, not `sudo go test`). A compound command (`&&`, `||`,
+    `;`, `|`, newlines, `&`) matches only when every simple command in it matches some rule.
+    Command or process substitution (`$(`, backticks, `<(`, `>(`), `eval`, a redirect to a file
+    (anything but an fd duplication such as `2>&1` and `/dev/null`) and bidi control characters
+    never match. Matching reads the whole `command` in the tool input, never the 160-character
+    summary (R5-S7). The splitter is the guard's (`guard.Segments`). `edit`: Edit, Write,
+    MultiEdit and NotebookEdit whose `file_path`/`notebook_path` is absolute and, cleaned, inside
+    `<root>/<pattern>`; the pattern is a relative directory (`.` the whole root; no `..`, not
+    absolute, no glob); the root is the job's working root (its worktree when isolated, else its
+    directory), or the project's directory for a lead's own calls; the orchestrator's calls have
+    no root. `tool`: a tool name, exact or a trailing-`*` prefix (`mcp__github__*`); a tool rule
+    never covers Bash or the edit tools (they have kinds that look inside the call), and `*`
+    alone and a bash pattern of only `*` are refused. Every refusal is a sentence saying what is
+    wrong.
+  - **Scope**: a project rule applies to the calls of the project's jobs and its lead; a job rule
+    only while its job is live (not done, failed or cancelled). A revoked rule never applies; it
+    stays listed with `?all` so the approvals it allowed still name it. The wiring
+    (`approvalWiring.scope`) gives the policy the job's project, whether it is live and its root,
+    or for a lead's pane holding no job, the lead's project.
+  - **Seen before it is trusted** (R5): the add form previews, as the human types, what the
+    pattern would have matched among the project's approvals of the last 7 days (at most 50,
+    settled or pending): "Would have matched 4 recent calls: go test ./a, …", the elevated ones it
+    matches that stay asked unless "also when elevated" is on, and any dangerous one it matches,
+    flagged "never auto-allowed". Each listed rule shows the same. A compound command counts in a
+    preview only when that one rule matches every part of it.
+  - **Project rules** are managed on the project page (the Approval rules card) through
+    `GET|POST /projects/{ref}/approval-rules`, `POST …/preview` and `DELETE
+    /approval-rules/{id}`, with the browser session only: none of these exists on the agent
+    socket, so an agent cannot widen its own policy.
+  - **"Allow and remember for this job"** on a card (not offered for a dangerous call, nor for a
+    call with no job): an inline confirm with the proposed pattern, editable (for Bash the first
+    two words of the first command plus ` *`, the one word alone when there is one; for an edit
+    the file's directory relative to the root; otherwise the tool), and "Until j_12 ends,
+    crowsnest will allow …". `POST /approvals/{id}/decide` with `remember: {pattern}` checks the
+    rule first, allows this call once, stores the job rule (`max_risk` the approval's risk), then
+    allows by policy every other pending call of the job the rule now matches. The job's page
+    lists its remembered rules with Remove.
+  - **Batch allow**: when two or more low-risk approvals from one job are pending, the tray row
+    (which Now and the Inbox render too) offers "Allow N low-risk calls from <agent>", which lists
+    the N calls and needs one confirming tap. `POST /approvals/batch-allow {ids}` refuses the
+    whole batch with 409 and the reason (nothing allowed) unless every id is pending, low risk and
+    from the same job.
+  - **Journalled**: every auto-allow on the job's timeline (`hook` kind: "Auto-allowed by rule
+    r_3: Bash: go test ./...", with the approval, rule ids, patterns and reason) and in the global
+    journal (new kind `approval`), both written by the wiring's change callback; every rule added,
+    removed or remembered (`approval`), and every batch (`answer`). A settled approval says how
+    it ended: for `policy`, the rule sentence, on its card and in the Inbox History.
+  - **`--demo`**: Crowsnest has the rule Bash `go test *` (created via `demo`), and the reviewer
+    j_13 makes a call it allows (ap_4), so the project page, the History and j_13's timeline show
+    it. `CROWSNEST_DEMO_PARALLEL=1` adds two more low calls from Website's j_14 (ap_5, ap_6) for
+    the batch e2e; the plain demo keeps one call per agent.
 - **The card** (`ApprovalCard`): by tool. Bash: the command in a code block, the description, the
   directory; Edit, Write, MultiEdit: a diff (the Inbox's `DiffView`; Write against nothing:
   crowsnest does not read the file on the browser's behalf); WebFetch: the URL and the prompt; MCP:
@@ -2130,7 +2208,15 @@ the fallback that is always there.
 - **Tests**: `internal/risk` and `internal/guard` tables; `internal/approvals` (allow wakes the
   waiter, deny with the note, the dangerous confirmation, notification only for low, expiry, a
   hook that stops polling, an active waiter kept, demo ones kept, supersession by pane, by the tool
-  having run, by the screen, at restart, the change callback); `internal/actions` (single use,
+  having run, by the screen, restart survival within the grace and supersession after it, the
+  change callback; `policy_test.go`: precedence, dangerous never, max_risk, compound commands,
+  substitution, redirects, eval, edit containment with `..` and outside paths, tool prefixes,
+  revoked rules, a settled job's rules, a lead's calls with no job, the full command not the
+  summary, bidi, the preview, remember and its refusals, batch); `internal/httpd/approval_rules_test.go`
+  (session, CSRF and X-Crowsnest, validation sentences, preview, add, list, remove, remember,
+  batch); `internal/agentapi/approval_rules_test.go` (none of the rule routes on the agent socket);
+  Vitest (`ApprovalRulesCard`, `RememberForJob`, `BatchAllow`); Playwright
+  (`e2e/hermetic/policy.spec.ts`, desktop and mobile WebKit); `internal/actions` (single use,
   racing redeems, expiry, scope); the hook CLI (`cmd/crowsnest/approvalhooks_test.go`: holds then
   allows, deny with the note, expiry and supersession print nothing, crowsnest down at the start
   and gone mid-wait print nothing, no token prints nothing, the guard); `internal/httpd`
@@ -2212,7 +2298,10 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /schedule`, `DELETE /schedule/{name}` | An app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list (`400` invalid, `409` a taken name); delete one (`409` for a task file, `404` unknown) → the list (7.8) |
 | `POST /orchestrator/poke`, `/restart`, `/new` | Manual controls (`/restart` and `/new` in M4; `/poke` in M8) |
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
-| `GET /approvals?status=pending\|all\|<status>`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` | Tool-call approvals (8.7): `{id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, created_at, settled_at, expires_at, summary}`; decide `{decision: allow\|deny, note, confirm}` → the approval, `409 CONFLICT` when no longer pending, `409 CONFIRM_REQUIRED` for an unconfirmed dangerous allow |
+| `GET /approvals?status=pending\|all\|<status>`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` | Tool-call approvals (8.7): `{id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, rule_ids, remember, created_at, settled_at, expires_at, summary}` (`decided_via` `browser`, `notification` or `policy`; `remember` `{kind, pattern}` is the job rule proposed for a pending, non-dangerous call of a live job); decide `{decision: allow\|deny, note, confirm, remember?: {pattern}}` → the approval, `409 CONFLICT` when no longer pending or a remember is refused (a deny, dangerous, no job, the job ended), `400` for a bad pattern, `409 CONFIRM_REQUIRED` for an unconfirmed dangerous allow |
+| `POST /approvals/batch-allow` | `{ids}` (1 to 50): allows them all, once each, when every one is pending, low risk and from the same job; else `409` with the reason and nothing allowed (8.7 Policy) |
+| `GET /projects/{ref}/approval-rules`, `POST /projects/{ref}/approval-rules`, `POST /projects/{ref}/approval-rules/preview` | A project's live rules, each `{id, scope, project_id, job_id, kind, pattern, max_risk, note, created_at, created_via, revoked_at, sentence, recent}` with `recent` its preview; add `{kind: bash\|edit\|tool, pattern, max_risk?: low\|elevated, note?}` → `201` the rule (400 with a sentence when invalid); preview (same body) → `{considered, allowed, above_max_risk, dangerous}`, each a list of `{approval_id, summary, risk, status, created_at}` from the project's last 7 days (at most 50). Browser session only; not on the agent socket (8.7 Policy) |
+| `DELETE /approval-rules/{id}`, `GET /jobs/{id}/approval-rules` | Revoke a project or job rule (404 when already removed); a job's remembered rules |
 | `POST /push/action` | A notification's button (8.7): `{token, action}` with the single-use action token alone (no session) → `{item, message}`; `403` for an unknown, used, expired or out-of-scope token, or an elevated or dangerous approval |
 | `GET /inbox/summary` | `{open, blocking}`: open questions only (added in M6); the web app's badge is the attention queue's count since R4 |
 | `GET /attention`, `POST /attention/snooze` `{id, until?}`, `/attention/unsnooze` `{id}`, `/attention/dismiss` `{id}` | The one attention queue (22): `{items, counts: {total, blocking, can_wait, snoozed, by_project}, revision, at, partial?}`; snooze (10 minutes, every device), bring back, dismiss a failed job (`409` for anything else, `404` for an item resolved meanwhile). An `attention` SSE event carries the whole snapshot when it changes |
@@ -2331,6 +2420,7 @@ idle_seconds}`), `POST /presence/gone`, `PUT /presence/dnd` `{until}`, `GET /dig
 - `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings; the attention queue's snoozes and dismissals (`attention.snoozed`, `attention.dismissed`: id → unix time) and each browser's "since you left" record (`browser.<id>`: last beat and window start; 22). The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
 - Migration `0015_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
+- Migration `0016_approval_rules.sql` (8.7 Policy): `approval_rules(id, scope project|job, project_id, job_id, kind bash|edit|tool, pattern, max_risk low|elevated, note, created_at, created_via browser|demo, revoked_at)`, revoked rather than deleted; `approvals` gains `rule_ids` (the rules that allowed a `policy` approval). Deleting a job (retention) deletes its rules.
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -3160,6 +3250,12 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 101. **Now is home; the board is `/jobs`** (22; Fable 1.2, Codex C1). The first screen answers what needs me, what each project is doing and what happened while I was away; giving a job stays one box down. Four primary destinations plus More on a phone (Fable 1.4, Codex C4); the same order on the desktop rail, so nothing moves between devices.
 102. **"Since you left" is per browser, kept on the server** (22.3). A random id in localStorage names the browser; its last activity and its window start live in kv. Keeping them on the server means a phone and a laptop each have their own "since", and a cleared tab does not replay a day; a ten-minute gap is "leaving", shorter is a tab switch.
 103. **Link to Remote Control, do not compete with it; work given there becomes a job** (7.10.1; R4 Fable 3.7, Codex P5). The Claude app is the better client for a long conversation with one agent, and crowsnest the only place that sees every project, question and approval. So crowsnest links to the agent's real session (captured from Claude's own banner or transcript, never built from a name, shown only while current) rather than growing its chat, and the agents are told to record conversational work with `job_adopt` so nothing given in the app escapes supervision or the board. `job_adopt` reuses the held-job lifecycle of a dispatched job instead of a new one, and keeps one live job per standing agent, so the supervisor's rules need no exception.
+ 104. **Approval policy lives in crowsnest, never in the agent's settings** (8.7 Policy; Fable R4 2.6). A project rule or a rule remembered for one job is evaluated in the hook path, journalled at every use and removable with a tap; it outlives nothing it should not (a job rule dies with the job) and is invisible to the agent, which cannot reach the rule routes. Claude's own "always allow" stays a terminal action.
+ 105. **Dangerous is never auto-allowed, and elevated is opt-in per rule** (8.7 Policy; R5-S7). The risk table wins over every rule; `max_risk` defaults to low, so a rule written for `go test *` does not start allowing pushes when R5 reclassifies unrecognised calls as elevated.
+ 106. **A bash rule matches every simple command or nothing** (8.7 Policy). A chain is allowed only when each part matches some rule, and anything whose real effect cannot be read from the line (substitution, eval, a redirect to a file, bidi controls) never matches. It matches the full command, never the cut summary. Fail closed: the cost is a tap.
+ 107. **A rule is shown with what it would have matched** (8.7 Policy; R5 review). The add form previews the project's last week of calls as the pattern is typed, and flags any dangerous match as never auto-allowed; each listed rule keeps that line, so a too-broad rule is visible before and after it is saved.
+ 108. **Pending approvals survive a restart for a grace, not forever** (8.7 (e); Fable R4 2.11). 150 s from the start covers the hook's two minutes of poll retries; one polled again is kept and still answered from the card, one never polled again is superseded, so an upgrade no longer drops every card back to the terminal.
+ 109. **Batch allow is one job's low-risk calls only** (8.7 Policy). Mixing jobs or risks in one tap would hide which agent got what; the server refuses the whole batch rather than allowing part of it.
 
 ## 18. Milestones
 
