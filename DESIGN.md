@@ -1549,6 +1549,29 @@ the orchestrator's own judgement and Jeff's pushes, which this routing does not 
 conversation" in the UI sends `/exit`, waits for the shell, and starts with a fresh session id.
 Compaction past a threshold and a daily new conversation with a hand-over: 7.9.
 
+**New instructions for a running standing agent** (`internal/orch/freshness.go`). crowsnest
+adopts a live orchestrator or lead across its own restarts without restarting Claude, so an agent
+started yesterday kept yesterday's prompt file (Jeff's orchestrator went on saying it writes SAY
+lines only "when the header says talk=on", a rule the template had dropped). Every start records a
+fingerprint of what it wrote: the rendered instructions (the version they name masked, so a
+rebuild alone is not a change), the Claude settings with their hooks, the guard rules and the MCP
+configuration (the per-start token aside). On adoption and every 30 s of the watch, the
+fingerprint of what a start would write now (`Options.Guidance`: the same text without recording
+a start) is compared; none recorded (an older crowsnest started it) counts as changed. A changed
+agent shows "Instructions changed since start" (the instructions card's banner and its Restart,
+`instructions_stale` on its status) and is restarted on the same conversation at its next idle
+moment: idle in herdr, an empty input box, no dialog, no step crowsnest is taking on a job it holds;
+journalled as a restart "for new instructions"; at most once per 10 minutes; never while paused;
+not at all with the Setting "Restart for new instructions" off (`--no-instruction-restart`).
+**Claude Code keeps a resumed conversation's original appended system prompt** (seen with real
+Claude: resumed with a new file, it still followed the old one), so a resume alone is not enough:
+each fresh conversation records the fingerprint it began with, and a start that resumes one whose
+instructions changed since leaves a notice that the agent's SessionStart context carries once: the
+current instructions in full, "replaces the crowsnest instructions in your system prompt". This
+also covers a manual Restart and the automatic restart after a crash. Job agents are not restarted
+by themselves (a restart mid-job loses the turn); their "changed since start" banner and Restart
+are the human's.
+
 **7.6 As built in M4** (`internal/orch`, `internal/transcript`; checked against herdr 0.9.5 and
 Claude Code 2.1.332 by `mise run test:claude`):
 

@@ -260,6 +260,19 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	greet := greeter(ctx, client, orchestrator, logger)
 	live.greeter.Store(&greet)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
+	refs.instructions.SetStandingStale(func(subject string) bool {
+		if subject == orch.Name {
+			return orchestrator.Status().InstructionsStale
+		}
+		if leads := refs.projects.leads.Load(); leads != nil {
+			for _, lead := range leads.Running() {
+				if projects.Subject(lead.Project.Slug) == subject {
+					return lead.Agent.Status().InstructionsStale
+				}
+			}
+		}
+		return false
+	})
 	var projectOf func(string) (int64, string)
 	if cfg.Demo {
 		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)

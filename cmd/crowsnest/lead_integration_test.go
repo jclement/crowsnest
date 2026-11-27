@@ -174,6 +174,7 @@ func TestIntegrationClaudeProjectLead(t *testing.T) {
 		RemoteControl     string `json:"remote_control"`
 		RemoteControlNote string `json:"remote_control_note"`
 		RemoteControlURL  string `json:"remote_control_url"`
+		SessionID         string `json:"session_id"`
 	}
 	var lead leadStatus
 	if code := rig.call(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/lead/start", project.ID), nil, &lead); code != http.StatusOK {
@@ -221,6 +222,38 @@ func TestIntegrationClaudeProjectLead(t *testing.T) {
 		t.Logf("NOTE: haiku did not start this reply with the SAY line: %q", reply)
 	}
 	waitLead(func(s leadStatus) bool { return s.State == "idle" }, "idle after the reply", time.Minute)
+
+	// New instructions for a running lead (DESIGN.md 7.5): the codeword changes in its layer; the
+	// lead's watch sees that what it would start with now differs, restarts it on the same
+	// conversation at its idle moment, and the resumed conversation is given the new text (Claude
+	// Code keeps a resumed conversation's original system prompt, so the SessionStart hook carries
+	// it). Asked again, it gives the new codeword.
+	if code := rig.call(http.MethodPut, fmt.Sprintf("/api/v1/instructions/project/%d", project.ID), map[string]string{
+		"body_md": "The project's codeword is QUINCE-9. Say it whenever anyone asks for the project's codeword.",
+	}, nil); code != http.StatusOK {
+		t.Fatalf("changing the project's instruction layer = %d", code)
+	}
+	promptFile := filepath.Join(short, "state", "crowsnest", session, "leads", project.Slug, "CROWSNEST.md")
+	restartBy := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(restartBy) {
+		if body, err := os.ReadFile(promptFile); err == nil && strings.Contains(string(body), "QUINCE-9") {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if body, _ := os.ReadFile(promptFile); !strings.Contains(string(body), "QUINCE-9") {
+		t.Fatal("the lead was not restarted for its new instructions within 2 minutes")
+	}
+	conversation := lead.SessionID
+	lead = waitLead(func(s leadStatus) bool { return s.State == "idle" && s.PaneID != "" }, "idle after the restart for new instructions", 2*time.Minute)
+	if conversation == "" || lead.SessionID != conversation {
+		t.Fatalf("the restart for new instructions did not keep the conversation: %q → %q", conversation, lead.SessionID)
+	}
+	reply = promptLead(t, rig, lead.PaneID, "What is the project's codeword now? Reply with the codeword only.")
+	if !strings.Contains(reply, "QUINCE-9") {
+		t.Fatalf("the restarted lead does not follow its new instructions: %q", reply)
+	}
+	waitLead(func(s leadStatus) bool { return s.State == "idle" }, "idle after the second reply", time.Minute)
 
 	var job struct {
 		ID string `json:"id"`

@@ -92,6 +92,9 @@ type Status struct {
 	// RemoteControlURL is the session's https://claude.ai/code/session_… link, once Claude has
 	// shown it (remote_control.go); "" until then, after every start, and when it is off.
 	RemoteControlURL string    `json:"remote_control_url,omitempty"`
+	// InstructionsStale: what crowsnest would start it with now (prompt file, hooks, settings,
+	// MCP config) differs from what its running Claude was started with (freshness.go).
+	InstructionsStale bool `json:"instructions_stale,omitempty"`
 	Restarts         int       `json:"restarts"` // automatic restarts in the last hour
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -182,6 +185,15 @@ type Options struct {
 	// OnStart, when set, is called after the start-up files are written for a start (the
 	// instructions service records what the agent was started with). It must not block long.
 	OnStart func(ctx context.Context)
+	// Guidance renders what Render would write now, without side effects (nothing recorded),
+	// for the comparison with what the agent was started with (freshness.go). Nil: Render.
+	Guidance func() (string, error)
+	// AutoInstructionRestart reports whether an agent whose instructions changed is restarted by
+	// itself at its next idle moment (the Setting); nil: yes.
+	AutoInstructionRestart func() bool
+	// HeldJobBusy reports a step crowsnest is taking on a job the agent holds; such an agent is
+	// not restarted for new instructions until it is over. Nil: never.
+	HeldJobBusy func(ctx context.Context) bool
 }
 
 // agentName is the herdr name of the agent this Orchestrator keeps.
@@ -232,6 +244,9 @@ type Orchestrator struct {
 	// launching is the pane a start is launching Claude in, before the status names it: hooks
 	// that fire during the launch (SessionStart, InstructionsLoaded) are matched to it.
 	launching string
+	// instructionsAt is the last comparison of its instructions, instructionsRestartAt the last
+	// restart for new ones (freshness.go).
+	instructionsAt, instructionsRestartAt time.Time
 }
 
 // Pane is the pane the agent runs in, or the one it is being launched in right now.
@@ -413,6 +428,7 @@ func (o *Orchestrator) adopt(ctx context.Context, agent herdr.Agent) Status {
 	o.remember(ctx, agent.PaneID, sessionOf(agent, ""))
 	status := o.follow(agent)
 	o.restoreRemoteControl(ctx, status.SessionID)
+	o.checkInstructions(ctx, agent, false) // marked now; the watch restarts it when idle
 	return o.Status()
 }
 

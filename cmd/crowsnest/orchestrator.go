@@ -66,12 +66,17 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 	var replies *voice.ReplyWatcher // talk mode: speaks the orchestrator's SAY lines
 	// The orchestrator's CROWSNEST.md, then the human's global instruction layer (DESIGN.md 21.3),
 	// recorded so "instructions changed since start" works for it too.
-	render := func() (string, error) {
+	compose := func(record bool) (string, error) {
 		body, err := orch.RenderInstructions(orch.InstructionData{Session: cfg.Session, Dir: cfg.Dir, Version: version})
 		if err != nil || layers == nil {
 			return body, err
 		}
-		extra, _, err := layers.ForStandingAgent(ctx, orch.Name, 0, "")
+		var extra string
+		if record {
+			extra, _, err = layers.ForStandingAgent(ctx, orch.Name, 0, "")
+		} else {
+			extra, err = layers.StandingAgentText(ctx, orch.Name, 0, "") // nothing recorded: a comparison
+		}
 		if err != nil {
 			logger.Warn("composing the orchestrator's instruction layers", "err", err)
 		}
@@ -80,9 +85,15 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 		}
 		return body, nil
 	}
-	orchestrator := orch.New(orch.Options{
+	render := func() (string, error) { return compose(true) }
+	var orchestrator *orch.Orchestrator
+	orchestrator = orch.New(orch.Options{
 		Render: render, Paused: ctl.paused, ExtraEnv: ctl.heavyEnv(),
-		Client: client, KV: db, Hub: events, Journal: journalLog, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
+		// An adopted orchestrator started with older instructions is restarted for them (7.5).
+		Guidance:               func() (string, error) { return compose(false) },
+		AutoInstructionRestart: ctl.instructionRestart,
+		HeldJobBusy:            func(ctx context.Context) bool { return heldJobBusy(db, orchestrator)(ctx) },
+		Client:                 client, KV: db, Hub: events, Journal: journalLog, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
 		StateDir: cfg.StateDir, Model: cfg.Model, PermissionMode: cfg.PermissionMode, Version: version,
 		RemoteControlName: orchestratorRemoteControl(cfg), Gate: gate.gate, Launch: gate.launch, DemoRemoteControl: demoRemoteControl(cfg, "crowsnest", "orchestrator"),
 		BinDir: binDir, Executable: executable, AgentSocket: agentSocket, BasePath: os.Getenv("PATH"), ClaudeConfigDir: claudeDir, Disabled: cfg.NoOrchestrator, Identity: identity, Guard: guardRules,

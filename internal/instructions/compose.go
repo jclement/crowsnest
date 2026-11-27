@@ -200,6 +200,20 @@ func (s *Service) ForStandingAgent(ctx context.Context, subject string, projectI
 	return text, manifest, nil
 }
 
+// StandingAgentText is ForStandingAgent's text without recording a start: what the agent would
+// be given now, for the comparison with what it was started with (orch's freshness check).
+func (s *Service) StandingAgentText(ctx context.Context, subject string, projectID int64, projectName string) (string, error) {
+	if !ValidSubject(subject) || strings.HasPrefix(subject, "j_") {
+		return "", failure(ErrInvalid, "A standing agent is \"orchestrator\" or \"lead:<slug>\", not %q.", subject)
+	}
+	kind := KindOrchestrator
+	if strings.HasPrefix(subject, "lead:") {
+		kind = KindLead
+	}
+	text, _, err := s.Compose(ctx, Subject{Kind: kind, Subject: subject, ProjectID: projectID, ProjectName: projectName})
+	return text, err
+}
+
 // ---- Changed since start -------------------------------------------------------------------
 
 // Change is one layer that differs from what the agent was started with.
