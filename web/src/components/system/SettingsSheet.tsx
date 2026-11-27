@@ -11,6 +11,7 @@ import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
+import { backupURL } from "../../lib/ops";
 import { CommandLine } from "./CheckList";
 
 const inputClass = "h-11 w-full min-w-0 rounded border border-border bg-surface px-3 text-sm font-normal text-heading md:h-9 disabled:bg-surface-sunken disabled:text-muted";
@@ -51,7 +52,15 @@ export function SettingsBody({ page, onOpen }: { page: SettingsPage; onOpen?: Se
           <Button compact onClick={() => onOpen?.("voice")}>
             Voice
           </Button>
+          <a
+            href={backupURL}
+            download
+            className="inline-flex min-h-11 items-center rounded border border-border-strong px-2 text-xs font-medium text-heading hover:bg-hover md:min-h-7"
+          >
+            Download backup
+          </a>
         </div>
+        <p className="text-2xs text-muted">Storage, clean-up, Machines and Sign in with Tailscale are on the System page.</p>
       </section>
       {sections.map((section) => (
         <section key={section} className="flex flex-col gap-1" aria-label={section}>
