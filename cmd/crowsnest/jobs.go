@@ -42,7 +42,7 @@ func newJobCommand() *cobra.Command {
 	}
 	command.PersistentFlags().StringVar(&jobID, "job", "", "the job id (default: CROWSNEST_JOB)")
 	command.AddCommand(newJobUpdateCommand(&jobID), newJobDoneCommand(&jobID), newJobFailCommand(&jobID),
-		newJobGetCommand(&jobID), newJobCreateCommand(), newJobListCommand())
+		newJobGetCommand(&jobID), newJobCreateCommand(), newJobListCommand(), newJobLandCommand())
 	return command
 }
 
@@ -97,7 +97,7 @@ func newJobUpdateCommand(jobID *string) *cobra.Command {
 }
 
 func newJobDoneCommand(jobID *string) *cobra.Command {
-	var result, resultFile string
+	var result, resultFile, walkthroughFile string
 	var verified, notVerified, attachments []string
 	command := &cobra.Command{
 		Use:   `done --result "…" --verified "…" --not-verified "…" [--attach file]`,
@@ -118,7 +118,16 @@ func newJobDoneCommand(jobID *string) *cobra.Command {
 			if !cmd.Flags().Changed("verified") || !cmd.Flags().Changed("not-verified") {
 				return usageError{fmt.Errorf("--verified and --not-verified are both required (pass 'none' for an empty list)")}
 			}
-			job, err := client.DoneJob(cmd.Context(), id, jobs.DoneInput{ResultMD: result, Verified: listFlag(verified), NotVerified: listFlag(notVerified), Attachments: attachments})
+			walkthrough := ""
+			if walkthroughFile != "" {
+				body, err := readInput(cmd.InOrStdin(), walkthroughFile)
+				if err != nil {
+					return err
+				}
+				walkthrough = string(body)
+			}
+			job, err := client.DoneJob(cmd.Context(), id, jobs.DoneInput{ResultMD: result, Verified: listFlag(verified), NotVerified: listFlag(notVerified),
+				Attachments: attachments, WalkthroughMD: walkthrough})
 			if err != nil {
 				return err
 			}
@@ -130,6 +139,7 @@ func newJobDoneCommand(jobID *string) *cobra.Command {
 	command.Flags().StringArrayVar(&verified, "verified", nil, "something you checked and saw (repeatable)")
 	command.Flags().StringArrayVar(&notVerified, "not-verified", nil, "something you did not check (repeatable)")
 	command.Flags().StringArrayVar(&attachments, "attach", nil, "a file to attach to the result, inside your working or job directory (repeatable)")
+	command.Flags().StringVar(&walkthroughFile, "walkthrough-file", "", "a Markdown walkthrough of the change, chunk by chunk (- for stdin)")
 	return command
 }
 
@@ -161,6 +171,30 @@ func newJobFailCommand(jobID *string) *cobra.Command {
 			return printJob(cmd.OutOrStdout(), job)
 		},
 	}
+}
+
+// newJobLandCommand asks the human to land a finished job (DESIGN.md 6.11): it only asks.
+func newJobLandCommand() *cobra.Command {
+	var reason string
+	command := &cobra.Command{
+		Use:   "land j_<n> merge|pr|discard [--reason …]",
+		Short: "Ask the human to merge, push or discard a finished job (they decide)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := agentClient()
+			if err != nil {
+				return err
+			}
+			response, err := client.RequestLand(cmd.Context(), args[0], args[1], reason)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "asked the human (%s): %s\n", response.QuestionID, response.Note)
+			return err
+		},
+	}
+	command.Flags().StringVar(&reason, "reason", "", "why, for the human")
+	return command
 }
 
 func newJobGetCommand(jobID *string) *cobra.Command {
