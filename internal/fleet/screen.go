@@ -57,6 +57,9 @@ type Dialog struct {
 	// Warnings are risky phrases found anywhere in the dialog (rm -rf, force push, …); the UI
 	// shows them as a badge. They never block an answer: the human is reading the real screen.
 	Warnings []string `json:"warnings"`
+	// Trust is set when the dialog is a folder-trust question (trust.go): whose, which folder,
+	// and which option trusts it.
+	Trust *TrustPrompt `json:"trust,omitempty"`
 }
 
 // DialogOption is one choice. Key is the digit to send for a numbered option; an option of an
@@ -74,7 +77,9 @@ type DialogOption struct {
 const dialogFooterLines = 4
 
 var (
-	dialogFooter = regexp.MustCompile(`(?i)enter to (select|confirm|submit)|esc to cancel`)
+	// dialogFooter: Claude's "Enter to confirm · Esc to cancel", and Codex's "enter continue ·
+	// esc back" (codex-cli 0.167, which drops the "to").
+	dialogFooter = regexp.MustCompile(`(?i)enter to (select|confirm|submit)|esc to cancel|^enter (continue|confirm|select|submit)\b`)
 	// optionLine: an optional cursor marker, a number, "." or ")", then the label.
 	optionLine = regexp.MustCompile(`^(?:([❯›>])\s*)?(\d{1,2})[.)]\s+(\S.*?)\s*$`)
 	// formHints mark screens that one digit cannot answer.
@@ -112,7 +117,7 @@ func DetectDialog(text string) Dialog {
 	if len(options) == 0 || findInputLine(lines) > lastOption {
 		return none
 	}
-	return Dialog{Present: true, Options: options, Form: isForm(lines), Warnings: warningsIn(lines)}
+	return Dialog{Present: true, Options: options, Form: isForm(lines), Warnings: warningsIn(lines), Trust: detectTrust(lines, options)}
 }
 
 // contentLines splits a screen into lines with box borders and surrounding space removed.
