@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jclement/crowsnest/internal/demostory"
 	"github.com/jclement/crowsnest/internal/herdr"
 )
 
@@ -35,9 +36,9 @@ type scribe struct {
 }
 
 // EnableTranscripts makes the demo keep transcripts under configDir (laid out like
-// ~/.claude: projects/<cwd>/<session>.jsonl), seeds the orchestrator, builder and reviewer with
-// a conversation, and makes the orchestrator answer prompts after delay (DefaultReplyDelay when
-// zero). Point the transcript manager's config dir at the same directory.
+// ~/.claude: projects/<cwd>/<session>.jsonl), seeds the orchestrator, the webhook builder and the
+// fleet cache reviewer with a conversation, and makes the orchestrator answer prompts after delay
+// (DefaultReplyDelay when zero). Point the transcript manager's config dir at the same directory.
 func (d *Demo) EnableTranscripts(configDir string, delay time.Duration) error {
 	if delay <= 0 {
 		delay = DefaultReplyDelay
@@ -45,7 +46,7 @@ func (d *Demo) EnableTranscripts(configDir string, delay time.Duration) error {
 	d.scribe = &scribe{configDir: configDir, delay: delay}
 	start := time.Now().Add(-40 * time.Minute)
 	for name, seed := range map[string]func(*transcriptWriter){
-		DemoOrchestrator: seedOrchestrator, DemoBuilder: seedBuilder, DemoReviewer: seedReviewer,
+		DemoOrchestrator: seedOrchestrator, demostory.WebhookBuilder: seedBuilder, demostory.CacheReviewer: seedReviewer,
 	} {
 		w, err := d.writerFor(d.panes[name])
 		if err != nil {
@@ -177,28 +178,32 @@ func (w *transcriptWriter) tool(name string, input map[string]any, result string
 // ---- The scripts -----------------------------------------------------------------------
 
 func seedOrchestrator(w *transcriptWriter) {
-	w.user("What's the state of the crowsnest build?")
-	w.thinking("Let me look at the fleet before answering, rather than guessing from memory.")
-	w.tool("Bash", map[string]any{"command": "herdr agent list --json | jq -r '.[] | \"\\(.name) \\(.agent_status)\"'", "description": "List agents and their states"},
-		"orchestrator working\nbuilder working\nreviewer done\ndocs-writer blocked\nlinter idle", false)
-	w.text("SAY: Four agents are running; the docs writer needs you.\n\nFour agents besides me:\n\n| Agent | State | Doing |\n|---|---|---|\n| builder | working | wiring `/api/v1/fleet` |\n| reviewer | done | review written to `REVIEW.md` |\n| docs-writer | **blocked** | wants to run a command |\n| linter | idle | no lint errors |\n\nThe docs writer needs you; everything else is moving.")
-	w.user("[crowsnest poke 2026-11-26T03:10Z]\n- docs-writer is blocked on a dialog (10 min)\n- reviewer settled: done")
-	w.tool("Read", map[string]any{"file_path": "~/src/crowsnest/REVIEW.md"}, "# Review: fleet cache\n\n1. minor: debounce constant could be named\n2. minor: missing test for events_lost", false)
-	w.text("SAY: The review found two minor issues, and the docs writer still needs you.\n\nThe reviewer found **two minor issues** in the fleet cache; I've passed them to the builder.\n\nThe docs writer is still waiting on you: it wants to run\n\n```sh\nrm -rf dist && npm run build\n```\n\nAnswer it from **Fleet** (or the Inbox, once that exists).")
+	w.user("What's waiting on me this morning?")
+	w.thinking("Let me look at the fleet and the jobs before answering, rather than guessing from memory.")
+	w.tool("Bash", map[string]any{"command": "crowsnest jobs --live --json | jq -r '.[] | \"\\(.id) \\(.project) \\(.state) \\(.agent_name)\"'", "description": "List the live jobs"},
+		"j_1 crowsnest running job-1\nj_11 crowsnest needs_you job-11\nj_13 crowsnest needs_you job-13\nj_15 website needs_you job-15\nj_3 mobile running(stuck) job-3\nj_5 handbook needs_you job-5\nj_17 infra running job-17", false)
+	w.text("SAY: Four things need you: a force push, a question about the homepage, the handbook's dialog, and Mobile is out of usage.\n\n" +
+		"| Project | What waits on you |\n|---|---|\n| Crowsnest | **j_13** wants to `git push --force origin main` (dangerous), and **j_11** asks whether to apply the fleet cache refactor |\n" +
+		"| Website | **j_15** needs the homepage's first sentence before it goes on |\n| Handbook | **j_5** is at a dialog: `rm -rf dist && npm run build` |\n" +
+		"| Mobile | **j_3** hit the usage limit; it retries on its own at 14:00 |\n\nInfra is quiet: **j_17** is rebuilding the devbox image.")
+	w.user("[crowsnest poke 2026-11-26T03:10Z]\n- job-5 is blocked on a dialog (10 min)\n- j_12 asked q_2: Which findings should the builder fix before merge?")
+	w.tool("Read", map[string]any{"file_path": "~/src/crowsnest/REVIEW.md"}, "# Review: fleet cache\n\n1. race: Publish reads subscribers without the lock\n2. leak: the SSE subscription is not closed\n3. names: handleX helpers\n4. docs: the 150 ms window", false)
+	w.text("SAY: The cache review found four things, and the handbook job still needs you.\n\nThe reviewer (**j_12**) found **four issues** in the fleet cache and asked you which the builder should fix before merge.\n\nThe handbook job is still waiting on you: it wants to run\n\n```sh\nrm -rf dist && npm run build\n```\n\nAnswer it from **Now** or the Inbox.")
 }
 
 func seedBuilder(w *transcriptWriter) {
-	w.user("Wire GET /api/v1/fleet to the fleet cache and add tests.")
-	w.tool("Edit", map[string]any{"file_path": "internal/httpd/agents.go", "old_string": "// TODO fleet", "new_string": "func (s *Server) handleFleet(…)"}, "The file internal/httpd/agents.go has been updated.", false)
-	w.tool("Bash", map[string]any{"command": "go test ./internal/httpd/... ./internal/fleet/...", "description": "Run the affected tests"},
-		"ok  \tgithub.com/jclement/crowsnest/internal/httpd\t0.81s\nok  \tgithub.com/jclement/crowsnest/internal/fleet\t0.47s", false)
-	w.text("`GET /api/v1/fleet` now serves the cached fleet; **7 tests** added, all passing. Next: the `fleet` SSE event.")
+	w.user("[crowsnest job j_1] Add retry back-off to the webhook sender\n\nExponential, capped at 5 minutes, with jitter. Tests for the schedule.")
+	w.tool("Read", map[string]any{"file_path": "internal/webhook/sender.go"}, "func (s *Sender) deliver(ctx context.Context, hook Hook) error {\n\t// TODO retry\n\treturn s.post(ctx, hook)\n}", false)
+	w.tool("Edit", map[string]any{"file_path": "internal/webhook/backoff.go", "old_string": "", "new_string": "func backoff(attempt int) time.Duration {…}"}, "The file internal/webhook/backoff.go has been created.", false)
+	w.tool("Bash", map[string]any{"command": "go test ./internal/webhook/ -run Backoff", "description": "Run the back-off tests"},
+		"ok  \tgithub.com/jclement/crowsnest/internal/webhook\t0.21s", false)
+	w.text("The back-off is in: doubling from 1 s, **capped at 5 minutes**, with ±20 % jitter. Writing table tests for the schedule next.")
 }
 
 func seedReviewer(w *transcriptWriter) {
-	w.user("Review the fleet cache on wip/m2-herdr. Findings to REVIEW.md.")
-	w.tool("Bash", map[string]any{"command": "git diff main...wip/m2-herdr --stat"}, " internal/fleet/cache.go | 338 +++++\n internal/fleet/view.go  | 181 +++\n 2 files changed, 519 insertions(+)", false)
-	w.text("Review written to `REVIEW.md`: **2 findings, both minor**.\n\n1. The 150 ms debounce is a bare number; name it.\n2. No test covers `events_lost` resubscription.")
+	w.user("[crowsnest job j_12] Review the fleet cache refactor on wip/fleet-cache. Findings to REVIEW.md, then ask which to fix.")
+	w.tool("Bash", map[string]any{"command": "git diff main...wip/fleet-cache --stat"}, " internal/fleet/cache.go | 64 +++++---\n internal/hub/hub.go     | 12 ++-\n 2 files changed, 52 insertions(+), 24 deletions(-)", false)
+	w.text("Review written to `REVIEW.md`: **4 findings**, one serious.\n\n1. Data race: `Publish` reads subscribers without the lock.\n2. Goroutine leak on SSE close.\n3. The `handleX` helpers want names.\n4. The 150 ms window is undocumented.\n\nI've asked which the builder should fix before merge.")
 }
 
 // cannedReply is one scripted answer of the demo orchestrator.
@@ -230,8 +235,8 @@ var cannedReplies = []cannedReply{
 	{
 		tool: "Bash", input: map[string]any{"command": "git log --oneline -5", "description": "Recent commits"},
 		result:   "a26b6f1 Merge branch 'wip/m2-herdr'\n4252245 M2: README and DESIGN\n8e1218b STATUS: M1 and M3 merged",
-		say:      "M1 to M3 are merged and nothing needs you except one dialog.",
-		markdown: "On **{{prompt}}**: here is where things stand.\n\n- M1 and M3 are merged; M2 merged an hour ago.\n- The builder is on the fleet SSE event.\n- Nothing is waiting on you except the docs writer's dialog.\n\nWant me to start the next milestone?",
+		say:      "M1 to M3 are merged; four things wait on you.",
+		markdown: "On **{{prompt}}**: here is where things stand.\n\n- M1 and M3 are merged; M2 merged an hour ago.\n- **j_1** is on the webhook back-off, in its worktree.\n- Waiting on you: the force push in Crowsnest, the homepage question in Website, the handbook's dialog, and Mobile's usage limit.\n\nWant me to start the next milestone?",
 	},
 	{
 		tool: "Read", input: map[string]any{"file_path": "DESIGN.md"},

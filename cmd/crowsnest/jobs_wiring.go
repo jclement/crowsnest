@@ -187,11 +187,7 @@ func rolesDir(cfg config.Config) string {
 // startJobs runs the supervisor (and, under --demo, seeds the board).
 func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, projectOf func(string) (int64, string), logger *slog.Logger) {
 	if demo, ok := client.(*fake.Demo); ok {
-		panes := jobs.DemoPanes{
-			Orchestrator: demo.PaneOf(fake.DemoOrchestrator), Builder: demo.PaneOf(fake.DemoBuilder),
-			Reviewer: demo.PaneOf(fake.DemoReviewer), Docs: demo.PaneOf(fake.DemoDocs), Linter: demo.PaneOf(fake.DemoLinter),
-			ProjectOf: projectOf,
-		}
+		panes := jobs.DemoPanes{PaneOf: demo.PaneOf, DialogOf: demo.DialogCommand, ProjectOf: projectOf}
 		if err := jobs.SeedDemo(ctx, service, panes); err != nil {
 			logger.Warn("seeding the demo jobs", "err", err)
 		}

@@ -5,9 +5,11 @@ package fake
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/demostory"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 )
@@ -149,12 +151,25 @@ func TestDemoFleet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Workspaces) != 3 || len(snapshot.Agents) != 5 {
+	// The orchestrator's workspace plus one per demo project; 12 job agents, the orchestrator and
+	// the hand-started linter.
+	if len(snapshot.Workspaces) != 6 || len(snapshot.Agents) != 14 {
 		t.Fatalf("demo has %d workspaces and %d agents", len(snapshot.Workspaces), len(snapshot.Agents))
+	}
+	labels := map[string]string{}
+	for _, workspace := range snapshot.Workspaces {
+		labels[workspace.ID] = workspace.Label
 	}
 	statuses := map[herdr.AgentStatus]bool{}
 	for _, agent := range snapshot.Agents {
 		statuses[agent.AgentStatus] = true
+		// A job agent works in its project's workspace and directory.
+		if strings.HasPrefix(agent.Name, "job-") {
+			slug := labels[agent.WorkspaceID]
+			if !strings.HasPrefix(agent.Cwd, demostory.Dir(slug)) && !strings.HasPrefix(agent.Cwd, "~/.herdr/worktrees/"+slug+"/") {
+				t.Errorf("%s works in %s, outside workspace %s", agent.Name, agent.Cwd, slug)
+			}
+		}
 	}
 	for _, want := range []herdr.AgentStatus{herdr.StatusIdle, herdr.StatusWorking, herdr.StatusDone, herdr.StatusBlocked} {
 		if !statuses[want] {
@@ -162,14 +177,43 @@ func TestDemoFleet(t *testing.T) {
 		}
 	}
 
-	docs := demo.PaneOf(DemoDocs)
-	screen, _ := demo.PaneRead(ctx, docs, herdr.ReadOptions{})
+	handbook := demo.PaneOf(demostory.HandbookPublish)
+	screen, _ := demo.PaneRead(ctx, handbook, herdr.ReadOptions{})
 	if dialog := fleet.DetectDialog(screen.Text); !dialog.Present || len(dialog.Options) != 3 {
-		t.Fatalf("the docs writer's screen is not a detectable dialog: %+v\n%s", dialog, screen.Text)
+		t.Fatalf("the handbook job's screen is not a detectable dialog: %+v\n%s", dialog, screen.Text)
+	}
+	if got := demo.DialogCommand(handbook); got != demoHandbookBuild || !strings.Contains(screen.Text, "Bash("+got+")") {
+		t.Fatalf("DialogCommand = %q, screen:\n%s", got, screen.Text)
 	}
 	idle, _ := demo.PaneRead(ctx, demo.PaneOf(DemoOrchestrator), herdr.ReadOptions{ANSI: true})
 	if draft := fleet.DetectDraft(idle.Text); !draft.InputFound || draft.Present {
 		t.Fatalf("the orchestrator's input box should be found and empty (ghost text only): %+v", draft)
+	}
+}
+
+// An approval's permission dialog is drawn on its pane (detectable, but not a terminal dialog:
+// the approval stands for it) and goes when the approval is decided.
+func TestDemoApprovalDialog(t *testing.T) {
+	ctx := context.Background()
+	demo := NewDemo()
+	for _, call := range []struct{ tool, subject, detail string }{
+		{"Bash", "git push --force origin main", "Force-push"},
+		{"Edit", "/home/crow/src/mobile/src/screens/InboxScreen.tsx", ""},
+		{"WebFetch", "WebFetch: https://pkg.go.dev/golang.org/x/time/rate", ""},
+	} {
+		pane := demo.PaneOf(demostory.LimiterReviewer)
+		demo.AwaitApproval(pane, call.tool, call.subject, call.detail)
+		screen, _ := demo.PaneRead(ctx, pane, herdr.ReadOptions{})
+		if dialog := fleet.DetectDialog(screen.Text); !dialog.Present || !strings.Contains(screen.Text, call.subject) {
+			t.Fatalf("%s: no dialog drawn:\n%s", call.tool, screen.Text)
+		}
+		if agent, _ := demo.AgentGet(ctx, pane); agent.AgentStatus != herdr.StatusBlocked || demo.DialogCommand(pane) != "" {
+			t.Fatalf("%s: status %s, terminal dialog %q", call.tool, agent.AgentStatus, demo.DialogCommand(pane))
+		}
+		demo.ApprovalSettled(pane, true)
+		if agent, _ := demo.AgentGet(ctx, pane); agent.AgentStatus != herdr.StatusWorking {
+			t.Fatalf("%s: after the decision the agent is %s", call.tool, agent.AgentStatus)
+		}
 	}
 }
 
@@ -183,24 +227,36 @@ func TestDemoScript(t *testing.T) {
 		}
 		return agent.AgentStatus
 	}
-
-	demo.Step() // step 1: builder settles, reviewer starts
-	if status(DemoBuilder) != herdr.StatusDone || status(DemoReviewer) != herdr.StatusWorking {
-		t.Fatalf("after step 1: builder %s reviewer %s", status(DemoBuilder), status(DemoReviewer))
+	screen := func(name string) string {
+		read, _ := demo.PaneRead(ctx, demo.PaneOf(name), herdr.ReadOptions{})
+		return read.Text
 	}
 
-	// Answering the dialog unblocks the docs writer; the next dialog arrives three steps later.
-	if err := demo.AgentSendKeys(ctx, DemoDocs, []string{"1"}); err != nil {
+	// A step moves the working job agents on; nothing that waits on the human changes.
+	before := screen(demostory.WebhookBuilder)
+	demo.Step()
+	if after := screen(demostory.WebhookBuilder); after == before || status(demostory.WebhookBuilder) != herdr.StatusWorking {
+		t.Fatalf("the webhook builder did not move on: %s\n%s", status(demostory.WebhookBuilder), after)
+	}
+	for range 100 { // ten minutes of steps
+		demo.Step()
+	}
+	if status(demostory.HandbookPublish) != herdr.StatusBlocked || demo.DialogCommand(demo.PaneOf(demostory.HandbookPublish)) != demoHandbookBuild {
+		t.Fatal("the script answered the handbook job's dialog by itself")
+	}
+
+	// Answering the dialog unblocks the handbook job; its next dialog arrives three steps later.
+	if err := demo.AgentSendKeys(ctx, demostory.HandbookPublish, []string{"1"}); err != nil {
 		t.Fatal(err)
 	}
-	if status(DemoDocs) != herdr.StatusWorking {
-		t.Fatalf("docs writer after answering = %s", status(DemoDocs))
+	if status(demostory.HandbookPublish) != herdr.StatusWorking || demo.DialogCommand(demo.PaneOf(demostory.HandbookPublish)) != "" {
+		t.Fatalf("handbook job after answering = %s", status(demostory.HandbookPublish))
 	}
 	for range 3 {
 		demo.Step()
 	}
-	if status(DemoDocs) != herdr.StatusBlocked {
-		t.Fatalf("docs writer should be blocked again, is %s", status(DemoDocs))
+	if status(demostory.HandbookPublish) != herdr.StatusBlocked || demo.DialogCommand(demo.PaneOf(demostory.HandbookPublish)) != demoHandbookPublish {
+		t.Fatalf("the handbook job should be at its publish dialog, is %s", status(demostory.HandbookPublish))
 	}
 
 	// A prompted agent works for two steps, then goes idle.
@@ -214,5 +270,18 @@ func TestDemoScript(t *testing.T) {
 	demo.Step()
 	if status(DemoOrchestrator) != herdr.StatusIdle {
 		t.Fatalf("orchestrator two steps after a prompt = %s", status(DemoOrchestrator))
+	}
+
+	// A job agent prompted mid-task (an answer typed to it) goes back to its task afterwards.
+	if _, err := demo.AgentPrompt(ctx, demostory.DevboxBuilder, "Answer to q_9: yes", nil); err != nil {
+		t.Fatal(err)
+	}
+	demo.Step()
+	if !strings.Contains(screen(demostory.DevboxBuilder), "Working on: Answer to q_9") {
+		t.Fatalf("the devbox builder did not take the prompt:\n%s", screen(demostory.DevboxBuilder))
+	}
+	demo.Step()
+	if status(demostory.DevboxBuilder) != herdr.StatusWorking || strings.Contains(screen(demostory.DevboxBuilder), "Working on:") {
+		t.Fatalf("the devbox builder should be back on its task: %s\n%s", status(demostory.DevboxBuilder), screen(demostory.DevboxBuilder))
 	}
 }

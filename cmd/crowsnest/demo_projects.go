@@ -1,7 +1,9 @@
-// --demo's projects (DESIGN.md 21.5): three projects in throwaway directories under the demo's
-// state directory, the demo's jobs filed under them by directory, two leads running (on the fake
-// herdr, answering with canned replies), two schedules made in the app, and edited instruction
-// layers, so every new view has something real to show and the hermetic suite has fixtures.
+// --demo's projects (DESIGN.md 21.5): five projects in throwaway directories under the demo's
+// state directory, the demo's jobs filed under them by directory, three leads running (on the
+// fake herdr, answering with canned replies), two schedules made in the app, and edited
+// instruction layers, so every new view has something real to show and the hermetic suite has
+// fixtures. The slugs and made-up directories are internal/demostory's, which the fake fleet's
+// workspaces and the seeded jobs use too.
 
 package main
 
@@ -14,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/demostory"
 	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/schedule"
@@ -21,7 +24,7 @@ import (
 
 // demoProject is one seeded project and the made-up directory its demo jobs name.
 type demoProject struct {
-	fakeDir string // the directory the demo jobs name ("~/src/crowsnest")
+	fakeDir string // the directory the demo jobs name (demostory.Dir: "~/src/crowsnest")
 	input   projects.Input
 	lead    bool // start its lead
 }
@@ -29,13 +32,19 @@ type demoProject struct {
 func strPtr(s string) *string { return &s }
 
 func demoProjectList() []demoProject {
+	project := func(slug, name, description, role, leadStart string, lead bool) demoProject {
+		input := projects.Input{Name: strPtr(name), Slug: strPtr(slug), Description: strPtr(description), LeadStart: strPtr(leadStart)}
+		if role != "" {
+			input.DefaultRole = strPtr(role)
+		}
+		return demoProject{fakeDir: demostory.Dir(slug), lead: lead, input: input}
+	}
 	return []demoProject{
-		{fakeDir: "~/src/crowsnest", lead: true, input: projects.Input{Name: strPtr("Crowsnest"), Slug: strPtr("crowsnest"),
-			Description: strPtr("The web app and supervisor for herdr sessions."), DefaultRole: strPtr("builder"), LeadStart: strPtr(projects.LeadOnJob)}},
-		{fakeDir: "~/src/website", lead: true, input: projects.Input{Name: strPtr("Website"), Slug: strPtr("website"),
-			Description: strPtr("The marketing site and docs."), DefaultRole: strPtr("builder"), LeadStart: strPtr(projects.LeadOnOpen)}},
-		{fakeDir: "~/src/infra", input: projects.Input{Name: strPtr("Infra"), Slug: strPtr("infra"),
-			Description: strPtr("Deploy scripts and the devbox image."), LeadStart: strPtr(projects.LeadManual)}},
+		project(demostory.Crowsnest, "Crowsnest", "The web app and supervisor for herdr sessions.", "builder", projects.LeadOnJob, true),
+		project(demostory.Website, "Website", "The marketing site and docs.", "builder", projects.LeadOnOpen, true),
+		project(demostory.Infra, "Infra", "Deploy scripts and the devbox image.", "", projects.LeadManual, false),
+		project(demostory.Mobile, "Mobile", "The iOS and Android app.", "builder", projects.LeadOnOpen, true),
+		project(demostory.Handbook, "Handbook", "The team handbook, published as a static site.", "", projects.LeadOnJob, false),
 	}
 }
 

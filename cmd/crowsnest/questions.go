@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -17,7 +16,6 @@ import (
 	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/herdr"
-	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/instructions"
 	"github.com/jclement/crowsnest/internal/jobs"
@@ -87,14 +85,6 @@ func startQuestions(ctx context.Context, cfg config.Config, client herdr.Client,
 	}()
 	logger.Info("agent API listening", "socket", socket)
 
-	if demo, ok := client.(*fake.Demo); ok {
-		if err := startDemoQuestions(ctx, service, demo, logger); err != nil {
-			return nil, stop, err
-		}
-		if err := seedDemoAttachments(ctx, files, service, cfg.StateDir); err != nil {
-			logger.Warn("seeding the demo attachments", "err", err)
-		}
-	}
 	return service, stop, nil
 }
 
@@ -116,17 +106,4 @@ func jobQuestionChanged(ctx context.Context, jobService *jobs.Service, question 
 		return
 	}
 	go jobService.QuestionChanged(context.WithoutCancel(ctx), question.JobID, question.ID, question.Title, change, question.Wait)
-}
-
-// startDemoQuestions seeds the demo inbox and keeps asking.
-func startDemoQuestions(ctx context.Context, service *questions.Service, demo *fake.Demo, logger *slog.Logger) error {
-	panes := questions.DemoPanes{
-		Orchestrator: demo.PaneOf(fake.DemoOrchestrator), Builder: demo.PaneOf(fake.DemoBuilder),
-		Reviewer: demo.PaneOf(fake.DemoReviewer), Docs: demo.PaneOf(fake.DemoDocs),
-	}
-	if err := questions.SeedDemo(ctx, service, panes); err != nil {
-		return fmt.Errorf("seeding the demo questions: %w", err)
-	}
-	go questions.RunDemo(ctx, service, panes, 0, logger)
-	return nil
 }

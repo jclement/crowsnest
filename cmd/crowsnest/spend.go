@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/demostory"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/projects"
@@ -122,6 +123,12 @@ func seedDemoSpend(ctx context.Context, meter *spend.Meter, service *jobs.Servic
 		start := now.AddDate(0, 0, -day).Add(-3 * time.Hour)
 		subjects = append(subjects, spend.DemoSubject{Subject: spend.OrchestratorSubject, Model: "claude-sonnet-5-5",
 			Start: start, End: start.Add(2 * time.Hour), Calls: 6 + day})
+	}
+	// The three running leads (DESIGN.md 21.5): a morning's worth each, on their own lines.
+	for i, slug := range []string{demostory.Crowsnest, demostory.Website, demostory.Mobile} {
+		start := now.Add(-time.Duration(3+i) * time.Hour)
+		subjects = append(subjects, spend.DemoSubject{Subject: spend.LeadSubjectPrefix + slug, Model: "claude-sonnet-5-5",
+			Start: start, End: now, Calls: 10 - 2*i})
 	}
 	return spend.SeedDemo(ctx, meter, subjects)
 }
