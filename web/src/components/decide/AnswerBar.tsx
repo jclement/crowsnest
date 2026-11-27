@@ -12,7 +12,7 @@ import { useEffect, useId, useState } from "react";
 import { ApiError } from "../../lib/api";
 import type { Approval } from "../../lib/approvals";
 import { cn } from "../../lib/cn";
-import { loadNote, saveNote } from "../../lib/decision";
+import { grants, isGate, loadNote, saveNote } from "../../lib/decision";
 import { buildAnswer, canSubmit, type Question } from "../../lib/questions";
 import { useAnswerQuestion, useApproval, useDecideApproval, useQuestion, useSendKeys } from "../../lib/queries";
 import type { AgentScreen, DialogOption } from "../../lib/types";
@@ -133,13 +133,34 @@ function QuestionChoices({ question, note, onError, onDone }: ChoiceProps & { qu
     );
   };
   const busy = answer.isPending;
+  const gate = isGate(question);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const pending = question.options.find((option) => option.key === confirming);
+  if (pending) {
+    return (
+      <div className="flex flex-col gap-1.5" role="group" aria-label="Confirm the choice">
+        <p className="flex items-start gap-1.5 text-xs font-medium text-warning">
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+          This widens what agents may do. Read the evidence above, then confirm “{pending.label}”.
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <BarButton primary onPress={() => submit([pending.key])} disabled={busy} icon={<ShieldCheck className="h-4 w-4" aria-hidden />}>
+            Yes, {pending.label}
+          </BarButton>
+          <BarButton onPress={() => setConfirming(null)} disabled={busy}>
+            Back
+          </BarButton>
+        </div>
+      </div>
+    );
+  }
   if (question.kind === "confirm" || (question.kind === "choice" && !question.multi)) {
     return (
       <OptionList count={question.options.length}>
         {question.options.map((option) => (
           <BarButton
             key={option.key}
-            onPress={() => submit([option.key])}
+            onPress={() => (gate && grants(option.key) ? setConfirming(option.key) : submit([option.key]))}
             disabled={busy}
             recommended={option.key === question.recommend}
             icon={<Check className="h-4 w-4" aria-hidden />}

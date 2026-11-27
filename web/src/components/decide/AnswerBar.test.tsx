@@ -68,6 +68,33 @@ describe("AnswerBar", () => {
     expect(localStorage.getItem("crowsnest-note:question:q_7")).toContain("keep me");
   });
 
+  it("a gate question (it widens what agents may do) takes a second, deliberate tap to grant", async () => {
+    const gate = makeQuestion({
+      id: "q_8",
+      title: "Land j_3 into main?",
+      kind: "confirm",
+      recommend: "allow",
+      context: { land_for: "j_3" },
+      options: [
+        { key: "allow", label: "Allow: merge it" },
+        { key: "deny", label: "Deny" },
+      ],
+    });
+    const calls = stubApi((call) => {
+      if (call.method === "POST") return { body: { data: { ...gate, status: "answered" } } };
+      if (call.path === "/questions/q_8") return { body: { data: gate } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const onAnswered = vi.fn();
+    renderWithClient(<AnswerBar itemId="question:q_8" target={{ kind: "question", question: gate }} onAnswered={onAnswered} />);
+    await user.click(screen.getByRole("button", { name: /Allow: merge it/ }));
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+    await user.click(screen.getByRole("button", { name: /Yes, Allow: merge it/ }));
+    await waitFor(() => expect(onAnswered).toHaveBeenCalled());
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({ answer_value: "allow" });
+  });
+
   it("a dangerous approval asks again before allowing", async () => {
     const approval = {
       id: "ap_3",

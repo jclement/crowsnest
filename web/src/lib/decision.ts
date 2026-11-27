@@ -63,8 +63,37 @@ const ROUTINE_BODY_CHARS = 400;
  * other question opens the packet, so a consequential choice never gets a shorter path than its
  * evidence (R4 Codex P2).
  */
-export function isRoutine(question: Pick<Question, "kind" | "multi" | "files" | "body_md">): boolean {
-  return (question.kind === "confirm" || question.kind === "choice") && !question.multi && !question.files?.length && question.body_md.length <= ROUTINE_BODY_CHARS;
+export function isRoutine(question: Pick<Question, "kind" | "multi" | "files" | "body_md" | "context" | "options">): boolean {
+  return (
+    (question.kind === "confirm" || question.kind === "choice") &&
+    !question.multi &&
+    !question.files?.length &&
+    question.body_md.length <= ROUTINE_BODY_CHARS &&
+    !isGate(question)
+  );
+}
+
+/** Context keys crowsnest sets on its own gate questions (land requests, delegation approvals). */
+const GATE_CONTEXT_KEYS = ["land_for", "land_action", "approval_for", "requested_by"];
+/** Option keys that grant something: a question offering one is treated as a gate. */
+const GATE_OPTION_KEYS = new Set(["allow", "approve", "merge", "land", "push", "grant"]);
+/** Option keys that refuse: choosing one never needs the gate's confirmation. */
+const REFUSING_KEYS = new Set(["deny", "no", "reject", "cancel", "later", "not_yet"]);
+
+/**
+ * A question that widens what agents may do (crowsnest's land and delegation gates, or anything
+ * whose options allow, approve, merge or push). Mirrors internal/push.GateShaped: such a question
+ * is never answerable from a notification or a row, and in the packet a granting choice takes a
+ * second, deliberate tap (R5-S2).
+ */
+export function isGate(question: Pick<Question, "context" | "options">): boolean {
+  if (GATE_CONTEXT_KEYS.some((key) => key in (question.context ?? {}))) return true;
+  return question.options.some((option) => GATE_OPTION_KEYS.has(option.key.toLowerCase()));
+}
+
+/** True when choosing this key on a gate question needs the second tap. */
+export function grants(key: string): boolean {
+  return !REFUSING_KEYS.has(key.toLowerCase());
 }
 
 // ---- Briefs ----------------------------------------------------------------------------------

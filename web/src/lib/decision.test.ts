@@ -5,6 +5,8 @@ import {
   approvalStale,
   decisionLink,
   dialogBrief,
+  grants,
+  isGate,
   isRoutine,
   lastAssistantText,
   loadNote,
@@ -112,6 +114,16 @@ describe("routine questions", () => {
     expect(isRoutine({ ...confirm, body_md: "x".repeat(401) })).toBe(false);
     expect(isRoutine({ ...confirm, kind: "choice", multi: true })).toBe(false);
     expect(isRoutine({ ...confirm, kind: "manual" })).toBe(false);
+    expect(isRoutine({ ...confirm, context: { approval_for: "j_9" } })).toBe(false);
+  });
+
+  it("gates: crowsnest's context keys or a granting option; refusing keys need no second tap", () => {
+    expect(isGate(confirm)).toBe(false);
+    expect(isGate({ ...confirm, context: { land_for: "j_3" } })).toBe(true);
+    expect(isGate({ ...confirm, options: [{ key: "Approve", label: "Approve" }] })).toBe(true);
+    expect(grants("allow")).toBe(true);
+    expect(grants("deny")).toBe(false);
+    expect(grants("No")).toBe(false);
   });
 });
 
