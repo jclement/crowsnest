@@ -362,17 +362,19 @@ func (s *Store) AttachmentShaExists(ctx context.Context, sha string) (bool, erro
 	return count > 0, err
 }
 
-// JobExists reports whether job id exists (any state) and, when it does, whether it is settled.
-func (s *Store) JobExists(ctx context.Context, id int64) (exists, settled bool, err error) {
+// JobExists reports whether job id exists (any state) and, when it does, whether it is settled
+// and when it settled.
+func (s *Store) JobExists(ctx context.Context, id int64) (exists, settled bool, settledAt time.Time, err error) {
 	var state string
-	err = s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id = ?`, id).Scan(&state)
+	var at int64
+	err = s.db.QueryRowContext(ctx, `SELECT state, settled_at FROM jobs WHERE id = ?`, id).Scan(&state, &at)
 	if err == sql.ErrNoRows {
-		return false, false, nil
+		return false, false, time.Time{}, nil
 	}
 	if err != nil {
-		return false, false, fmt.Errorf("reading job %d: %w", id, err)
+		return false, false, time.Time{}, fmt.Errorf("reading job %d: %w", id, err)
 	}
-	return true, strings.Contains(settledStates, "'"+state+"'"), nil
+	return true, strings.Contains(settledStates, "'"+state+"'"), unixOrZero(sql.NullInt64{Int64: at, Valid: at > 0}), nil
 }
 
 func (s *Store) count(ctx context.Context, query string, args ...any) (int, error) {

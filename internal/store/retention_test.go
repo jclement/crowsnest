@@ -96,7 +96,7 @@ func TestDeleteJobsTakesOnlySettledJobsAndWhatIsTheirs(t *testing.T) {
 	if len(orphans) != 1 || orphans[0] != "sha-j1" {
 		t.Errorf("orphans %v, want j_1's blob", orphans)
 	}
-	if exists, _, _ := db.JobExists(ctx, 3); !exists {
+	if exists, _, _, _ := db.JobExists(ctx, 3); !exists {
 		t.Error("a running job was deleted")
 	}
 	for query, want := range map[string]int{
