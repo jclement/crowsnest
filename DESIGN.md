@@ -98,6 +98,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--review` | `CROWSNEST_REVIEW` | `auto` | The review gate for builder jobs in a worktree: `auto`, `same`, `claude`, `codex`, `off` (6.7) |
 | `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges: `merge` (a merge commit) or `ff` (fast-forward only) (6.11) |
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | off | `HH:MM`: the daily digest (7.13); the Schedule switch writes this setting |
+| `--theme` | `CROWSNEST_THEME` | `crowsnest` | the default theme for browsers that chose none ("Design language"); written into index.html so the first paint is in it |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Largest attachment, pasted, dropped or attached by an agent (8.6) |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Disk all attachments may take; past it the oldest unneeded files are deleted, else an upload is refused (8.6) |
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host: the guard hook refuses commands that would reach it, and an approval naming it is dangerous (8.7). Repeatable; added to the file's hosts |

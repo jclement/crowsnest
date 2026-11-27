@@ -925,6 +925,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--review` | `CROWSNEST_REVIEW` | `auto` | The review gate for builder jobs in a worktree: `auto` (the other engine when installed, else the same one), `same`, `claude`, `codex` or `off`. A job can ask for its own |
 | `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges a finished job's branch into its base: `merge` (a merge commit) or `ff` (fast-forward only) |
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | off | `HH:MM`: write the daily digest into the Inbox after this local time (also the switch in the Schedule sheet and in Settings) |
+| `--theme` | `CROWSNEST_THEME` | `crowsnest` | the theme a browser gets until it chooses its own: `crowsnest`, `phosphor`, `deep-sea`, `ember` or `contrast` (Settings → Appearance sets it; each browser's own choice wins) |
 | `--check-timeout` | `CROWSNEST_CHECK_TIMEOUT` | `30m` | Longest crowsnest's own check of a finished coding job may run (DESIGN 6.15) |
 | `--check-rounds` | `CROWSNEST_CHECK_ROUNDS` | `3` | Failed checks sent back to the agent before the job needs you |
 | `--job-budget-usd` | `CROWSNEST_JOB_BUDGET_USD` | `0` (none) | Default budget per job in estimated dollars, its delegated jobs included (DESIGN 6.16) |
