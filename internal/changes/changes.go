@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/hub"
@@ -134,13 +135,29 @@ type Service struct {
 // entry is one subject's last reading.
 type entry struct {
 	key, subject string
-	mu           sync.Mutex // held while reading git
-	reading      *reading
-	err          error
-	at           time.Time // when reading or err was taken
-	asked        time.Time // the last request: watched until asked + WatchFor
-	target       Target
-	timer        *time.Timer
+	mu           sync.Mutex // held while reading git; only the reader holding it replaces last
+	// last is the latest reading, its error and when it was taken, as one immutable value (R7-C08):
+	// written by the reader under mu, read by anyone without it (ProgressAll, refreshWatched),
+	// so no field is read under one lock while it is written under another.
+	last   atomic.Pointer[taken]
+	asked  time.Time // the last request: watched until asked + WatchFor (under Service.mu)
+	target Target
+	timer  *time.Timer
+}
+
+// taken is one entry's last reading (nil before the first), its error, and when it was taken.
+type taken struct {
+	reading *reading
+	err     error
+	at      time.Time
+}
+
+// lastOf is e's last reading, or an empty one.
+func (e *entry) lastOf() taken {
+	if last := e.last.Load(); last != nil {
+		return *last
+	}
+	return taken{}
 }
 
 // reading is one git reading of a checkout.
@@ -264,17 +281,17 @@ func (s *Service) read(ctx context.Context, target Target, force, ask bool) (*re
 	if force {
 		interval /= 2
 	}
-	if !e.at.IsZero() && now.Sub(e.at) < interval {
-		return e.reading, e.err
+	last := e.lastOf()
+	if !last.at.IsZero() && now.Sub(last.at) < interval {
+		return last.reading, last.err
 	}
-	previous := e.reading
+	previous := last.reading
 	next, err := readCheckout(ctx, target, now)
-	e.at = s.opts.Now()
 	if err != nil {
-		e.err = err
-		return e.reading, err
+		e.last.Store(&taken{reading: previous, err: err, at: s.opts.Now()})
+		return previous, err
 	}
-	e.reading, e.err = next, nil
+	e.last.Store(&taken{reading: next, at: s.opts.Now()})
 	if previous != nil && previous.fingerprint != next.fingerprint {
 		s.publish(target.Subject, next.fingerprint)
 	}
@@ -912,8 +929,8 @@ func (s *Service) ProgressAll(ctx context.Context) (map[string]Progress, error) 
 	}
 	pairs := []pair{}
 	for _, e := range s.entries {
-		if e.target.Kind == KindJob && e.reading != nil {
-			pairs = append(pairs, pair{e.target, e.reading})
+		if last := e.lastOf(); e.target.Kind == KindJob && last.reading != nil {
+			pairs = append(pairs, pair{e.target, last.reading})
 		}
 	}
 	s.mu.Unlock()
@@ -1091,7 +1108,7 @@ func (s *Service) refreshWatched(ctx context.Context, age time.Duration) {
 	s.mu.Lock()
 	due := []Target{}
 	for _, e := range s.entries {
-		if now.Sub(e.asked) <= WatchFor && now.Sub(e.at) >= age {
+		if now.Sub(e.asked) <= WatchFor && now.Sub(e.lastOf().at) >= age {
 			due = append(due, e.target)
 		}
 	}

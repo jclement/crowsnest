@@ -337,3 +337,41 @@ func TestWatchedSubjectReadAfterActivity(t *testing.T) {
 		}
 	}
 }
+
+// TestConcurrentReadsAreRaceFree is R7-C08: a reading being replaced while the progress route and
+// the watch tick look at it. Run with -race (mise run test does): before the fix, the entry's
+// reading and time were written under the entry's lock and read under the service's.
+func TestConcurrentReadsAreRaceFree(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	svc := New(Options{Store: f.st, Hub: f.hub, Resolver: f.res, Now: time.Now, MinInterval: time.Nanosecond})
+	if _, err := svc.Summary(ctx, job1, ScopeAll, false); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				_, _ = svc.Summary(ctx, job1, ScopeAll, true)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				_, _ = svc.ProgressAll(ctx)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				svc.refreshWatched(ctx, 0)
+			}
+		}()
+	}
+	wg.Wait()
+	if progress, err := svc.ProgressAll(ctx); err != nil || progress["j_1"].Total == 0 {
+		t.Fatalf("progress after the reads: %+v %v", progress, err)
+	}
+}
