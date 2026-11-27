@@ -1,18 +1,18 @@
 // The signed-in frame: a dark header (session, connection state, speak mode when voice is on,
 // theme, user menu) with the now-playing strip under it, the five
 // views as a left rail from md and a bottom nav on mobile, the reconnect banner, and the
-// footer, the command palette (⌘K; components/palette) and the needs-you tray (components/tray). It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
-// badge and the tab title count what needs Jeff: open questions, pending tool-call approvals, and agents
-// at a terminal dialog (one whose pane has a pending approval counts once, as the approval).
+// footer, the command palette (⌘K; components/palette) and the needs-you tray (components/tray). It owns the one event stream (lib/live.ts), which keeps every query fresh. The nav
+// badge and the tab title show the attention queue's one number (counts.total from the server,
+// DESIGN.md 22), the same number the tray, the palette, the Inbox and the Now view show.
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { endpoints, fixturesEnabled } from "../lib/api";
 import { cn } from "../lib/cn";
-import { inboxCount, needsYouCount, pageTitle } from "../lib/fleet";
+import { pageTitle } from "../lib/fleet";
 import { listenForNavigation, registerServiceWorker } from "../lib/push";
 import { useLiveQueries } from "../lib/live";
-import { useApprovals, useFleet, useInboxSummary, useMe } from "../lib/queries";
+import { useAttention, useMe } from "../lib/queries";
 import type { StreamStatus } from "../lib/sse";
 import { useNoStrayFileDrops } from "./attach/useAttachments";
 import { ConnectionBanner } from "./ConnectionBanner";
@@ -34,10 +34,8 @@ export function AppFrame() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const me = useMe();
   const stream = useLiveQueries();
-  const fleet = useFleet();
-  const summary = useInboxSummary();
-  const approvals = useApprovals("pending");
-  const needsYou = inboxCount(summary.data?.open, needsYouCount(fleet.data, approvals.data)) + (approvals.data?.length ?? 0);
+  const attention = useAttention();
+  const needsYou = attention.data?.counts.total ?? 0;
   const voice = me.data?.features.voice ?? false;
   useSyncPlaybackRate(voice);
 

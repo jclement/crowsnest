@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { fixtureApprovals } from "../../lib/approvalFixtures";
+import { fixtureSnapshot } from "../../lib/attentionFixtures";
 import { FOCUS_TRAY_EVENT } from "../../lib/needsYou";
 import { fixtureQuestions } from "../../lib/questionFixtures";
 import type { Approval } from "../../lib/approvals";
@@ -12,10 +13,12 @@ import { ToastProvider } from "../ui/Toast";
 import { TrayList, TrayPanel } from "./NeedsYouTray";
 import { useTrayItems } from "./useTrayItems";
 
-function renderTray(ui: React.ReactElement) {
+// Rendered on /chat: on Now ("/") and the Inbox the tray hides, since those views show the queue.
+function renderTray(ui: React.ReactElement, path = "/chat") {
   const root = createRootRoute({ component: () => ui });
   const inbox = createRoute({ getParentRoute: () => root, path: "/inbox", component: () => null });
-  const router = createRouter({ routeTree: root.addChildren([inbox]), history: createMemoryHistory({ initialEntries: ["/"] }) });
+  const chat = createRoute({ getParentRoute: () => root, path: "/chat", component: () => null });
+  const router = createRouter({ routeTree: root.addChildren([inbox, chat]), history: createMemoryHistory({ initialEntries: [path] }) });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
@@ -28,7 +31,19 @@ function renderTray(ui: React.ReactElement) {
 }
 
 function stubTray(approvals: Approval[] = fixtureApprovals) {
+  const snoozed = new Set<string>();
+  const snapshot = () => {
+    const data = fixtureSnapshot(approvals, fixtureQuestions);
+    data.items = data.items.map((item) => (snoozed.has(item.id) ? { ...item, snoozed_until: "2099-01-01T00:00:00Z" } : item));
+    data.counts.total -= snoozed.size;
+    return data;
+  };
   return stubApi((call) => {
+    if (call.path === "/attention") return { body: { data: snapshot() } };
+    if (call.path === "/attention/snooze") {
+      snoozed.add((call.body as { id: string }).id);
+      return { body: { data: snapshot() } };
+    }
     if (call.path.startsWith("/approvals?status=pending")) return { body: { data: approvals.filter((a) => a.status === "pending") } };
     if (call.path.startsWith("/questions?status=open")) return { body: { data: fixtureQuestions.filter((q) => q.status === "open") } };
     if (call.path === "/fleet") return { body: { data: { workspaces: [], agents: [], revision: 1 } } };
@@ -75,12 +90,14 @@ describe("NeedsYouTray", () => {
 
   it("snoozes an item for ten minutes", async () => {
     const user = userEvent.setup();
-    stubTray();
+    const calls = stubTray();
     renderTray(<List />);
     const snoozeButton = await screen.findByRole("button", { name: /Snooze for 10 minutes: Bash: go test/ });
     await user.click(snoozeButton);
     await waitFor(() => expect(screen.queryByRole("button", { name: /Snooze for 10 minutes: Bash: go test/ })).toBeNull());
-    expect(JSON.parse(localStorage.getItem("crowsnest-tray-snoozed") ?? "{}")).toHaveProperty("approval:ap_1");
+    // The snooze is the server's (every device sees it), not this browser's.
+    expect(calls.some((call) => call.path === "/attention/snooze" && (call.body as { id: string }).id === "approval:ap_1")).toBe(true);
+    expect(localStorage.getItem("crowsnest-tray-snoozed")).toBeNull();
   });
 
   it("shows a count, folds, and takes focus on the tray shortcut", async () => {
@@ -96,8 +113,16 @@ describe("NeedsYouTray", () => {
     expect(pill).not.toBeInTheDocument();
   });
 
+  it("hides on Now and the Inbox, which show the queue themselves", async () => {
+    stubTray();
+    renderTray(<TrayPanel />, "/inbox");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByRole("complementary", { name: "Needs you" })).toBeNull();
+  });
+
   it("renders nothing when nothing needs you", async () => {
     stubApi((call) => {
+      if (call.path === "/attention") return { body: { data: fixtureSnapshot([], []) } };
       if (call.path.startsWith("/approvals") || call.path.startsWith("/questions") || call.path === "/jobs") return { body: { data: [] } };
       if (call.path === "/fleet") return { body: { data: { workspaces: [], agents: [], revision: 1 } } };
       return undefined;

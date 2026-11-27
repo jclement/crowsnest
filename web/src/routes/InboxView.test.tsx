@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { ToastProvider } from "../components/ui/Toast";
 import { makeFleet, makeScreens } from "../lib/fixtures";
 import { fixtureQuestions } from "../lib/questionFixtures";
+import { fixtureSnapshot } from "../lib/attentionFixtures";
+import type { AttentionItem } from "../lib/attention";
 import { stubApi } from "../test/render";
 import { InboxView } from "./InboxView";
 
@@ -33,7 +35,18 @@ function renderInbox(path = "/inbox") {
 function stubInbox() {
   const fleet = makeFleet();
   const screens = makeScreens();
+  const snapshot = fixtureSnapshot([], fixtureQuestions);
+  const dialog: AttentionItem = {
+    id: "dialog:w3:p1", kind: "dialog", urgency: "blocking", rank: 40, since: new Date().toISOString(), title: "Dialog: Rebuild the docs site",
+    project: { id: 2, slug: "website", name: "Website" }, job_id: "j_5", job_title: "Rebuild the docs site", agent: "job-5", pane_id: "w3:p1",
+    action: { kind: "dialog", label: "Answer the dialog" }, dialog_agent: fleet.agents.find((agent) => agent.pane_id === "w3:p1"),
+  };
+  // The server orders the queue; the test puts the dialog second, as a blocking question outranks it.
+  snapshot.items.splice(1, 0, dialog);
+  snapshot.counts.total += 1;
+  snapshot.counts.blocking += 1;
   return stubApi((call) => {
+    if (call.path === "/attention") return { body: { data: snapshot } };
     if (call.path.startsWith("/questions?status=open")) return { body: { data: fixtureQuestions.filter((q) => q.status === "open"), meta: { total: 6 } } };
     if (call.path.startsWith("/questions?status=")) return { body: { data: fixtureQuestions.filter((q) => q.status !== "open") } };
     const one = /^\/questions\/(q_\d+)$/.exec(call.path);
@@ -46,16 +59,20 @@ function stubInbox() {
 }
 
 describe("InboxView", () => {
-  it("lists blocking questions first, then dialogs, then the rest", async () => {
+  it("lists the attention queue in the server's order, each with its project and job, and notices apart", async () => {
     stubInbox();
     renderInbox();
     const list = await screen.findByRole("list", { name: "Needs you" });
-    await waitFor(() => expect(within(list).getAllByText(/is waiting at a dialog/).length).toBeGreaterThan(0));
+    await waitFor(() => expect(within(list).getAllByText(/Dialog: Rebuild the docs site/).length).toBeGreaterThan(0));
     const rows = within(list).getAllByRole("button").map((row) => row.textContent ?? "");
     expect(rows[0]).toContain("Apply the fleet cache refactor?");
-    expect(rows[1]).toContain("is waiting at a dialog");
-    expect(rows.at(-1)).toContain("Nightly backup finished");
-    expect(rows.some((row) => row.includes("1 file"))).toBe(true);
+    expect(rows[1]).toContain("Dialog: Rebuild the docs site");
+    expect(rows[1]).toContain("Website · Rebuild the docs site");
+    expect(rows.every((row) => !row.includes("Nightly backup finished"))).toBe(true);
+    const notices = screen.getByRole("list", { name: "Notices" });
+    expect(within(notices).getByText(/Nightly backup finished/)).toBeInTheDocument();
+    // The count line is the snapshot's own total: the badge's number.
+    expect(screen.getByText(/need you: \d+ blocking/)).toHaveTextContent(`${rows.length} need you`);
   });
 
   it("opens a question with its body, diff and options", async () => {
