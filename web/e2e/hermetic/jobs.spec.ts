@@ -9,7 +9,8 @@
 // unresponsive, j_7 blocked, j_8 done, j_9 failed (older), j_10 queued for the orchestrator (it
 // picks it up); then j_11 and j_15 waiting on questions, j_13, j_14 and j_16 on approvals, j_12 and
 // j_17 running. Then the landing demo (internal/jobs/demo_landing.go): j_18 done and ready to land, j_19 in
-// review (reviewers j_20, j_21), j_22 waiting for a slot. A job given here is j_23, held by job-23.
+// review (reviewers j_20, j_21), j_22 waiting for a slot, j_23 whose check failed (DESIGN.md 6.15). A job
+// given here is j_24, held by job-24.
 import type { Page } from "@playwright/test";
 import { detailRegion, expect, isPhone, test } from "../support/fixtures";
 
@@ -37,21 +38,21 @@ test("giving a job with a directory starts an agent, and the card moves from que
   await expect(page.getByRole("button", { name: new RegExp(`To ${app.root.split("/").pop()} · tester`) })).toBeVisible();
   await page.getByRole("button", { name: "Give job" }).click();
 
-  await expect(page.getByText("Job j_23 given")).toBeVisible();
-  await expect(page).toHaveURL(/job=j_23/);
+  await expect(page.getByText("Job j_24 given")).toBeVisible();
+  await expect(page).toHaveURL(/job=j_24/);
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByRole("heading", { name: "Add a health check to the webhook sender" })).toBeVisible();
   await expect(detail.getByText("Done when: the endpoint answers and the README says how")).toBeVisible();
   // The launcher opens a pane, sends the brief and the job is running, all on the timeline.
   const timeline = detail.getByRole("list", { name: "Timeline" });
-  await expect(timeline).toContainText("Brief sent to job-23", { timeout: 15_000 });
+  await expect(timeline).toContainText("Brief sent to job-24", { timeout: 15_000 });
   await expect(timeline).toContainText("queued → running");
   await expect(detail.getByText("Running", { exact: true }).first()).toBeVisible();
 
   // On the board it sits in progress, with its agent.
   if (isPhone(testInfo)) await page.getByRole("button", { name: "Close" }).click();
   const card = page.getByRole("region", { name: "In progress" }).getByRole("button", { name: /Add a health check/ });
-  await expect(card).toContainText("job-23");
+  await expect(card).toContainText("job-24");
   // The text box was cleared for the next job.
   await expect(page.getByLabel("What needs doing?")).toHaveValue("");
 });
@@ -88,18 +89,19 @@ test("giving a job without options sends it to the orchestrator; Cmd/Ctrl+Enter 
 test("the board puts needs-you first, then stuck, then running, then finished today, older behind a toggle", async ({ page }) => {
   await openBoard(page);
   const attention = await sectionTitles(page, "Needs you or stuck");
-  // Needs-you (three questions, the dialog, three approvals) before stuck (the limit and the
-  // unresponsive job).
-  expect(attention.slice(0, 7).sort()).toEqual([
+  // Needs-you (three questions, the dialog, three approvals, and the landing demo's failed check)
+  // before stuck (the limit and the unresponsive job).
+  expect(attention.slice(0, 8).sort()).toEqual([
     "Add pull-to-refresh to the inbox screen",
     "Coalesce the fleet cache refresh",
     "Decide the release date for v0.2",
     "Fix the broken links the link check found",
     "Rebuild and publish the handbook site",
+    "Render widgets at three sizes",
     "Review the rate-limiter fix on fix/limiter",
     "Rewrite the homepage hero",
   ]);
-  expect(attention.slice(7).sort()).toEqual(["Migrate the settings page to the new form kit", "Profile the fleet cache"]);
+  expect(attention.slice(8).sort()).toEqual(["Migrate the settings page to the new form kit", "Profile the fleet cache"]);
   const running = await sectionTitles(page, "In progress");
   expect(running).toEqual(expect.arrayContaining(["Add retry back-off to the webhook sender", "Tidy the install guide", "Upgrade the Postgres driver", "Review the fleet cache refactor", "Pin the devbox base image by digest"]));
   // The demo's finished jobs settled 2 h and 5 h before it started, so which side of midnight they
@@ -227,9 +229,9 @@ test("a finished job shows its result, what was verified and what was not", asyn
   const detail = detailRegion(page, testInfo, "Selected job");
   const result = detail.getByText("Fixed the race in sse.test.tsx: the fake timer advanced");
   await expect(result).toBeVisible();
-  await expect(detail.getByRole("region", { name: "Verified", exact: true })).toContainText("mise run check: green");
-  await expect(detail.getByRole("region", { name: "Verified", exact: true })).toContainText("50 runs, 0 failures");
-  await expect(detail.getByRole("region", { name: "Not verified" })).toContainText("Safari");
+  await expect(detail.getByRole("region", { name: "Verified (reported by the agent)", exact: true })).toContainText("mise run check: green");
+  await expect(detail.getByRole("region", { name: "Verified (reported by the agent)", exact: true })).toContainText("50 runs, 0 failures");
+  await expect(detail.getByRole("region", { name: "Not verified (reported by the agent)" })).toContainText("Safari");
   await expect(detail.getByLabel("Done")).toBeVisible();
   // A failed job says why instead.
   await openBoard(page, "?job=j_9");
