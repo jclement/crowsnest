@@ -11,7 +11,10 @@
 // Schedule and Spend sheets open filtered to it. With every project shown, cards carry a chip
 // naming their project.
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { CalendarClock, ListTodo, NotebookText, RefreshCw } from "lucide-react";
+import { CalendarClock, FolderGit2, Gauge, ListTodo, NotebookText, RefreshCw } from "lucide-react";
+import { LimitsSheet } from "../components/control/LimitsSheet";
+import { SweepSheet } from "../components/control/SweepSheet";
+import { queueText } from "../lib/landing";
 import { useState } from "react";
 import { JobCard } from "../components/jobs/JobCard";
 import { JobDetail } from "../components/jobs/JobDetail";
@@ -29,7 +32,7 @@ import { SkeletonRows } from "../components/ui/Skeleton";
 import { boardSections, sectionLabels, type BoardSection, type Job } from "../lib/jobs";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { filterJobs, filterProjectId, filterToParam, projectsById, type ProjectFilter, type ProjectView } from "../lib/projects";
-import { findProject, useJobs, useProjects } from "../lib/queries";
+import { findProject, useJobs, useProjects, useQueue, useSweep } from "../lib/queries";
 
 export function JobsView() {
   const { job: selected } = useSearch({ strict: false }) as { job?: string };
@@ -43,6 +46,11 @@ export function JobsView() {
   const [journalOpen, setJournalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [spendOpen, setSpendOpen] = useState(false);
+  const [limitsOpen, setLimitsOpen] = useState(false);
+  const [sweepOpen, setSweepOpen] = useState(false);
+  const queue = useQueue();
+  const sweep = useSweep();
+  const lingering = sweep.data?.length ?? 0;
   const scheduleProject = filterProjectId(filter, projects.data?.projects);
 
   return (
@@ -54,6 +62,16 @@ export function JobsView() {
           <span className="mr-auto">
             <SpendButton onOpen={() => setSpendOpen(true)} />
           </span>
+          {queue.data && (
+            <Button compact variant="ghost" icon={Gauge} onClick={() => setLimitsOpen(true)} title="Running-job limit, load hold and heavy slots">
+              <span className={queue.data.paused || queue.data.load_hold ? "text-warning" : undefined}>{queueText(queue.data)}</span>
+            </Button>
+          )}
+          {lingering > 0 && (
+            <Button compact variant="ghost" icon={FolderGit2} onClick={() => setSweepOpen(true)} title="Finished jobs whose worktrees are still around">
+              {lingering} to land
+            </Button>
+          )}
           <Button compact variant="ghost" icon={CalendarClock} onClick={() => setScheduleOpen(true)}>
             Schedule
           </Button>
@@ -62,6 +80,15 @@ export function JobsView() {
           </Button>
         </div>
         <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
+        <LimitsSheet open={limitsOpen} onClose={() => setLimitsOpen(false)} />
+        <SweepSheet
+          open={sweepOpen}
+          onClose={() => setSweepOpen(false)}
+          onOpenJob={(id) => {
+            setSweepOpen(false);
+            select(id);
+          }}
+        />
         <ScheduleSheet open={scheduleOpen} onClose={() => setScheduleOpen(false)} projectId={scheduleProject ?? undefined} />
         <SpendSheet open={spendOpen} onClose={() => setSpendOpen(false)} projectId={scheduleProject ?? undefined} />
         <div className="min-h-0 flex-1 overflow-y-auto">

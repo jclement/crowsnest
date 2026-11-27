@@ -9,6 +9,7 @@
 //
 // The figures arrive as `sys` events every two seconds while a browser is connected (lib/live.ts
 // appends them to the query below); the query's first load brings the last minute.
+import { HeavyDetail } from "../control/HeavySlots";
 import { useQuery } from "@tanstack/react-query";
 import { Bot, Cpu, HardDrive, MemoryStick, TriangleAlert, Gauge } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -190,6 +191,7 @@ export function MachineDetail() {
               </table>
             )}
           </div>
+          <HeavyDetail />
         </div>
       )}
     </Card>

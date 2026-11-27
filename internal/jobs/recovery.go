@@ -110,7 +110,9 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		return
 	}
 	if State(r.State) == StateQueued && r.PaneID == "" {
-		if r.Dir != "" && now.Sub(r.CreatedAt) > relaunchAfter {
+		// A held job is tried on every pass, oldest first (holds.go); any other queued job with
+		// a directory only once its own launch has had time to run.
+		if r.Dir != "" && (Cause(r.Cause) == CauseHeld || now.Sub(r.CreatedAt) > relaunchAfter) {
 			s.goBackground(ctx, id, func(ctx context.Context) { s.launch(ctx, id) })
 		}
 		return // a no-directory job waits for its standing agent (DispatchStanding)
@@ -133,8 +135,14 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 	case seen == livenessUnknown:
 		// herdr could not be asked: look again next tick, change nothing (R2-C07).
 	case seen == livenessGone:
-		s.restart(ctx, r, false)
+		if !s.heldWhilePaused(ctx, "restart:"+id, "restarting the agent of "+id+" (it exited)") {
+			s.restart(ctx, r, false)
+		}
 	case !r.BriefSent:
+		// A job the human started anyway gets its brief even while paused: that start was theirs.
+		if !r.StartAnyway && s.heldWhilePaused(ctx, "brief:"+id, "typing the brief of "+id) {
+			return
+		}
 		if agent.InteractiveReady && agent.AgentStatus != herdr.StatusBlocked && !s.hasDialog(ctx, r.PaneID) {
 			s.sendHeldBrief(ctx, id)
 		}
@@ -149,7 +157,9 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 			})
 		}
 	case r.Stuck && (Cause(r.Cause) == CauseLimit || Cause(r.Cause) == CauseServerError):
-		s.retry(ctx, r, agent, now)
+		if !s.heldWhilePaused(ctx, "retry:"+id, "the retry of "+id+" (\"continue\" after a limit or an API error)") {
+			s.retry(ctx, r, agent, now)
+		}
 	default:
 		s.checkActivity(ctx, r, now)
 	}

@@ -4,10 +4,13 @@
 // starts, DESIGN.md 21.3), Voice (the
 // voice, speed and model of spoken replies, when voice is on) and "Sign out". With --no-auth there is no one to sign out, so the menu says so instead.
 import { useNavigate } from "@tanstack/react-router";
-import { Activity, AudioLines, Bell, BookText, CircleUser, KeyRound, LogOut, SlidersHorizontal } from "lucide-react";
+import { Activity, AudioLines, Bell, BellOff, BookText, CircleUser, KeyRound, LogOut, PauseCircle, PlayCircle, SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Me } from "../lib/api";
 import { AccountSheet } from "./account/AccountSheet";
+import { DndSheet } from "./control/DndSheet";
+import { PauseSheet } from "./control/PauseSheet";
+import { usePause, useSetPause } from "../lib/queries";
 import { SettingsSheet } from "./system/SettingsSheet";
 import { InstructionsSheet } from "./instructions/InstructionsSheet";
 import { NotificationSettings } from "./push/NotificationSettings";
@@ -22,6 +25,10 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const navigate = useNavigate();
   const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [pauseOpen, setPauseOpen] = useState(false);
+  const [dndOpen, setDndOpen] = useState(false);
+  const pause = usePause();
+  const setPause = useSetPause();
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -127,6 +134,31 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               Voice
             </button>
           )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              if (pause.data?.paused) setPause.mutate({ paused: false });
+              else setPauseOpen(true);
+            }}
+            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
+          >
+            {pause.data?.paused ? <PlayCircle className="h-4 w-4 text-muted" aria-hidden /> : <PauseCircle className="h-4 w-4 text-muted" aria-hidden />}
+            {pause.data?.paused ? "Resume automation" : "Pause automation…"}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setDndOpen(true);
+            }}
+            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
+          >
+            <BellOff className="h-4 w-4 text-muted" aria-hidden />
+            Do not disturb…
+          </button>
           {me.features.auth && (
             <button
               type="button"
@@ -156,6 +188,8 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
       />
       <NotificationSettings open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
       <InstructionsSheet open={instructionsOpen} onClose={() => setInstructionsOpen(false)} />
+      <PauseSheet open={pauseOpen} onClose={() => setPauseOpen(false)} />
+      <DndSheet open={dndOpen} onClose={() => setDndOpen(false)} />
       {me.features.voice && <VoiceSettingsSheet open={voiceOpen} onClose={() => setVoiceOpen(false)} />}
     </div>
   );

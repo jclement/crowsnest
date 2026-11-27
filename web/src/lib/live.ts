@@ -29,7 +29,7 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   question: [queryKeys.questions, queryKeys.fleet, queryKeys.jobs, queryKeys.now],
   orchestrator: [queryKeys.orchestrator, queryKeys.fleet, queryKeys.agents],
   poke: [queryKeys.journal],
-  journal: [queryKeys.journal, queryKeys.orchestratorContext],
+  journal: [queryKeys.journal, queryKeys.orchestratorContext, queryKeys.digests],
   say: [],
   schedule: [queryKeys.schedule],
   spend: [queryKeys.spend, queryKeys.jobs],
@@ -40,6 +40,11 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   lead: [queryKeys.projects, queryKeys.fleet, queryKeys.agents, queryKeys.now],
   instructions: [queryKeys.instructions],
   approval: [queryKeys.approvals, queryKeys.jobs],
+  // Landing, throttling and the pause (6.11 to 6.14): the switch's banner, the presence chip,
+  // and the queue line and limits.
+  pause: [queryKeys.pause, queryKeys.jobs],
+  presence: [queryKeys.presence],
+  throttle: [queryKeys.throttle, queryKeys.jobs],
   // sys carries a machine sample, appended to the stats in useLiveQueries; nothing to refetch.
   sys: [],
   system: [systemKeys.system, systemKeys.onboarding],

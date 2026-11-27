@@ -69,7 +69,7 @@ func seedDemoWorld(t *testing.T) demoWorld {
 	wiring := &projectWiring{service: projects.New(projects.Options{Store: db})}
 
 	projectOf := seedDemoProjects(ctx, config.Config{StateDir: t.TempDir()}, wiring, logger)
-	startJobs(ctx, jobService, demo, projectOf, logger)
+	startJobs(ctx, jobService, demo, projectOf, t.TempDir(), logger)
 	if err := startDemoInbox(ctx, demoInbox{demo: demo, jobs: jobService, approvals: approvalService, questions: questionService}, logger); err != nil {
 		t.Fatal(err)
 	}

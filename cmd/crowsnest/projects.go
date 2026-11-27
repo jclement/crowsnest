@@ -140,6 +140,8 @@ type leadDeps struct {
 	logger      *slog.Logger
 	// onStatus is told every status change of every lead (serve pins its conversation).
 	onStatus func(project projects.Project, status orch.Status)
+	// ctl are the pause and presence (landing_wiring.go); nil: neither.
+	ctl *controls
 }
 
 // leadRemoteControl is a lead's Remote Control name, "<instance> <project>", or "" when off.
@@ -166,7 +168,10 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 			BinDir:            binDir, Executable: executable, AgentSocket: deps.agentSocket, BasePath: os.Getenv("PATH"),
 			ClaudeConfigDir: claudeConfigDir(deps.cfg), Identity: deps.identity, Guard: deps.guard,
 			AgentName: projects.AgentName(project.Slug), Workspace: "lead " + project.Slug, KVPrefix: "lead." + project.Slug,
-			Render: func() (string, error) { return w.leadInstructions(deps.cfg.Session, project) },
+			Render:   func() (string, error) { return w.leadInstructions(deps.cfg.Session, project) },
+			Paused:   deps.ctl.paused,
+			Gate:     herdrGate(deps.client),
+			ExtraEnv: deps.ctl.heavyEnv(),
 			OnStatus: func(status orch.Status) {
 				if deps.onStatus != nil {
 					deps.onStatus(project, status)
@@ -186,6 +191,9 @@ func (w *projectWiring) leadPokerOptions(deps leadDeps, project projects.Project
 		Status: agent.Status, ManualOnly: deps.cfg.Demo, NoAgentReasons: true,
 		StateKey: "lead." + project.Slug + ".poke.state", Label: "the lead of " + project.Name,
 		Interval: deps.cfg.PokeInterval,
+	}
+	if deps.ctl != nil { // the pause holds a lead's pokes, timer, escalations and upkeep too (6.13)
+		options.Paused, options.Held, options.Presence = deps.ctl.paused, deps.ctl.held, deps.ctl.presenceWord
 	}
 	if source := w.taskSource.Load(); source != nil {
 		options.Tasks = (*source)(project.ID)
@@ -277,4 +285,20 @@ func (w *projectWiring) startLeads(ctx context.Context, deps leadDeps) *projects
 	w.leads.Store(leads)
 	go leads.Resume(ctx)
 	return leads
+}
+
+// herdrGate is a lead's start gate: wait while the lazy herdr client has not connected yet (at
+// start-up, or herdr not installed), instead of failing the lead's start. The orchestrator's gate
+// (system.Gate) also waits for the first-run checklist; a lead needs only herdr.
+func herdrGate(client herdr.Client) func(context.Context) string {
+	lazy, ok := client.(*herdr.Lazy)
+	if !ok {
+		return nil
+	}
+	return func(context.Context) string {
+		if lazy.Connected() {
+			return ""
+		}
+		return "herdr is not running yet; the lead starts as soon as it is."
+	}
 }

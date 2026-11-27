@@ -160,6 +160,22 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
             .catch(failed("Could not poke"))
             .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.journal }));
           return;
+        case "resume":
+          endpoints
+            .resume()
+            .then((state) => {
+              queryClient.setQueryData(queryKeys.pause, state);
+              toast.show({ tone: "success", title: "Automation resumed" });
+            })
+            .catch(failed("Not resumed"));
+          return;
+        case "digestNow":
+          endpoints
+            .digestNow()
+            .then((result) => toast.show({ tone: "success", title: "Digest on its way", description: result.note }))
+            .catch(failed("No digest"))
+            .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.digests }));
+          return;
         case "compact":
           endpoints
             .orchestratorCompact()

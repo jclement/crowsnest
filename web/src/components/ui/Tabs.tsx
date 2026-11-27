@@ -55,7 +55,7 @@ export function Tabs<T extends string>({ id, label, items, value, onChange, clas
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(item.value)}
             className={cn(
-              "inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded px-3 text-xs font-medium transition-colors md:min-h-7",
+              "inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded px-3 text-xs font-medium transition-colors md:min-h-7",
               selected ? "bg-surface text-heading shadow-sm ring-1 ring-border" : "text-muted hover:text-heading",
             )}
           >

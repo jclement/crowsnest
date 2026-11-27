@@ -12,6 +12,7 @@ import type { PokeResult } from "./journal";
 import type { AnswerRequest } from "./questions";
 import type { DecideRequest } from "./approvals";
 import type { SendKeysRequest } from "./types";
+import type { DigestSettings, LandAction, ThrottleSettings } from "./landing";
 
 /** How often the fleet is refetched even without events: a safety net, not the update path. */
 const FLEET_SAFETY_POLL_MS = 30_000;
@@ -424,4 +425,124 @@ export function useDecideApproval(id: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
     },
   });
+}
+
+// ---- Landing, throttling, the pause, presence, the digest (6.11 to 6.14, 7.12) -----------------
+
+/** The Review tab: what the job produced. Refreshed by `job` events (it sits under ["jobs"]). */
+export function useReview(id: string, enabled = true) {
+  return useQuery({ queryKey: queryKeys.review(id), queryFn: () => endpoints.review(id), enabled });
+}
+
+/** One changed file's diff, fetched only when its row is opened. */
+export function useReviewDiff(id: string, path: string, enabled: boolean) {
+  return useQuery({ queryKey: queryKeys.reviewDiff(id, path), queryFn: () => endpoints.reviewDiff(id, path), enabled, staleTime: 30_000 });
+}
+
+/** Land: merge, push with a PR, or discard (the confirmation is the caller's). */
+export function useLand(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: LandAction) => endpoints.land(id, action),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+export function useTeardown() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => endpoints.teardown(id),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+export function useStartAnyway() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => endpoints.startAnyway(id),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+export function useSweep(enabled = true) {
+  return useQuery({ queryKey: queryKeys.sweep, queryFn: endpoints.sweep, enabled });
+}
+
+export function useSweepDiscard() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => endpoints.sweepDiscard(ids),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+export function useQueue() {
+  return useQuery({ queryKey: queryKeys.queue, queryFn: endpoints.queue, refetchInterval: 30_000 });
+}
+
+export function usePause() {
+  return useQuery({ queryKey: queryKeys.pause, queryFn: endpoints.pause, refetchInterval: 60_000 });
+}
+
+export function useSetPause() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paused, until, reason }: { paused: boolean; until?: string; reason?: string }) =>
+      paused ? endpoints.setPause(until ?? "", reason ?? "") : endpoints.resume(),
+    onSuccess: (state) => queryClient.setQueryData(queryKeys.pause, state),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs }),
+  });
+}
+
+export function useThrottle(enabled = true) {
+  return useQuery({ queryKey: queryKeys.throttle, queryFn: endpoints.throttle, enabled, refetchInterval: enabled ? 10_000 : false });
+}
+
+export function useSaveThrottle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: ThrottleSettings | null) => (settings ? endpoints.saveThrottle(settings) : endpoints.resetThrottle()),
+    onSettled: () => Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.throttle }), queryClient.invalidateQueries({ queryKey: queryKeys.jobs })]),
+  });
+}
+
+export function usePresence(enabled = true) {
+  return useQuery({ queryKey: queryKeys.presence, queryFn: endpoints.presence, enabled });
+}
+
+export function useSetDND() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (until: string) => endpoints.setDND(until),
+    onSuccess: (state) => queryClient.setQueryData(queryKeys.presence, state),
+  });
+}
+
+export function useDigests(enabled = true) {
+  return useQuery({ queryKey: queryKeys.digests, queryFn: endpoints.digests, enabled });
+}
+
+export function useDigestSettings() {
+  return useQuery({ queryKey: queryKeys.digestSettings, queryFn: endpoints.digestSettings });
+}
+
+export function useSaveDigestSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: DigestSettings) => endpoints.saveDigestSettings(settings),
+    onSuccess: (settings) => queryClient.setQueryData(queryKeys.digestSettings, settings),
+  });
+}
+
+export function useDigestNow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => endpoints.digestNow(),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.digests }),
+  });
+}
+
+/** The heavy-command slots (DESIGN.md 6.12): cheap file reads on the server, polled. */
+export function useHeavy(intervalMs = 5_000) {
+  return useQuery({ queryKey: ["heavy"], queryFn: endpoints.heavy, refetchInterval: intervalMs });
 }

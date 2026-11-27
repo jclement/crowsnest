@@ -14,6 +14,8 @@ import { relativeTime } from "../../lib/format";
 import type { ProjectView } from "../../lib/projects";
 import { useProjects, useSchedule, useScheduleAction, useScheduleEdit } from "../../lib/queries";
 import { nextDueText, targetOf, type ScheduleInput, type ScheduleTask } from "../../lib/schedule";
+import { DigestSwitch } from "../control/DigestSwitch";
+import { DigestsSheet } from "../control/DigestsSheet";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
@@ -346,13 +348,18 @@ function RunNow({ task }: { task: ScheduleTask }) {
 /** The Schedule in a Sheet: full screen on a phone, a modal from md. */
 export function ScheduleSheet({ open, onClose, projectId }: { open: boolean; onClose: () => void; projectId?: number }) {
   const navigate = useNavigate();
+  const [digestsOpen, setDigestsOpen] = useState(false);
   const openJob = (id: string) => {
     onClose();
     void navigate({ to: "/jobs", search: { job: id } });
   };
   return (
-    <Sheet open={open} onClose={onClose} title="Schedule">
-      {open && <SchedulePanel projectId={projectId} onOpenJob={openJob} />}
-    </Sheet>
+    <>
+      <Sheet open={open} onClose={onClose} title="Schedule">
+        {open && <DigestSwitch onOpenList={() => setDigestsOpen(true)} />}
+        {open && <SchedulePanel projectId={projectId} onOpenJob={openJob} />}
+      </Sheet>
+      <DigestsSheet open={digestsOpen} onClose={() => setDigestsOpen(false)} />
+    </>
   );
 }

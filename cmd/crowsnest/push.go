@@ -18,12 +18,16 @@ import (
 )
 
 // startPush builds the push service and starts its watcher, which runs until ctx ends.
-func startPush(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, logger *slog.Logger) (*push.Service, *push.Watcher, error) {
+func startPush(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, ctl *controls, logger *slog.Logger) (*push.Service, *push.Watcher, error) {
 	service, err := push.New(ctx, push.Options{Store: db, Logger: logger, AllowLoopbackHTTP: cfg.Demo, Name: cfg.Name})
 	if err != nil {
 		return nil, nil, fmt.Errorf("starting Web Push: %w", err)
 	}
-	watcher := push.NewWatcher(push.WatcherOptions{Sender: service, Hub: events, Logger: logger, Tokens: &actions.Tokens{Store: db}})
+	options := push.WatcherOptions{Sender: service, Hub: events, Logger: logger, Tokens: &actions.Tokens{Store: db}}
+	if ctl != nil {
+		options.Route = ctl.route // presence and do not disturb (DESIGN.md 6.14)
+	}
+	watcher := push.NewWatcher(options)
 	go watcher.Run(ctx)
 	return service, watcher, nil
 }

@@ -125,7 +125,10 @@ func seedDemoSpend(ctx context.Context, meter *spend.Meter, service *jobs.Servic
 		start := now.AddDate(0, 0, -day).Add(-3 * time.Hour)
 		end := start.Add(2 * time.Hour)
 		if day == 0 {
-			start, end = now.Add(-90*time.Minute), now
+			// Today's share must fall today, even just after midnight (three hours back was
+			// yesterday before 03:00, and "today" showed no cost).
+			midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			start, end = maxTime(start, midnight), now
 		}
 		subjects = append(subjects, spend.DemoSubject{Subject: spend.OrchestratorSubject, Model: "claude-sonnet-5-5",
 			Start: start, End: end, Calls: 6 + day})
@@ -137,4 +140,11 @@ func seedDemoSpend(ctx context.Context, meter *spend.Meter, service *jobs.Servic
 			Start: start, End: now, Calls: 10 - 2*i})
 	}
 	return spend.SeedDemo(ctx, meter, subjects)
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }

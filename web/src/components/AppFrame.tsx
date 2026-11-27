@@ -17,12 +17,15 @@ import { useAttention, useMe } from "../lib/queries";
 import type { StreamStatus } from "../lib/sse";
 import { useNoStrayFileDrops } from "./attach/useAttachments";
 import { ConnectionBanner } from "./ConnectionBanner";
+import { PauseBanner } from "./control/PauseBanner";
+import { usePresenceHeartbeat } from "./control/usePresenceHeartbeat";
 import { Footer } from "./Footer";
 import { inMore, moreNav, primaryNav, type NavItem } from "./nav";
 import { Sheet } from "./ui/Sheet";
 import { useBrowserBeat } from "../lib/browserBeat";
 import { PaletteButton } from "./palette/PaletteButton";
 import { MachineStrip } from "./system/MachineStats";
+import { HeavyChip } from "./control/HeavySlots";
 import { PaletteProvider } from "./palette/PaletteProvider";
 import { ThemeToggle } from "./ThemeToggle";
 import { TrayBar, TrayPanel } from "./tray/NeedsYouTray";
@@ -32,6 +35,7 @@ import { useSyncPlaybackRate } from "../lib/voice/settings";
 
 export function AppFrame() {
   useNoStrayFileDrops();
+  usePresenceHeartbeat();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -92,6 +96,7 @@ export function AppFrame() {
           </span>
         )}
         <MachineStrip className="ml-auto" />
+        <HeavyChip />
         <PaletteButton className="sm:mr-1" />
         <div className="flex items-center">
           <ConnectionState status={stream.status} />
@@ -101,6 +106,7 @@ export function AppFrame() {
         </div>
       </header>
       <ConnectionBanner stream={stream} />
+      <PauseBanner />
       {voice && <NowPlaying />}
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Views" className="hidden w-44 shrink-0 flex-col gap-0.5 border-r border-border bg-surface-raised p-2 md:flex">

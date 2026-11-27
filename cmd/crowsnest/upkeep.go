@@ -123,9 +123,10 @@ func (a scheduleTasks) Delivered(ctx context.Context, at time.Time, names []stri
 
 // startSchedule builds the schedule service and runs its job-task ticks until ctx ends. kick is
 // the poker, filled in once it exists.
-func startSchedule(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, journalLog *journal.Journal, jobService *jobs.Service, client herdr.Client, kick *atomic.Pointer[orch.Poker], logger *slog.Logger) *schedule.Service {
+func startSchedule(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, journalLog *journal.Journal, jobService *jobs.Service, client herdr.Client, kick *atomic.Pointer[orch.Poker], ctl *controls, logger *slog.Logger) *schedule.Service {
 	options := schedule.Options{
-		KV: db, Sources: taskSources(cfg), Journal: journalLog, Hub: events, Logger: logger,
+		Paused: ctl.paused,
+		KV:     db, Sources: taskSources(cfg), Journal: journalLog, Hub: events, Logger: logger,
 		Store: db, StateDir: cfg.StateDir, Projects: liveProjects(db, logger),
 		Picture: fleetPicture(client, jobService),
 		Kick: func() {

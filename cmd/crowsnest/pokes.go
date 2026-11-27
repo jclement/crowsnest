@@ -48,6 +48,8 @@ type pokeServices struct {
 	db *store.Store
 	// leadWatch remembers each lead's last state, so a lead that fails is escalated once.
 	leadWatch *leadWatch
+	// ctl are the pause and presence (landing_wiring.go); nil: neither.
+	ctl *controls
 }
 
 // startPoker builds the poker, feeds it from the hub, and runs it until ctx ends.
@@ -59,6 +61,9 @@ func startPoker(ctx context.Context, cfg config.Config, db *store.Store, events 
 		Interval: cfg.PokeInterval, Standing: standingWork(services), Alert: services.alert,
 		ManualOnly: cfg.Demo, Tasks: services.tasks,
 		OwnedElsewhere: services.ownedElsewhere(ctx), Escalations: services.escalations,
+	}
+	if services.ctl != nil {
+		options.Paused, options.Held, options.Presence = services.ctl.paused, services.ctl.held, services.ctl.presenceWord
 	}
 	if services.tender != nil && !cfg.NoOrchestrator {
 		options.Tender = services.tender

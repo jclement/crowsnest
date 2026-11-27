@@ -92,6 +92,11 @@ type Fake struct {
 	// startSession, when set, is the session the next agent.start's agent reports instead of
 	// the one in its args ("" for none): herdr's detection can lag or be stale (DESIGN.md 7.6).
 	startSession *string
+
+	// realGit makes worktree.create and worktree.remove run git for real (RealGitWorktrees).
+	realGit bool
+	removed []string // workspace ids whose worktree was removed, in order
+	closed  []string // workspace ids closed, in order
 }
 
 // New returns an empty fake session.

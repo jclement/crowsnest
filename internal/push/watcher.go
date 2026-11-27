@@ -63,6 +63,10 @@ type WatcherOptions struct {
 	// Tokens mints the single-use action tokens a notification's buttons carry (DESIGN.md 8.7).
 	// Nil: no notice carries buttons.
 	Tokens Minter
+	// Route asks the presence router whether a notice may be pushed now (DESIGN.md 6.14): not
+	// while the human is here (it is on screen), not twice for one item, held by do not disturb
+	// unless urgent. Nil: every notice that passes the kind switch and the rate gate is pushed.
+	Route func(ctx context.Context, item, channel string, blocking bool) (bool, string)
 }
 
 // Minter mints an action token for one item (internal/actions).
@@ -250,6 +254,12 @@ func (w *Watcher) orchestratorChanged(ctx context.Context, status orch.Status) {
 func (w *Watcher) notify(ctx context.Context, notice Notice) {
 	if !w.opts.Sender.Enabled(ctx, notice.Kind) {
 		return
+	}
+	if w.opts.Route != nil {
+		if ok, why := w.opts.Route(ctx, notice.Tag, "push", notice.Urgency == UrgencyHigh); !ok {
+			w.opts.Logger.Info("not pushing a notice: "+why, "kind", notice.Kind, "tag", notice.Tag)
+			return
+		}
 	}
 	if ok, why := w.gate.allow(notice.Source); !ok {
 		w.opts.Logger.Info("not pushing a notice: "+why, "kind", notice.Kind, "tag", notice.Tag)

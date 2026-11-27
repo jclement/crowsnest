@@ -127,6 +127,18 @@ var editable = []Setting{
 		Help: "disk all attachments may take; past it the oldest unneeded files are deleted"},
 	{Name: optNotifyURL, Label: "Notify URL", Section: "Notices", Kind: "secret", WriteOnly: true, Apply: ApplyRestart,
 		Help: "ntfy-style URL that gets a one-line POST when something needs you. Write-only: it is never shown again"},
+	{Name: optMaxRunningJobs, Label: "Running jobs at once", Section: "Throttling and review", Kind: "int", Apply: ApplyLive,
+		Help: "job agents running at once; more wait queued and start in order. 0: a quarter of the cores, at least 2"},
+	{Name: optLoadHold, Label: "Hold starts above load per core", Section: "Throttling and review", Kind: "text", Apply: ApplyLive,
+		Help: "new job starts wait while the load average per core stays above this for a minute; 0 off"},
+	{Name: optHeavySlots, Label: "Heavy command slots", Section: "Throttling and review", Kind: "int", Apply: ApplyLive,
+		Help: "builds and test suites that may run at once through crowsnest heavy"},
+	{Name: optReview, Label: "Review gate", Section: "Throttling and review", Kind: "choice", Choices: []string{ReviewAuto, ReviewSame, ReviewClaude, ReviewCodex, ReviewOff}, Apply: ApplyLive,
+		Help: "for builder jobs in a worktree: auto is the other engine when installed, else the same one"},
+	{Name: optMerge, Label: "Land merges with", Section: "Throttling and review", Kind: "choice", Choices: []string{MergeCommit, MergeFF}, Apply: ApplyLive,
+		Help: "merge: a merge commit; ff: fast-forward only (refused when the base moved on)"},
+	{Name: optDigestAt, Label: "Daily digest at", Section: "Throttling and review", Kind: "text", Apply: ApplyLive,
+		Help: "HH:MM local time: the day's digest in the Inbox; empty off"},
 	{Name: optProtectedHost, Label: "Protected hosts", Section: "Guard", Kind: "list", Apply: ApplyRestart,
 		Help: "production hosts no agent may reach unattended (added to the protected-hosts file's)"},
 	{Name: optProtectedBranch, Label: "Protected branches", Section: "Guard", Kind: "list", Apply: ApplyRestart,
@@ -212,6 +224,18 @@ func (c Config) SettingValue(name string) string {
 		return itoa(c.AttachmentQuotaMB)
 	case optNotifyURL:
 		return boolText(c.NotifyURL != "")
+	case optMaxRunningJobs:
+		return itoa(c.MaxRunningJobs)
+	case optLoadHold:
+		return strconv.FormatFloat(c.LoadHold, 'f', -1, 64)
+	case optHeavySlots:
+		return itoa(c.HeavySlots)
+	case optReview:
+		return c.Review
+	case optMerge:
+		return c.MergeMode
+	case optDigestAt:
+		return c.DigestAt
 	case optProtectedHost:
 		return strings.Join(c.ProtectedHosts, ",")
 	case optProtectedBranch:
@@ -288,6 +312,8 @@ func (c Config) WithSettings(from Config) Config {
 	c.AttachmentMaxMB, c.AttachmentQuotaMB = from.AttachmentMaxMB, from.AttachmentQuotaMB
 	c.NotifyURL = from.NotifyURL
 	c.ProtectedHosts, c.ProtectedBranches = from.ProtectedHosts, from.ProtectedBranches
+	c.MaxRunningJobs, c.LoadHold, c.HeavySlots = from.MaxRunningJobs, from.LoadHold, from.HeavySlots
+	c.Review, c.MergeMode, c.DigestAt = from.Review, from.MergeMode, from.DigestAt
 	c.Sources = from.Sources
 	return c
 }
