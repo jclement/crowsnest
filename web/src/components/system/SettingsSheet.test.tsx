@@ -29,7 +29,7 @@ describe("SettingsBody", () => {
     const input = screen.getByLabelText("Orchestrator model");
     await user.clear(input);
     await user.type(input, "opus");
-    await user.click(screen.getAllByRole("button", { name: "Save" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Save" })[0]!);
     expect(await screen.findByText("Orchestrator model saved")).toBeInTheDocument();
     expect(screen.getByText("Applies when the orchestrator restarts.")).toBeInTheDocument();
     expect(calls).toContainEqual({ method: "PUT", path: "/settings/model", body: { value: "opus" } });
@@ -52,7 +52,7 @@ describe("SettingsBody", () => {
     const input = screen.getByLabelText("Orchestrator model");
     await user.clear(input);
     await user.type(input, "x y");
-    await user.click(screen.getAllByRole("button", { name: "Save" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Save" })[0]!);
     expect(await screen.findByRole("alert")).toHaveTextContent("is not a model name");
   });
 });
