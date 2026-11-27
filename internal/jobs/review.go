@@ -188,6 +188,9 @@ func indent(text string) string {
 // moves the job it reviews on.
 func (s *Service) afterSettled(ctx context.Context, job Job) {
 	s.wakeWaiters(ctx, job) // jobs blocked until this one settled (waits.go)
+	if job.State == StateCancelled {
+		s.cancelQuestions(ctx, job.ID, "the job was cancelled")
+	}
 	if job.FixOf != "" {
 		s.fixSettled(ctx, job)
 	}
@@ -195,6 +198,14 @@ func (s *Service) afterSettled(ctx context.Context, job Job) {
 		return
 	}
 	s.reviewSettled(ctx, job)
+}
+
+// cancelQuestions cancels a cancelled job's open questions (DESIGN.md 8): nobody will act on
+// their answers. A failed job's questions are left to the human, who may still want to answer.
+func (s *Service) cancelQuestions(ctx context.Context, jobID, reason string) {
+	if s.opts.CancelQuestions != nil {
+		s.opts.CancelQuestions(ctx, jobID, reason)
+	}
 }
 
 // reviewSettled applies a reviewer's outcome to the job it reviews.

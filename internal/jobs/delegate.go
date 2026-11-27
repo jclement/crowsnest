@@ -710,6 +710,7 @@ func (s *Service) cancelHeld(ctx context.Context, jobID, why string) {
 		c.event(EventState, "Not started: "+why, nil)
 		return nil
 	})
+	s.cancelQuestions(ctx, jobID, "the job was not started: "+why)
 }
 
 // ReconcileApprovals applies decisions on every held job, all of them, a page at a time (serve

@@ -384,6 +384,29 @@ func (s *Service) Cancel(ctx context.Context, id string, byAsker bool) (Question
 	return s.settle(ctx, question, StatusCancelled, nil, "", byAsker)
 }
 
+// CancelForJob cancels every open question of a job that was cancelled, with reason as the note
+// and nothing typed back (the job is gone), and returns how many.
+func (s *Service) CancelForJob(ctx context.Context, jobID, reason string) int {
+	records, err := s.opts.Store.ListQuestionsByJob(ctx, jobID)
+	if err != nil {
+		return 0
+	}
+	cancelled := 0
+	for _, record := range records {
+		if record.Status != string(StatusOpen) {
+			continue
+		}
+		question, err := s.Get(ctx, FormatID(record.ID))
+		if err != nil || question.Status != StatusOpen {
+			continue
+		}
+		if _, err := s.settle(ctx, question, StatusCancelled, nil, reason, true); err == nil {
+			cancelled++
+		}
+	}
+	return cancelled
+}
+
 // SweepExpired settles every open question past its expiry as expired, and returns how many.
 func (s *Service) SweepExpired(ctx context.Context) (int, error) {
 	ids, err := s.opts.Store.ExpiredOpenQuestions(ctx, s.opts.Now())

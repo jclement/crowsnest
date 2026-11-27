@@ -507,3 +507,32 @@ func waitForWaiter(t *testing.T, service *Service, id string) {
 	}
 	t.Fatal("no long-poll registered")
 }
+
+// TestCancelForJob: a cancelled job's open questions are cancelled with the reason as the note and
+// nothing typed back; another job's, and the job's settled ones, are left alone.
+func TestCancelForJob(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	open := f.ask(t, confirm("Ship?"))
+	answered := f.ask(t, confirm("Name?"))
+	if _, err := f.service.Answer(ctx, answered.ID, AnswerInput{Value: json.RawMessage(`"yes"`)}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := f.service.Ask(ctx, confirm("Other job?"), Caller{PaneID: "w1:p2", JobID: "j_4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := f.service.CancelForJob(ctx, asker.JobID, "the job was cancelled"); n != 1 {
+		t.Fatalf("cancelled %d, want 1", n)
+	}
+	got, _ := f.service.Get(ctx, open.ID)
+	if got.Status != StatusCancelled || got.AnswerNote != "the job was cancelled" || got.Delivery != DeliveryNone {
+		t.Fatalf("the open question: %s note %q delivery %q", got.Status, got.AnswerNote, got.Delivery)
+	}
+	if got, _ := f.service.Get(ctx, other.ID); got.Status != StatusOpen {
+		t.Fatalf("another job's question: %s", got.Status)
+	}
+	if got, _ := f.service.Get(ctx, answered.ID); got.Status != StatusAnswered {
+		t.Fatalf("an answered question: %s", got.Status)
+	}
+}

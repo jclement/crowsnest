@@ -89,6 +89,9 @@ type Options struct {
 	// ApprovalPending reports whether a job has a tool call waiting for approval (8.7); the tick
 	// uses it to bring back a job whose "settled" callback was lost. nil: never.
 	ApprovalPending func(ctx context.Context, jobID string) bool
+	// CancelQuestions cancels a job's open questions, with reason as their note and nothing typed
+	// back (a cancelled job's questions must not wait in Needs you); nil: they stay open.
+	CancelQuestions func(ctx context.Context, jobID, reason string)
 	// Activity reads transcript activity for the heartbeat; nil disables it.
 	Activity ActivityFunc
 	// Notify tells Jeff something (serve wires --notify-url). It must not block.

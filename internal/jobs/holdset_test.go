@@ -295,3 +295,24 @@ func TestWaitCyclesAreRefusedAndBroken(t *testing.T) {
 		t.Fatalf("the circle was not broken or the human not told (%d broken, notices %v)", broken, r.Notices())
 	}
 }
+
+// TestCancelledJobCancelsItsQuestions (lead's finding from the real-Claude journeys): cancelling
+// a job cancels its open questions; failing one leaves them to the human.
+func TestCancelledJobCancelsItsQuestions(t *testing.T) {
+	var cancelled []string
+	r := newRig(t, func(o *Options) {
+		o.CancelQuestions = func(_ context.Context, jobID, reason string) { cancelled = append(cancelled, jobID+": "+reason) }
+	})
+	ctx := context.Background()
+	gone := r.create(CreateInput{Brief: "Cancel me", Dir: t.TempDir()})
+	failing := r.create(CreateInput{Brief: "Fail me", Dir: t.TempDir()})
+	if _, err := r.svc.Cancel(ctx, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.svc.Fail(ctx, failing.ID, "cannot"); err != nil {
+		t.Fatal(err)
+	}
+	if len(cancelled) != 1 || !strings.HasPrefix(cancelled[0], gone.ID+": ") {
+		t.Fatalf("questions cancelled for %v", cancelled)
+	}
+}
