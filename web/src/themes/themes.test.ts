@@ -70,7 +70,7 @@ for (const file of files) {
         };
         for (const ink of inks) for (const surface of surfaces) check(`${ink} on ${surface}`, contrast(color(ink), color(surface)));
         for (const tone of tinted)
-          for (const surface of ["surface", "surface-raised"]) {
+          for (const surface of ["surface", "surface-raised", "selected"]) {
             const chip = mix(color(tone), 0.1, color(surface));
             check(`${tone} in its chip on ${surface}`, contrast(color(tone), chip));
           }

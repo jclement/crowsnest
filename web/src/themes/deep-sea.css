@@ -14,13 +14,13 @@
   --color-border: #cfd9ee;
   --color-border-strong: #b0bfdc;
   --color-hover: #e4ebf9;
-  --color-selected: #dbe3fd;
+  --color-selected: #e6ebfd;
   --color-accent: #3446c4;
   --color-accent-fg: #ffffff;
   --color-focus: #3446c4;
-  --color-danger: #b3203a;
-  --color-warning: #87500a;
-  --color-success: #0f6e55;
+  --color-danger: #a81c35;
+  --color-warning: #7d4a08;
+  --color-success: #0c6550;
   --color-overlay: rgb(11 20 48 / 0.45);
 
   --color-status-working: #3446c4;

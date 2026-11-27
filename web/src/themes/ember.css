@@ -14,13 +14,13 @@
   --color-border: #e3d4bd;
   --color-border-strong: #cdb89a;
   --color-hover: #f3e7d4;
-  --color-selected: #f8dcc2;
-  --color-accent: #a3400d;
+  --color-selected: #f9e6d3;
+  --color-accent: #963a0b;
   --color-accent-fg: #ffffff;
-  --color-focus: #a3400d;
-  --color-danger: #b01e2e;
-  --color-warning: #735500;
-  --color-success: #3d6e14;
+  --color-focus: #963a0b;
+  --color-danger: #a51b2a;
+  --color-warning: #6b4f00;
+  --color-success: #356311;
   --color-overlay: rgb(42 26 14 / 0.45);
 
   --color-status-working: #a3400d;
