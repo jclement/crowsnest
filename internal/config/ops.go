@@ -66,6 +66,14 @@ func (l *loader) loadOps(cfg *Config) error {
 	if cfg.TailscaleAuth, err = l.boolean(optTailscaleAuth); err != nil {
 		return err
 	}
+	if cfg.TailscaleAuth && len(cfg.TrustedProxies) > 0 {
+		// tailscale serve proves nothing about itself: from crowsnest's side its request is a
+		// loopback connection with a header, exactly like any other local proxy's (cloudflared,
+		// Caddy) passing on a client's forged one (R5-S6). With another proxy configured, the
+		// header cannot be trusted, so the two are not allowed together.
+		return fmt.Errorf("--tailscale-auth cannot be combined with --trusted-proxy: another proxy on this machine could pass on a forged Tailscale-User-Login; " +
+			"use one or the other (DESIGN.md 4.20)")
+	}
 	if cfg.BackupEvery, err = l.duration(optBackupEvery); err != nil {
 		return err
 	}

@@ -77,6 +77,16 @@ func TestTailscaleHeadersAreForgedEverywhereElse(t *testing.T) {
 			opts:   harnessOptions{tailscale: true, serveStatus: serveStatusForTest},
 			change: func(r *http.Request) { r.Host = testHost },
 		},
+		// R5-S6: a request that came through cloudflared (or any proxy that says so) is not
+		// believed, even with the right Host.
+		"through cloudflared": {
+			opts:   harnessOptions{hostNames: []string{magicDNS}, tailscale: true, serveStatus: serveStatusForTest},
+			change: func(r *http.Request) { r.Header.Set("Cf-Connecting-Ip", "203.0.113.9") },
+		},
+		"through a proxy that sets Forwarded": {
+			opts:   harnessOptions{hostNames: []string{magicDNS}, tailscale: true, serveStatus: serveStatusForTest},
+			change: func(r *http.Request) { r.Header.Set("Forwarded", "for=203.0.113.9") },
+		},
 		"for a login not on the list": {
 			opts:   harnessOptions{hostNames: []string{magicDNS}, tailscale: true, serveStatus: serveStatusForTest},
 			change: func(r *http.Request) { r.Header.Set("Tailscale-User-Login", "stranger@github") },

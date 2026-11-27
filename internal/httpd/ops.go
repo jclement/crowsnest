@@ -373,11 +373,29 @@ func (s *Server) trustedTailscaleLogin(r *http.Request) string {
 	if !gate.Enabled() || !peerAddr(r).IsLoopback() {
 		return ""
 	}
+	if viaOtherProxy(r) {
+		return "" // R5-S6: tailscale serve adds none of these; another proxy (a tunnel) does
+	}
 	login := tsauth.NormalizeLogin(r.Header.Get(tailscaleLoginHeader))
 	if login == "" || !gate.ServesHost(r.Context(), r.Host) {
 		return ""
 	}
 	return login
+}
+
+// otherProxyHeaders are added by proxies other than tailscale serve: Cloudflare's edge and
+// cloudflared, and the standard Forwarded header. A request carrying any of them reached
+// crowsnest through something else, whose client may have written the identity header.
+var otherProxyHeaders = []string{"Cf-Connecting-Ip", "Cf-Ray", "Cdn-Loop", "Cf-Ipcountry", "Forwarded", "X-Forwarded-Host"}
+
+// viaOtherProxy reports whether r carries another proxy's marks.
+func viaOtherProxy(r *http.Request) bool {
+	for _, name := range otherProxyHeaders {
+		if r.Header.Get(name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // signInWithTailscale issues a session for an allowed tailnet login and returns it, or false.

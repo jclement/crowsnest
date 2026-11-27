@@ -664,3 +664,13 @@ func TestNameExplicit(t *testing.T) {
 		t.Fatal("ValidName")
 	}
 }
+
+// R5-S6: Sign in with Tailscale and a trusted proxy cannot both be on: the proxy could pass on a
+// forged identity header that looks exactly like tailscale serve's.
+func TestTailscaleAuthRefusesATrustedProxy(t *testing.T) {
+	_, err := newHarness(t, "--no-auth", "--tailscale-auth", "--trusted-proxy", "loopback").load()
+	assertErrorContains(t, err, "--tailscale-auth cannot be combined with --trusted-proxy")
+	if _, err := newHarness(t, "--no-auth", "--tailscale-auth").load(); err != nil {
+		t.Fatalf("--tailscale-auth alone: %v", err)
+	}
+}
