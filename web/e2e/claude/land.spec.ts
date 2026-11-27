@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { Instance } from "../support/instance";
-import { cheapJobs, getJob, git, listJobs, logSpend, makeScratch, realClaudeOnly, removeScratch, startReal, waitForJob, type Scratch } from "./rig";
+import { cheapJobs, getJob, git, listJobs, logSpend, makeScratch, realClaudeOnly, removeScratch, startReal, trustFolders, waitForJob, type Scratch } from "./rig";
 
 // The check: answer.txt (when there is one) must hold exactly 42; land.txt (when there is one) the
 // word landed. Its last line says why it failed, as a real project's check would.
@@ -78,9 +78,16 @@ test.describe.serial("a coding job from Now to landed", () => {
     const id = ((await response.json()) as { data: { id: string } }).data.id;
     await expect(page.getByText(`Job ${id} given`)).toBeVisible();
 
-    // On Now: the project's row counts it running (live, no reload).
+    // On Now: the project's row counts it running (live, no reload). In a folder Claude has not
+    // trusted yet the builder first stops at the folder-trust question, answered from its card as
+    // a person would. The count and the word are separate elements, so their text has no space.
     const row = page.locator(`[data-now-row="${project.slug}"]`);
-    await expect(row).toContainText("1 running", { timeout: 60_000 });
+    await expect
+      .poll(async () => {
+        await trustFolders(page, instance, [id]);
+        return (await row.textContent()) ?? "";
+      }, { timeout: 4 * 60_000, message: "the project's row counts the builder running" })
+      .toMatch(/1\s*running/);
 
     // On the project's board: its card, in progress.
     await waitForJob(page, instance, id, (job) => job.state === "running" && !!job.pane_id, 4 * 60_000, "the builder starts");
@@ -105,10 +112,11 @@ test.describe.serial("a coding job from Now to landed", () => {
 
     // The Review tab: one commit ahead of main, land.txt in the diff.
     await expect(detail.getByText(/1 commit ahead of main/)).toBeVisible();
-    const files = detail.getByRole("list", { name: "Changed files" });
-    await expect(files).toContainText("land.txt");
-    await files.getByRole("button", { name: /land\.txt/ }).first().click();
-    await expect(detail.getByText("landed", { exact: true }).first()).toBeVisible();
+    // The live diff viewer (it replaced the Review tab's old per-file list, DESIGN 6.21), as the
+    // hermetic landing spec reads it: land.txt's own diff, with its one line.
+    const viewer = detail.getByRole("region", { name: /^Changes: / });
+    await expect(viewer.locator('[data-file-section="land.txt"]')).toBeVisible({ timeout: 30_000 });
+    await expect(viewer.getByRole("table", { name: "Diff of land.txt" }).first()).toContainText("landed");
     await page.screenshot({ path: "screenshots/e2e-claude-review-1440x900.png" });
 
     // Merge: the confirmation names the commit that was reviewed.
