@@ -497,8 +497,14 @@ var sessionNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 // letter or digit, so a value can never read as another flag ("--model --something").
 var modelNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,63}$`)
 
-// permissionModes are Claude Code's --permission-mode choices (claude --help, 2.1.x).
+// permissionModes are Claude Code's --permission-mode choices (claude --help, 2.1.x), offered in
+// Settings.
 var permissionModes = []string{"acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"}
+
+// legacyManualMode is "manual"'s older name, which Claude 2.1.332 still takes and DESIGN.md and a
+// project's permission mode use: the flag accepts it too (it was refused, so `--permission-mode
+// default` stopped crowsnest at start).
+const legacyManualMode = "default"
 
 func (l *loader) loadOrchestrator(cfg *Config) error {
 	var err error
@@ -524,7 +530,7 @@ func (l *loader) loadOrchestrator(cfg *Config) error {
 		}
 	}
 	cfg.PermissionMode = l.str(optPermissionMode)
-	if !slices.Contains(permissionModes, cfg.PermissionMode) {
+	if !slices.Contains(permissionModes, cfg.PermissionMode) && cfg.PermissionMode != legacyManualMode {
 		return fmt.Errorf("--permission-mode %q is not one of %s", cfg.PermissionMode, strings.Join(permissionModes, ", "))
 	}
 	if cfg.PokeInterval, err = l.duration(optPokeInterval); err != nil {

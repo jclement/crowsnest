@@ -2,6 +2,7 @@ package landing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -329,6 +330,37 @@ func TestOrder(t *testing.T) {
 	walk := "First `internal/httpd/land.go` takes the request, then `internal/jobs/land.go` does it."
 	if first := Order(files, walk); first[0].Path != "internal/httpd/land.go" || first[1].Path != "internal/jobs/land.go" {
 		t.Fatalf("the walkthrough's order did not win: %v", first[:2])
+	}
+}
+
+// After Land merges a branch its worktree holds nothing ahead of the base; the Review tab is read
+// once more and must still say "files": [] (a null crashed the browser's Review tab, found by the
+// real-Claude e2e journey).
+func TestOrderOfAMergedBranchIsAnEmptyList(t *testing.T) {
+	r := newRepo(t)
+	ctx := context.Background()
+	base := run(t, r.main, "git", "rev-parse", "HEAD")
+	r.commitInWorktree("feature.go", "package main\n", "feature")
+	if _, err := Merge(ctx, MergeInput{MainDir: r.main, WorkDir: r.worktree, Branch: r.branch, Base: "main", Mode: ModeMerge, Message: "Merge job j_1"}); err != nil {
+		t.Fatal(err)
+	}
+	produced, err := Inspect(ctx, r.worktree, "main", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if produced.Ahead != 0 {
+		t.Fatalf("ahead %d after the merge", produced.Ahead)
+	}
+	produced.Files = Order(produced.Files, "")
+	encoded, err := json.Marshal(produced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"files":[]`) {
+		t.Fatalf("a merged branch's files are not an empty list: %s", encoded)
+	}
+	if got := Order(nil, ""); got == nil {
+		t.Fatal("Order(nil) is nil")
 	}
 }
 

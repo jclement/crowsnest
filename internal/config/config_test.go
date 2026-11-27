@@ -361,6 +361,17 @@ func TestInvalidValues(t *testing.T) {
 	}
 }
 
+// Claude Code calls the asking mode "manual" now and still takes its old name "default"; both
+// load (default was refused, though DESIGN.md and a project's permission mode use it).
+func TestPermissionModeManualAndItsOldName(t *testing.T) {
+	for _, mode := range []string{"manual", "default"} {
+		cfg, err := newHarness(t, "--permission-mode", mode).load()
+		if err != nil || cfg.PermissionMode != mode {
+			t.Fatalf("--permission-mode %s: %q %v", mode, cfg.PermissionMode, err)
+		}
+	}
+}
+
 // ---- Bind resolution ---------------------------------------------------------
 
 func TestBindResolution(t *testing.T) {

@@ -241,7 +241,7 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 		o.startedRemoteControl(ctx, launch.RemoteControlName, sessionID) // looked for once the prompt is answered
 		return o.update(func(s *Status) {
 			o.launch = newLaunchBaseline(sessionID, prior)
-			s.State, s.Detail, s.PaneID, s.SessionID = StateNeedsTerminal, needsTerminalDetail, paneID, sessionID
+			s.State, s.Detail, s.PaneID, s.SessionID = StateNeedsTerminal, o.needsTerminalDetail(), paneID, sessionID
 			s.Model, s.Engine = launch.Model, EngineClaude
 		}), nil
 	default:
@@ -276,7 +276,7 @@ func (o *Orchestrator) startCodex(ctx context.Context, paneID string, files star
 	case errors.Is(err, herdr.ErrAgentNotReady):
 		o.remember(ctx, paneID, "")
 		return o.update(func(s *Status) {
-			s.State, s.Detail, s.PaneID, s.Model, s.Engine = StateNeedsTerminal, needsTerminalDetail, paneID, launch.Model, EngineCodex
+			s.State, s.Detail, s.PaneID, s.Model, s.Engine = StateNeedsTerminal, o.needsTerminalDetail(), paneID, launch.Model, EngineCodex
 		}), nil
 	default:
 		return o.fail(fmt.Errorf("starting Codex in pane %s: %w", paneID, err))

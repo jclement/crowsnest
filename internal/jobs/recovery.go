@@ -86,6 +86,7 @@ func (s *Service) Tick(ctx context.Context) {
 	if err := s.eachLive(ctx, liveStates, func(record store.JobRecord) { s.tickJob(ctx, record) }); err != nil && ctx.Err() == nil {
 		s.opts.Logger.Warn("supervisor: listing jobs", "err", err)
 	}
+	s.reconcileSettledReceipts(ctx) // answers to jobs that finished before the live pass read them (6.19)
 	// A check nobody is running (crowsnest restarted mid-check), in review or after done (6.15).
 	if checking, err := s.opts.Store.ListCheckingJobs(ctx, superviseBatch); err == nil {
 		for _, record := range checking {

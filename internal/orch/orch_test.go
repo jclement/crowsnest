@@ -208,6 +208,28 @@ func TestEnsureNotReadyBecomesNeedsTerminal(t *testing.T) {
 	}
 }
 
+// A lead at its start-up prompt names itself, not the orchestrator (a lead's card said "Open the
+// orchestrator's terminal").
+func TestNeedsTerminalNamesTheAgent(t *testing.T) {
+	for name, want := range map[string]string{"": "Open the orchestrator's terminal", "lead-orchard": "Open lead-orchard's terminal"} {
+		f := fake.New()
+		f.StartNotReadyNext()
+		rig := newRig(t, f, func(o *Options) {
+			if name != "" {
+				o.AgentName, o.Workspace = name, name
+			}
+		})
+		status, err := rig.orch.Ensure(context.Background())
+		if err != nil || status.State != StateNeedsTerminal || !strings.Contains(status.Detail, want) {
+			t.Fatalf("%q: %+v %v, want %q", name, status, err, want)
+		}
+		rig.orch.Watch(context.Background()) // the watch's own refresh keeps the agent's name
+		if got := rig.orch.Status(); !strings.Contains(got.Detail, want) {
+			t.Fatalf("%q after a watch: %q", name, got.Detail)
+		}
+	}
+}
+
 func TestWatchRestartsAnExitedOrchestratorWithinBudget(t *testing.T) {
 	f := fake.New()
 	now := time.Unix(1_700_000_000, 0)
