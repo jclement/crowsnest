@@ -211,7 +211,7 @@ export function TrayBar() {
 
 function TrayCount({ count }: { count: number }) {
   return (
-    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-blocked px-1.5 text-2xs font-semibold tabular-nums text-white dark:text-surface">
+    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-blocked px-1.5 text-2xs font-semibold tabular-nums text-status-fg">
       {count > 99 ? "99+" : count}
     </span>
   );

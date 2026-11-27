@@ -1,7 +1,10 @@
-/* Theme tokens (DESIGN.md section 12, web-apps house style). Components use only the semantic
-   colours below (bg-surface, text-muted, border-border, bg-status-blocked, ...), never raw
-   palette values, so light and dark are one change here. Light values live in @theme; the
-   .dark class on <html> swaps them, set before paint by public/theme-init.js.
+/* Theme tokens (DESIGN.md "Design language", web-apps house style). Components use only the
+   semantic colours below (bg-surface, text-muted, border-border, bg-status-blocked, ...), never raw
+   palette values; a check in src/themes/no-raw-colour.test.ts fails the build on a hex or functional colour
+   anywhere else. The VALUES live in the theme files, src/themes/<id>.css: each defines every token
+   for [data-theme="<id>"] (light) and [data-theme="<id>"].dark. public/theme-init.js puts the
+   theme and the mode on <html> before first paint. The values here are a loud magenta sentinel:
+   they only show if a theme file misses a token, which src/themes/themes.test.ts forbids.
 
    Fonts are self-hosted through @fontsource (bundled by Vite): the CSP is default-src 'self',
    so no font CDN. */
@@ -19,48 +22,70 @@
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
 
-  --color-surface: #ffffff;
-  --color-surface-raised: #f7f8fa;
-  --color-surface-sunken: #f1f3f6;
-  --color-heading: #0f172a;
-  --color-body: #334155;
-  /* Muted, warning, accent and success are dark enough for 4.5:1 on every light surface they sit on,
-     including the selected row and a chip's own 10-20 % tint (axe, M9; they were 3.6 to 4.5). */
-  --color-muted: #556070;
-  --color-border: #e3e7ed;
-  --color-border-strong: #cbd3dd;
-  --color-hover: #f1f4f8;
-  --color-selected: #e4effa;
-  --color-accent: #0a56a8;
-  --color-accent-fg: #ffffff;
-  --color-danger: #a81f1f;
-  --color-warning: #864405;
-  --color-success: #166a2e;
-  --color-overlay: rgb(15 23 42 / 0.45);
+  /* Crisp edges: an instrument panel, not a pillow. */
+  --radius-md: 0.25rem;
+  --radius-lg: 0.375rem;
+  --radius-xl: 0.5rem;
 
-  /* Agent states (StatusDot). Each also has its own shape, so colour is never the only cue. */
-  --color-status-working: #0b63c1;
-  --color-status-blocked: #d1242f;
-  --color-status-done: #1a7f37;
-  --color-status-idle: #8592a4;
-  --color-status-unknown: #a3adbb;
+  /* Surfaces and inks. Heading > body > muted is the text hierarchy; selected is the current row. */
+  --color-surface: #f0f;
+  --color-surface-raised: #f0f;
+  --color-surface-sunken: #f0f;
+  --color-heading: #f0f;
+  --color-body: #f0f;
+  --color-muted: #f0f;
+  --color-border: #f0f;
+  --color-border-strong: #f0f;
+  --color-hover: #f0f;
+  --color-selected: #f0f;
+  /* The theme's one signature colour: primary buttons, links, selection, and the running state. */
+  --color-accent: #f0f;
+  --color-accent-fg: #f0f;
+  /* The keyboard focus ring. */
+  --color-focus: #f0f;
+  --color-danger: #f0f;
+  --color-warning: #f0f;
+  --color-success: #f0f;
+  --color-overlay: #f0f;
 
-  /* The header is dark in both themes. */
-  --color-chrome: #0b1220;
-  --color-chrome-fg: #e2e8f0;
-  --color-chrome-muted: #94a3b8;
-  --color-chrome-hover: #1c2636;
-  --color-chrome-border: #1e293b;
-  /* Warning on the dark header (the demo and fixtures chips): the light theme's warning is too dark there. */
-  --color-chrome-warning: #e3a43a;
+  /* States, each with its own marker shape too (components/ui/Chip.tsx), so colour is never the
+     only cue: working = running (a pulsing dot, the accent), blocked = needs you (a diamond),
+     stuck (a triangle), done (a filled dot), held (a square), idle (a ring), unknown (a dash).
+     status-fg is text on a solid state fill (the count badges). */
+  --color-status-working: #f0f;
+  --color-status-blocked: #f0f;
+  --color-status-stuck: #f0f;
+  --color-status-done: #f0f;
+  --color-status-held: #f0f;
+  --color-status-idle: #f0f;
+  --color-status-unknown: #f0f;
+  --color-status-fg: #f0f;
 
-  /* Syntax highlighting (rehype-highlight's hljs classes). */
-  --color-code-keyword: #8b3fd1;
-  --color-code-string: #0f7a3a;
-  --color-code-number: #b45309;
-  --color-code-comment: #7c8798;
-  --color-code-title: #0b63c1;
-  --color-code-attr: #b4235a;
+  /* The header, the instrument cluster: dark in every theme and mode. */
+  --color-chrome: #f0f;
+  --color-chrome-fg: #f0f;
+  --color-chrome-muted: #f0f;
+  --color-chrome-hover: #f0f;
+  --color-chrome-border: #f0f;
+  --color-chrome-warning: #f0f;
+  /* The wordmark's lamp, the live heartbeat and the sparkline on the chrome. */
+  --color-chrome-accent: #f0f;
+
+  /* Syntax highlighting (rehype-highlight's hljs classes) and the diff viewer's row tints. */
+  --color-code-keyword: #f0f;
+  --color-code-string: #f0f;
+  --color-code-number: #f0f;
+  --color-code-comment: #f0f;
+  --color-code-title: #f0f;
+  --color-code-attr: #f0f;
+  --color-diff-add: #f0f;
+  --color-diff-del: #f0f;
+
+  /* Chart series, in order. */
+  --color-chart-1: #f0f;
+  --color-chart-2: #f0f;
+  --color-chart-3: #f0f;
+  --color-chart-4: #f0f;
 
   --animate-pulse-ring: pulse-ring 1.6s ease-out infinite;
   --animate-shimmer: shimmer 1.4s ease-in-out infinite;
@@ -120,37 +145,6 @@
   }
 }
 
-.dark {
-  --color-surface: #0d1117;
-  --color-surface-raised: #131a23;
-  --color-surface-sunken: #090d12;
-  --color-heading: #e8edf3;
-  --color-body: #c3cdd9;
-  --color-muted: #8794a6;
-  --color-border: #212b37;
-  --color-border-strong: #33404f;
-  --color-hover: #18212c;
-  --color-selected: #0f2840;
-  --color-accent: #4ea8f5;
-  --color-accent-fg: #06121f;
-  --color-danger: #f47067;
-  --color-warning: #e3a43a;
-  --color-success: #4cc36b;
-  --color-overlay: rgb(0 0 0 / 0.6);
-
-  --color-status-working: #4ea8f5;
-  --color-status-blocked: #ff6b6b;
-  --color-status-done: #4cc36b;
-  --color-status-idle: #8794a6;
-  --color-status-unknown: #6e7d90;
-
-  --color-code-keyword: #c792ea;
-  --color-code-string: #8bd49c;
-  --color-code-number: #f0b45b;
-  --color-code-comment: #6b7a8c;
-  --color-code-title: #6cb6ff;
-  --color-code-attr: #f07ca6;
-}
 
 html,
 body,
@@ -158,10 +152,37 @@ body,
   height: 100%;
 }
 
-html {
+/* The terminal palette (components/terminal/XTerm.tsx reads it): not Tailwind colours, so
+   declared here; every theme sets all of them. */
+:root {
+  --term-background: #f0f;
+  --term-foreground: #f0f;
+  --term-cursor: #f0f;
+  --term-selection: #f0f;
+  --term-black: #f0f;
+  --term-red: #f0f;
+  --term-green: #f0f;
+  --term-yellow: #f0f;
+  --term-blue: #f0f;
+  --term-magenta: #f0f;
+  --term-cyan: #f0f;
+  --term-white: #f0f;
+  --term-bright-black: #f0f;
+  --term-bright-red: #f0f;
+  --term-bright-green: #f0f;
+  --term-bright-yellow: #f0f;
+  --term-bright-blue: #f0f;
+  --term-bright-magenta: #f0f;
+  --term-bright-cyan: #f0f;
+  --term-bright-white: #f0f;
+}
+
+/* A theme preview (Settings → Appearance) sets data-theme and the mode on its own element, so
+   these follow the element, not just <html>. */
+[data-theme] {
   color-scheme: light;
 }
-html.dark {
+[data-theme].dark {
   color-scheme: dark;
 }
 

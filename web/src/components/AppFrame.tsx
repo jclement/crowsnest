@@ -220,7 +220,7 @@ function Badge({ count, className }: { count: number; className?: string }) {
     <span
       aria-label={`${count} need you`}
       className={cn(
-        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-blocked px-1 text-[10px] font-semibold leading-none text-white tabular-nums dark:text-surface",
+        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-blocked px-1 text-[10px] font-semibold leading-none text-status-fg tabular-nums",
         className,
       )}
     >
