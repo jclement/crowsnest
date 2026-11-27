@@ -118,7 +118,7 @@
   --color-code-keyword: #c49bff;
   --color-code-string: #7ee0a1;
   --color-code-number: #f5b96a;
-  --color-code-comment: #77869a;
+  --color-code-comment: #8190a4; /* 4.8:1 on an added line's background (was #77869a, 4.2:1: axe, R8 comments e2e) */
   --color-code-title: #6edcf0;
   --color-code-attr: #ff8fb1;
   --color-diff-add: rgb(79 209 139 / 0.12);

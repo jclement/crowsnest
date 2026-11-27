@@ -7,6 +7,11 @@
 // fullscreen, Esc out of it. On a phone: one file at a time, the list as a sheet, Previous, Viewed
 // and Next at the bottom within thumb reach, and a swipe moves between files.
 //
+// Line comments (Comments.tsx, lib/comments.ts): click a line number (shift-click or drag for a
+// range; on a phone tap one, then another), then c or Comment; or "Ask for change here" on a hunk or
+// a file. Notes are drafts on the server until "Send N comments to the agent" (the Comments sheet,
+// opened from the header, which counts them) composes them into one message.
+//
 // Fullscreen is the standalone route (/diff?job=j_12, /diff?project=<slug>): the same component
 // with the app's chrome hidden, so it can be opened in its own tab and deep-linked. Entering and
 // leaving it keeps the scope, the file and the scroll position (sessionStorage).
@@ -25,6 +30,8 @@ import {
   Filter,
   List,
   Maximize2,
+  MessageSquare,
+  MessageSquarePlus,
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -55,6 +62,8 @@ import {
   type ViewerPrefs,
 } from "../../lib/changes";
 import { changesApi, changesKeys, useDiffFile, useDiffSummary, useMarks } from "../../lib/changes-queries";
+import { clickLine, markedLines, placeComments, selectionRange, whereText, type CommentList, type Selection } from "../../lib/comments";
+import { useCommentActions, useComments } from "../../lib/comments-queries";
 import { describeHidden, findHidden, hidesSomething } from "../../lib/hidden";
 import { Revealed } from "../ui/Revealed";
 import { useQueryClient } from "@tanstack/react-query";
@@ -66,7 +75,8 @@ import { Chip } from "../ui/Chip";
 import { Sheet } from "../ui/Sheet";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
-import { FileDiff } from "./FileDiff";
+import { FileDiff, type CommentLayer } from "./FileDiff";
+import { CommentCard, CommentEditor, CommentsPanel } from "./Comments";
 import { HelpButton } from "../help/HelpButton";
 
 export interface DiffViewerProps {
@@ -96,6 +106,11 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [since, setSince] = useState<Record<string, boolean>>({});
   const [listSheet, setListSheet] = useState(false);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [editor, setEditor] = useState<Editing | null>(null);
+  const [commentsSheet, setCommentsSheet] = useState(false);
+  const commentList = useComments(who).data;
+  const commentActions = useCommentActions(who);
   const wide = useMediaQuery("(min-width: 1024px)");
   const phone = !useMediaQuery("(min-width: 768px)");
   const scroller = useRef<HTMLDivElement>(null);
@@ -207,7 +222,29 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
     }
   };
 
-  // ---- Keys: j/k file, n/p change, v viewed, f fullscreen, Esc out of fullscreen.
+  // ---- Comments: a selection, the editor for it, saving a draft.
+  const commentOnSelection = useCallback(() => {
+    if (!selection) return false;
+    const range = selectionRange(selection);
+    setEditor({ path: selection.path, side: selection.side, start: range.start, end: range.end });
+    return true;
+  }, [selection]);
+  const saveComment = useCallback(
+    (file: DiffFile, editing: Editing, body: string) =>
+      commentActions.add.mutate(
+        { path: file.path, scope, side: editing.side, line_start: editing.start, line_end: editing.end, body, hash: file.hash },
+        {
+          onSuccess: () => {
+            setEditor(null);
+            setSelection(null);
+          },
+          onError: (error) => toast.show({ tone: "danger", title: "Comment not saved", description: error.message }),
+        },
+      ),
+    [commentActions.add, scope, toast],
+  );
+
+  // ---- Keys: j/k file, n/p change, v viewed, c comment, f fullscreen, Esc out of fullscreen.
   const gAt = useRef(0);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -237,11 +274,28 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
           if (file) toggleViewed(file);
           break;
         }
+        case "c": {
+          // The selection; else the line number that has focus; else the whole current file.
+          if (commentOnSelection()) break;
+          const focused = document.activeElement as HTMLElement | null;
+          const line = Number(focused?.dataset.line ?? 0);
+          const section = focused?.closest<HTMLElement>("[data-file-section]")?.dataset.fileSection;
+          if (line > 0 && section && (focused?.dataset.side === "old" || focused?.dataset.side === "new")) {
+            const side = focused.dataset.side;
+            setSelection({ path: section, side, anchor: line, end: line });
+            setEditor({ path: section, side, start: line, end: line });
+          } else if (files[index]) {
+            setEditor({ path: files[index].path, side: "file", start: 0, end: 0 });
+          }
+          break;
+        }
         case "f":
           if (onFullscreen) fullscreenToggle();
           break;
         case "Escape":
-          if (fullscreen && onFullscreen) fullscreenToggle();
+          if (editor) setEditor(null);
+          else if (selection) setSelection(null);
+          else if (fullscreen && onFullscreen) fullscreenToggle();
           else return;
           break;
         default:
@@ -249,9 +303,12 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       }
       event.preventDefault();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [files, index, goToFile, toggleViewed, fullscreen, onFullscreen, fullscreenToggle]);
+    // In the capture phase: a sheet closes itself on Escape from a document listener, and by the
+    // time the key bubbled up to the window the sheet would be gone, so its Escape would also have
+    // left full screen. Here the open sheet is still seen, and the key left to it.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [files, index, goToFile, toggleViewed, fullscreen, onFullscreen, fullscreenToggle, commentOnSelection, editor, selection]);
 
   if (summaryQuery.isPending) return <SkeletonRows rows={8} label="Reading the diff" />;
   if (summaryQuery.isError && !summary) {
@@ -291,7 +348,48 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       }
       onClearMarks={() => unmark.mutate([], { onError: (error) => toast.show({ tone: "danger", title: "Could not clear", description: error.message }) })}
       who={who}
+      comments={commentList}
+      onOpenComments={() => setCommentsSheet(true)}
     />
+  );
+  const commentsSheetEl = (
+    <Sheet open={commentsSheet} onClose={() => setCommentsSheet(false)} title={`Comments · ${summary.label}`}>
+      {commentList ? (
+        <CommentsPanel
+          who={who}
+          list={commentList}
+          onJump={(path) => {
+            goToFile(path);
+            setCommentsSheet(false);
+          }}
+        />
+      ) : (
+        <SkeletonRows rows={3} label="Reading the comments" />
+      )}
+    </Sheet>
+  );
+  const selectionBar = selection && !editor && (
+    <div
+      role="status"
+      aria-label="Selected lines"
+      // Floating, so it appearing never moves the rows under a pointer that is still dragging.
+      className={cn(
+        "z-20 flex flex-wrap items-center gap-2 border border-accent/40 bg-surface-raised px-2 py-1 text-xs text-body shadow-lg",
+        phone ? "border-x-0 border-b-0" : "absolute bottom-3 left-1/2 w-[min(42rem,calc(100%-1.5rem))] -translate-x-1/2 rounded",
+      )}
+    >
+      <span className="min-w-0 flex-1 truncate">
+        {whereText({ side: selection.side, line_start: selectionRange(selection).start, line_end: selectionRange(selection).end })} of{" "}
+        <span className="font-mono">{selection.path}</span> selected
+        {phone ? "; tap another line number to extend" : "; shift-click or drag to extend"}
+      </span>
+      <Button compact variant="primary" icon={MessageSquarePlus} onClick={() => commentOnSelection()}>
+        Comment{phone ? "" : " (c)"}
+      </Button>
+      <Button compact variant="ghost" onClick={() => setSelection(null)}>
+        Clear
+      </Button>
+    </div>
   );
   const list = (
     <FileList
@@ -327,6 +425,20 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       onToggleViewed={() => toggleViewed(file)}
       current={file.path === current}
       phone={phone}
+      commentList={commentList}
+      selection={selection}
+      onLine={(side, line, extend) => {
+        setEditor(null);
+        setSelection((now) => clickLine(now, file.path, side, line, extend));
+      }}
+      editor={editor && editor.path === file.path ? editor : null}
+      onEdit={(editing) => {
+        setSelection(editing.side === "file" ? null : { path: file.path, side: editing.side, anchor: editing.start, end: editing.end });
+        setEditor(editing);
+      }}
+      onCancelEdit={() => setEditor(null)}
+      onSaveComment={(editing, body) => saveComment(file, editing, body)}
+      saving={commentActions.add.isPending}
     />
   );
   const empty = (
@@ -351,6 +463,7 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
         <SwipeArea className="min-h-0 flex-1 overflow-y-auto" onSwipe={(by) => goToFile(files[step(position, by, files.length)]?.path)}>
           {file ? section(file) : empty}
         </SwipeArea>
+        {selectionBar}
         {file && (
           <nav aria-label="Files" className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-border bg-surface-raised px-2 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
             <Button compact icon={ChevronRight} className="[&>svg]:rotate-180" disabled={position <= 0} onClick={() => goToFile(files[position - 1]?.path)}>
@@ -368,14 +481,17 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
         <Sheet open={listSheet} onClose={() => setListSheet(false)} title={`Files · ${viewedText(summary.viewed, summary.total)}`}>
           {list}
         </Sheet>
+        {commentsSheetEl}
       </section>
     );
   }
 
   return (
-    <section ref={sectionRef} aria-label={`Changes: ${summary.label}`} className={cn("flex min-h-0 flex-col overflow-hidden rounded border border-border bg-surface", fullscreen ? "h-full rounded-none border-0" : "h-[78vh] min-h-[28rem]", className)}>
+    <section ref={sectionRef} aria-label={`Changes: ${summary.label}`} className={cn("relative flex min-h-0 flex-col overflow-hidden rounded border border-border bg-surface", fullscreen ? "h-full rounded-none border-0" : "h-[78vh] min-h-[28rem]", className)}>
       {title}
       {toolbar}
+      {commentsSheetEl}
+      {selectionBar}
       <div className="flex min-h-0 flex-1">
         {listShown && <aside aria-label="Changed files" className="flex w-64 shrink-0 flex-col border-r border-border bg-surface-raised xl:w-72">{list}</aside>}
         <div ref={scroller} onScroll={onScroll} className="min-w-0 flex-1 overflow-auto" data-diff-scroller>
@@ -411,6 +527,8 @@ interface ToolbarProps {
   onMarkAll: () => void;
   onClearMarks: () => void;
   who: DiffWho;
+  comments?: CommentList;
+  onOpenComments: () => void;
 }
 
 function Toolbar(props: ToolbarProps) {
@@ -466,6 +584,7 @@ function Toolbar(props: ToolbarProps) {
           </label>
         )}
         <div className="ml-auto flex items-center gap-2" aria-live="polite">
+          <CommentsButton comments={props.comments} onClick={props.onOpenComments} phone={phone} />
           <span className="text-xs text-body">{viewedText(summary.viewed, summary.total)}</span>
           <div className="h-1.5 w-20 overflow-hidden rounded bg-surface-sunken" role="progressbar" aria-label="Files viewed" aria-valuemin={0} aria-valuemax={summary.total} aria-valuenow={summary.viewed}>
             <div className="h-full bg-success" style={{ width: `${percent}%` }} />
@@ -510,6 +629,18 @@ function Toolbar(props: ToolbarProps) {
       </div>
       {summary.truncated && <p className="text-2xs text-warning">Only the first 1,500 files are listed.</p>}
     </div>
+  );
+}
+
+/** The header's count of notes to send; opens the Comments sheet (the list and Send). */
+function CommentsButton({ comments, onClick, phone }: { comments?: CommentList; onClick: () => void; phone: boolean }) {
+  const drafts = comments?.drafts ?? 0;
+  const total = comments?.comments.length ?? 0;
+  const label = drafts > 0 ? `Comments: ${drafts} to send` : total > 0 ? `Comments: ${total}, none to send` : "Comments";
+  return (
+    <Button compact variant={drafts > 0 ? "secondary" : "ghost"} icon={MessageSquare} aria-label={label} title={label} onClick={onClick} className={cn("min-w-11", drafts > 0 && "border-accent")}>
+      {phone ? (drafts > 0 ? String(drafts) : "") : drafts > 0 ? `${drafts} to send` : "Comments"}
+    </Button>
   );
 }
 
@@ -636,10 +767,28 @@ interface FileSectionProps {
   onToggleViewed: () => void;
   current: boolean;
   phone: boolean;
+  commentList?: CommentList;
+  selection: Selection | null;
+  onLine: (side: "old" | "new", line: number, extend: boolean) => void;
+  /** The editor open on this file, if any. */
+  editor: Editing | null;
+  onEdit: (editing: Editing) => void;
+  onCancelEdit: () => void;
+  onSaveComment: (editing: Editing, body: string) => void;
+  saving: boolean;
+}
+
+/** A note being written: on lines of one side, or on the whole file (side "file", lines 0). */
+interface Editing {
+  path: string;
+  side: "old" | "new" | "file";
+  start: number;
+  end: number;
 }
 
 function FileSection(props: FileSectionProps) {
   const { file, open } = props;
+  const placed = useMemo(() => placeComments(props.commentList?.comments ?? [], file), [props.commentList, file]);
   const toast = useToast();
   const copy = async () => {
     try {
@@ -690,15 +839,33 @@ function FileSection(props: FileSectionProps) {
         )}
         <StatBar file={file} />
         <IconButton icon={Copy} label={`Copy path ${file.path}`} onClick={() => void copy()} />
+        <Button compact variant="ghost" icon={MessageSquarePlus} aria-label={`Ask for change here: the whole of ${file.path}`} className={cn(props.phone && "w-11")} onClick={() => props.onEdit({ path: file.path, side: "file", start: 0, end: 0 })}>
+          {props.phone ? "" : "Ask for change here"}
+        </Button>
         {!props.phone && <ViewedBox file={file} onToggle={props.onToggleViewed} big />}
       </header>
-      {open && <LazyBody {...props} />}
+      {(placed.loose.length > 0 || props.editor?.side === "file") && (
+        <div className="flex flex-col gap-1.5 border-b border-border bg-surface px-2 py-1.5">
+          {placed.loose.map((comment) => (
+            <CommentCard key={comment.id} comment={comment} who={props.who} showQuote />
+          ))}
+          {props.editor?.side === "file" && (
+            <CommentEditor
+              where={`the whole of ${file.path}`}
+              busy={props.saving}
+              onCancel={props.onCancelEdit}
+              onSave={(body) => props.editor && props.onSaveComment(props.editor, body)}
+            />
+          )}
+        </div>
+      )}
+      {open && <LazyBody {...props} placed={placed} />}
     </section>
   );
 }
 
 /** Fetches and renders the file's diff once its section is near the screen. */
-function LazyBody(props: FileSectionProps) {
+function LazyBody(props: FileSectionProps & { placed: ReturnType<typeof placeComments> }) {
   const { file } = props;
   const holder = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(props.phone || typeof IntersectionObserver === "undefined");
@@ -710,6 +877,35 @@ function LazyBody(props: FileSectionProps) {
     return () => observer.disconnect();
   }, [near]);
   const skip = file.too_large || (file.binary && !props.since);
+  const { editor, placed, commentList, selection, onLine, onEdit, onCancelEdit, onSaveComment, saving, who, phone } = props;
+  const layer = useMemo<CommentLayer>(
+    () => ({
+      selection,
+      marked: { old: markedLines(commentList?.comments ?? [], file, "old"), new: markedLines(commentList?.comments ?? [], file, "new") },
+      inline: placed.inline,
+      editorAt: editor && editor.side !== "file" ? { side: editor.side, line: editor.end } : null,
+      renderEditor: () =>
+        editor && editor.side !== "file" ? (
+          <CommentEditor
+            where={`${whereText({ side: editor.side, line_start: editor.start, line_end: editor.end })} of ${file.path}`}
+            busy={saving}
+            onCancel={onCancelEdit}
+            onSave={(body) => onSaveComment(editor, body)}
+          />
+        ) : null,
+      renderComments: (comments) => (
+        <div className="flex flex-col gap-1.5">
+          {comments.map((comment) => (
+            <CommentCard key={comment.id} comment={comment} who={who} />
+          ))}
+        </div>
+      ),
+      onLine,
+      onHunk: (range) => onEdit({ path: file.path, side: range.side, start: range.start, end: range.end }),
+      phone,
+    }),
+    [selection, commentList, file, placed, editor, saving, onCancelEdit, onSaveComment, onLine, onEdit, who, phone],
+  );
   const query = useDiffFile(props.who, file.path, file.hash, props.scope, { context, ignoreWhitespace: props.ignoreWhitespace, since: props.since, baseline: file.viewed_at }, props.base, near && !skip);
   let body: ReactNode;
   if (file.too_large) body = <p className="px-3 py-2 text-xs text-muted">{file.note ?? "Too large to show."}</p>;
@@ -725,7 +921,8 @@ function LazyBody(props: FileSectionProps) {
             What changed since you viewed it{query.data.viewed_at ? ` (${new Date(query.data.viewed_at).toLocaleString()})` : ""}: only the new edits.
           </p>
         )}
-        <FileDiff view={query.data} split={props.split} wrap={props.wrap} onMoreContext={setContext} />
+        <FileDiff view={query.data} split={props.split} wrap={props.wrap} onMoreContext={setContext} comments={props.since ? undefined : layer} />
+        {props.since && <p className="px-3 py-1 font-sans text-2xs text-muted">Leave line comments from the full diff (turn off “Since viewed”).</p>}
       </>
     );
   return <div ref={holder}>{body}</div>;

@@ -9,6 +9,8 @@
 //	GET    /api/v1/changes/projects/{ref}/jobs             the project's checkouts with diffstats
 //	GET    /api/v1/changes/progress                        jobs' viewed counts (no git is run)
 //	POST   /api/v1/changes/jobs/{id}/demo-touch            --demo only: the demo job edits a file now
+//
+// Line comments on the diff, and sending them to the agent, are in comments.go.
 
 package httpd
 
@@ -40,6 +42,7 @@ func (s *Server) registerChangesRoutes(mux *http.ServeMux) {
 		mux.Handle("GET "+prefix.path+"/file", auth(func(w http.ResponseWriter, r *http.Request) { s.handleChangesFile(w, r, ask(r)) }))
 		mux.Handle("PUT "+prefix.path+"/viewed", auth(func(w http.ResponseWriter, r *http.Request) { s.handleChangesMark(w, r, ask(r)) }))
 		mux.Handle("DELETE "+prefix.path+"/viewed", auth(func(w http.ResponseWriter, r *http.Request) { s.handleChangesUnmark(w, r, ask(r)) }))
+		s.registerCommentRoutes(mux, prefix.path, ask) // comments.go
 	}
 	mux.Handle("GET /api/v1/changes/projects/{ref}/jobs", auth(s.handleProjectChanges))
 	mux.Handle("GET /api/v1/changes/progress", auth(s.handleChangesProgress))

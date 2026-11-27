@@ -839,6 +839,17 @@ Every checkout has a live, syntax-highlighted diff (DESIGN.md 6.21), at any time
   nav and tray hidden, so it opens in its own tab ("Open in a new tab") and deep-links; entering
   and leaving keeps the scope, the file and where you were. On a phone it shows one file at a
   time: the file list as a sheet, Previous, Viewed and Next at the bottom, swipe between files.
+- **Comments**: click a line number (shift-click or drag for a range; on a phone tap, then tap
+  another), press **c**, and write what should change; or **Ask for change here** on a hunk or a
+  whole file. Notes are drafts on the server (every device) until **Send N comments to the agent**
+  (the viewer's header, or the Review tab, "Review · 2 comments to send") sends them all as one
+  message: each note with its file, lines and the code quoted from git, plus an optional overall
+  note, previewed first; over 4 KB as an attached file. A running job gets it at once; a paused or
+  held one when nothing holds it any more; a finished one gets a fix job in its worktree and is
+  checked again after it. A project's diff goes to its lead. Notes show **sent**, and **outdated**
+  (with their quote) once the agent changes the file; dismiss or re-send them. Hidden characters in
+  quotes and notes are shown and written out as ⟨U+…⟩. With "Require all files viewed before Land"
+  on, Land's confirmation names unsent notes.
 - The palette has **Changes: <job>** and **Changes: <project>**.
 - Read-only git with crowsnest's protective options (no hooks, external diff, textconv, pager
   or fsmonitor), and the repository's clean/smudge filters switched off by name: the work tree is
@@ -1053,6 +1064,8 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /changes/jobs/{id}`, `/changes/projects/{ref}`, `/changes/orchestrator` | session | The live diff (DESIGN.md 6.21): `?scope=all\|committed\|uncommitted\|since_viewed`, `&base=` (a main checkout: `""` upstream, `session`, or a ref), `&refresh=1`; the files with status, counts, content hashes and viewed marks, the scopes' totals, the base and commits |
 | `GET /changes/{who}/file?path=&scope=&context=&ws=ignore&since=1` | session | One file's unified diff (only files the diff lists), with both sides' whole text when under 256 KB; `since=1` is the change since the version you marked viewed |
 | `PUT /changes/{who}/viewed`, `DELETE /changes/{who}/viewed` | session | `{scope, files: [{path, hash}]}` or `{all: true}` marks files viewed (`409 STALE` when a file changed after it was shown); `{scope, paths}` clears (no paths: all in scope) |
+| `GET /changes/{who}/comments`, `POST /changes/{who}/comments`, `PATCH`/`DELETE /changes/{who}/comments/{cid}`, `POST …/{cid}/dismiss`, `POST …/{cid}/resend` | session | Line comments on a diff (DESIGN.md 6.21): `{path, scope, side old\|new\|file, line_start, line_end, body, hash}` saves a draft (quoted from git; `409 STALE` when the file changed after it was shown); the list says draft, sent or outdated |
+| `POST /changes/{who}/comments/send` | session | `{overall, dry_run, force}`: every unsent note as one message to the job's agent (its message path; pending feedback while paused or held; a fix job for a finished job), the lead or the orchestrator; `dry_run` answers the composed text only |
 | `GET /changes/projects/{ref}/jobs`, `GET /changes/progress` | session | A project's main checkout and job checkouts with diffstats; jobs' viewed counts for the cards. A `changes` event `{subject, revision}` says a diff or its marks changed |
 | `POST /jobs/{id}/land` | session | `{action: merge\|pr\|discard, confirm: true}` → what was done and whether the teardown finished; `409 CONFIRM_REQUIRED` without `confirm`; `400` for a refusal (dirty checkout, conflict, protected branch) with nothing changed; `409 EVIDENCE_<CODE>` when crowsnest's check is stale, failed or missing, or the base moved on, unless `override: true`. Merge and pr need `expected_head` (the Review tab's `land.head`): exactly that commit lands, else `409 EVIDENCE_HEAD_MOVED` |
 | `POST /jobs/{id}/teardown`, `POST /jobs/{id}/start-anyway` | session | Retry a landed job's teardown (`{confirm: true}`); start a held job past the limits |
