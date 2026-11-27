@@ -10,8 +10,9 @@
 // where herdr puts them (~/.herdr/worktrees/<repo>/…), and `removeWorktrees` removes the scratch
 // repository's leftovers at the end (only that repository's, found through git itself).
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { scrubbedEnv, startInstance, type Instance } from "../support/instance";
 
@@ -71,6 +72,14 @@ export function removeScratch(scratch: Scratch | undefined) {
     // the repository is already gone
   }
   rmSync(scratch.dir, { recursive: true, force: true });
+  // herdr keeps a repository's worktrees under ~/.herdr/worktrees/<repo name>/ and leaves that
+  // directory behind, empty, when the last one goes: remove it, only if empty (the name is this
+  // run's own).
+  try {
+    rmdirSync(join(homedir(), ".herdr", "worktrees", basename(scratch.repo)));
+  } catch {
+    // not there, or not empty
+  }
 }
 
 export interface RealOptions {
