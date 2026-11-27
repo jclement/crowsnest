@@ -142,7 +142,7 @@ func loopbackTarget(addrs []net.Addr) (string, error) {
 	if v6 != "" {
 		return v6, nil
 	}
-	return "", errors.New("crowsnest listens on no loopback address (its --bind leaves localhost out), and tailscale serve only proxies to this machine's loopback.")
+	return "", errors.New("crowsnest listens on no loopback address (its --bind leaves localhost out), and tailscale serve only proxies to this machine's loopback")
 }
 
 // allowTailnetName lets the host check accept the MagicDNS name crowsnest publishes under, or

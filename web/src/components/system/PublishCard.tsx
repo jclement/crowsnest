@@ -136,7 +136,7 @@ function Offer({ view }: { view: PublishView }) {
 function Published({ view }: { view: PublishView }) {
   return (
     <div className="flex flex-wrap items-start gap-3">
-      {view.qr && <img src={view.qr} alt={`QR code for ${view.url}`} width={128} height={128} className="h-32 w-32 rounded border border-border bg-white p-1 [image-rendering:pixelated]" />}
+      {view.qr && <img src={view.qr} alt={`QR code for ${view.url}`} width={128} height={128} className="h-32 w-32 rounded border border-border [image-rendering:pixelated]" />}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <a className="inline-flex items-center gap-1 break-all font-mono text-sm text-accent underline" href={view.url} target="_blank" rel="noopener noreferrer">
           {view.url} <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />

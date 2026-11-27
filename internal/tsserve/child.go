@@ -39,11 +39,11 @@ const childGrace = 2 * time.Second
 // tailscale's own when it ended by itself, 0 after a stop, 2 for an argv outside the allowlist.
 func RunChild(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) < 2 || args[1] != "serve" {
-		fmt.Fprintln(stderr, "crowsnest tailscale-serve-child: expected -- <tailscale> serve --https=<port> <target>")
+		_, _ = fmt.Fprintln(stderr, "crowsnest tailscale-serve-child: expected -- <tailscale> serve --https=<port> <target>")
 		return 2
 	}
 	if err := CheckArgs(args[1:]); err != nil {
-		fmt.Fprintln(stderr, "crowsnest tailscale-serve-child:", err)
+		_, _ = fmt.Fprintln(stderr, "crowsnest tailscale-serve-child:", err)
 		return 2
 	}
 	signals := make(chan os.Signal, 1)
@@ -54,7 +54,7 @@ func RunChild(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	cmd.Env = herdr.ScrubEnv(os.Environ())
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintln(stderr, "crowsnest tailscale-serve-child: starting tailscale:", err)
+		_, _ = fmt.Fprintln(stderr, "crowsnest tailscale-serve-child: starting tailscale:", err)
 		return 1
 	}
 	exited := make(chan int, 1)

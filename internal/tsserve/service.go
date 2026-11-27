@@ -307,7 +307,7 @@ func (s *Service) planServe(ctx context.Context, view View, run tailscale.Runner
 	}
 	target, err := s.target()
 	if err != nil {
-		return refuse(view, StateRefused, Problem{Reason: err.Error(), Fix: "Add --bind localhost (the default) so tailscale serve has a loopback address to proxy to."})
+		return refuse(view, StateRefused, Problem{Reason: err.Error() + ".", Fix: "Add --bind localhost (the default) so tailscale serve has a loopback address to proxy to."})
 	}
 	view.Target = target
 	if s.opts.AllowHost != nil {

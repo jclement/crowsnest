@@ -156,7 +156,7 @@ describe("generated reference pages", () => {
     const real = new Set([...settings.matchAll(/`(--[a-z0-9-]+)`/g)].map((match) => match[1]!));
     // Flags of subcommands (crowsnest ask, job, doctor, backup, …) and of other tools the pages show.
     const subcommand = new Set(
-      "--wait --timeout --attach --file --urgency --job --socket --token-file --rules --state --reason --waiting --result --result-file --verified --not-verified --dir --role --done-when --isolate --json --deep --force --until --status --check --walkthrough-file --no-commits-reason --recheck-in --day --out --bg --resume --settings --mcp-config --append-system-prompt-file --session-id --remote-control --permission-mode --help --name --rm --volume -- --publish --env --dangerously-skip-permissions --model --hard --verify".split(" "),
+      "--wait --timeout --attach --file --urgency --job --socket --token-file --rules --state --reason --waiting --result --result-file --verified --not-verified --dir --role --done-when --isolate --json --deep --force --until --status --check --walkthrough-file --no-commits-reason --recheck-in --day --out --bg --resume --settings --mcp-config --append-system-prompt-file --session-id --remote-control --permission-mode --help --name --rm --volume -- --publish --env --dangerously-skip-permissions --model --hard --verify --https --operator".split(" "),
     );
     const unknown: string[] = [];
     for (const page of manual.pages.values()) {
