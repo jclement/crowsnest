@@ -438,7 +438,7 @@ func (o *Orchestrator) applyAgentLocked(s *Status, agent herdr.Agent) {
 	o.adoptSessionLocked(s, agent)
 	s.State, s.Detail = stateOf(agent, s.State), ""
 	if s.State == StateNeedsTerminal {
-		s.Detail = needsTerminalDetail
+		s.Detail = o.needsTerminalDetail()
 	}
 }
 
@@ -459,7 +459,15 @@ func (o *Orchestrator) adoptSessionLocked(s *Status, agent herdr.Agent) {
 	s.SessionID = reported
 }
 
-const needsTerminalDetail = "Claude stopped at a start-up prompt (folder trust or login). Open the orchestrator's terminal and answer it."
+// needsTerminalDetail says what to do about a start-up prompt, naming the agent: a lead's card said
+// "Open the orchestrator's terminal" (found by e2e:claude, a lead in a folder Claude had not seen).
+func (o *Orchestrator) needsTerminalDetail() string {
+	whose := "the orchestrator's"
+	if name := o.agentName(); name != Name {
+		whose = name + "'s"
+	}
+	return "Claude stopped at a start-up prompt (folder trust or login). Open " + whose + " terminal, or its card under Needs you, and answer it."
+}
 
 // stateOf maps an agent to a state. An agent that is not interactive-ready and is blocked is
 // still at its start-up dialog; while it stays there the state stays needs_terminal.
