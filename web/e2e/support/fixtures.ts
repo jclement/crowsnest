@@ -113,6 +113,11 @@ export async function waitForOrchestratorSettled(page: Page) {
     )
     .toBe(0);
   await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
+  // A brief typed a moment ago may not have turned the state to Working yet: wait one demo turn
+  // (2.5 s, fake.DefaultReplyDelay) and require Idle again, so the orchestrator's own job turn is
+  // over before the test sends anything.
+  await page.waitForTimeout(3_000);
+  await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
   // The turn's reply lands in the transcript just after the state goes idle.
   await page.waitForTimeout(500);
 }

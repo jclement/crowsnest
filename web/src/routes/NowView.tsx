@@ -75,7 +75,7 @@ function QueueSection() {
   return (
     <section aria-labelledby="now-queue" className="min-w-0 rounded-lg border border-border bg-surface">
       <SectionHeader id="now-queue" icon={Inbox} title="Needs you" count={attention.data?.counts.total}>
-        <Link to="/inbox" className="inline-flex min-h-11 items-center text-xs text-accent hover:underline md:min-h-0">
+        <Link to="/inbox" className="inline-flex min-h-11 min-w-11 items-center justify-end text-xs text-accent hover:underline md:min-h-0 md:min-w-0">
           Inbox
         </Link>
       </SectionHeader>
@@ -103,7 +103,7 @@ function ProjectsSection() {
   return (
     <section aria-labelledby="now-projects" className="min-w-0 rounded-lg border border-border bg-surface">
       <SectionHeader id="now-projects" icon={FolderKanban} title="Projects">
-        <Link to="/projects" className="inline-flex min-h-11 items-center text-xs text-accent hover:underline md:min-h-0">
+        <Link to="/projects" className="inline-flex min-h-11 min-w-11 items-center justify-end text-xs text-accent hover:underline md:min-h-0 md:min-w-0">
           All projects
         </Link>
       </SectionHeader>
@@ -294,7 +294,7 @@ function GiveJobSection() {
             aria-label="Who gets the job"
             value={slug}
             onChange={(event) => setSlug(event.target.value)}
-            className="min-h-11 rounded border border-border-strong bg-surface px-1.5 text-xs text-heading md:min-h-7"
+            className="h-11 rounded border border-border-strong bg-surface px-1.5 text-xs text-heading md:h-7"
           >
             <option value="">The orchestrator (no project)</option>
             {live.map((candidate) => (
