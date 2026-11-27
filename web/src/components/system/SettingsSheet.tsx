@@ -3,6 +3,7 @@
 // takes effect. A setting given by a flag or an environment variable is read-only ("set by the
 // environment: change it there"); the bind is shown read-only with the command that changes it.
 // The server groups its settings by section name; the view decides which group each lands in.
+import { EngineNote } from "../jobs/EngineNote";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../../lib/api";
@@ -116,6 +117,7 @@ function SettingRow({ setting, engineNow }: { setting: SettingView; engineNow?: 
         {setting.help.replace(/\.?$/, ".")}
         {engineNow && setting.value === "auto" ? ` Now: ${engineNow}.` : ""} {applyLabels[setting.apply]}.
       </p>
+      {setting.name === "engine" && <EngineNote engine={draft === "auto" ? (engineNow ?? "") : draft} />}
       {setting.locked && <p className="text-2xs text-warning">{setting.locked}</p>}
       {error && (
         <p role="alert" className="text-2xs text-danger">

@@ -280,3 +280,16 @@ test("a job that does not exist says so", async ({ page }, testInfo) => {
   await openBoard(page, "?job=j_999");
   await expect(detailRegion(page, testInfo, "Selected job").getByRole("alert")).toContainText("Could not load j_999");
 });
+
+test("choosing Codex for a job says plainly what it does not get (R8)", async ({ page }) => {
+  await openBoard(page);
+  await openForm(page);
+  await page.getByRole("button", { name: /To the orchestrator/ }).click();
+  const note = page.getByRole("note", { name: "What Codex does not get" });
+  await expect(note).toHaveCount(0);
+  await page.getByLabel("Engine").selectOption("codex");
+  await expect(note).toContainText("Codex runs without crowsnest's hooks");
+  await expect(note).toContainText("spend measurement");
+  await page.getByLabel("Engine").selectOption("claude");
+  await expect(note).toHaveCount(0);
+});

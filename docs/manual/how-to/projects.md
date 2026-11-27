@@ -61,7 +61,7 @@ On **New project**, or **Edit** on the project's page:
 | Field | What it sets |
 |---|---|
 | **Role** | The role a job in this project gets when you do not choose one. |
-| **Engine** | Claude or Codex for its jobs. |
+| **Engine** | Claude or Codex for its jobs. Choosing Codex shows a note of what it does not get: crowsnest supervises Claude through its hooks, and Codex has none. |
 | **Model** | The model for its job agents (empty: crowsnest's default). |
 | **Own worktree** | **Yes, a worktree per job**, or **No, work in the directory**. |
 | **Permission mode** | The lead's Claude Code permission mode. |

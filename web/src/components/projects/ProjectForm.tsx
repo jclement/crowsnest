@@ -6,6 +6,7 @@
 // its remote host (Land opens pull requests only on GitHub), not a repository, overlaps. The defaults its jobs get (role, engine, model, isolation, permission mode) and when
 // its lead starts sit behind one disclosure. The server checks the rest (the directory exists, is
 // not $HOME, does not overlap another project) and its message is shown as it comes.
+import { EngineNote } from "../jobs/EngineNote";
 import { ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { factsSummary, folderWarnings, hostNote, isPathInput, type FolderFacts } from "../../lib/browse";
@@ -218,6 +219,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
               <option value="codex">Codex</option>
             </select>
           </label>
+          <EngineNote engine={engine} className="sm:col-span-2" />
           <label className={labelClass}>
             Model
             <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Claude's default" className={`${inputClass} font-mono`} />

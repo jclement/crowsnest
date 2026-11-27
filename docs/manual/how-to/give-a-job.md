@@ -17,7 +17,10 @@ shows (a project page's **New job** does the same).
 3. Optional: press the summary button under the box (it reads, for example, **To the
    orchestrator**) for **Where** (a directory or repo; empty for the orchestrator or the project's
    directory; **Browse…** opens the [folder picker](projects.md#choosing-the-folder)), **Role**,
-   **Done when** and **Engine**.
+   **Done when** and **Engine**. With **Codex** the form says plainly what it does not get from
+   crowsnest (no hooks: a stop it cannot refuse, no spend measurement, no spinning detection, no
+   usage-limit reset times, answer receipts only to "delivered"); budgets still bound it by minutes
+   and turns.
 4. Attach files if they help: paste a screenshot, drop a file, or press **Attach files**.
 5. **Give job** (`⌘ Enter`, `Ctrl Enter` elsewhere). A toast says where it went ("Given to
    Crowsnest's lead", "Starting an agent in …", "Sent to the orchestrator"), with a link.

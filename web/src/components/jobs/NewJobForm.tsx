@@ -8,6 +8,7 @@
 // "To the lead" (no directory; the project's lead holds it, as the orchestrator holds unfiled
 // ones) or "As a job" (a job agent, the directory and defaults prefilled from the project; the
 // server fills anything left unset from the project's defaults too).
+import { EngineNote } from "./EngineNote";
 import { ChevronDown, ChevronRight, FolderSearch, Send } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { onJobDraft, takeJobDraft } from "../../lib/jobDraft";
@@ -275,6 +276,7 @@ function Options({ ids, dir, setDir, role, setRole, doneWhen, setDoneWhen, engin
           <option value="codex">Codex</option>
         </select>
       </label>
+      <EngineNote engine={engine} className="sm:col-span-2" />
     </div>
   );
 }

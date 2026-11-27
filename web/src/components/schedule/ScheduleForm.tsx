@@ -4,6 +4,7 @@
 // orchestrator, a project's lead (both as a poke) or a job of its own (the body is its brief, with
 // a project or a directory, a role and an engine). The body is markdown, with a preview. A name
 // cannot change after it is made (the server refuses a rename).
+import { EngineNote } from "../jobs/EngineNote";
 import { useId, useState, type FormEvent } from "react";
 import type { ProjectView } from "../../lib/projects";
 import { useDirs, useRoles } from "../../lib/queries";
@@ -207,6 +208,7 @@ export function ScheduleForm({ task, projects, defaultProjectId, pending, error,
               <option value="codex">Codex</option>
             </select>
           </label>
+          <EngineNote engine={engine} className="sm:col-span-3" />
         </div>
       )}
 
