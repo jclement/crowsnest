@@ -35,6 +35,7 @@ type demoWorld struct {
 	agentIn   map[string]string   // pane id → agent name
 	approvals []approvals.Approval
 	questions []questions.Question
+	landing   int // the landing demo's jobs, counted and left out of the story's invariants
 }
 
 func seedDemoWorld(t *testing.T) demoWorld {
@@ -80,6 +81,13 @@ func seedDemoWorld(t *testing.T) demoWorld {
 		t.Fatal(err)
 	}
 	for _, job := range list {
+		// The landing demo (internal/jobs/demo_landing.go, j_18 to j_22) is a scenario of its
+		// own in a real git repository, unfiled and held by "job-demo"; it is not part of the
+		// five-project story these invariants describe (REPORT: a known gap).
+		if strings.Contains(job.Dir, "demo-src/widgets") || strings.Contains(job.Dir, "demo-src/.worktrees") {
+			world.landing++
+			continue
+		}
 		world.jobs[job.ID] = job
 	}
 	projectList, _ := wiring.service.List(ctx, false)
@@ -111,8 +119,9 @@ func (w demoWorld) slug(job jobs.Job) string { return w.slugOf[job.ProjectID] }
 
 func TestDemoStory(t *testing.T) {
 	w := seedDemoWorld(t)
-	if len(w.slugOf) != 5 || len(w.jobs) != 17 {
-		t.Fatalf("%d projects and %d jobs", len(w.slugOf), len(w.jobs))
+	// The story's 17 jobs, and the landing demo's five beside them (j_18 to j_22).
+	if len(w.slugOf) != 5 || len(w.jobs) != 17 || w.landing != 5 {
+		t.Fatalf("%d projects, %d story jobs and %d landing jobs", len(w.slugOf), len(w.jobs), w.landing)
 	}
 	t.Run("jobs sit in their project's workspace, held by the agent they name", func(t *testing.T) { checkDemoJobs(t, w) })
 	t.Run("a dialog job's cause is the dialog on its screen", func(t *testing.T) { checkDemoDialogs(t, w) })
