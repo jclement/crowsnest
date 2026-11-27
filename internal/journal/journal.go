@@ -40,10 +40,13 @@ const (
 	KindDigest   Kind = "digest"   // the daily digest was written (7.13)
 	// KindStorage records backups, restores and the retention sweeper (4.17, 4.19).
 	KindStorage Kind = "storage"
+	// KindApproval records the approval policy at work: a call a rule allowed, a rule added,
+	// remembered or removed, a batch allow (8.7).
+	KindApproval Kind = "approval"
 )
 
 // Kinds lists every kind, for validating a filter.
-var Kinds = []Kind{KindPoke, KindSkip, KindSend, KindAnswer, KindRestart, KindAlert, KindBackstop, KindTask, KindUpkeep, KindSettings, KindPause, KindLand, KindReview, KindDigest, KindStorage}
+var Kinds = []Kind{KindPoke, KindSkip, KindSend, KindAnswer, KindRestart, KindAlert, KindBackstop, KindTask, KindUpkeep, KindSettings, KindPause, KindLand, KindReview, KindDigest, KindStorage, KindApproval}
 
 // Valid reports whether k is a known kind.
 func (k Kind) Valid() bool {

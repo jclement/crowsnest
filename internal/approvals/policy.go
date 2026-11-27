@@ -38,6 +38,7 @@ import (
 	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/risk"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 // Rule kinds, scopes and the decided_via of an approval a rule allowed.
@@ -306,8 +307,11 @@ func matchBash(rules []Rule, command string) []Rule {
 
 // SimpleCommands splits a command line into its simple commands, each its words joined by one
 // space, for matching against bash rules. ok is false when the line cannot be matched at all:
-// empty, command or process substitution, eval, or a redirect to a file.
+// empty, bidi controls, command or process substitution, eval, or a redirect to a file.
 func SimpleCommands(command string) ([]string, bool) {
+	if termtext.HasBidiControl(command) {
+		return nil, false // what is shown is not what runs
+	}
 	for _, unreadable := range []string{"$(", "`", "<(", ">("} {
 		if strings.Contains(command, unreadable) {
 			return nil, false
@@ -670,4 +674,104 @@ func firstNonBlank(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// ---- Preview: what a rule would have matched -------------------------------------------------
+
+// Preview window: the project's approvals of the last week, at most this many, newest first.
+const (
+	previewWindow = 7 * 24 * time.Hour
+	previewLimit  = 50
+)
+
+// PreviewMatch is one recent approval a rule's pattern matches.
+type PreviewMatch struct {
+	ApprovalID string     `json:"approval_id"`
+	Summary    string     `json:"summary"`
+	Risk       risk.Level `json:"risk"`
+	Status     Status     `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// Preview is what a rule would have done to the project's recent approvals (R5: a rule is shown
+// with its effect before it is saved, and beside it once listed). Allowed would have been
+// allowed; AboveMaxRisk match the pattern but are riskier than the rule's max_risk (a human is
+// still asked); Dangerous match the pattern and are never auto-allowed.
+type Preview struct {
+	Considered   int            `json:"considered"`
+	Allowed      []PreviewMatch `json:"allowed"`
+	AboveMaxRisk []PreviewMatch `json:"above_max_risk"`
+	Dangerous    []PreviewMatch `json:"dangerous"`
+}
+
+// PreviewRule matches a rule (not yet saved, or listed) against the project's recent approvals,
+// settled or pending. Each call is matched on its full tool input, never on its summary; a
+// compound command counts only when this one rule matches every part of it.
+func (s *Service) PreviewRule(ctx context.Context, projectID int64, kind, pattern string, maxRisk risk.Level) (Preview, error) {
+	if maxRisk == "" {
+		maxRisk = risk.Low
+	}
+	pattern, err := NormalizeRule(kind, pattern, maxRisk)
+	if err != nil {
+		return Preview{}, err
+	}
+	// Matched as if every call were low, so the pattern alone decides; risk is sorted after.
+	probe := []Rule{{ID: "preview", Kind: kind, Pattern: pattern, MaxRisk: risk.Elevated}}
+	preview := Preview{Allowed: []PreviewMatch{}, AboveMaxRisk: []PreviewMatch{}, Dangerous: []PreviewMatch{}}
+	for _, approval := range s.recentInProject(ctx, projectID) {
+		preview.Considered++
+		if evaluate(probe, call{tool: approval.ToolName, input: approval.ToolInput, level: risk.Low, root: approval.root}) == nil {
+			continue
+		}
+		match := PreviewMatch{ApprovalID: approval.ID, Summary: approval.Summary, Risk: approval.Risk, Status: approval.Status, CreatedAt: approval.CreatedAt}
+		switch {
+		case approval.Risk == risk.Dangerous:
+			preview.Dangerous = append(preview.Dangerous, match)
+		case !approval.Risk.AtMost(maxRisk):
+			preview.AboveMaxRisk = append(preview.AboveMaxRisk, match)
+		default:
+			preview.Allowed = append(preview.Allowed, match)
+		}
+	}
+	return preview, nil
+}
+
+// rootedApproval is an approval with the working root its call was made in.
+type rootedApproval struct {
+	Approval
+	root string
+}
+
+// recentInProject is the project's approvals of the preview window, newest first, at most
+// previewLimit, each with its root (the scope is asked once per job or pane).
+func (s *Service) recentInProject(ctx context.Context, projectID int64) []rootedApproval {
+	if projectID == 0 {
+		return nil
+	}
+	records, err := s.opts.Store.ListApprovals(ctx, nil, 500)
+	if err != nil {
+		s.opts.Logger.Warn("listing approvals for a rule preview", "err", err)
+		return nil
+	}
+	since := s.opts.Now().Add(-previewWindow)
+	scopes := map[string]Scope{}
+	var out []rootedApproval
+	for _, record := range records {
+		if record.CreatedAt.Before(since) || len(out) >= previewLimit {
+			break
+		}
+		key := record.JobID + "|" + record.PaneID
+		if record.JobID != "" {
+			key = record.JobID
+		}
+		scope, ok := scopes[key]
+		if !ok {
+			scope = s.scopeOf(ctx, record.JobID, record.PaneID)
+			scopes[key] = scope
+		}
+		if scope.ProjectID == projectID {
+			out = append(out, rootedApproval{Approval: toApproval(record), root: scope.Root})
+		}
+	}
+	return out
 }

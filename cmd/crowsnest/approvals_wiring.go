@@ -1,6 +1,8 @@
 // Wiring for structured approvals and the guard (DESIGN.md 8.7): the guard's rules (written into
 // every agent's guard.json), the risk classifier (built-ins plus ~/.config/crowsnest/risk.yaml),
-// and the approvals service, whose changes move the job's state and feed Web Push.
+// and the approvals service, whose changes move the job's state and feed Web Push. The policy's
+// scope (which project, whether the job is live, the working root) is read here, and every call a
+// rule allowed is journalled here: on the job's timeline and in the global journal.
 
 package main
 
@@ -9,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/jclement/crowsnest/internal/approvals"
@@ -17,6 +20,8 @@ import (
 	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/journal"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/push"
 	"github.com/jclement/crowsnest/internal/risk"
 	"github.com/jclement/crowsnest/internal/store"
@@ -52,6 +57,10 @@ func riskRulesPath(cfg config.Config) string {
 type approvalWiring struct {
 	jobs   atomic.Pointer[jobs.Service]
 	pusher atomic.Pointer[push.Watcher]
+	leads  atomic.Pointer[projects.Leads]
+	// journal and projects are known before the service is built; either may be nil in tests.
+	journal  *journal.Journal
+	projects *projects.Service
 }
 
 // newApprovals builds the approvals service. An invalid risk.yaml stops the start: a typo must not
@@ -61,8 +70,9 @@ func newApprovals(cfg config.Config, db *store.Store, events *hub.Hub, rules *gu
 	if err != nil {
 		return nil, err
 	}
-	return approvals.New(approvals.Options{
-		Store: db, Hub: events, Logger: logger, Classifier: classifier,
+	var service *approvals.Service
+	service = approvals.New(approvals.Options{
+		Store: db, Hub: events, Logger: logger, Classifier: classifier, Scope: wiring.scope,
 		RiskContext: func(ctx context.Context, jobID string) risk.Context {
 			riskContext := risk.Context{ProtectedHosts: rules.ProtectedHosts}
 			if service := wiring.jobs.Load(); service != nil && jobID != "" {
@@ -83,8 +93,67 @@ func newApprovals(cfg config.Config, db *store.Store, events *hub.Hub, rules *gu
 			if pusher := wiring.pusher.Load(); pusher != nil && change == "requested" {
 				pusher.ApprovalRequested(approval)
 			}
+			if change == string(approvals.StatusAllowed) && approval.DecidedVia == approvals.ViaPolicy {
+				wiring.journalAutoAllow(context.WithoutCancel(ctx), service, approval, logger)
+			}
 		},
-	}), nil
+	})
+	return service, nil
+}
+
+// scope is the approval policy's view of a call (DESIGN.md 8.7, Policy): a job's project, whether
+// it is still live and its working root (its worktree when isolated); for a lead's own calls,
+// which hold no job, the lead's project and its directory. Anything else (the orchestrator's own
+// calls) has no project, so only a job's remembered rules could apply.
+func (w *approvalWiring) scope(ctx context.Context, jobID, paneID string) approvals.Scope {
+	if service := w.jobs.Load(); service != nil && jobID != "" {
+		job, err := service.Get(ctx, jobID)
+		if err != nil {
+			return approvals.Scope{}
+		}
+		scope := approvals.Scope{ProjectID: job.ProjectID, JobLive: !job.State.Terminal()}
+		if job.AgentName != jobs.OrchestratorName {
+			scope.Root = firstNonEmpty(job.WorkDir, job.Dir)
+		}
+		if w.projects != nil && job.ProjectID != 0 {
+			if project, err := w.projects.ByID(ctx, job.ProjectID); err == nil {
+				scope.ProjectName = project.Name
+			}
+		}
+		return scope
+	}
+	if leads := w.leads.Load(); leads != nil && paneID != "" {
+		if lead := leads.ByPane(paneID); lead != nil {
+			return approvals.Scope{ProjectID: lead.Project.ID, ProjectName: lead.Project.Name, Root: lead.Project.Dir}
+		}
+	}
+	return approvals.Scope{}
+}
+
+// journalAutoAllow records a call a rule allowed on the job's timeline and in the global journal,
+// with the rules' patterns, so "why was this allowed" has an answer in both places.
+func (w *approvalWiring) journalAutoAllow(ctx context.Context, service *approvals.Service, approval approvals.Approval, logger *slog.Logger) {
+	var patterns []string
+	for _, id := range approval.RuleIDs {
+		if rule, err := service.GetRule(ctx, id); err == nil {
+			patterns = append(patterns, rule.Kind+": "+rule.Pattern)
+		}
+	}
+	word := "rule"
+	if len(approval.RuleIDs) > 1 {
+		word = "rules"
+	}
+	summary := "Auto-allowed by " + word + " " + strings.Join(approval.RuleIDs, ", ") + ": " + approval.Summary
+	detail := map[string]any{"approval": approval.ID, "rule_ids": approval.RuleIDs, "patterns": patterns, "reason": approval.StatusReason, "risk": approval.Risk}
+	if service := w.jobs.Load(); service != nil && approval.JobID != "" {
+		if err := service.Journal(ctx, approval.JobID, jobs.EventHook, summary, detail); err != nil {
+			logger.Warn("journalling an auto-allow on the job", "job", approval.JobID, "err", err)
+		}
+	}
+	if w.journal != nil {
+		detail["job"] = approval.JobID
+		w.journal.Add(ctx, journal.KindApproval, summary, detail)
+	}
 }
 
 // runApprovals recovers what a previous process left pending, then sweeps (expiry, hooks that
