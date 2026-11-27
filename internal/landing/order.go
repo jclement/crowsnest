@@ -80,9 +80,11 @@ func isConfig(lower, base, ext string) bool {
 }
 
 // Order sorts files for reading: files the walkthrough names first, in the order it names them,
-// then the rest by group, then by path. It returns a new slice.
+// then the rest by group, then by path. It returns a new slice, never nil: an empty list stays an
+// empty list (the Review tab of a merged branch has no files, and the browser reads "files": []).
 func Order(files []FileChange, walkthrough string) []FileChange {
-	out := append([]FileChange(nil), files...)
+	out := make([]FileChange, len(files))
+	copy(out, files)
 	mention := map[string]int{}
 	lower := walkthrough
 	for _, file := range out {
