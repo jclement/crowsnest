@@ -165,6 +165,13 @@ export async function startInstance(options: InstanceOptions): Promise<Instance>
     proc.stderr?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
     try {
       await waitForHealth(baseURL, proc);
+      // Health answers as soon as the port is bound, which is now before the herdr session is
+      // connected (the server binds early so a port in use is reported at once). A real-herdr spec
+      // that runs `herdr workspace create` straight away then found "no herdr server is running".
+      // The start-up log says when the session is there.
+      // An instance with no login starts in setup mode and connects herdr only once setup is done,
+      // so that milestone counts as ready too.
+      if (!options.demo) await waitForLog(log, proc, ["connected to herdr", "LOCKED in setup mode"]);
     } catch (error) {
       proc.kill("SIGKILL");
       throw new Error(`${(error as Error).message}\n--- crowsnest log ---\n${log.join("")}`, { cause: error });
@@ -213,6 +220,18 @@ export function demoDir(instance: Instance): string {
   if (dirs.length === 0) throw new Error("no demo state directory yet");
   // After a restart there are two (the killed one is never cleaned up); the newest wins.
   return join(tmp, dirs.sort().at(-1) as string);
+}
+
+/** Waits until the instance's own log contains one of `needles` (its start-up milestones are logged). */
+async function waitForLog(log: string[], child: ChildProcess, needles: string[]): Promise<void> {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const text = log.join("");
+    if (needles.some((needle) => text.includes(needle))) return;
+    if (child.exitCode !== null) throw new Error(`crowsnest exited with ${child.exitCode} before logging any of ${JSON.stringify(needles)}`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error(`crowsnest logged none of ${JSON.stringify(needles)} within ${READY_TIMEOUT_MS} ms`);
 }
 
 async function waitForHealth(baseURL: string, child: ChildProcess): Promise<void> {
