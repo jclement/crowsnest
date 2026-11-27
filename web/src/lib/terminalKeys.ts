@@ -51,8 +51,12 @@ export const MAX_FONT_SIZE = 24;
  * Mono reads the same in the browser.
  */
 export const DEFAULT_FONT_SIZE = 12;
-/** Phone and touch default: a size larger, since a phone is held further from small text. */
-export const TOUCH_FONT_SIZE = 13;
+/**
+ * Phone and touch default. It was 13 (a size larger than the desktop's), which left a pane 44
+ * columns wide at 390 px: Claude Code's and herdr's screens do not fit that (R4 Fable 3.2). At 11
+ * the same phone gets about 54 columns; A+ is one tap away and the choice is remembered.
+ */
+export const TOUCH_FONT_SIZE = 11;
 
 /** The default for this device: the touch size on a coarse pointer or below md, else the desktop size. */
 export function defaultFontSize(): number {

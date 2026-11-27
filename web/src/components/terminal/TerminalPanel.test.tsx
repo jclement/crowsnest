@@ -31,6 +31,7 @@ vi.mock("./XTerm", () => ({
       focus: () => {},
       reconnect: () => (stub.reconnects += 1),
       applicationCursor: () => stub.appCursor,
+      copyText: () => "line one\nline two",
     });
     stub.type = (data) => stub.sent.push(props.transformInput ? props.transformInput(data) : data);
     stub.setState = (state) => props.onState?.(state);
@@ -89,6 +90,17 @@ describe("TerminalPanel", () => {
     Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
     await user.click(screen.getByRole("button", { name: "Paste" }));
     expect(await screen.findByText("Paste is not available here")).toBeInTheDocument();
+  });
+
+  it("copies the selection or the screen, and sends ^C in one tap", async () => {
+    const user = userEvent.setup();
+    renderWithClient(<TerminalPanel path="/api/v1/term/tui" label="t" fill="fixed" />);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await user.click(screen.getByRole("button", { name: /^Copy/ }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("line one\nline two"));
+    await user.click(screen.getByRole("button", { name: /^\^C/ }));
+    expect(stub.sent).toContain("\x03");
   });
 
   it("shows the connection state and offers Reconnect after an exit", async () => {

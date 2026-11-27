@@ -71,6 +71,23 @@ export function TerminalPanel({ path, label, fill, className }: TerminalPanelPro
     );
   };
 
+  const copy = () => {
+    const text = handle.current?.copyText() ?? "";
+    const clipboard = navigator.clipboard as Clipboard | undefined;
+    if (!text || !clipboard?.writeText) {
+      toast.show({ tone: "warning", title: "Copy is not available here", description: "Long-press the terminal to select and copy." });
+      return;
+    }
+    clipboard.writeText(text).then(
+      () => toast.show({ tone: "success", title: "Copied", description: `${text.split("\n").length} lines` }),
+      () => toast.show({ tone: "warning", title: "The browser blocked the clipboard", description: "Long-press the terminal to select and copy." }),
+    );
+  };
+  const interrupt = () => {
+    setCtrl(false);
+    handle.current?.send("\x03");
+  };
+
   return (
     <div
       ref={rootRef}
@@ -97,7 +114,16 @@ export function TerminalPanel({ path, label, fill, className }: TerminalPanelPro
         className="flex-1"
       />
       {showKeyBar && (
-        <KeyBar onKey={pressKey} ctrl={ctrl} onCtrlChange={setCtrl} onPaste={paste} fontSize={fontSize} onFontSize={changeFontSize} />
+        <KeyBar
+          onKey={pressKey}
+          ctrl={ctrl}
+          onCtrlChange={setCtrl}
+          onPaste={paste}
+          onCopy={copy}
+          onInterrupt={interrupt}
+          fontSize={fontSize}
+          onFontSize={changeFontSize}
+        />
       )}
     </div>
   );
