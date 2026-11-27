@@ -28,7 +28,7 @@ type changesResolver struct {
 
 func (r changesResolver) jobTarget(ctx context.Context, job jobs.Job) changes.Target {
 	target := changes.Target{Subject: job.ID, Kind: changes.KindJob, JobID: job.ID, JobState: string(job.State), Label: job.ID + ": " + job.Title,
-		ProjectID: job.ProjectID, BaseBranch: job.BaseBranch, Root: job.WorkDir}
+		ProjectID: job.ProjectID, BaseBranch: job.BaseBranch, Root: job.WorkDir, Walkthrough: job.WalkthroughMD}
 	if target.Root == "" {
 		target.Root = job.Dir
 	}

@@ -5,8 +5,18 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 import { whoSearch, type DiffWho } from "../../lib/changes";
 import { SkeletonRows } from "../ui/Skeleton";
+import type { DiffViewerProps } from "./DiffViewer";
 
 const DiffViewer = lazy(() => import("./DiffViewer").then((module) => ({ default: module.DiffViewer })));
+
+/** The viewer, loaded on first use. */
+export function LazyDiffViewer(props: DiffViewerProps) {
+  return (
+    <Suspense fallback={<SkeletonRows rows={6} label="Loading the diff viewer" />}>
+      <DiffViewer {...props} />
+    </Suspense>
+  );
+}
 
 export function EmbeddedDiff({ who, className }: { who: DiffWho; className?: string }) {
   const navigate = useNavigate();

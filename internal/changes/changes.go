@@ -93,6 +93,8 @@ type Target struct {
 	BaseCommit string `json:"-"`
 	// Since is when the job's agent or the lead's conversation started.
 	Since time.Time `json:"-"`
+	// Walkthrough is the job agent's account: files it names come first, in its order.
+	Walkthrough string `json:"-"`
 	// BaseRef is the base asked for on a main checkout (BaseUpstream, BaseSession or a ref).
 	BaseRef string `json:"-"`
 }
@@ -516,8 +518,22 @@ func (s *Service) summarize(target Target, r *reading, marks []store.DiffMark, s
 			summary.Viewed++
 		}
 	}
+	// The reading order (landing.Order's): files the walkthrough names first, in its order; then
+	// schema → server → API → client → UI → tests → docs → config, churn last.
+	mention := func(file File) int {
+		if target.Walkthrough == "" || file.Churn {
+			return -1
+		}
+		return strings.Index(target.Walkthrough, file.Path)
+	}
 	sort.SliceStable(summary.Files, func(i, j int) bool {
 		a, b := summary.Files[i], summary.Files[j]
+		if ma, mb := mention(a), mention(b); ma >= 0 || mb >= 0 {
+			if ma >= 0 && mb >= 0 {
+				return ma < mb
+			}
+			return ma >= 0
+		}
 		if ra, rb := landing.GroupRank(a.Group), landing.GroupRank(b.Group); ra != rb {
 			return ra < rb
 		}

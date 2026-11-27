@@ -9,7 +9,7 @@ import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect } from "react";
 import { type ChangeScope } from "../lib/changes";
 import { whoFromSearch, type DiffSearch } from "../lib/diffSearch";
-import { DiffViewer } from "../components/changes/DiffViewer";
+import { LazyDiffViewer as DiffViewer } from "../components/changes/JobChanges";
 import { Banner } from "../components/ui/Banner";
 import { Button } from "../components/ui/Button";
 

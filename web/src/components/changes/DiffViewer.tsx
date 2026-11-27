@@ -94,13 +94,27 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
   const [listSheet, setListSheet] = useState(false);
   const wide = useMediaQuery("(min-width: 1024px)");
   const phone = !useMediaQuery("(min-width: 768px)");
-  const split = prefs.split && wide;
   const scroller = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
   const summaryQuery = useDiffSummary(who, scope, base);
   const summary = summaryQuery.data;
   const { mark, unmark } = useMarks(who, scope, base);
+  // Side by side only when the viewer itself is wide (the job panel is narrower than the window).
+  const [roomy, setRoomy] = useState(true);
+  const summaryLoaded = !!summaryQuery.data;
+  const sectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = sectionRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => setRoomy((entries[0]?.contentRect.width ?? 0) >= 960));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [summaryLoaded, phone]);
+  const split = prefs.split && wide && roomy;
+  // A narrow viewer (the job panel) starts with the file list hidden, to give the diff the room.
+  const [narrowList, setNarrowList] = useState(false);
+  const listShown = roomy ? prefs.listOpen : narrowList;
 
   const setPrefs = (change: Partial<ViewerPrefs>) =>
     setPrefsState((now) => {
@@ -114,7 +128,9 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
   const stateNow = useCallback(() => ({ scope, file: current, base }), [scope, current, base]);
   useEffect(() => onState?.({ scope, file: current, base }), [scope, current, base, onState]);
 
-  const isOpen = (file: DiffFile) => open[file.path] ?? !(file.viewed || file.churn || file.too_large);
+  // Open or collapsed is remembered per version of a file: one that changes again opens again.
+  const openKey = (file: DiffFile) => file.path + "\x00" + file.hash;
+  const isOpen = (file: DiffFile) => open[openKey(file)] ?? !(file.viewed || file.churn || file.too_large);
   const sinceOn = (file: DiffFile) => file.changed_since_viewed && file.since_available && (since[file.path] ?? scope === "since_viewed");
 
   // ---- Position: the current file follows the scroll, and is kept for fullscreen and new tabs.
@@ -129,9 +145,12 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
     requestAnimationFrame(go);
     setTimeout(go, 400); // again once the bodies above it have loaded
   }, [summary, who, initialFile, phone]);
+  // A jump (a click in the list, j/k) owns the current file for a moment: the scroll it causes,
+  // clamped at the end of the list, must not hand "current" to a neighbour.
+  const pinned = useRef(0);
   const onScroll = useCallback(() => {
     const container = scroller.current;
-    if (!container || phone) return;
+    if (!container || phone || Date.now() < pinned.current) return;
     const top = container.getBoundingClientRect().top;
     let found: { path: string; offset: number } | null = null;
     for (const section of container.querySelectorAll<HTMLElement>("[data-file-section]")) {
@@ -150,6 +169,7 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       if (!path) return;
       setCurrent(path);
       writePosition(who, { file: path, offset: 0 });
+      pinned.current = Date.now() + 600;
       if (!phone) scrollToFile(scroller.current, path, 0);
     },
     [who, phone],
@@ -159,18 +179,14 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
     (file: DiffFile) => {
       const onError = (error: Error) => toast.show({ tone: "danger", title: "Could not change the mark", description: error.message });
       if (file.viewed) {
-        setOpen((now) => ({ ...now, [file.path]: true }));
+        setOpen((now) => ({ ...now, [file.path + "\x00" + file.hash]: true }));
         unmark.mutate([file.path], { onError });
       } else {
-        setOpen((now) => ({ ...now, [file.path]: false }));
+        setOpen((now) => ({ ...now, [file.path + "\x00" + file.hash]: false }));
         mark.mutate({ files: [{ path: file.path, hash: file.hash }] }, { onError });
-        if (phone) {
-          const next = files[step(files.findIndex((entry) => entry.path === file.path), 1, files.length)];
-          if (next && next.path !== file.path && !prefs.hideViewed) setCurrent(next.path);
-        }
       }
     },
-    [mark, unmark, toast, phone, files, prefs.hideViewed],
+    [mark, unmark, toast],
   );
 
   const fullscreenToggle = useCallback(() => {
@@ -255,15 +271,17 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       setBase={setBase}
       prefs={prefs}
       setPrefs={setPrefs}
-      wide={wide}
+      wide={wide && roomy}
       phone={phone}
+      listShown={listShown}
+      onToggleList={() => (roomy ? setPrefs({ listOpen: !prefs.listOpen }) : setNarrowList(!narrowList))}
       fullscreen={!!fullscreen}
       canFullscreen={!!onFullscreen}
       onFullscreen={fullscreenToggle}
       onRefresh={() => void refresh()}
       refreshing={summaryQuery.isFetching}
       onOpenList={() => setListSheet(true)}
-      onExpandAll={(value) => setOpen(Object.fromEntries((summary.files ?? []).map((file) => [file.path, value])))}
+      onExpandAll={(value) => setOpen(Object.fromEntries((summary.files ?? []).map((file) => [openKey(file), value])))}
       onMarkAll={() =>
         mark.mutate({ files: [], all: true }, { onError: (error) => toast.show({ tone: "danger", title: "Could not mark them", description: error.message }) })
       }
@@ -293,9 +311,12 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       scope={scope}
       file={file}
       open={phone || isOpen(file)}
-      onOpen={(value) => setOpen((now) => ({ ...now, [file.path]: value }))}
+      onOpen={(value) => setOpen((now) => ({ ...now, [openKey(file)]: value }))}
       since={sinceOn(file)}
-      onSince={(value) => setSince((now) => ({ ...now, [file.path]: value }))}
+      onSince={(value) => {
+        setSince((now) => ({ ...now, [file.path]: value }));
+        setOpen((now) => ({ ...now, [openKey(file)]: true }));
+      }}
       split={split}
       wrap={prefs.wrap}
       ignoreWhitespace={prefs.ignoreWhitespace}
@@ -348,14 +369,14 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
   }
 
   return (
-    <section aria-label={`Changes: ${summary.label}`} className={cn("flex min-h-0 flex-col overflow-hidden rounded border border-border bg-surface", fullscreen ? "h-full rounded-none border-0" : "h-[78vh] min-h-[28rem]", className)}>
+    <section ref={sectionRef} aria-label={`Changes: ${summary.label}`} className={cn("flex min-h-0 flex-col overflow-hidden rounded border border-border bg-surface", fullscreen ? "h-full rounded-none border-0" : "h-[78vh] min-h-[28rem]", className)}>
       {title}
       {toolbar}
       <div className="flex min-h-0 flex-1">
-        {prefs.listOpen && <aside aria-label="Changed files" className="flex w-64 shrink-0 flex-col border-r border-border bg-surface-raised xl:w-72">{list}</aside>}
+        {listShown && <aside aria-label="Changed files" className="flex w-64 shrink-0 flex-col border-r border-border bg-surface-raised xl:w-72">{list}</aside>}
         <div ref={scroller} onScroll={onScroll} className="min-w-0 flex-1 overflow-auto" data-diff-scroller>
           {files.length === 0 ? empty : files.map(section)}
-          {files.length > 0 && <div className="h-[50vh]" aria-hidden />}
+          {files.length > 0 && <div className="h-[85vh]" aria-hidden />}
         </div>
       </div>
     </section>
@@ -365,6 +386,8 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
 // ---- Toolbar -----------------------------------------------------------------------------------
 
 interface ToolbarProps {
+  listShown: boolean;
+  onToggleList: () => void;
   summary: DiffSummary;
   scope: ChangeScope;
   setScope: (scope: ChangeScope) => void;
@@ -402,7 +425,7 @@ function Toolbar(props: ToolbarProps) {
             Files
           </Button>
         )}
-        {!phone && <IconButton icon={prefs.listOpen ? PanelLeftClose : PanelLeftOpen} label={prefs.listOpen ? "Hide the file list" : "Show the file list"} onClick={() => setPrefs({ listOpen: !prefs.listOpen })} />}
+        {!phone && <IconButton icon={props.listShown ? PanelLeftClose : PanelLeftOpen} label={props.listShown ? "Hide the file list" : "Show the file list"} onClick={props.onToggleList} />}
         <div role="radiogroup" aria-label="Which changes" className="flex flex-wrap gap-1">
           {summary.scopes.map((info) => (
             <button
@@ -448,20 +471,29 @@ function Toolbar(props: ToolbarProps) {
       <div className="flex flex-wrap items-center gap-0.5">
         <Toggle on={prefs.hideViewed} icon={prefs.hideViewed ? EyeOff : Eye} label="Hide viewed" onClick={() => setPrefs({ hideViewed: !prefs.hideViewed })} />
         {wide && <Toggle on={prefs.split} icon={prefs.split ? Columns2 : Rows3} label={prefs.split ? "Split" : "Unified"} onClick={() => setPrefs({ split: !prefs.split })} pressedLabel="Split view" />}
-        <Toggle on={prefs.ignoreWhitespace} icon={Space} label="Hide whitespace" onClick={() => setPrefs({ ignoreWhitespace: !prefs.ignoreWhitespace })} />
-        <Toggle on={prefs.wrap} icon={WrapText} label="Wrap" onClick={() => setPrefs({ wrap: !prefs.wrap })} />
+        <Toggle on={prefs.ignoreWhitespace} icon={Space} label="Hide whitespace" iconOnly={phone} onClick={() => setPrefs({ ignoreWhitespace: !prefs.ignoreWhitespace })} />
+        <Toggle on={prefs.wrap} icon={WrapText} label="Wrap" iconOnly={phone} onClick={() => setPrefs({ wrap: !prefs.wrap })} />
         {!phone && (
           <>
             <IconButton icon={ChevronsUpDown} label="Expand all files" onClick={() => props.onExpandAll(true)} />
             <IconButton icon={ChevronsDownUp} label="Collapse all files" onClick={() => props.onExpandAll(false)} />
           </>
         )}
-        <Button compact variant="ghost" icon={Check} onClick={props.onMarkAll} disabled={summary.total === 0 || summary.viewed === summary.total}>
-          Mark all viewed
-        </Button>
-        <Button compact variant="ghost" icon={X} onClick={props.onClearMarks} disabled={summary.viewed === 0}>
-          Clear marks
-        </Button>
+        {phone ? (
+          <>
+            <IconButton icon={Check} label="Mark all viewed" onClick={props.onMarkAll} disabled={summary.total === 0 || summary.viewed === summary.total} />
+            <IconButton icon={X} label="Clear marks" onClick={props.onClearMarks} disabled={summary.viewed === 0} />
+          </>
+        ) : (
+          <>
+            <Button compact variant="ghost" icon={Check} onClick={props.onMarkAll} disabled={summary.total === 0 || summary.viewed === summary.total}>
+              Mark all viewed
+            </Button>
+            <Button compact variant="ghost" icon={X} onClick={props.onClearMarks} disabled={summary.viewed === 0}>
+              Clear marks
+            </Button>
+          </>
+        )}
         <span className="ml-auto flex items-center">
           <span className="mr-1 hidden text-2xs text-muted md:inline" title={summary.base ? `base ${summary.base.slice(0, 10)}` : undefined}>
             {summary.base_label ? `vs ${summary.base_label}` : ""}
@@ -476,10 +508,19 @@ function Toolbar(props: ToolbarProps) {
   );
 }
 
-function Toggle({ on, icon, label, onClick, pressedLabel }: { on: boolean; icon: typeof Eye; label: string; onClick: () => void; pressedLabel?: string }) {
+function Toggle({ on, icon, label, onClick, pressedLabel, iconOnly }: { on: boolean; icon: typeof Eye; label: string; onClick: () => void; pressedLabel?: string; iconOnly?: boolean }) {
   return (
-    <Button compact variant="ghost" icon={icon} aria-pressed={on} aria-label={pressedLabel} onClick={onClick} className={cn(on && "bg-accent/10 text-heading")}>
-      {label}
+    <Button
+      compact
+      variant="ghost"
+      icon={icon}
+      aria-pressed={on}
+      aria-label={pressedLabel ?? (iconOnly ? label : undefined)}
+      title={iconOnly ? label : undefined}
+      onClick={onClick}
+      className={cn(on && "bg-accent/10 text-heading", iconOnly && "w-11")}
+    >
+      {!iconOnly && label}
     </Button>
   );
 }
@@ -607,7 +648,7 @@ function FileSection(props: FileSectionProps) {
           </button>
         )}
         <StatusBadge status={file.status} />
-        <h3 className="min-w-0 flex-1 break-all font-mono text-xs text-heading">
+        <h3 className="min-w-0 flex-1 basis-[55%] break-all font-mono text-xs text-heading">
           {file.old_path && file.old_path !== file.path ? (
             <>
               <span className="text-muted">{file.old_path}</span> → {file.path}

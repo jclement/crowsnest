@@ -83,13 +83,29 @@ export function useMarks(who: DiffWho, scope: ChangeScope, base: string) {
     void queryClient.invalidateQueries({ queryKey: ["changes", "summary", whoKey(who)] });
     void queryClient.invalidateQueries({ queryKey: changesKeys.progress });
   };
+  // The tick shows at once (optimistic); the server's answer replaces it, and a refusal (the file
+  // changed meanwhile) puts the summary back as the server has it.
+  const optimistic = (viewed: boolean, paths: string[] | "all") => {
+    const key = changesKeys.summary(who, scope, base);
+    void queryClient.cancelQueries({ queryKey: key });
+    queryClient.setQueryData<DiffSummary>(key, (summary) => {
+      if (!summary) return summary;
+      const files = summary.files.map((file) => (paths === "all" || paths.includes(file.path) ? { ...file, viewed, changed_since_viewed: viewed ? false : file.changed_since_viewed } : file));
+      return { ...summary, files, viewed: files.filter((file) => file.viewed).length };
+    });
+  };
+  const restore = () => void queryClient.invalidateQueries({ queryKey: ["changes", "summary", whoKey(who)] });
   const mark = useMutation({
     mutationFn: ({ files, all }: { files: { path: string; hash: string }[]; all?: boolean }) => changesApi.mark(who, scope, files, all, base),
+    onMutate: ({ files, all }) => optimistic(true, all ? "all" : files.map((file) => file.path)),
     onSuccess: settle,
+    onError: restore,
   });
   const unmark = useMutation({
     mutationFn: (paths: string[]) => changesApi.unmark(who, scope, paths, base),
+    onMutate: (paths) => optimistic(false, paths.length === 0 ? "all" : paths),
     onSuccess: settle,
+    onError: restore,
   });
   return { mark, unmark };
 }
