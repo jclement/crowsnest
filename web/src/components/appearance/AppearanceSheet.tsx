@@ -114,9 +114,9 @@ export function AppearanceBody() {
           <p className="text-2xs text-muted">
             {chosen ? "Chosen in this browser." : "Following the default for new browsers."}{" "}
             {chosen && (
-              <button type="button" className="text-accent underline underline-offset-2" onClick={() => clearThemeName()}>
+              <Button compact variant="ghost" className="text-accent" onClick={() => clearThemeName()}>
                 Follow the default
-              </button>
+              </Button>
             )}
           </p>
         </div>
