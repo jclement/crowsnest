@@ -41,7 +41,7 @@ func TestEscalations(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got := Escalations(now, tc.jobs)
-		if keys := keysOf(got); !slices.Equal(keys, tc.keys) && !(len(keys) == 0 && len(tc.keys) == 0) {
+		if keys := keysOf(got); !slices.Equal(keys, tc.keys) && (len(keys) != 0 || len(tc.keys) != 0) {
 			t.Errorf("%s: keys %v, want %v", tc.name, keys, tc.keys)
 		}
 	}
