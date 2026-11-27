@@ -27,9 +27,9 @@ export function ReviewPanel({ job }: { job: JobDetail }) {
   if (query.isError) return <Banner tone="danger">Could not read the review: {query.error.message}</Banner>;
   const view = query.data;
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       <LandCard job={job} view={view} />
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex min-w-0 flex-col gap-3">
           <Summary view={view} />
           <Files jobId={job.id} view={view} />
@@ -295,12 +295,12 @@ function Reviews({ view }: { view: ReviewView }) {
     <Card title="Review">
       <ol aria-label="Review rounds" className="flex flex-col gap-3">
         {view.reviews.map((round) => (
-          <li key={round.job_id}>
+          <li key={round.job_id || `round-${round.round}`}>
             <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
               <span className="font-semibold text-heading">Round {round.round}</span>
               <Chip tone={round.verdict === "approve" ? "success" : round.verdict === "" ? "accent" : "warning"}>{verdictText(round.verdict)}</Chip>
-              <Chip mono>{round.job_id}</Chip>
-              <Chip>{round.engine}</Chip>
+              {round.job_id && <Chip mono>{round.job_id}</Chip>}
+              {round.engine && <Chip>{round.engine}</Chip>}
             </div>
             {round.findings && <Markdown className="text-xs">{round.findings}</Markdown>}
           </li>

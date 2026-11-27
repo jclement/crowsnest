@@ -45,11 +45,12 @@ export function JobDetail({ id }: { id: string }) {
       <Tabs<DetailTab>
         id={`job-${job.id}`}
         label="Job views"
+        className="max-w-full overflow-x-auto"
         value={tab}
         onChange={setTab}
         items={[
           { value: "overview", label: "Overview" },
-          ...(hasReview(job) ? [{ value: "review" as const, label: readyToLand(job) ? "Review · land" : "Review", icon: GitCompareArrows }] : []),
+          ...(hasReview(job) ? [{ value: "review" as const, label: readyToLand(job) ? "Land" : "Review", icon: GitCompareArrows }] : []),
           { value: "conversation", label: "Conversation", icon: MessageSquare },
           { value: "terminal", label: "Terminal", icon: SquareTerminal },
         ]}

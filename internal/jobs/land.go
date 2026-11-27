@@ -117,6 +117,10 @@ func (s *Service) ReviewOf(ctx context.Context, id string) (ReviewView, error) {
 		}
 		view.Reviews = append(view.Reviews, round)
 	}
+	if len(view.Reviews) == 0 && job.ReviewMD != "" {
+		// The verdict is on the job even when its reviewer rows are not (seeded, or imported).
+		view.Reviews = append(view.Reviews, ReviewRound{Round: max(job.ReviewRound, 1), Verdict: job.ReviewVerdict, Findings: job.ReviewMD, State: StateDone})
+	}
 	view.Land = s.landOptions(job, view.Produced)
 	return view, nil
 }
