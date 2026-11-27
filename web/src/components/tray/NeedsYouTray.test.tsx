@@ -1,3 +1,4 @@
+import { isRoutine } from "../../lib/decision";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -81,7 +82,8 @@ describe("NeedsYouTray", () => {
     const user = userEvent.setup();
     const calls = stubTray([]);
     renderTray(<List />);
-    const choice = fixtureQuestions.find((q) => q.status === "open" && (q.kind === "confirm" || q.kind === "choice") && !q.multi)!;
+    // A routine one: a question with a diff or a long body opens its decision packet instead.
+    const choice = fixtureQuestions.find((q) => q.status === "open" && isRoutine(q))!;
     await user.click(await screen.findByRole("button", { name: new RegExp(choice.title.replace(/[?.*+()]/g, "\\$&")), expanded: false }));
     const option = choice.options[0]!;
     await user.click(screen.getByRole("button", { name: new RegExp(option.label.replace(/[?.*+()]/g, "\\$&")) }));

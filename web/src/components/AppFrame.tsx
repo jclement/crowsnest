@@ -127,7 +127,7 @@ export function AppFrame() {
           </div>
           {/* Not under Chat on a phone: its composer sticks to the bottom, and a footer below it
               would show up under the composer at the end of the conversation. */}
-          {pathname !== "/chat" && <Footer className="border-t border-border px-3 py-2 md:hidden" />}
+          {pathname !== "/chat" && pathname !== "/decide" && <Footer className="border-t border-border px-3 py-2 md:hidden" />}
         </main>
       </div>
       <TrayBar />

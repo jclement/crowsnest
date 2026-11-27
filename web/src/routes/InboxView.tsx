@@ -90,6 +90,7 @@ function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: st
   const questions = useQuestions("open");
   const navigate = useNavigate();
   const unsnooze = useAttentionAction();
+  const desktop = useMediaQuery(DESKTOP_QUERY);
   if (attention.isPending) return <SkeletonRows rows={5} label="Loading what needs you" />;
   if (attention.isError) return <LoadError message={attention.error.message} retry={() => void attention.refetch()} />;
   const items = activeItems(attention.data);
@@ -97,6 +98,12 @@ function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: st
   const notices = (questions.data ?? []).filter((question) => question.kind === "notice");
   const open = (item: AttentionItem) => {
     if (item.kind === "approval" || item.kind === "question" || item.kind === "dialog") {
+      // A phone opens the decision packet (answer bar in thumb reach, R4 Fable 3.3); the desktop
+      // keeps its list beside the detail.
+      if (!desktop) {
+        void navigate({ to: "/decide", search: { item: item.id } });
+        return;
+      }
       onSelect(item.kind === "question" ? (item.question?.id ?? item.id) : item.id);
       return;
     }

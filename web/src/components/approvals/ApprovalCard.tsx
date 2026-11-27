@@ -235,7 +235,8 @@ function Code({ children, label, compact }: { children: ReactNode; label: string
   );
 }
 
-function CallBody({ approval, compact }: { approval: Approval; compact?: boolean }) {
+/** The call itself (command, diff, URL, arguments), as the card shows it; the decision packet reuses it. */
+export function CallBody({ approval, compact }: { approval: Approval; compact?: boolean }) {
   const input = approval.tool_input;
   switch (toolKind(approval.tool_name)) {
     case "bash":

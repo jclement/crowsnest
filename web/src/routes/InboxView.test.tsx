@@ -20,7 +20,8 @@ function renderInbox(path = "/inbox") {
     component: InboxView,
   });
   const fleet = createRoute({ getParentRoute: () => root, path: "/fleet", component: () => <p>fleet</p> });
-  const router = createRouter({ routeTree: root.addChildren([inbox, fleet]), history: createMemoryHistory({ initialEntries: [path] }) });
+  const decide = createRoute({ getParentRoute: () => root, path: "/decide", component: () => <p>decision packet</p> });
+  const router = createRouter({ routeTree: root.addChildren([inbox, fleet, decide]), history: createMemoryHistory({ initialEntries: [path] }) });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
@@ -75,11 +76,17 @@ describe("InboxView", () => {
     expect(screen.getByText(/need you: \d+ blocking/)).toHaveTextContent(`${rows.length} need you`);
   });
 
-  it("opens a question with its body, diff and options", async () => {
+  it("on a phone, an open question opens its decision packet", async () => {
     stubInbox();
     const router = renderInbox();
     await userEvent.setup().click(await screen.findByRole("button", { name: /Apply the fleet cache refactor/ }));
-    await waitFor(() => expect(router.state.location.search).toEqual({ q: "q_1" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/decide"));
+    expect(router.state.location.search).toEqual({ item: "question:q_1" });
+  });
+
+  it("a link to a question opens it with its body, diff and options", async () => {
+    stubInbox();
+    renderInbox("/inbox?q=q_1");
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByRole("region", { name: "Diff of internal/fleet/cache.go" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Apply it/ })).toHaveTextContent("Recommended");

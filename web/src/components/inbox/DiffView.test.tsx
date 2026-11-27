@@ -17,6 +17,18 @@ describe("DiffView", () => {
     expect(kinds).toEqual(["same", "del", "add", "same", "add"]);
   });
 
+  it("unified: one narrow gutter (old number only for a deletion), no wrap until asked", async () => {
+    const { container } = renderWithClient(<DiffView files={[file]} layout="unified" />);
+    const rows = [...container.querySelectorAll("tr[data-kind]")].map((row) => row.querySelectorAll("td").length);
+    expect(new Set(rows)).toEqual(new Set([3]));
+    const deleted = container.querySelector("tr[data-kind=del]");
+    expect(deleted?.querySelector("td")?.textContent).toBe("2");
+    const table = container.querySelector("table[data-layout=unified]");
+    expect(table?.getAttribute("data-wrap")).toBe("off");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Wrap" }));
+    expect(container.querySelector("table[data-layout=unified]")?.getAttribute("data-wrap")).toBe("on");
+  });
+
   it("split: the old line beside the new one", () => {
     const { container } = renderWithClient(<DiffView files={[file]} layout="split" />);
     const changed = [...container.querySelectorAll("table[data-layout=split] tr")].find((row) => row.textContent?.includes("B"));

@@ -13,6 +13,7 @@
 //
 // Keyboard: g then n focuses the tray (expanding it); Tab moves through it; Enter opens an item,
 // and an open approval takes focus so y and n answer it. Nothing else in the app answers to y or n.
+import { isRoutine } from "../../lib/decision";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { BellDot, BellOff, Bot, ChevronDown, ChevronUp, Clock, ListTodo, MessageSquareWarning, MessagesSquare, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
@@ -37,8 +38,8 @@ import { useToast } from "../ui/toast-context";
 /** How many items the desktop stack shows before "Show all". */
 const STACK = 3;
 
-/** Views that show the whole queue themselves, so the tray would only repeat it (R4 Fable 1.5). */
-const QUEUE_VIEWS = new Set(["/", "/inbox"]);
+/** Views that show the whole queue themselves, so the tray would only repeat it (R4 Fable 1.5), and the decision packet, whose answer bar it would crowd. */
+const QUEUE_VIEWS = new Set(["/", "/inbox", "/decide"]);
 
 /** True on a view that already shows the queue. */
 function useOnQueueView(): boolean {
@@ -332,7 +333,7 @@ function RowBody({ item, cardRef, onDone, onNavigate }: { item: TrayItem; cardRe
         />
       );
     case "question":
-      return <QuickAnswer question={item.question} onOpen={() => go("/inbox", { q: item.question.id })} />;
+      return <QuickAnswer question={item.question} onOpen={() => go("/decide", { item: `question:${item.question.id}` })} />;
     case "dialog":
       return <QuickDialog paneId={item.agent.pane_id} name={item.agent.name || item.agent.pane_id} onOpen={() => go("/fleet", { agent: item.agent.pane_id })} />;
     case "job":
@@ -358,11 +359,15 @@ function RowBody({ item, cardRef, onDone, onNavigate }: { item: TrayItem; cardRe
   }
 }
 
-/** A confirm or choice question's options as buttons; anything else opens in the Inbox. */
+/**
+ * A routine confirm or choice question's options as buttons; anything else (and every question
+ * carrying a diff or a long body: R4 Codex P2, a consequential choice must not get a shorter path
+ * than its evidence) opens the decision packet.
+ */
 function QuickAnswer({ question, onOpen }: { question: Question; onOpen: () => void }) {
   const answer = useAnswerQuestion(question.id);
   const toast = useToast();
-  const quick = (question.kind === "confirm" || question.kind === "choice") && !question.multi;
+  const quick = isRoutine(question);
   return (
     <div className="flex flex-col gap-2">
       {question.body_md && <p className="line-clamp-3 break-words text-xs text-body">{plainPreview(question.body_md)}</p>}
@@ -388,8 +393,8 @@ function QuickAnswer({ question, onOpen }: { question: Question; onOpen: () => v
           ))}
         </ul>
       )}
-      <Button compact variant={quick ? "ghost" : "secondary"} onClick={onOpen}>
-        {quick ? "Open in the Inbox (add a note)" : "Open in the Inbox"}
+      <Button compact variant={quick ? "ghost" : "primary"} onClick={onOpen}>
+        {quick ? "Review (add a note)" : "Review the decision"}
       </Button>
     </div>
   );

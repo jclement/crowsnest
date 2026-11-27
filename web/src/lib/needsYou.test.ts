@@ -50,7 +50,7 @@ describe("attention helpers", () => {
   });
 
   it("links each kind to where it opens in full", () => {
-    expect(itemLink(item)).toEqual({ to: "/inbox", search: { q: "dialog:w3:p1" } });
+    expect(itemLink(item)).toEqual({ to: "/decide", search: { item: "dialog:w3:p1" } });
     expect(itemLink({ ...item, id: "job:j_5", kind: "job" })).toEqual({ to: "/jobs", search: { job: "j_5" } });
   });
 
