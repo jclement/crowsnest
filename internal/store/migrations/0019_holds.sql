@@ -50,3 +50,9 @@ ALTER TABLE job_checks ADD COLUMN definition_changed TEXT NOT NULL DEFAULT '';
 ALTER TABLE jobs ADD COLUMN fix_applied INTEGER NOT NULL DEFAULT 0;
 UPDATE jobs SET fix_applied = COALESCE((SELECT MAX(f.id) FROM jobs f WHERE f.fix_of = jobs.id
     AND f.state IN ('done', 'failed', 'cancelled')), 0);
+
+-- land_approved_at marks a land request the human allowed and crowsnest has not yet finished
+-- (R6-C10, R5-C09): the approval is a claimed step, not consumed before the land runs. Recovery
+-- finds it, checks whether the land already happened (a merge is verified in the main checkout),
+-- and finishes or drops it with the outcome on the timeline.
+ALTER TABLE jobs ADD COLUMN land_approved_at INTEGER NOT NULL DEFAULT 0;

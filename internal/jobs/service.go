@@ -190,6 +190,9 @@ type Service struct {
 	checksMu sync.Mutex
 	checks   map[string]bool // jobs whose check this process is running (accept.go)
 
+	landingMu  sync.Mutex
+	landingNow map[string]bool // jobs whose allowed land this process is running (landrequest.go)
+
 	watchMu sync.Mutex
 	watch   map[string]*jobWatch // per-job supervisor memory: spinning samples, budget reads (spinning.go)
 

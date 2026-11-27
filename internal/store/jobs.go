@@ -131,6 +131,8 @@ type JobRecord struct {
 	PendingFeedback string
 	// FixApplied is the newest finished fix job applied to this job (migration 0019, R6-C11).
 	FixApplied int64
+	// LandApprovedAt marks an allowed land request not yet finished (migration 0019, R6-C10).
+	LandApprovedAt time.Time
 }
 
 // JobEventRecord is one row of job_events.
@@ -189,7 +191,7 @@ func jobColumns(r *JobRecord) []column {
 		textCol("tree_hash", &r.TreeHash), timeCol("tree_changed_at", &r.TreeChangedAt),
 		textCol("land_token", &r.LandToken), timeCol("land_requested_at", &r.LandRequestedAt),
 		textCol("holds_json", &r.HoldsJSON), textCol("pending_feedback", &r.PendingFeedback),
-		int64Col("fix_applied", &r.FixApplied),
+		int64Col("fix_applied", &r.FixApplied), timeCol("land_approved_at", &r.LandApprovedAt),
 	}
 	return cols
 }

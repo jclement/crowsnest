@@ -511,3 +511,13 @@ func CheckDefinitionChanges(ctx context.Context, workDir, base, baseCommit strin
 	}
 	return changed
 }
+
+// ContainsCommit reports whether branch (a local branch of the checkout at dir) already contains
+// commit: how crowsnest verifies, after a restart, that an approved merge happened (R6-C10).
+func ContainsCommit(ctx context.Context, dir, branch, commit string) bool {
+	if branch == "" || commit == "" {
+		return false
+	}
+	_, err := git(ctx, dir, "merge-base", "--is-ancestor", commit, "refs/heads/"+branch)
+	return err == nil
+}

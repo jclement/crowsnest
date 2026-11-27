@@ -66,7 +66,10 @@ func (s *Service) RequestLand(ctx context.Context, id, action string, caller que
 	head := ""
 	if action != LandDiscard && job.WorkDir != "" {
 		// The request is for the branch as it is now (R5-S4): Allow lands this commit or nothing.
-		head, _ = landing.Head(ctx, job.WorkDir)
+		// A head that cannot be read refuses the request rather than store one with no pin (R6-S11).
+		if head, err = landing.Head(ctx, job.WorkDir); err != nil || head == "" {
+			return questions.Question{}, invalid("crowsnest could not read job %s's commit, so it cannot pin the land request to it; try again", job.ID)
+		}
 	}
 	token, err := s.reserveLandRequest(ctx, id, action, head)
 	if err != nil {
@@ -186,6 +189,7 @@ func (s *Service) dropLandRequest(ctx context.Context, id, token, why string) {
 // clearLandRequest removes every trace of a request from the record.
 func clearLandRequest(r *store.JobRecord) {
 	r.LandRequest, r.LandToken, r.LandQuestionID, r.LandRequestedAt, r.LandHead = "", "", 0, time.Time{}, ""
+	r.LandApprovedAt = time.Time{}
 }
 
 // landAnswer is what step 4 needs from a settled question, from the callback or the database.
@@ -215,26 +219,96 @@ func (s *Service) applyLandAnswer(ctx context.Context, jobID string, answer land
 		return
 	}
 	allowed := answer.status == string(questions.StatusAnswered) && answer.key == "allow" && strings.TrimSpace(answer.note) == ""
-	var action, head string
 	_, err := s.mutate(ctx, jobID, func(r *store.JobRecord, c *change) error {
 		if r.LandRequest == "" || r.LandToken != token || answer.context[questions.ContextLandAction] != r.LandRequest {
 			return errStaleLandAnswer
 		}
-		action, head = r.LandRequest, r.LandHead
-		clearLandRequest(r)
-		if allowed {
-			c.event(EventLand, "You allowed the request to "+landVerb(action)+" ("+answer.label+")", nil)
-		} else {
-			c.event(EventLand, "You did not allow the request to "+landVerb(action)+" ("+answer.label+" "+answer.status+")", nil)
+		if !r.LandApprovedAt.IsZero() {
+			return errStaleLandAnswer // already allowed: the claimed step below owns it
 		}
+		if allowed {
+			// Not consumed yet (R6-C10): the allowed request becomes a claimed step, kept until
+			// Land records its outcome, so a crash in between leaves it for recovery.
+			r.LandApprovedAt = s.opts.Now()
+			c.event(EventLand, "You allowed the request to "+landVerb(r.LandRequest)+" ("+answer.label+")", nil)
+			return nil
+		}
+		c.event(EventLand, "You did not allow the request to "+landVerb(r.LandRequest)+" ("+answer.label+" "+answer.status+")", nil)
+		clearLandRequest(r)
 		return nil
 	})
 	if err != nil || !allowed {
 		return
 	}
-	if _, err := s.LandWith(ctx, jobID, action, "you, as an agent asked", LandFlags{Head: head}); err != nil {
-		_ = s.Journal(ctx, jobID, EventLand, "The land you allowed was refused: "+oneLine(err.Error(), 240), nil)
+	s.runApprovedLand(ctx, jobID, token)
+}
+
+// landApprovedGrace is how long an allowed land may run in the process that started it before
+// recovery treats it as abandoned (crowsnest stopped mid-land).
+const landApprovedGrace = 2 * time.Minute
+
+// runApprovedLand carries out an allowed land request (R6-C10) and settles the claim with the
+// outcome: landed (recordLanded clears it), or refused or failed (cleared here, the reason on the
+// timeline). Recovery calls it for a claim whose process is gone, after checking whether the
+// land already happened.
+func (s *Service) runApprovedLand(ctx context.Context, jobID, token string) {
+	if !s.startLanding(jobID) {
+		return // this process is already landing it
 	}
+	defer s.endLanding(jobID)
+	record, err := s.opts.Store.GetJob(ctx, mustParse(jobID))
+	if err != nil || record.LandToken != token || record.LandApprovedAt.IsZero() {
+		return
+	}
+	action, head := record.LandRequest, record.LandHead
+	if action == LandMerge && record.LandState == "" && landing.ContainsCommit(ctx, mainCheckoutOf(ctx, record.Dir), record.BaseBranch, head) {
+		// The merge happened before crowsnest could record it: record it, do not merge again.
+		if _, err := s.recordLanded(ctx, jobID, LandedMerged, "Merged into "+record.BaseBranch+" ("+shortHash(head)+"; found merged after a restart)", "you, as an agent asked"); err == nil {
+			return
+		}
+	}
+	if record.LandState == "" {
+		if _, err := s.LandWith(ctx, jobID, action, "you, as an agent asked", LandFlags{Head: head}); err == nil {
+			return
+		} else {
+			_ = s.Journal(ctx, jobID, EventLand, "The land you allowed was refused: "+oneLine(err.Error(), 240), nil)
+		}
+	}
+	_, _ = s.mutate(ctx, jobID, func(r *store.JobRecord, _ *change) error {
+		if r.LandToken != token {
+			return errSkip
+		}
+		clearLandRequest(r)
+		return nil
+	})
+}
+
+// mainCheckoutOf is the repository's main checkout for dir ("" when it cannot be found).
+func mainCheckoutOf(ctx context.Context, dir string) string {
+	main, err := landing.MainCheckout(ctx, dir)
+	if err != nil {
+		return ""
+	}
+	return main
+}
+
+func (s *Service) startLanding(id string) bool {
+	s.landingMu.Lock()
+	defer s.landingMu.Unlock()
+	if s.landingNow == nil {
+		s.landingNow = map[string]bool{}
+	}
+	if s.landingNow[id] {
+		return false
+	}
+	s.landingNow[id] = true
+	return true
+}
+
+func (s *Service) endLanding(id string) {
+	s.landingMu.Lock()
+	defer s.landingMu.Unlock()
+	delete(s.landingNow, id)
 }
 
 // ReconcileLandRequests repairs every waiting land request from the database (serve calls it at
@@ -255,6 +329,15 @@ func (s *Service) ReconcileLandRequests(ctx context.Context) {
 
 func (s *Service) reconcileLandRequest(ctx context.Context, r store.JobRecord) {
 	id := FormatID(r.ID)
+	if !r.LandApprovedAt.IsZero() {
+		// An allowed land whose outcome was never recorded (R6-C10): finish it, once its own
+		// process has had time to.
+		if s.opts.Now().Sub(r.LandApprovedAt) >= landApprovedGrace {
+			_ = s.Journal(ctx, id, EventLand, "An allowed land had not finished (crowsnest stopped); finishing it", nil)
+			s.runApprovedLand(ctx, id, r.LandToken)
+		}
+		return
+	}
 	var question store.QuestionRecord
 	var err error
 	if r.LandQuestionID != 0 {

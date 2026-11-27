@@ -45,6 +45,11 @@ func (s *Service) AdoptForStanding(ctx context.Context, input AdoptInput, caller
 	}
 	now := s.opts.Now()
 	record.ProjectID, record.PaneID, record.AgentName = agent.ProjectID, agent.PaneID, agent.Name
+	// The brief is the agent's words, so the job is the agent's, not the human's (R6-S11).
+	record.Origin = OriginOrchestrator
+	if agent.ProjectID != 0 {
+		record.Origin = agent.Name
+	}
 	record.State, record.BriefSent = string(StateRunning), true
 	record.StartedAt, record.LastActivityAt = now, now
 	record.Progress = "Recorded from conversation"
