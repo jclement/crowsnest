@@ -69,6 +69,9 @@ func (s *Service) startHoldLocked(ctx context.Context, r store.JobRecord) string
 		// Start anyway included: raising that budget is the way past it.
 		return holdPrefix + hold.Why
 	}
+	if why := s.ancestorBudgetHold(ctx, r); why != "" {
+		return holdPrefix + why
+	}
 	if r.StartAnyway {
 		return ""
 	}
@@ -154,6 +157,9 @@ func (s *Service) StartAnyway(ctx context.Context, id string) (Job, error) {
 		}
 		if hold, ok := humanHold(*r); ok {
 			return invalid("job %s is held (%s: %s); Start anyway does not pass that: lift it first (raise the budget)", FormatID(r.ID), hold.Kind, oneLine(hold.Why, 160))
+		}
+		if why := s.ancestorBudgetHold(ctx, *r); why != "" {
+			return invalid("job %s is held (%s); Start anyway does not pass that", FormatID(r.ID), why)
 		}
 		r.StartAnyway = true
 		if Cause(r.Cause) == CauseHeld {

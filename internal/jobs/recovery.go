@@ -79,6 +79,7 @@ func (s *Service) Tick(ctx context.Context) {
 	s.DispatchStanding(ctx)
 	s.ReconcileLandRequests(ctx) // R5-C09: requests sit on finished jobs, which the live pass skips
 	s.reconcileFixes(ctx)        // R6-C11: a finished rebase whose parent never took it in
+	s.reconcileBudgetHolds(ctx)  // R7-C02: the holds below an exhausted budget, from its own hold
 	// The review gate's own states (R5-C05): in_review is not a live state of the pass below.
 	if err := s.eachLive(ctx, []State{StateInReview}, func(record store.JobRecord) { s.reconcileReview(ctx, record) }); err != nil && ctx.Err() == nil {
 		s.opts.Logger.Warn("supervisor: listing jobs in review", "err", err)

@@ -200,6 +200,52 @@ func TestParentBudgetHoldsQueuedChild(t *testing.T) {
 	}
 }
 
+// TestBudgetHoldsBelowAreRecoveredFromTheParent is R7-C02: crowsnest saved the parent's own budget
+// hold and then crashed before the walk reached the queued child and grandchild. The launch reads
+// the ancestors and refuses (Start anyway too), and the next tick puts the holds back.
+func TestBudgetHoldsBelowAreRecoveredFromTheParent(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	parent := r.create(CreateInput{Brief: "Parent", Dir: t.TempDir()})
+	child, err := r.svc.Create(ctx, CreateInput{Brief: "Child", Dir: t.TempDir()}, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild, err := r.svc.Create(ctx, CreateInput{Brief: "Grandchild", Dir: t.TempDir()}, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{child.ID, grandchild.ID} {
+		r.edit(id, func(rec *store.JobRecord) {
+			rec.State, rec.PaneID, rec.AgentName, rec.BriefSent = string(StateQueued), "", "", false
+			rec.Cause, rec.CauseDetail = string(CauseHeld), "waiting for a slot"
+		})
+	}
+	// The parent's own hold, as applyBudget saves it, and no walk after it: the crash.
+	r.placeHold(parent.ID, HoldBudget, "")
+	r.svc.mu.Lock()
+	why := r.svc.startHoldLocked(ctx, r.record(grandchild.ID))
+	r.svc.mu.Unlock()
+	if !strings.HasPrefix(why, holdPrefix) {
+		t.Fatalf("the grandchild would start past its grandparent's budget: %q", why)
+	}
+	if _, err := r.svc.StartAnyway(ctx, child.ID); err == nil {
+		t.Fatal("Start anyway passed a budget hold above the job")
+	}
+	r.svc.Tick(ctx)
+	for _, id := range []string{child.ID, grandchild.ID} {
+		if hold, ok := holdOf(r.record(id), HoldBudget); !ok || hold.From != parent.ID {
+			t.Fatalf("%s was not held from %s after a tick: %s", id, parent.ID, r.record(id).HoldsJSON)
+		}
+	}
+	// The walk cut short half way: the child held, the grandchild not. A tick finishes it.
+	r.edit(grandchild.ID, func(rec *store.JobRecord) { rec.HoldsJSON = "" })
+	r.svc.Tick(ctx)
+	if !hasHold(r.record(grandchild.ID), HoldBudget) {
+		t.Fatal("a walk interrupted below an already-held child was not finished")
+	}
+}
+
 // TestCheckFailureWaitsForThePause (R6-C07): a check failing while the automation is paused does
 // not type anything to the builder; the finding is kept and typed after the resume.
 func TestCheckFailureWaitsForThePause(t *testing.T) {

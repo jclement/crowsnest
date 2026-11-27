@@ -1412,7 +1412,12 @@ not measured (Codex) shows "not measured", never zero, and is bounded by minutes
 - The limit is a `budget` hold (6.20). A parent's exhausted budget puts a hold from that parent
   on every live job below it, queued ones included, so a child waiting for a slot does not start
   past it, Start anyway included (R6-C05); a held job cannot delegate. Raising the parent's
-  budget lifts those holds; a child still over its own budget is held by that one.
+  budget lifts those holds; a child still over its own budget is held by that one. R7-C02: the
+  parent's own hold is the durable fact and the holds below are derived from it, so a crash or a
+  failed write in the walk loses nothing: every tick (and so the first after a start) walks again
+  below each job held by its own budget, going on below children already held; and a launch (Start
+  anyway too) reads the job's ancestors itself, refusing when one is held by its own budget or
+  cannot be read.
 
 ### 6.17 Spinning and the fleet's usage limit (built on `wip/accept`)
 

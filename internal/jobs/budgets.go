@@ -453,11 +453,13 @@ func (s *Service) exceedBelow(ctx context.Context, root, parent, what string, de
 			continue
 		}
 		id := FormatID(child.ID)
+		alreadyHeld := false
 		job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 			if State(r.State).Terminal() {
 				return errSkip
 			}
 			if held, ok := holdOf(*r, HoldBudget); ok && held.From == root {
+				alreadyHeld = true
 				return errSkip
 			}
 			if r.BudgetState != BudgetExceeded {
@@ -467,6 +469,11 @@ func (s *Service) exceedBelow(ctx context.Context, root, parent, what string, de
 			s.placeHoldLocked(r, c, HoldBudget, "Its parent "+parent+" used "+what+": raise "+root+"'s budget, or stop the job", root)
 			return nil
 		})
+		if alreadyHeld {
+			// Held by an earlier walk that may have been cut short below it (R7-C02): go on down.
+			s.exceedBelow(ctx, root, id, what, depth+1)
+			continue
+		}
 		if err != nil {
 			continue
 		}
@@ -474,6 +481,49 @@ func (s *Service) exceedBelow(ctx context.Context, root, parent, what string, de
 			"commit what is safe, call job_update with where you got to, and end your turn.", id, parent))
 		s.exceedBelow(ctx, root, id, what, depth+1)
 	}
+}
+
+// reconcileBudgetHolds derives the jobs below every job held by its own budget from that hold,
+// on every tick and so at the first one after a start (R7-C02). The walk after the hold is placed
+// is a side effect a crash or a failed child write can cut short; the parent's hold is the durable
+// fact, and this puts back whatever the walk did not finish. Placing an existing hold is a no-op.
+func (s *Service) reconcileBudgetHolds(ctx context.Context) {
+	var roots []store.JobRecord
+	if err := s.eachLive(ctx, append(append([]State{}, liveStates...), StateInReview), func(r store.JobRecord) {
+		if hasOwnBudgetHold(r) {
+			roots = append(roots, r)
+		}
+	}); err != nil && ctx.Err() == nil {
+		s.opts.Logger.Warn("supervisor: listing jobs for budget holds", "err", err)
+	}
+	for _, r := range roots {
+		what := strings.TrimPrefix(r.BudgetDetail, "Used ")
+		s.exceedBelow(ctx, FormatID(r.ID), FormatID(r.ID), what, 0)
+	}
+}
+
+// ancestorBudgetHold returns why r may not start because a job above it is held by its own
+// budget ("" when none is). It reads the ancestors themselves, so a child the walk has not reached
+// yet is still held (R7-C02); an ancestor that cannot be read holds it too (fail closed).
+func (s *Service) ancestorBudgetHold(ctx context.Context, r store.JobRecord) string {
+	parent := r.ParentID
+	for depth := 0; parent != 0; depth++ {
+		if depth >= maxBudgetDepth {
+			return ""
+		}
+		above, err := s.opts.Store.GetJob(ctx, parent)
+		if errors.Is(err, store.ErrNotFound) {
+			return ""
+		}
+		if err != nil {
+			return "crowsnest could not read job " + FormatID(parent) + " above it, whose budget covers it; it starts once that can be read"
+		}
+		if !State(above.State).Terminal() && hasOwnBudgetHold(above) {
+			return "job " + FormatID(above.ID) + " above it reached its budget: raise that budget, or stop the job"
+		}
+		parent = above.ParentID
+	}
+	return ""
 }
 
 // liftBudgetBelow lifts the budget holds root's exhausted budget put on the jobs below it, now
