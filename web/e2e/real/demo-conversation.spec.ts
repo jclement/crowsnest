@@ -52,6 +52,10 @@ test("Chat still round-trips with the demo orchestrator", async ({ page }) => {
   await page.goto(`${instance.baseURL}/chat`);
   const replies = page.getByRole("article", { name: "Reply" });
   await expect(replies.first()).toBeVisible();
+  // A reply to the previous test's message (same instance) may still be on its way: count only
+  // once the orchestrator is idle again, or that reply is counted as this one.
+  await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
+  await page.waitForTimeout(500);
   const before = await replies.count();
   await page.getByRole("textbox", { name: /Message to the orchestrator/ }).fill("merge check");
   await page.getByRole("button", { name: "Send" }).click();
