@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.332
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   ~/…/wip-phone/internal/orch/e2e-rc-0a1b2c3d4e · /rc
+
+⚠ 1 MCP server needs authentication · run /mcp
+
+  /remote-control is active · Continue here, on your phone, or at
+  https://claude.ai/code/session_01HfG6jKa9DeRt5UoP2wXs8N
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  Remote Control
+
+  This session is available in the Claude mobile app and at
+  https://claude.ai/code/session_01HfG6jKa9DeRt5UoP2wXs8N.
+
+    Disconnect this session
+    Show QR code   Scan with your phone to open this session
+  ❯ Continue
+
+  ↑/↓ to navigate · Enter to select · Esc to close

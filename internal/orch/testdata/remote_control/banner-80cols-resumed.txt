@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.332
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   ~/…/wip-phone/internal/orch/e2e-rc-0a1b2c3d4e · /rc
+
+⚠ 1 MCP server needs authentication · run /mcp
+
+  /remote-control is active · Continue here, on your phone, or at
+  https://claude.ai/code/session_01QzP4vRk8sTn2LmWx7yBc3D
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents

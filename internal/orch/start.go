@@ -206,7 +206,10 @@ func (o *Orchestrator) waitForShell(ctx context.Context, paneID string) error {
 func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (Status, error) {
 	o.mu.Lock()
 	o.launching = paneID
+	o.rcLook = rcLook{}
 	o.mu.Unlock()
+	// Every start forgets the last Remote Control link: it is captured again from this start.
+	o.update(func(s *Status) { s.RemoteControl, s.RemoteControlNote, s.RemoteControlURL = "", "", "" })
 	files, err := o.writeFiles(ctx, paneID)
 	if err != nil {
 		return o.fail(err)
@@ -230,16 +233,12 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 		// The id passed to Claude is the truth, not herdr's report: that can still be the
 		// previous conversation's, or missing, right after a launch (R1-C02).
 		o.remember(ctx, paneID, sessionID)
-		o.update(func(s *Status) {
-			s.RemoteControl, s.RemoteControlNote = launch.RemoteControlName, ""
-			s.Model, s.Engine = launch.Model, EngineClaude
-		})
-		o.mu.Lock()
-		o.rcCheckUntil = o.opts.Now().Add(remoteControlCheck)
-		o.mu.Unlock()
+		o.update(func(s *Status) { s.Model, s.Engine = launch.Model, EngineClaude })
+		o.startedRemoteControl(ctx, launch.RemoteControlName, sessionID)
 		return o.followLaunch(agent, sessionID, prior), nil
 	case errors.Is(err, herdr.ErrAgentNotReady):
 		o.remember(ctx, paneID, sessionID)
+		o.startedRemoteControl(ctx, launch.RemoteControlName, sessionID) // looked for once the prompt is answered
 		return o.update(func(s *Status) {
 			o.launch = newLaunchBaseline(sessionID, prior)
 			s.State, s.Detail, s.PaneID, s.SessionID = StateNeedsTerminal, needsTerminalDetail, paneID, sessionID

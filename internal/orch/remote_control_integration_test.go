@@ -84,7 +84,17 @@ func TestIntegrationClaudeRemoteControl(t *testing.T) {
 		t.Errorf("Claude did not report Remote Control active; see the log above")
 	}
 	o.Watch(ctx) // serve runs this on a timer
-	if note := o.Status().RemoteControlNote; note != orch.RemoteControlActive {
-		t.Errorf("status note %q, want %q", note, orch.RemoteControlActive)
+	got := o.Status()
+	if got.RemoteControlNote != orch.RemoteControlActive {
+		t.Errorf("status note %q, want %q (this login may not be able to use Remote Control; see the pane above)", got.RemoteControlNote, orch.RemoteControlActive)
+		return
 	}
+	// The link is captured from the real banner (DESIGN.md 7.10), and it is the one on the screen.
+	if !orch.ValidRemoteControlURL(got.RemoteControlURL) {
+		t.Fatalf("Remote Control is active but no session URL was captured: %+v", got)
+	}
+	if want := orch.ParseRemoteControlURL(screen); want != got.RemoteControlURL {
+		t.Errorf("captured %q, the screen shows %q", got.RemoteControlURL, want)
+	}
+	t.Logf("Remote Control session URL captured (%d characters)", len(got.RemoteControlURL))
 }
