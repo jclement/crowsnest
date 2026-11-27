@@ -1,13 +1,17 @@
 // ProjectForm: a project's fields, for "New project" and "Edit project" (DESIGN.md 21.1). The
-// directory comes from the remembered ones (GET /dirs, tappable on a phone, where a datalist is
-// poor) or free text; on a new project the name follows the directory's basename until it is
-// typed over. The defaults its jobs get (role, engine, model, isolation, permission mode) and when
+// directory comes from the folder picker (Browse…, DESIGN.md 4.23), the remembered ones (GET
+// /dirs, tappable on a phone, where a datalist is poor) or free text; on a new project the name
+// follows the directory's basename until it is typed over, and the folder's facts (GET
+// /browse/facts, for a picked or a typed path) prefill the check command and say what to know:
+// its remote host (Land opens pull requests only on GitHub), not a repository, overlaps. The defaults its jobs get (role, engine, model, isolation, permission mode) and when
 // its lead starts sit behind one disclosure. The server checks the rest (the directory exists, is
 // not $HOME, does not overlap another project) and its message is shown as it comes.
-import { ChevronDown, ChevronRight, FolderOpen } from "lucide-react";
-import { useId, useState, type FormEvent } from "react";
+import { ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-react";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import { factsSummary, folderWarnings, hostNote, isPathInput, type FolderFacts } from "../../lib/browse";
 import { leadStartLabels, permissionModes, suggestName, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
-import { useDirs, useRoles } from "../../lib/queries";
+import { useDirs, useFolderFacts, useRoles } from "../../lib/queries";
+import { DirPicker } from "../browse/DirPicker";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 
@@ -18,6 +22,17 @@ const labelClass = "flex flex-col gap-1 text-2xs font-medium text-muted";
 /** How many remembered directories are offered as buttons. */
 const DIR_CHOICES = 6;
 
+/** How long a typed directory must rest before its facts are fetched. */
+const TYPED_FACTS_DELAY_MS = 400;
+
+/** What a new project carries besides its fields: the check command, saved after creating it. */
+export interface ProjectExtras {
+  /** The check command as typed ("" automatic). */
+  checkCommand: string;
+  /** What crowsnest found by itself; saving the same again is not needed. */
+  detectedCheck: string;
+}
+
 interface ProjectFormProps {
   /** The project being edited; a new project when absent. */
   project?: Project;
@@ -25,15 +40,17 @@ interface ProjectFormProps {
   pending: boolean;
   /** The server's refusal, shown above the buttons. */
   error?: string | null;
-  onSubmit: (input: ProjectInput) => void;
+  onSubmit: (input: ProjectInput, extras: ProjectExtras) => void;
   onCancel: () => void;
+  /** Open the folder picker at once (the palette's "New project in…"). */
+  startBrowsing?: boolean;
 }
 
 function isolateValue(value: boolean | null | undefined): "-1" | "0" | "1" {
   return value === true ? "1" : value === false ? "0" : "-1";
 }
 
-export function ProjectForm({ project, submitLabel, pending, error, onSubmit, onCancel }: ProjectFormProps) {
+export function ProjectForm({ project, submitLabel, pending, error, onSubmit, onCancel, startBrowsing }: ProjectFormProps) {
   const ids = useId();
   const creating = !project;
   const [dir, setDir] = useState(project?.dir ?? "");
@@ -48,8 +65,22 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
   const [permission, setPermission] = useState(project?.permission_mode ?? "");
   const [leadStart, setLeadStart] = useState<LeadStart>(project?.lead_start ?? "open");
   const [open, setOpen] = useState(!creating);
+  const [browsing, setBrowsing] = useState(!!startBrowsing && creating);
+  const [checkCommand, setCheckCommand] = useState("");
+  const [checkTouched, setCheckTouched] = useState(false);
   const dirs = useDirs();
   const roles = useRoles();
+  const typed = useSettled(creating && isPathInput(dir) ? dir.trim() : "", TYPED_FACTS_DELAY_MS);
+  const factsQuery = useFolderFacts(typed);
+  const facts = factsQuery.data && typed !== "" ? factsQuery.data : undefined;
+
+  // New facts (a picked or typed folder) prefill the name and the check command, unless typed over.
+  const [prefilledFrom, setPrefilledFrom] = useState("");
+  if (facts && facts.path !== prefilledFrom) {
+    setPrefilledFrom(facts.path);
+    if (!nameTouched) setName(suggestName(facts.path));
+    if (!checkTouched) setCheckCommand(facts.check_command ?? "");
+  }
 
   const pickDir = (value: string) => {
     setDir(value);
@@ -70,7 +101,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
       default_isolate: Number(isolate) as -1 | 0 | 1,
       permission_mode: permission,
       lead_start: leadStart,
-    });
+    }, { checkCommand: checkCommand.trim(), detectedCheck: facts?.check_command ?? "" });
   };
 
   const remembered = (dirs.data ?? []).slice(0, DIR_CHOICES);
@@ -95,6 +126,14 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
           ))}
         </datalist>
       </label>
+      {creating && (
+        <div className="-mt-1 flex flex-col gap-1">
+          <Button compact icon={FolderSearch} onClick={() => setBrowsing(true)} className="self-start">
+            Browse…
+          </Button>
+          {facts && <FolderNote facts={facts} />}
+        </div>
+      )}
       {creating && remembered.length > 0 && (
         <div className="-mt-1 flex flex-wrap gap-1" aria-label="Remembered directories" role="group">
           {remembered.map((entry) => (
@@ -130,6 +169,20 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
           </div>
         )}
       </div>
+      {creating && (
+        <label className={labelClass}>
+          Check command (how crowsnest checks a job's finished work)
+          <input
+            value={checkCommand}
+            onChange={(event) => {
+              setCheckCommand(event.target.value);
+              setCheckTouched(true);
+            }}
+            placeholder="Automatic: mise run check when there is a check task"
+            className={`${inputClass} font-mono`}
+          />
+        </label>
+      )}
       <label className={labelClass}>
         Description
         <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} placeholder="What it is, in a line" className={`${inputClass} resize-y py-2`} />
@@ -204,6 +257,16 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
           {error}
         </Banner>
       )}
+      {creating && (
+        <DirPicker
+          open={browsing}
+          onClose={() => setBrowsing(false)}
+          initialPath={dir}
+          title="Choose the project's folder"
+          purpose="project"
+          onSelect={(path) => pickDir(path)}
+        />
+      )}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onCancel}>
           Cancel
@@ -214,4 +277,30 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
       </div>
     </form>
   );
+}
+
+/** The facts about the chosen folder, in a line, with the remote's note and any warnings. */
+function FolderNote({ facts }: { facts: FolderFacts }) {
+  const note = hostNote(facts);
+  return (
+    <div aria-live="polite" className="flex flex-col gap-0.5 text-2xs">
+      <span className="text-body">{factsSummary(facts)}</span>
+      {note && <span className="text-muted">{note}</span>}
+      {folderWarnings(facts, "project").map((warning) => (
+        <span key={warning.text} className={warning.tone === "danger" ? "text-danger" : warning.tone === "warning" ? "text-warning" : "text-muted"}>
+          {warning.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** value, once it has stopped changing for delay ms. */
+function useSettled(value: string, delay: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return settled;
 }

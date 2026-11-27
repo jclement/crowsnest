@@ -4,6 +4,7 @@ import type { SpendGroup } from "./spend";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys } from "./api";
 import type { CreateJobRequest } from "./jobs";
+import type { BrowseOptions } from "./browse";
 import type { BudgetInput, ProjectAccept } from "./accept";
 import type { JournalKind } from "./journal";
 import type { ScheduleInput, ScheduleView } from "./schedule";
@@ -141,6 +142,30 @@ export function useRoles() {
 
 export function useDirs() {
   return useQuery({ queryKey: queryKeys.dirs, queryFn: endpoints.dirs });
+}
+
+// ---- The folder picker (DESIGN.md 4.23) -------------------------------------------------------
+
+/** One directory's listing; off while path is empty. Errors (outside, unreadable) are not retried. */
+export function useBrowse(path: string, options: BrowseOptions) {
+  return useQuery({
+    queryKey: queryKeys.browse(path, options),
+    queryFn: () => endpoints.browse(path, options),
+    enabled: path !== "",
+    retry: false,
+    staleTime: 10_000,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** The facts about one folder; off while path is empty. */
+export function useFolderFacts(path: string) {
+  return useQuery({ queryKey: queryKeys.browseFacts(path), queryFn: () => endpoints.browseFacts(path), enabled: path !== "", retry: false, staleTime: 30_000 });
+}
+
+/** Where the picker starts: home, favourites, roots. */
+export function useBrowsePlaces(enabled = true) {
+  return useQuery({ queryKey: queryKeys.browsePlaces, queryFn: endpoints.browsePlaces, enabled, staleTime: 30_000 });
 }
 
 /** Creates a job from the text box; the board and the directory list refresh afterwards. */
