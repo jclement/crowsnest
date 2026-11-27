@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,17 +19,27 @@ import (
 type policyHarness struct {
 	*harness
 	ended map[string]bool
+	root  string // a real directory standing for /work/crow (edit rules compare real paths, R6-C03)
 }
 
 func newPolicyHarness(t *testing.T) *policyHarness {
 	t.Helper()
-	h := &policyHarness{harness: newHarness(t), ended: map[string]bool{"j_9": true}}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"internal/x", "cmd", "docs", "internal2"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := &policyHarness{harness: newHarness(t), ended: map[string]bool{"j_9": true}, root: root}
 	h.service.opts.Scope = func(_ context.Context, jobID, paneID string) Scope {
 		switch {
 		case jobID != "":
-			return Scope{ProjectID: 1, ProjectName: "Crowsnest", JobLive: !h.ended[jobID], Root: "/work/crow"}
+			return Scope{ProjectID: 1, ProjectName: "Crowsnest", JobLive: !h.ended[jobID], Root: root}
 		case paneID == "lead":
-			return Scope{ProjectID: 1, ProjectName: "Crowsnest", Root: "/work/crow"}
+			return Scope{ProjectID: 1, ProjectName: "Crowsnest", Root: root}
 		}
 		return Scope{}
 	}
@@ -55,6 +67,11 @@ func (h *policyHarness) jobRule(t *testing.T, jobID, kind, pattern string, maxRi
 
 func (h *policyHarness) ask(t *testing.T, jobID, paneID, tool string, input map[string]any) Approval {
 	t.Helper()
+	for key, value := range input {
+		if text, ok := value.(string); ok && strings.HasPrefix(text, "/work/crow") {
+			input[key] = h.root + strings.TrimPrefix(text, "/work/crow")
+		}
+	}
 	body, _ := json.Marshal(input)
 	approval, err := h.service.Request(context.Background(), RequestInput{JobID: jobID, PaneID: paneID, ToolName: tool, ToolInput: body, Hooked: true})
 	if err != nil {
@@ -482,5 +499,29 @@ func TestPreviewRule(t *testing.T) {
 	var ruleErr *RuleError
 	if _, err := h.service.PreviewRule(ctx, 1, KindBash, "*", risk.Low); !errors.As(err, &ruleErr) {
 		t.Fatalf("a bad pattern is refused in the preview too: %v", err)
+	}
+}
+
+// TestEditRuleDoesNotFollowALinkOut is R6-C03 (and R6-I4): a rule for edits under internal/ does
+// not cover a file reached through a link inside internal/ that points elsewhere, even when the
+// target is still inside the job's root; an elevated rule cannot reach outside the root that way
+// either. A path that does not exist yet, inside the directory, still matches.
+func TestEditRuleDoesNotFollowALinkOut(t *testing.T) {
+	h := newPolicyHarness(t)
+	h.projectRule(t, KindEdit, "internal/", risk.Elevated)
+	if err := os.Symlink(filepath.Join(h.root, "cmd"), filepath.Join(h.root, "internal", "shared")); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(h.root, "internal", "away")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/work/crow/internal/shared/main.go", "/work/crow/internal/away/x.go", "/work/crow/internal/away/../x.go"} {
+		if got := h.ask(t, "j_1", "p1", "Edit", map[string]any{"file_path": path}); got.Status != StatusPending {
+			t.Fatalf("%s through a link was allowed by the internal/ rule: %s", path, got.Status)
+		}
+	}
+	if got := h.ask(t, "j_1", "p1", "Edit", map[string]any{"file_path": "/work/crow/internal/x/new.go"}); got.Status != StatusAllowed {
+		t.Fatalf("a new file inside internal/: %s", got.Status)
 	}
 }

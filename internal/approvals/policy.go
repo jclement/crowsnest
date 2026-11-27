@@ -437,9 +437,49 @@ func insideRule(root, pattern, path string) bool {
 	if root == "" || !filepath.IsAbs(root) || path == "" || !filepath.IsAbs(path) {
 		return false
 	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return false // the OS walks a link before the .., so cleaning it away would lie (R6-C03)
+		}
+	}
 	base := filepath.Join(root, pattern)
-	rel, err := filepath.Rel(base, filepath.Clean(path))
+	if !within(base, filepath.Clean(path)) {
+		return false
+	}
+	// The same comparison on real paths (R6-C03, R6-I4): a link inside the allowed directory that
+	// points elsewhere does not carry the rule with it. A base that cannot be resolved, or a path
+	// whose existing part cannot, matches nothing.
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return false
+	}
+	realPath, ok := resolveExisting(filepath.Clean(path))
+	return ok && within(realBase, realPath)
+}
+
+// within reports whether path is base or below it (both clean and absolute).
+func within(base, path string) bool {
+	rel, err := filepath.Rel(base, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../") && !filepath.IsAbs(rel)
+}
+
+// resolveExisting resolves the links of path's longest existing prefix and joins the rest, which
+// must not climb (..). ok is false when nothing of it resolves.
+func resolveExisting(path string) (string, bool) {
+	rest := ""
+	for current := path; ; current = filepath.Dir(current) {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			if strings.Contains(rest, "..") {
+				return "", false
+			}
+			return filepath.Join(resolved, rest), true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", false
+		}
+		rest = filepath.Join(filepath.Base(current), rest)
+	}
 }
 
 // toolMatches: exact, or a trailing-* prefix; never Bash or an edit tool.

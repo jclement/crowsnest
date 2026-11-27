@@ -434,6 +434,11 @@ func inside(root, path string) bool {
 	if !filepath.IsAbs(path) {
 		return true // relative to the agent's directory
 	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return false // the OS follows a link before the .., which cleaning would hide (R6-C03)
+		}
+	}
 	clean := resolve(filepath.Clean(path))
 	root = resolve(filepath.Clean(root))
 	return clean == root || strings.HasPrefix(clean, root+string(filepath.Separator))
