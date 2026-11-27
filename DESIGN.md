@@ -850,6 +850,24 @@ per reason. Every poke and skip is recorded in the journal table and visible in 
 Scheduled tasks (`tasks/*.md` with `every:` frontmatter, as the front door has, and schedules
 made in the app) are another reason source, for the orchestrator or a project's lead: 7.8.
 
+**Who is poked for what (lead-first routing, decision 88).** A project's lead owns its project's
+jobs; the orchestrator routes and summarises across projects. So a job or question event is
+delivered to exactly one standing agent, except where the orchestrator needs an outcome:
+
+| Event | The project's lead (running, able to take pokes) | The orchestrator |
+|---|---|---|
+| An Unfiled job (project 0) settles or gets stuck; its question settles | (none) | yes, as before |
+| A project job settles or gets stuck; its question settles | yes | no |
+| A job the orchestrator created (`origin: orchestrator`) in a project settles | yes | yes: `project X: job j_N you handed it is done: …` |
+| A project job event while that project has no lead able to take it (off, stopped, `failed`, `needs_terminal`) | (none) | yes, prefixed `project X has no lead running:` |
+| A project job stuck or `needs_you` for `EscalateAfter` (30 min) with no change, its lead up | (it already knew) | one escalation per (job, cause) |
+| A lead goes `failed` or `needs_terminal` | (none) | one reason: `the lead of X has failed …` |
+| Another agent settles (`done`/`blocked`) | (leads get none) | yes, unless its pane is a lead's or holds a live job of a project whose lead is up |
+| The timer | its project's stuck, needs-you and blocked jobs and its jobs' open questions | stuck, needs-you and blocked jobs not owned by an up lead, and the open-question count |
+
+The escalation ladder is therefore job agent → its lead → the orchestrator → the human (through
+the orchestrator's own judgement and Jeff's pushes, which this routing does not change).
+
 **7.5 Upkeep**: if the orchestrator pane is back at a shell, restart with `--resume`. "New
 conversation" in the UI sends `/exit`, waits for the shell, and starts with a fresh session id.
 Compaction past a threshold and a daily new conversation with a hand-over: 7.9.
@@ -925,6 +943,17 @@ Claude Code 2.1.332 by `mise run test:claude`):
   (`agent.list` every 2 s, plus at once when an event adds a reason), keeps the bookkeeping, and
   types the poke with `Prompt` (the web app's send path: it re-checks dialog and draft and waits
   for the turn to start).
+- **Routing** (7.4's table, `cmd/crowsnest/pokes.go`): `routeJob(project, origin, settled, lead)`
+  is a pure function, so every row of the table is a test row; `pokeRouter` delivers to the
+  orchestrator's poker and the project lead's poker (`JobInfo.Prefix` and `HandedOver` word the
+  orchestrator's line). A lead is "up" when it is running and `orch.LeadCanTakePokes` (not off,
+  `stopped`, `failed`, `needs_terminal`). The orchestrator's poker has `OwnedElsewhere(pane)`,
+  asked only for settled agents and handed to the pure precheck as `PrecheckInput.Owned`, and
+  `Escalations(now)`, asked at most every 30 s: `orch.Escalations` (pure) over the live project
+  jobs whose lead is up, each measured from its last activity (`last_activity_at`, else its start;
+  the simplest honest "since" a job records), keyed `escalate:<job>:<cause>` so the delivered set
+  sends it once; and a lead's move into `failed` or `needs_terminal` (`orch.LeadDownReason`, keyed
+  by when it got there). The replay after a dropped hub subscription routes the same way.
 - **Triggers.** Another agent (not the orchestrator) settled into `done` (held 45 s) or `blocked`
   (held 10 s), each `(pane, name, state_change_seq)` pushed once, and at most one poke carrying
   agent reasons per 120 s. A question settled (answered, expired, cancelled) whose asker is not the
@@ -1096,6 +1125,16 @@ door's `frontdoor-poke`, with its lessons:
 - **UI**: the Chat menu shows the context ("128k tokens · compacts at 150k") and a bar against the
   threshold (amber past 80 %), with Compact now and New conversation; the command palette has
   "Compact now".
+- **Project leads** get the same Tender (`newLeadTender` in `cmd/crowsnest/upkeep.go`, passed as
+  the lead poker's `Tender`): the size from the lead's own conversation
+  (`transcript.Manager.Usage(lead-<slug>)`; serve pins each lead's conversation when it gets a
+  pane, so the size is there), compaction at **two thirds of `--compact-at`**
+  (`orch.LeadCompactAt`; a lead re-reads a narrower picture; `0` stays off), the daily new
+  conversation at `--fresh-at` with the hand-over in `<state>/leads/<slug>/handoff.md`, which the
+  lead's SessionStart standing context now includes. Its bookkeeping is under
+  `lead.<slug>.upkeep.state`, its thresholds follow the orchestrator's live Settings
+  (`TenderOptions.ThresholdsFrom`), and its journal lines name it ("Compacted the lead of X …",
+  detail `agent`); the orchestrator's lines name the orchestrator.
 - **Job agents** are not compacted by crowsnest: the tailer follows a job's transcript only while
   someone reads it, so the size is not there for free; Claude's own auto-compact and the
   SessionStart re-injection cover them, as before.
@@ -1157,9 +1196,14 @@ visibility per job."
   transaction: totals, the day rollups, the chart's calls and the reader state together, so a
   crash between them cannot double-count. A settled job is read once more two minutes after
   settling and then marked final. Subjects: the board's newest 300 jobs with a Claude session of
-  their own (`jobs.Service.SpendSources`), plus the orchestrator's current session. A job the
-  orchestrator holds is the orchestrator's (its conversation), so it shows "counted on the
-  orchestrator's line"; a Codex job shows "not measured" (Codex keeps usage in its own rollout
+  their own (`jobs.Service.SpendSources`), plus the orchestrator's current session, plus each
+  running project lead's current session as `lead:<slug>` (`projects.Subject`, cwd the project's
+  directory; `leadSpendSources` in `cmd/crowsnest/spend.go`). The meter's remembered session ids
+  per subject keep a lead's earlier conversations (a new conversation, a restart) counted, as
+  for the orchestrator; a stopped lead is not read until it runs again. The report labels a
+  lead's row "Lead of <slug>". A job the orchestrator holds is the orchestrator's (its
+  conversation), so it shows "counted on the orchestrator's line"; a job a lead holds is the
+  lead's (`spend.ReasonLead`, "counted on the lead's line"); a Codex job shows "not measured" (Codex keeps usage in its own rollout
   files, not mapped to jobs; not worth it yet), never zero.
 - **Storage** (`0011_spend.sql`): `spend_totals` (running totals per subject plus the reader's
   state JSON), `spend_daily` (per local day, subject and pricing key), `spend_turns` (the latest
@@ -2666,6 +2710,7 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 85. **The MagicDNS name is detected, the proxy header is not trusted** (3.5). Allowing a name only widens which Host is accepted (still loopback-reached, still authenticated); believing `X-Forwarded-For` would let any local client pick its limiter bucket, so that stays an explicit `--trusted-proxy`.
 86. **The folder-trust question is answered on a card, not by crowsnest** (4.14.1). Detecting the arrow-key menu and sending the keys the person picked keeps the rule (crowsnest never answers a start-up dialog itself) and removes the one step that needed the Terminal view.
 87. **Codex can be the orchestrator, with its gaps stated** (7.12) rather than refused: a machine with only Codex still gets a working crowsnest.
+88. **Lead-first routing** (7.4, 21.2; R4 reviews 1.7, 2.9, C3, X1). A project job's events go to its lead alone; the orchestrator hears the outcome of jobs it handed over and escalations (no lead able to take it, a job stuck or waiting on the human for `EscalateAfter`, a lead that failed). Two agents hearing one event cost two turns and invited both to act on it; one owner per job makes "who acts" unambiguous, and the escalation ladder keeps the orchestrator from going blind when a lead cannot cope. The cost is latency on the escalation path (30 minutes before the orchestrator learns of a job its lead is sitting on), which is the point: the lead gets the first chance.
 
 ## 18. Milestones
 
@@ -2780,15 +2825,22 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
   - Claude Code 2.1.332's folder-trust prompt is an unnumbered list ("No, exit" preselected), so
     its dialog card offers no buttons, only the terminal. A card that drives a list (arrows,
     Enter) would answer it; crowsnest deliberately never answers trust by itself.
-  - The orchestrator is poked when any agent settles, including job agents for jobs the human
-    gave from the browser, and again for jobs already finished or cancelled; it answers `noop`
-    or worries about jobs it did not start. It costs a turn each time.
+  - For Unfiled work (and projects whose lead is not up) the orchestrator is still poked when
+    any agent settles, including job agents for jobs the human gave from the browser, and again
+    for jobs already finished or cancelled; it answers `noop` or worries about jobs it did not
+    start. Lead-first routing (decision 88) removed this for a project whose lead is up: its
+    jobs, its workers' panes and its lead's pane are the lead's news, not the orchestrator's.
   - The Jobs form has no model field; a job from the browser runs on Claude's default model
     (the API takes `model`). `e2e:claude` adds `haiku` to the browser's request.
-- **Projects and leads (21)**: a lead's own conversation is not metered for spend (jobs it holds
-  count on its conversation, which is not read). A lead has no compaction or daily new
-  conversation of crowsnest's (Claude's own auto-compact applies). Leads' pokers carry only their
-  project's jobs and tasks; there is no timer poke for a lead. Task files are not read from inside
+- **Projects and leads (21)**: a lead's compaction, daily new conversation and timer were
+  exercised against the fake herdr only (as the orchestrator's were); whether a lead's Write of
+  its hand-over into `<state>/leads/<slug>/` asks for permission was not tested. The 30-minute
+  escalation measures a job from its last activity, so a job idle for a while before it was
+  declared stuck escalates sooner after the stuck mark; a lead-down escalation is remembered in
+  memory, so a crowsnest restart while a lead is failed sends it once more. A lead's spend is read
+  only while it runs (a stopped lead's last records are read at its next start). Lead pokers and
+  tenders pick up the orchestrator's live Settings only for leads started after serve wires them
+  (`projectWiring.useUpkeep`). Task files are not read from inside
   project repositories. Archiving a project stops its lead but leaves its running jobs alone. A
   `Run now` of a lead's poke task waits for that lead's next check (2 s), not an immediate kick.
   Files pasted in Chat with a lead go to the lead's own inbox (`<state>/leads/<slug>/
@@ -2869,8 +2921,18 @@ project's main checkout, workers in worktrees under it, and a front door above a
   `NoAgentReasons`): the lead hears about its own project's jobs settling or getting stuck (not
   ones it holds), questions those jobs asked being settled, and its project's scheduled tasks
   (21.4); "another agent settled" reasons stay the orchestrator's, the front door. The gate is the
-  orchestrator's: idle, empty input box, no dialog. "Poke now" per lead. The orchestrator is still
-  poked for every job, project jobs included, as before.
+  orchestrator's: idle, empty input box, no dialog. "Poke now" per lead. **Routing is
+  lead-first** (7.4's table, decision 88): a project job's events go to its lead alone while the
+  lead can take pokes; the orchestrator hears the outcome of jobs it handed to the project and
+  the escalations (no lead able to take it, `EscalateAfter`, a lead that failed), and no "agent
+  settled" reason for a lead's pane or a pane holding one of an up lead's jobs. A lead's poker
+  has the **timer** too (`--poke-interval`, following the orchestrator's live Settings through
+  `PokerOptions.IntervalFrom`), over its project's stuck, needs-you and blocked jobs and the open
+  questions its jobs asked, and the orchestrator's **Tender** (7.9: compaction at two thirds of
+  `--compact-at`, `--fresh-at` with its own hand-over). Under `--demo` lead pokers are manual
+  only, as the orchestrator's. Each agent's instructions say the division in one paragraph, the
+  job protocol tells a job agent its project's lead owns its job, and `orch.OwnershipSentence`
+  is the one line the web app can show.
 - **Taking jobs**: `jobs.Service.DispatchStanding` gives each standing agent the oldest queued
   job waiting for it (the orchestrator Unfiled ones, a lead its project's), one at a time, with
   the R2 reservation and claim (`dispatchTo` is the old orchestrator dispatch with the agent as a
@@ -2887,12 +2949,10 @@ project's main checkout, workers in worktrees under it, and a front door above a
 - **The front door**: the orchestrator lists projects and leads (`project_list`, `project_get`,
   `crowsnest project list|get`) and hands work to a project. With `--no-orchestrator` everything
   works with leads alone (the real-Claude lead test runs that way).
-- **Standing context** (7.9) is re-sent to a lead at every SessionStart too: its open questions
-  and the live jobs it holds or created (no hand-over file: leads have no daily new
-  conversation).
-- **Spend**: jobs a lead holds are counted on the lead's conversation, as the orchestrator's are;
-  the lead's own conversation is **not metered** in this round (the meter reads the orchestrator
-  and jobs only).
+- **Standing context** (7.9) is re-sent to a lead at every SessionStart too: its hand-over notes
+  (`<state>/leads/<slug>/handoff.md`), its open questions and the live jobs it holds or created.
+- **Spend** (7.11): a lead's own conversation is metered as `lead:<slug>`, and jobs a lead holds
+  are counted on the lead's line, as the orchestrator's are on its line.
 
 ### 21.3 Instruction layers
 

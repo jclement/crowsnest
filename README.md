@@ -542,6 +542,12 @@ tools, SAY line, recovery), with Remote Control named `<instance> <project>`. Ma
   until you stop it.
 - The orchestrator stays the front door: it sees every project (`project_list`, `project_get`,
   `crowsnest project list|get`) and can hand one work. `--no-orchestrator` works with leads alone.
+- **A project's lead owns its jobs.** When one of them finishes, gets stuck or has a question
+  settled, only the lead is poked. The orchestrator hears the outcome of a job it handed to the
+  project, and escalations: the project has no lead running, a job has been stuck or waiting on
+  you for 30 minutes, or the lead itself failed. A lead also gets the timer poke (its project's
+  open work), compaction at two thirds of `--compact-at`, the `--fresh-at` daily new
+  conversation with its own hand-over, and its conversation is metered for spend (`lead:<slug>`).
 - The Jobs board filters by project (remembered per browser); Chat can talk to the orchestrator
   or any lead (`/chat?target=lead-<slug>`); each standing agent can speak in its own voice,
   opted into per agent, with spoken replies queued so two never overlap.
