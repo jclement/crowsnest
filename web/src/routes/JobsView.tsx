@@ -181,7 +181,7 @@ function Section({
   return (
     <section aria-label={sectionLabels[section]}>
       <h2 className="sticky top-0 z-10 border-b border-border bg-surface-raised px-3 py-1 text-2xs font-semibold uppercase tracking-wide text-muted">
-        {sectionLabels[section]} <span className="font-normal">({jobs.length})</span>
+        {sectionLabels[section]} <span className="font-normal">({jobs.length} {jobs.length === 1 ? "job" : "jobs"})</span>
       </h2>
       <ul className="divide-y divide-border">
         {jobs.map((job) => (
