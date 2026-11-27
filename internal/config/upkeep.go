@@ -17,6 +17,9 @@ const (
 	optJobRemoteControl = "job-remote-control"
 	optCompactAt        = "compact-at"
 	optFreshAt          = "fresh-at"
+	// optNoInstructionRestart turns off restarting a standing agent whose instructions changed
+	// since it started (DESIGN.md 7.5).
+	optNoInstructionRestart = "no-instruction-restart"
 )
 
 // DefaultCompactAt is the orchestrator's context size, in tokens, past which it is compacted.
@@ -32,6 +35,8 @@ func init() {
 		option{name: optJobRemoteControl, env: []string{"CROWSNEST_JOB_REMOTE_CONTROL"}, kind: kindBool, def: "false", usage: "start job agents with Remote Control too, named \"<name> <job id> <title>\""},
 		option{name: optCompactAt, env: []string{"CROWSNEST_COMPACT_AT"}, kind: kindInt, def: fmt.Sprint(DefaultCompactAt), usage: "compact the orchestrator once its context passes this many tokens; 0 disables"},
 		option{name: optFreshAt, env: []string{"CROWSNEST_FRESH_AT"}, usage: "HH:MM: start the orchestrator on a new conversation once a day after this local time, with a hand-over (default off)"},
+		option{name: optNoInstructionRestart, env: []string{"CROWSNEST_NO_INSTRUCTION_RESTART"}, kind: kindBool, def: "false",
+			usage: "do not restart the orchestrator or a lead by itself when its instructions changed since it started (it is shown, and Restart takes them)"},
 	)
 }
 
@@ -89,6 +94,9 @@ func (l *loader) loadUpkeep(cfg *Config) error {
 		return err
 	}
 	if cfg.JobRemoteControl, err = l.boolean(optJobRemoteControl); err != nil {
+		return err
+	}
+	if cfg.NoInstructionRestart, err = l.boolean(optNoInstructionRestart); err != nil {
 		return err
 	}
 	if cfg.CompactAt, err = l.integer(optCompactAt); err != nil {

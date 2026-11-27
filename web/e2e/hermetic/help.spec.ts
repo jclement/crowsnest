@@ -1,4 +1,4 @@
-// The built-in manual (DESIGN.md 12.10) against `crowsnest --demo`, at 390x844 (Chromium and
+// The built-in manual (DESIGN.md 12.11) against `crowsnest --demo`, at 390x844 (Chromium and
 // WebKit) and 1440: Help from the nav, a search, a deep link to a heading, an "open the thing"
 // button, the palette answering a question with the manual, the contextual "?" on a stuck job
 // (the section in a sheet over the job, and Escape closing only that sheet), a first-visit hint,

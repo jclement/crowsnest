@@ -108,6 +108,11 @@ func (s *Service) Agent(ctx context.Context, subject string) (AgentInstructions,
 	case !isNotFound(err):
 		return AgentInstructions{}, err
 	}
+	if stale := s.standingStale.Load(); stale != nil && (*stale)(subject) {
+		// crowsnest's own files for it changed (DESIGN.md 7.5): the same banner and Restart.
+		view.Changed = true
+		view.Changes = append(view.Changes, Change{Layer: "crowsnest's prompt file, hooks and settings", Scope: "crowsnest", NowSource: "crowsnest"})
+	}
 	loaded, err := s.opts.Store.ListLoadedInstructions(ctx, subject)
 	if err != nil {
 		return AgentInstructions{}, err

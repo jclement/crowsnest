@@ -1,0 +1,151 @@
+/* @name High contrast
+   @order 5
+   @description Black and white with signal colours, every text token at WCAG AAA (7:1) on every surface, borders you cannot miss.
+   @aaa
+
+   See crowsnest.css for what a theme file must hold. The @aaa line above raises the contrast
+   floor themes.test.ts checks from 4.5:1 to 7:1. */
+
+[data-theme="contrast"] {
+  --color-surface: #ffffff;
+  --color-surface-raised: #f7f7f7;
+  --color-surface-sunken: #efefef;
+  --color-heading: #000000;
+  --color-body: #111111;
+  --color-muted: #3b3b3b;
+  --color-border: #767676;
+  --color-border-strong: #333333;
+  --color-hover: #e8e8e8;
+  --color-selected: #e8efff;
+  --color-accent: #002f8f;
+  --color-accent-fg: #ffffff;
+  --color-focus: #000000;
+  --color-danger: #7a0000;
+  --color-warning: #573700;
+  --color-success: #00421e;
+  --color-overlay: rgb(0 0 0 / 0.6);
+
+  --color-status-working: #0036a8;
+  --color-status-blocked: #9e0000;
+  --color-status-stuck: #6b4400;
+  --color-status-done: #00592c;
+  --color-status-held: #561d94;
+  --color-status-idle: #4d4d4d;
+  --color-status-unknown: #767676;
+  --color-status-fg: #ffffff;
+
+  --color-chrome: #000000;
+  --color-chrome-fg: #ffffff;
+  --color-chrome-muted: #d4d4d4;
+  --color-chrome-hover: #262626;
+  --color-chrome-border: #8a8a8a;
+  --color-chrome-warning: #ffd84d;
+  --color-chrome-accent: #6fe0ff;
+
+  --color-code-keyword: #4b148a;
+  --color-code-string: #004d26;
+  --color-code-number: #6b2e00;
+  --color-code-comment: #3b3b3b;
+  --color-code-title: #0036a8;
+  --color-code-attr: #85003d;
+  --color-diff-add: rgb(0 89 44 / 0.14);
+  --color-diff-del: rgb(158 0 0 / 0.12);
+
+  --color-chart-1: #0036a8;
+  --color-chart-2: #561d94;
+  --color-chart-3: #6b4400;
+  --color-chart-4: #00592c;
+
+  --term-background: #ffffff;
+  --term-foreground: #000000;
+  --term-cursor: #000000;
+  --term-selection: #b3ccff;
+  --term-black: #000000;
+  --term-red: #8a0000;
+  --term-green: #004d26;
+  --term-yellow: #573700;
+  --term-blue: #0036a8;
+  --term-magenta: #4b148a;
+  --term-cyan: #00495c;
+  --term-white: #3b3b3b;
+  --term-bright-black: #2e2e2e;
+  --term-bright-red: #a30000;
+  --term-bright-green: #005c2e;
+  --term-bright-yellow: #664000;
+  --term-bright-blue: #0040c4;
+  --term-bright-magenta: #5c1aa3;
+  --term-bright-cyan: #005870;
+  --term-bright-white: #4a4a4a;
+}
+
+[data-theme="contrast"].dark {
+  --color-surface: #000000;
+  --color-surface-raised: #0b0b0b;
+  --color-surface-sunken: #000000;
+  --color-heading: #ffffff;
+  --color-body: #f2f2f2;
+  --color-muted: #c9c9c9;
+  --color-border: #8a8a8a;
+  --color-border-strong: #d0d0d0;
+  --color-hover: #1c1c1c;
+  --color-selected: #0a1a33;
+  --color-accent: #6fe0ff;
+  --color-accent-fg: #000000;
+  --color-focus: #ffffff;
+  --color-danger: #ffb3b3;
+  --color-warning: #ffd84d;
+  --color-success: #7dffa6;
+  --color-overlay: rgb(0 0 0 / 0.75);
+
+  --color-status-working: #6fe0ff;
+  --color-status-blocked: #ff8080;
+  --color-status-stuck: #ffd84d;
+  --color-status-done: #7dffa6;
+  --color-status-held: #e3b0ff;
+  --color-status-idle: #bdbdbd;
+  --color-status-unknown: #8a8a8a;
+  --color-status-fg: #000000;
+
+  --color-chrome: #000000;
+  --color-chrome-fg: #ffffff;
+  --color-chrome-muted: #d4d4d4;
+  --color-chrome-hover: #262626;
+  --color-chrome-border: #8a8a8a;
+  --color-chrome-warning: #ffd84d;
+  --color-chrome-accent: #6fe0ff;
+
+  --color-code-keyword: #e6b8ff;
+  --color-code-string: #9effbb;
+  --color-code-number: #ffdd70;
+  --color-code-comment: #c9c9c9;
+  --color-code-title: #9ae9ff;
+  --color-code-attr: #ffb3cd;
+  --color-diff-add: rgb(125 255 166 / 0.16);
+  --color-diff-del: rgb(255 128 128 / 0.18);
+
+  --color-chart-1: #6fe0ff;
+  --color-chart-2: #e3b0ff;
+  --color-chart-3: #ffd84d;
+  --color-chart-4: #7dffa6;
+
+  --term-background: #000000;
+  --term-foreground: #ffffff;
+  --term-cursor: #ffffff;
+  --term-selection: #1f4a8a;
+  --term-black: #3b3b3b;
+  --term-red: #ff9e9e;
+  --term-green: #7dffa6;
+  --term-yellow: #ffd84d;
+  --term-blue: #8cb8ff;
+  --term-magenta: #e6b8ff;
+  --term-cyan: #6fe0ff;
+  --term-white: #e0e0e0;
+  --term-bright-black: #9a9a9a;
+  --term-bright-red: #ffc4c4;
+  --term-bright-green: #b3ffcb;
+  --term-bright-yellow: #ffe999;
+  --term-bright-blue: #b8d4ff;
+  --term-bright-magenta: #f2d9ff;
+  --term-bright-cyan: #b0efff;
+  --term-bright-white: #ffffff;
+}

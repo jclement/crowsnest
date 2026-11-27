@@ -42,6 +42,10 @@ test("Open in Claude on Chat's header, for the orchestrator and for a lead", asy
 
 test("Open in Claude on a lead's card, and the help sheet", async ({ page }, testInfo) => {
   await page.goto("/projects/website");
+  // The demo starts its leads in the background after the server answers, so straight after the
+  // instance comes up the lead may not be running yet (no card until it is): under a full,
+  // parallel run that start took longer than the default 10 s. Wait for the lead, then check it.
+  await expect(page.getByTestId("open-in-claude-link").first()).toBeVisible({ timeout: 45_000 });
   const card = page.getByTestId("open-in-claude").first();
   await expectSafeLink(card.getByTestId("open-in-claude-link"), isPhone(testInfo));
   await card.getByRole("button", { name: "Crowsnest or the Claude app?" }).click();

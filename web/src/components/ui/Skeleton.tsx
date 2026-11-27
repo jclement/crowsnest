@@ -1,8 +1,17 @@
-// Skeleton: a placeholder block shown while data loads, sized by the caller.
+// Skeleton: a placeholder block shown while data loads, sized by the caller. A band of light
+// sweeps across it like a scan line (still under reduced motion: the global rule stops it).
 import { cn } from "../../lib/cn";
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div aria-hidden className={cn("animate-shimmer rounded bg-hover", className)} />;
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "animate-scan rounded bg-hover bg-[length:200%_100%] bg-[linear-gradient(100deg,transparent_30%,var(--color-surface-sunken)_50%,transparent_70%)]",
+        className,
+      )}
+    />
+  );
 }
 
 /** A stack of skeleton rows for a loading list. */

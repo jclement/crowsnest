@@ -83,3 +83,44 @@ export function StatusChip({ status }: { status: AgentStatus }) {
     </Chip>
   );
 }
+
+/**
+ * The five states a piece of work can be in, as the whole app names them (DESIGN.md "Design
+ * language"), plus the two quiet ones. Each has a colour token and a shape of its own: needs you
+ * a diamond, stuck a triangle, running a pulsing dot, done a filled dot, held a square, idle a
+ * ring, unknown a dash.
+ */
+export type WorkState = "needs" | "stuck" | "running" | "done" | "held" | "idle" | "unknown";
+
+export const workStates: WorkState[] = ["needs", "stuck", "running", "done", "held", "idle", "unknown"];
+
+export const workStateLabels: Record<WorkState, string> = {
+  needs: "Needs you",
+  stuck: "Stuck",
+  running: "Running",
+  done: "Done",
+  held: "Held",
+  idle: "Idle",
+  unknown: "Unknown",
+};
+
+const stateShape: Record<WorkState, string> = {
+  needs: "rotate-45 scale-90 rounded-[1px] bg-status-blocked",
+  stuck: "bg-status-stuck [clip-path:polygon(50%_4%,100%_96%,0_96%)]",
+  running: "rounded-full bg-status-working",
+  done: "rounded-full bg-status-done",
+  held: "scale-[0.8] rounded-[1px] bg-status-held",
+  idle: "rounded-full border-2 border-status-idle",
+  unknown: "my-[3.5px] h-[3px]! rounded-full bg-status-unknown",
+};
+
+/** A 10 px marker for a work state, labelled for assistive technology. */
+export function StateMark({ state, label, className }: { state: WorkState; label?: string; className?: string }) {
+  const name = label ?? workStateLabels[state];
+  return (
+    <span role="img" aria-label={name} title={name} data-state={state} className={cn("relative inline-flex h-2.5 w-2.5 shrink-0", className)}>
+      {state === "running" && <span aria-hidden className="absolute inset-0 animate-pulse-ring rounded-full bg-status-working" />}
+      <span aria-hidden className={cn("relative h-2.5 w-2.5", stateShape[state])} />
+    </span>
+  );
+}

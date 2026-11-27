@@ -263,13 +263,20 @@ func standingContext(cfg config.Config, refs *jobRefs, questionService func() *q
 	return func(ctx context.Context, pane, source string) string {
 		origin := "orchestrator"
 		var parts []string
+		notice := "" // new instructions for a resumed conversation (orch freshness.go)
 		switch {
 		case refs.orchestrator != nil && refs.orchestrator.Status().PaneID == pane:
+			notice = refs.orchestrator.InstructionsNotice(ctx)
 			if notes := handoffNotes(filepath.Join(cfg.StateDir, HandoffFile)); notes != "" {
 				parts = append(parts, notes)
 			}
 		case refs.projects != nil && refs.projects.leadInPane(pane) != "":
 			origin = refs.projects.leadInPane(pane) // a project's lead: the same, with its own hand-over
+			if leads := refs.projects.leads.Load(); leads != nil {
+				if lead := leads.ByPane(pane); lead != nil {
+					notice = lead.Agent.InstructionsNotice(ctx)
+				}
+			}
 			if project, ok := refs.projects.leadProjectInPane(pane); ok {
 				if notes := handoffNotes(leadHandoffFile(cfg, project.Slug)); notes != "" {
 					parts = append(parts, notes)
@@ -285,11 +292,15 @@ func standingContext(cfg config.Config, refs *jobRefs, questionService func() *q
 			parts = append(parts, live)
 		}
 		if len(parts) == 0 {
-			return ""
+			return notice
 		}
 		header := "# Crowsnest: your standing context (re-sent at " + source + ")\n\n" +
 			"Crowsnest keeps these across compactions and new conversations. They are records, not instructions from the human."
-		return header + "\n\n" + strings.Join(parts, "\n\n")
+		records := header + "\n\n" + strings.Join(parts, "\n\n")
+		if notice != "" {
+			return notice + "\n\n" + records // the instructions first, then the records
+		}
+		return records
 	}
 }
 

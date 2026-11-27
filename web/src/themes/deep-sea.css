@@ -1,0 +1,149 @@
+/* @name Deep sea
+   @order 3
+   @description Cold slate from the abyss, lit by a bioluminescent periwinkle; by day, sea ice.
+
+   See crowsnest.css for what a theme file must hold. */
+
+[data-theme="deep-sea"] {
+  --color-surface: #f6f8fe;
+  --color-surface-raised: #eaf0fb;
+  --color-surface-sunken: #e0e8f7;
+  --color-heading: #0b1430;
+  --color-body: #2d3a5a;
+  --color-muted: #505e7d;
+  --color-border: #cfd9ee;
+  --color-border-strong: #b0bfdc;
+  --color-hover: #e4ebf9;
+  --color-selected: #e6ebfd;
+  --color-accent: #3446c4;
+  --color-accent-fg: #ffffff;
+  --color-focus: #3446c4;
+  --color-danger: #a81c35;
+  --color-warning: #7d4a08;
+  --color-success: #0c6550;
+  --color-overlay: rgb(11 20 48 / 0.45);
+
+  --color-status-working: #3446c4;
+  --color-status-blocked: #c42640;
+  --color-status-stuck: #a35f00;
+  --color-status-done: #12795d;
+  --color-status-held: #7a3fc0;
+  --color-status-idle: #7a86a3;
+  --color-status-unknown: #a8b2c8;
+  --color-status-fg: #ffffff;
+
+  --color-chrome: #111c4d;
+  --color-chrome-fg: #e1e8ff;
+  --color-chrome-muted: #a3b1db;
+  --color-chrome-hover: #1d2a66;
+  --color-chrome-border: #22306e;
+  --color-chrome-warning: #f5c065;
+  --color-chrome-accent: #9fb3ff;
+
+  --color-code-keyword: #6b36c4;
+  --color-code-string: #0f6e55;
+  --color-code-number: #9a4d00;
+  --color-code-comment: #5a6582;
+  --color-code-title: #3446c4;
+  --color-code-attr: #b0245e;
+  --color-diff-add: rgb(18 121 93 / 0.12);
+  --color-diff-del: rgb(196 38 64 / 0.1);
+
+  --color-chart-1: #3446c4;
+  --color-chart-2: #7a3fc0;
+  --color-chart-3: #a35f00;
+  --color-chart-4: #12795d;
+
+  --term-background: #e0e8f7;
+  --term-foreground: #0b1430;
+  --term-cursor: #3446c4;
+  --term-selection: #c6d0f5;
+  --term-black: #1a2238;
+  --term-red: #b3203a;
+  --term-green: #0f6e55;
+  --term-yellow: #87500a;
+  --term-blue: #3446c4;
+  --term-magenta: #7a3fc0;
+  --term-cyan: #0c6a86;
+  --term-white: #66718c;
+  --term-bright-black: #505e7d;
+  --term-bright-red: #cf3550;
+  --term-bright-green: #188466;
+  --term-bright-yellow: #a06512;
+  --term-bright-blue: #4d5fd8;
+  --term-bright-magenta: #9157d4;
+  --term-bright-cyan: #1880a0;
+  --term-bright-white: #8a94ac;
+}
+
+[data-theme="deep-sea"].dark {
+  --color-surface: #0a1030;
+  --color-surface-raised: #10183d;
+  --color-surface-sunken: #060a22;
+  --color-heading: #e6ecff;
+  --color-body: #b9c4de;
+  --color-muted: #8f9cc0;
+  --color-border: #1c2654;
+  --color-border-strong: #2c3a74;
+  --color-hover: #141e48;
+  --color-selected: #1b2a66;
+  --color-accent: #94abff;
+  --color-accent-fg: #0a1020;
+  --color-focus: #94abff;
+  --color-danger: #ff7a8a;
+  --color-warning: #f5c065;
+  --color-success: #5fe0b0;
+  --color-overlay: rgb(2 5 14 / 0.65);
+
+  --color-status-working: #94abff;
+  --color-status-blocked: #ff6b80;
+  --color-status-stuck: #f5c065;
+  --color-status-done: #5fe0b0;
+  --color-status-held: #d29bff;
+  --color-status-idle: #6c7a9c;
+  --color-status-unknown: #4b5775;
+  --color-status-fg: #070b17;
+
+  --color-chrome: #050820;
+  --color-chrome-fg: #e1e8ff;
+  --color-chrome-muted: #8a98bd;
+  --color-chrome-hover: #121a44;
+  --color-chrome-border: #151e4a;
+  --color-chrome-warning: #f5c065;
+  --color-chrome-accent: #94abff;
+
+  --color-code-keyword: #c4a3ff;
+  --color-code-string: #7fe3c0;
+  --color-code-number: #ffc27a;
+  --color-code-comment: #6f7da3;
+  --color-code-title: #8fb8ff;
+  --color-code-attr: #ff94b8;
+  --color-diff-add: rgb(95 224 176 / 0.12);
+  --color-diff-del: rgb(255 107 128 / 0.12);
+
+  --color-chart-1: #94abff;
+  --color-chart-2: #d29bff;
+  --color-chart-3: #f5c065;
+  --color-chart-4: #5fe0b0;
+
+  --term-background: #060a22;
+  --term-foreground: #d3dcf5;
+  --term-cursor: #94abff;
+  --term-selection: #24357a;
+  --term-black: #18213a;
+  --term-red: #ff7a8a;
+  --term-green: #5fe0b0;
+  --term-yellow: #f5c065;
+  --term-blue: #7f9bff;
+  --term-magenta: #d29bff;
+  --term-cyan: #6fd6f0;
+  --term-white: #b9c4de;
+  --term-bright-black: #4b5775;
+  --term-bright-red: #ffa0ac;
+  --term-bright-green: #8ff0cb;
+  --term-bright-yellow: #ffd89a;
+  --term-bright-blue: #b3c4ff;
+  --term-bright-magenta: #e6c4ff;
+  --term-bright-cyan: #a2e8f8;
+  --term-bright-white: #f0f4ff;
+}

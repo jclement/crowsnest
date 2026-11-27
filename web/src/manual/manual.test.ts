@@ -1,4 +1,4 @@
-// The manual cannot rot silently (DESIGN.md 12.10). Every page is in the contents; every link
+// The manual cannot rot silently (DESIGN.md 12.11). Every page is in the contents; every link
 // between pages, every heading anchor, every "open the thing" button and every picture resolves;
 // every contextual "?" and hint in the app names a section that exists; links out to the
 // repository's files point at files that exist; every flag the prose names is a real flag (or a

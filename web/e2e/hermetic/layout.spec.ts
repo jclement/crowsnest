@@ -124,6 +124,24 @@ test("the offline banner shows when the server dies, and goes when it returns", 
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
 });
 
+// The way the server is restarted in development (`mise run dev`, again and again): every restart,
+// quick or not, under the same page, ends with the page live again, without touching it.
+test("the page comes back by itself after every one of several restarts", async ({ page, app }) => {
+  test.slow();
+  await page.goto("/jobs");
+  const live = page.getByRole("status").filter({ hasText: "Live" });
+  const banner = page.getByRole("status").filter({ hasText: /^Connection lost\./ });
+  await expect(live).toBeAttached();
+  for (const pause of [0, 300, 1_500, 0, 3_000]) {
+    await app.kill();
+    await expect(banner).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(pause);
+    await app.start();
+    await expect(banner).toHaveCount(0, { timeout: 45_000 });
+    await expect(live).toBeAttached();
+  }
+});
+
 test.describe("accessibility", () => {
   for (const theme of ["light", "dark"] as const) {
     for (const view of views) {

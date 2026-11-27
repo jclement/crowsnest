@@ -45,6 +45,7 @@ first session.
 - [Back up, restore and upgrade](how-to/backup-restore-upgrade.md)
 - [Work with Claude's Remote Control](how-to/remote-control.md)
 - [Run the devbox container](how-to/devbox.md)
+- [Choose a theme](how-to/appearance.md)
 
 ## Reference
 

@@ -23,7 +23,7 @@ import type { ChipTone } from "../components/ui/Chip";
 
 export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/fleet" | "/terminal" | "/system" | "/help" | "/diff";
 /** The sheets the palette (and the manual's "open" buttons) can open. */
-export const PALETTE_SHEETS = ["journal", "notifications", "shortcuts", "voice", "schedule", "spend", "instructions", "settings", "digests", "worktrees", "limits", "pause"] as const;
+export const PALETTE_SHEETS = ["appearance", "journal", "notifications", "shortcuts", "voice", "schedule", "spend", "instructions", "settings", "digests", "worktrees", "limits", "pause"] as const;
 export type PaletteSheet = (typeof PALETTE_SHEETS)[number];
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
@@ -45,6 +45,8 @@ export type PaletteCommand =
   | { kind: "relaunch"; action: "restart" | "new" }
   | { kind: "pushTest" }
   | { kind: "theme"; choice: ThemeChoice }
+  /** Switch to a named theme (src/themes); "next" cycles. */
+  | { kind: "themeName"; id: string | "next" }
   | { kind: "signOut" }
   | { kind: "sheet"; sheet: PaletteSheet }
   | { kind: "speak"; on: boolean }
@@ -117,6 +119,7 @@ export type PaletteIcon =
   | "theme-system"
   | "theme-light"
   | "theme-dark"
+  | "palette-theme"
   | "signout"
   | "speak"
   | "voice"
@@ -170,6 +173,9 @@ export interface PaletteSources {
   /** Login is on, so Sign out means something. */
   auth: boolean;
   theme: ThemeChoice;
+  /** The named theme in use (src/themes), and the themes to offer. */
+  themeName?: string;
+  themes?: Array<{ id: string; name: string; description: string }>;
   /** Speak mode, when the voice build that owns it is present: null leaves the action out. */
   speak: { on: boolean } | null;
   /** A voice settings sheet exists to open. */
@@ -482,13 +488,29 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
     verb: "Go",
   });
   if (sources.voiceSettings) items.push(sheet("voice", "Voice settings", "voice", ["talk", "speak", "elevenlabs", "microphone"]));
+  items.push(sheet("appearance", "Appearance", "palette-theme", ["theme", "colours", "colors", "dark", "light", "gallery", "skin"]));
+  for (const theme of sources.themes ?? []) {
+    items.push({
+      id: `theme-name:${theme.id}`,
+      group: "navigate",
+      title: `Theme: ${theme.name}`,
+      subtitle: sources.themeName === theme.id ? "Current" : undefined,
+      keywords: ["appearance", "colour", "color", "skin", theme.id],
+      icon: "palette-theme",
+      command: { kind: "themeName", id: theme.id },
+      verb: "Switch",
+    });
+  }
+  if ((sources.themes?.length ?? 0) > 1) {
+    items.push({ id: "theme-name:next", group: "navigate", title: "Next theme", subtitle: "T", keywords: ["appearance", "cycle", "theme"], icon: "palette-theme", command: { kind: "themeName", id: "next" }, verb: "Switch" });
+  }
   for (const choice of ["system", "light", "dark"] as const) {
     items.push({
       id: `theme:${choice}`,
       group: "navigate",
-      title: `Theme: ${themeLabels[choice]}`,
+      title: `Mode: ${themeLabels[choice]}`,
       subtitle: sources.theme === choice ? "Current" : undefined,
-      keywords: ["appearance", "colour", "color", "mode"],
+      keywords: ["appearance", "colour", "color", "mode", "theme", "dark", "light"],
       icon: `theme-${choice}`,
       command: { kind: "theme", choice },
       verb: "Switch",

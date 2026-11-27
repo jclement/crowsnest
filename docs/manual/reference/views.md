@@ -3,7 +3,7 @@
 On a phone the bottom bar is **Now**, **Projects**, **Inbox**, **Chat** and **More**; More holds
 **Jobs**, **Fleet**, **Terminal**, **Help** and **System**. On a desktop the left rail shows the
 same, with the More views under a heading. The account menu (top right) holds **System**,
-**Settings**, **Account**, **Notifications**, **Instructions**, **Pause automation…** and **Do not
+**Settings**, **Appearance**, **Account**, **Notifications**, **Instructions**, **Pause automation…** and **Do not
 disturb…** (and **Voice** with talk mode on).
 
 ## Now
@@ -110,6 +110,7 @@ Opened from menus and the palette, over the current view:
 | Sheet | What | From |
 |---|---|---|
 | **Settings** | Every setting the app may change, with its source and when it applies | Account menu; [Open Settings](app:sheet/settings) |
+| **Appearance** | The theme and the mode, a gallery of every theme | Account menu, Settings, palette; [Open Appearance](app:sheet/appearance) |
 | **Instructions** | Global, role and project instruction layers | Account menu; [Open Instructions](app:sheet/instructions) |
 | **Notifications** | This device, what to send, devices | Account menu; [Open Notifications](app:sheet/notifications) |
 | **Schedule** | Scheduled tasks and the daily digest | Jobs, Chat's menu, palette; [Open Schedule](app:sheet/schedule) |
@@ -128,11 +129,5 @@ load; from wide screens free disk and working agents; on a phone one chip that o
 **Search or run…** (the command palette), the connection state, **Speak replies** (with talk
 mode), the theme switch and the account menu.
 
-<!-- STUB(wip/design): paired light and dark themes, with a picker in Settings and the palette,
-are being built on wip/design. Describe the picker here (and in reference/settings if it adds a
-setting) once it is on main. -->
-
-> **Coming soon (not on main yet):** paired light and dark themes with a theme picker in Settings
-> and the palette. Today the header's switch cycles System, Light and Dark, and the palette has
-> **Theme: System**, **Theme: Light** and **Theme: Dark**. Banners below it: the connection, **Automation
-paused**, and the fleet's usage limit.
+The theme and mode: account menu → **Appearance**, the palette, or `T` for the next theme. See
+[Choose a theme](../how-to/appearance.md).

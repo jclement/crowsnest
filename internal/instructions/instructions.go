@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/hub"
@@ -94,7 +95,15 @@ type Options struct {
 // Service is the instruction layers. Build it with New.
 type Service struct {
 	opts Options
+	// standingStale reports whether a standing agent's running Claude was started with other
+	// crowsnest files (its prompt template, hooks, settings, MCP config) than a start would
+	// write now (orch freshness.go); set once the agents exist.
+	standingStale atomic.Pointer[func(subject string) bool]
 }
+
+// SetStandingStale wires the check of a standing agent's own files ("orchestrator",
+// "lead:<slug>") into the "instructions changed since start" view.
+func (s *Service) SetStandingStale(stale func(subject string) bool) { s.standingStale.Store(&stale) }
 
 // New returns a Service with the defaults filled in.
 func New(opts Options) *Service {

@@ -80,6 +80,13 @@ func seedDemoProjects(ctx context.Context, cfg config.Config, w *projectWiring, 
 
 // seedDemoExtras starts the demo leads and adds the demo's schedules and instruction layers.
 func seedDemoExtras(ctx context.Context, w *projectWiring, leads *projects.Leads, tasks *schedule.Service, layers *instructions.Service, logger *slog.Logger) {
+	// The project layer before any lead starts: a layer saved after a start makes that agent's
+	// instructions "changed since start", and it would be restarted for them (orch freshness.go).
+	if crowsnest, err := w.service.Get(ctx, "crowsnest"); err == nil && layers != nil {
+		if err := layers.Save(ctx, "project", formatProjectKey(crowsnest.ID), "Crowsnest's gate is `mise run check`. Screenshots live in `web/screenshots`."); err != nil {
+			logger.Debug("seeding a demo instruction layer", "scope", "project", "err", err)
+		}
+	}
 	for _, seed := range demoProjectList() {
 		project, err := w.service.Get(ctx, *seed.input.Slug)
 		if err != nil || !seed.lead {
@@ -103,15 +110,20 @@ func seedDemoExtras(ctx context.Context, w *projectWiring, leads *projects.Leads
 			}
 		}
 	}
-	if layers != nil {
-		for _, layer := range []struct{ scope, key, body string }{
-			{"global", "", "Write for a phone: lead with the answer and keep replies short.\n\nNever push to `main`; open a pull request instead."},
-			{"role", "builder", "# Role: builder\n\nYou implement one unit of work in your own worktree, test it, and report evidence.\n\n- Run only the tests for what you touched while working; the full suite once at the end.\n- Commit as you go."},
-			{"project", formatProjectKey(crowsnest.ID), "Crowsnest's gate is `mise run check`. Screenshots live in `web/screenshots`."},
-		} {
-			if err := layers.Save(ctx, layer.scope, layer.key, layer.body); err != nil {
-				logger.Debug("seeding a demo instruction layer", "scope", layer.scope, "err", err)
-			}
+}
+
+// seedDemoLayers saves the demo's global and role instruction layers. serve calls it before the
+// orchestrator starts, so no demo agent begins with instructions that then change under it.
+func seedDemoLayers(ctx context.Context, layers *instructions.Service, logger *slog.Logger) {
+	if layers == nil {
+		return
+	}
+	for _, layer := range []struct{ scope, key, body string }{
+		{"global", "", "Write for a phone: lead with the answer and keep replies short.\n\nNever push to `main`; open a pull request instead."},
+		{"role", "builder", "# Role: builder\n\nYou implement one unit of work in your own worktree, test it, and report evidence.\n\n- Run only the tests for what you touched while working; the full suite once at the end.\n- Commit as you go."},
+	} {
+		if err := layers.Save(ctx, layer.scope, layer.key, layer.body); err != nil {
+			logger.Debug("seeding a demo instruction layer", "scope", layer.scope, "err", err)
 		}
 	}
 }

@@ -8,10 +8,14 @@ import { ToastProvider } from "./components/ui/Toast";
 import "./index.css";
 import { ApiError, onUnauthorized } from "./lib/api";
 import { captureSetupToken } from "./lib/setupToken";
+import { applyStartupTheme } from "./lib/theme";
 import { makeRouter } from "./router";
 
 // Take a setup token out of the address bar before anything renders (lib/setupToken.ts).
 captureSetupToken();
+
+// public/theme-init.js already applied the theme; this catches a saved one that no longer exists.
+applyStartupTheme();
 
 const queryClient = new QueryClient({
   defaultOptions: {

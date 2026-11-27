@@ -34,6 +34,7 @@ func (o *Orchestrator) Watch(ctx context.Context) {
 			o.sessionMoved(ctx, status.SessionID)
 		}
 		o.checkRemoteControl(ctx, agent.PaneID)
+		o.checkInstructions(ctx, agent, true)
 		return
 	}
 	if state := o.Status().State; state == StateFailed || state == StateStopped {

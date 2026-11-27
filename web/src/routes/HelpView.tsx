@@ -1,4 +1,4 @@
-// Help: the built-in manual (DESIGN.md 12.10). /help is the contents, /help/<page> a page and
+// Help: the built-in manual (DESIGN.md 12.11). /help is the contents, /help/<page> a page and
 // /help/<page>#<heading> a heading in it. Desktop: the contents and search on the left, the page,
 // with its own headings above it. Phone: a Contents button opens the same list as a sheet. Every
 // page ends with previous and next in reading order.

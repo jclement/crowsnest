@@ -192,7 +192,7 @@ const decideRoute = createRoute({
 });
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
-// The built-in manual (DESIGN.md 12.10): /help is its contents, /help/<page>#<heading> a place in it.
+// The built-in manual (DESIGN.md 12.11): /help is its contents, /help/<page>#<heading> a place in it.
 const helpRoute = createRoute({ getParentRoute: () => appRoute, path: "/help", component: () => <HelpView /> });
 const helpPageRoute = createRoute({
   getParentRoute: () => appRoute,

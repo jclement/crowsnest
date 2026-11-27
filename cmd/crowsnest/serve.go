@@ -176,16 +176,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	// use is reported at once, and nothing can take it while the services are wired (the test
 	// that reserved a port and bound it seconds later lost it about one run in five to the
 	// parallel suite's own connections).
-	listeners, err := httpd.Bind(ctx, cfg, logger)
+	// They answer at once from here on: 503 with Retry-After until the server is ready, so a
+	// browser reconnecting across a restart is told to retry rather than left waiting on a
+	// connection nobody answers.
+	early, err := httpd.ServeEarly(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	handedOver := false
 	defer func() {
 		if !handedOver {
-			for _, listener := range listeners {
-				_ = listener.Close()
-			}
+			early.Close()
 		}
 	}()
 
@@ -254,12 +255,28 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	if err != nil {
 		return err
 	}
+	if cfg.Demo {
+		seedDemoLayers(ctx, refs.instructions, logger) // before any demo agent starts with them
+	}
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions,
 		orchGate{gate: sys.Gate, launch: sys.LaunchSettings(orchestratorRemoteControl)}, ctl, logger)
 	sys.SetOrchestrator(orchestrator)
 	greet := greeter(ctx, client, orchestrator, logger)
 	live.greeter.Store(&greet)
 	refs.orchestrator, refs.conversations = orchestrator, conversations
+	refs.instructions.SetStandingStale(func(subject string) bool {
+		if subject == orch.Name {
+			return orchestrator.Status().InstructionsStale
+		}
+		if leads := refs.projects.leads.Load(); leads != nil {
+			for _, lead := range leads.Running() {
+				if projects.Subject(lead.Project.Slug) == subject {
+					return lead.Agent.Status().InstructionsStale
+				}
+			}
+		}
+		return false
+	})
 	var projectOf func(string) (int64, string)
 	if cfg.Demo {
 		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)
@@ -318,7 +335,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	})
 	approvalLinks.leads.Store(leads)
 	if cfg.Demo {
-		go seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
+		// Before the server answers (it serves "starting" until Run): a page opened at once finds
+		// the demo's leads already launched, rather than racing a goroutine that starts them.
+		seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
 	}
 
 	attentionService, nowSources := startAttention(ctx, attentionDeps{
@@ -382,7 +401,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	serverRef.Store(server)
-	server.Prebound, handedOver = listeners, true
+	server.Early, handedOver = early, true
 	var readyOnce sync.Once
 	server.OnListening = func(url string) {
 		readyOnce.Do(func() { logReady(ctx, sys, []string{browsableBase(url)}, logger) })

@@ -19,7 +19,10 @@ import { Card } from "../ui/Card";
 
 const levelInk: Record<Level, string> = { ok: "text-chrome-fg", busy: "text-chrome-fg", saturated: "text-chrome-warning" };
 
-/** A tiny sparkline of CPU % over the last minute: one series, a 2 px line, no axes. */
+/**
+ * A tiny sparkline of CPU % over the last minute: one series, a 1.5 px line over a faint fill to
+ * the baseline, no axes. Its colour is the caller's (the header draws it in the chrome's accent).
+ */
 export function Sparkline({ values, width = 48, height = 16, className }: { values: number[]; width?: number; height?: number; className?: string }) {
   const baseline = <line x1={0} x2={width} y1={height - 0.5} y2={height - 0.5} stroke="currentColor" strokeOpacity={0.25} strokeWidth={1} />;
   if (values.length < 2) {
@@ -36,6 +39,7 @@ export function Sparkline({ values, width = 48, height = 16, className }: { valu
   return (
     <svg aria-hidden width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={cn("shrink-0 overflow-visible", className)}>
       {baseline}
+      <polygon points={`0,${height - 0.5} ${points} ${width},${height - 0.5}`} fill="currentColor" fillOpacity={0.14} stroke="none" />
       <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
@@ -73,7 +77,7 @@ function Figures({ stats, wide }: { stats: SysStats; wide?: boolean }) {
   return (
     <>
       <Figure icon={<Cpu className="h-3.5 w-3.5" />} label="CPU" title={cpuTitle(sample)} level={cpuLevel(sample.cpu)} width="5.75rem">
-        <Sparkline values={stats.history.map((point) => point.cpu)} className="text-chrome-muted" />
+        <Sparkline values={stats.history.map((point) => point.cpu)} className="text-chrome-accent" />
         <span className="w-8 text-right">{sample.cpu.toFixed(0)}%</span>
       </Figure>
       <Figure icon={<MemoryStick className="h-3.5 w-3.5" />} label="Memory" title={memTitle(sample)} level={memLevel(sample.mem_used, sample.mem_total)} width="6.5rem">

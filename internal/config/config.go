@@ -97,12 +97,15 @@ type Config struct {
 
 	// ---- Name, Remote Control and upkeep (upkeep.go) ----
 
-	Name             string // this instance's name: --name, else the short hostname
-	NameExplicit     bool   // Name came from --name, CROWSNEST_NAME or the config file, so it beats a stored name
-	NoRemoteControl  bool   // start the orchestrator without Remote Control
-	JobRemoteControl bool   // start job agents with Remote Control too
-	CompactAt        int    // compact the orchestrator past this many tokens; 0 off
-	FreshAt          int    // daily new conversation, minutes after local midnight; -1 off
+	Name            string // this instance's name: --name, else the short hostname
+	NameExplicit    bool   // Name came from --name, CROWSNEST_NAME or the config file, so it beats a stored name
+	NoRemoteControl bool   // start the orchestrator without Remote Control
+	// NoInstructionRestart: a standing agent whose instructions changed since its start is only
+	// marked, not restarted by itself (7.5).
+	NoInstructionRestart bool
+	JobRemoteControl     bool // start job agents with Remote Control too
+	CompactAt            int  // compact the orchestrator past this many tokens; 0 off
+	FreshAt              int  // daily new conversation, minutes after local midnight; -1 off
 
 	// ---- Throttling, review and landing (landing.go) ----
 
@@ -112,6 +115,7 @@ type Config struct {
 	Review         string  // the review gate's default for isolated builder jobs: auto | off | claude | codex | same
 	MergeMode      string  // Land's merge: merge (a merge commit) | ff (fast-forward only)
 	DigestAt       string  // HH:MM: the daily digest's time; "" off
+	Theme          string  // the default theme's id for browsers that chose none; "" the house theme
 	// ---- Day thirty: terminal reach, Tailscale sign-in, backups, retention (ops.go) ----
 
 	// TerminalMachines lets the Terminal view's herdr client show the user's saved SSH machines

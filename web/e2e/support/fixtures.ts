@@ -28,6 +28,14 @@ export const test = base.extend<Fixtures>({
     await instance.stop();
   },
   baseURL: async ({ app }, use) => use(app.baseURL),
+  // E2E_THEME=<id> runs the whole suite in that theme (DESIGN.md "Design language": the suite is
+  // run under at least two). Set before the page's first script, as a chosen theme would be;
+  // a spec that sets its own theme later still wins.
+  page: async ({ page }, use) => {
+    const theme = process.env.E2E_THEME;
+    if (theme) await page.addInitScript((id) => localStorage.getItem("crowsnest-theme-name") ?? localStorage.setItem("crowsnest-theme-name", id), theme);
+    await use(page);
+  },
 });
 
 /** True in the phone projects (375 px wide; the sheet and bottom-nav layouts). */

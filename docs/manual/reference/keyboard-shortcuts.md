@@ -12,6 +12,7 @@ The `g` sequences and `?` do nothing while you type in a field or a terminal, so
 |---|---|---|
 | `⌘ K` | `Ctrl K` | Command palette (also from inside a terminal) (elsewhere: Command palette (not inside a terminal, where Ctrl K is the shell's)) |
 | `?` | `?` | Keyboard shortcuts (this sheet), with the way into the manual |
+| `T` | `T` | Next theme (Settings → Appearance has them all) |
 | `g` then `h` | `g` then `h` | Go to Now |
 | `g` then `j` | `g` then `j` | Go to Jobs |
 | `g` then `p` | `g` then `p` | Go to Projects |

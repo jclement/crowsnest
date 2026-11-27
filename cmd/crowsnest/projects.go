@@ -35,7 +35,7 @@ type projectWiring struct {
 	leads   atomic.Pointer[projects.Leads]
 	// extra renders the human's instruction layers for a lead (internal/instructions); nil adds
 	// nothing.
-	extra atomic.Pointer[func(ctx context.Context, project projects.Project) string]
+	extra atomic.Pointer[func(ctx context.Context, project projects.Project, record bool) string]
 	// taskSource gives a lead's poker its project's scheduled tasks; nil gives none.
 	taskSource atomic.Pointer[func(projectID int64) orch.TaskSource]
 	// jobs is the jobs service, for a lead poker's spend ceiling and usage-limit hold (6.16).
@@ -162,7 +162,8 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 		if permission == "" {
 			permission = deps.cfg.PermissionMode
 		}
-		agent := orch.New(orch.Options{
+		var agent *orch.Orchestrator
+		agent = orch.New(orch.Options{
 			Client: deps.client, KV: deps.db, Hub: nil, Journal: deps.journal, Logger: deps.logger.With("lead", project.Slug),
 			Session: deps.cfg.Session, Dir: project.Dir, StateDir: filepath.Join(deps.cfg.StateDir, "leads", project.Slug),
 			Model: deps.cfg.Model, PermissionMode: permission, Version: version,
@@ -171,10 +172,14 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 			BinDir:            binDir, Executable: executable, AgentSocket: deps.agentSocket, BasePath: os.Getenv("PATH"),
 			ClaudeConfigDir: claudeConfigDir(deps.cfg), Identity: deps.identity, Guard: deps.guard,
 			AgentName: projects.AgentName(project.Slug), Workspace: "lead " + project.Slug, KVPrefix: "lead." + project.Slug,
-			Render:   func() (string, error) { return w.leadInstructions(deps.cfg.Session, project) },
-			Paused:   deps.ctl.paused,
-			Gate:     herdrGate(deps.client),
-			ExtraEnv: deps.ctl.heavyEnv(),
+			Render:   func() (string, error) { return w.leadInstructions(deps.cfg.Session, project, true) },
+			Guidance: func() (string, error) { return w.leadInstructions(deps.cfg.Session, project, false) },
+			// An adopted lead started with older instructions is restarted for them (7.5).
+			AutoInstructionRestart: deps.ctl.instructionRestart, AdoptAsCurrent: deps.cfg.Demo,
+			HeldJobBusy: func(ctx context.Context) bool { return heldJobBusy(deps.db, agent)(ctx) },
+			Paused:      deps.ctl.paused,
+			Gate:        herdrGate(deps.client),
+			ExtraEnv:    deps.ctl.heavyEnv(),
 			OnStatus: func(status orch.Status) {
 				if deps.onStatus != nil {
 					deps.onStatus(project, status)
@@ -221,7 +226,7 @@ func (w *projectWiring) leadPokerOptions(deps leadDeps, project projects.Project
 
 // leadInstructions is a lead's CROWSNEST.md: the orchestrator's template with the project named,
 // then the human's instruction layers (global, the lead role, the project).
-func (w *projectWiring) leadInstructions(session string, project projects.Project) (string, error) {
+func (w *projectWiring) leadInstructions(session string, project projects.Project, record bool) (string, error) {
 	body, err := orch.RenderInstructions(orch.InstructionData{
 		Session: session, Project: project.Slug, ProjectName: project.Name, Description: project.Description, Dir: project.Dir, Version: version,
 	})
@@ -229,7 +234,7 @@ func (w *projectWiring) leadInstructions(session string, project projects.Projec
 		return "", err
 	}
 	if extra := w.extra.Load(); extra != nil {
-		if layers := (*extra)(context.Background(), project); layers != "" {
+		if layers := (*extra)(context.Background(), project, record); layers != "" {
 			body += "\n\n" + layers
 		}
 	}
@@ -273,7 +278,11 @@ func (w *projectWiring) useInstructions(layers *instructions.Service, logger *sl
 	if layers == nil {
 		return
 	}
-	extra := func(ctx context.Context, project projects.Project) string {
+	extra := func(ctx context.Context, project projects.Project, record bool) string {
+		if !record {
+			text, _ := layers.StandingAgentText(ctx, projects.Subject(project.Slug), project.ID, project.Name)
+			return text
+		}
 		text, _, err := layers.ForStandingAgent(ctx, projects.Subject(project.Slug), project.ID, project.Name)
 		if err != nil {
 			logger.Warn("composing a lead's instruction layers", "project", project.Slug, "err", err)

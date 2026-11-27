@@ -115,6 +115,8 @@ var editable = []Setting{
 		Help: "start the orchestrator with Claude Code's Remote Control, so the Claude app can reach it too"},
 	{Name: optJobRemoteControl, Label: "Remote Control for jobs", Section: "Agents", Kind: "bool", Apply: ApplyRestart,
 		Help: "start Claude job agents with Remote Control too"},
+	{Name: optNoInstructionRestart, Label: "Restart for new instructions", Section: "Orchestrator upkeep", Kind: "bool", Invert: true, Apply: ApplyLive,
+		Help: "when the orchestrator's or a lead's instructions changed since it started, restart it on the same conversation at its next idle moment"},
 	{Name: optPokeInterval, Label: "Poke interval", Section: "Orchestrator upkeep", Kind: "duration", Apply: ApplyLive,
 		Help: "how often the timer considers poking the orchestrator; 0 turns timer pokes off"},
 	{Name: optCompactAt, Label: "Compact past (tokens)", Section: "Orchestrator upkeep", Kind: "int", Apply: ApplyLive,
@@ -143,6 +145,8 @@ var editable = []Setting{
 		Help: "production hosts no agent may reach unattended (added to the protected-hosts file's)"},
 	{Name: optProtectedBranch, Label: "Protected branches", Section: "Guard", Kind: "list", Apply: ApplyRestart,
 		Help: "branches agents may not commit or push onto, nor force-push"},
+	{Name: optTheme, Label: "Default theme", Section: "Appearance", Kind: "text", Apply: ApplyLive,
+		Help: "the theme a browser gets until it chooses its own (Appearance sets it); empty: the house theme"},
 }
 
 // EditableSettings returns the table of settings the app may change.
@@ -217,6 +221,8 @@ func (c Config) SettingValue(name string) string {
 		return boolText(c.JobRemoteControl)
 	case optPokeInterval:
 		return durationText(c.PokeInterval.String())
+	case optNoInstructionRestart:
+		return boolText(c.NoInstructionRestart)
 	case optCompactAt:
 		return itoa(c.CompactAt)
 	case optFreshAt:
@@ -239,6 +245,8 @@ func (c Config) SettingValue(name string) string {
 		return c.MergeMode
 	case optDigestAt:
 		return c.DigestAt
+	case optTheme:
+		return c.Theme
 	case optProtectedHost:
 		return strings.Join(c.ProtectedHosts, ",")
 	case optProtectedBranch:
@@ -321,12 +329,14 @@ func (l *loader) loadEngine(cfg *Config) error {
 func (c Config) WithSettings(from Config) Config {
 	c.Model, c.JobModel, c.Engine, c.PermissionMode = from.Model, from.JobModel, from.Engine, from.PermissionMode
 	c.NoRemoteControl, c.JobRemoteControl = from.NoRemoteControl, from.JobRemoteControl
+	c.NoInstructionRestart = from.NoInstructionRestart
 	c.PokeInterval, c.CompactAt, c.FreshAt = from.PokeInterval, from.CompactAt, from.FreshAt
 	c.AttachmentMaxMB, c.AttachmentQuotaMB = from.AttachmentMaxMB, from.AttachmentQuotaMB
 	c.NotifyURL = from.NotifyURL
 	c.ProtectedHosts, c.ProtectedBranches = from.ProtectedHosts, from.ProtectedBranches
 	c.MaxRunningJobs, c.LoadHold, c.HeavySlots = from.MaxRunningJobs, from.LoadHold, from.HeavySlots
 	c.Review, c.MergeMode, c.DigestAt = from.Review, from.MergeMode, from.DigestAt
+	c.Theme = from.Theme
 	c = c.withAcceptSettings(from)
 	c.RequireViewedBeforeLand = from.RequireViewedBeforeLand
 	c.BackupEvery, c.BackupKeep = from.BackupEvery, from.BackupKeep

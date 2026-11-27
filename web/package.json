@@ -18,7 +18,8 @@
     "screenshots:inbox": "playwright test --project=screenshots e2e/screenshots/inbox.spec.ts",
     "screenshots:jobs": "playwright test --project=screenshots e2e/screenshots/jobs.spec.ts",
     "screenshots:palette": "playwright test --project=screenshots e2e/screenshots/palette.spec.ts",
-    "screenshots:manual": "playwright test --project=screenshots e2e/screenshots/manual.spec.ts"
+    "screenshots:manual": "playwright test --project=screenshots e2e/screenshots/manual.spec.ts",
+    "screenshots:themes": "playwright test --project=screenshots e2e/screenshots/themes.spec.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",

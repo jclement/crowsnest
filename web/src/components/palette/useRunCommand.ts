@@ -10,7 +10,8 @@ import { endpoints, queryKeys } from "../../lib/api";
 import { offerJobDraft } from "../../lib/jobDraft";
 import { pokeToast } from "../../lib/journal";
 import type { PaletteCommand, PaletteSheet, ViewPath } from "../../lib/palette";
-import { setTheme } from "../../lib/theme";
+import { cycleThemeName, setTheme, setThemeName } from "../../lib/theme";
+import { findTheme } from "../../themes";
 import { useToast } from "../ui/toast-context";
 
 export interface RunContext {
@@ -43,6 +44,11 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
         case "theme":
           setTheme(command.choice);
           return;
+        case "themeName": {
+          const id = command.id === "next" ? cycleThemeName() : (setThemeName(command.id), command.id);
+          toast.show({ title: `Theme: ${findTheme(id)?.name ?? id}` });
+          return;
+        }
         case "signOut":
           signOut();
           return;

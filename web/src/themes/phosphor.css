@@ -1,0 +1,152 @@
+/* @name Phosphor
+   @order 2
+   @description A green-screen terminal after dark; a greenbar printout by day. Running is the phosphor, so done turns ice-cyan here.
+
+   See crowsnest.css for what a theme file must hold. This theme also sets the one optional
+   token, --font-sans: a terminal draws everything in its monospace face, so this one does. */
+
+[data-theme="phosphor"] {
+  --font-sans: var(--font-mono);
+  --color-surface: #f7faf2;
+  --color-surface-raised: #eef4e6;
+  --color-surface-sunken: #e5eedb;
+  --color-heading: #0a1f0f;
+  --color-body: #1f3a26;
+  --color-muted: #48604e;
+  --color-border: #cddbc2;
+  --color-border-strong: #adc29f;
+  --color-hover: #e8f0de;
+  --color-selected: #d5eacd;
+  --color-accent: #0d6229;
+  --color-accent-fg: #f7faf2;
+  --color-focus: #0d6229;
+  --color-danger: #a3182b;
+  --color-warning: #7a4700;
+  --color-success: #0b5e78;
+  --color-overlay: rgb(10 31 15 / 0.45);
+
+  --color-status-working: #0d6229;
+  --color-status-blocked: #b81d33;
+  --color-status-stuck: #9a5b00;
+  --color-status-done: #0e6e8c;
+  --color-status-held: #6a3fb5;
+  --color-status-idle: #6e8a74;
+  --color-status-unknown: #a5b8a8;
+  --color-status-fg: #ffffff;
+
+  --color-chrome: #07130a;
+  --color-chrome-fg: #c8ffd6;
+  --color-chrome-muted: #7fb08e;
+  --color-chrome-hover: #12261a;
+  --color-chrome-border: #183020;
+  --color-chrome-warning: #ffc23d;
+  --color-chrome-accent: #39ff7a;
+
+  --color-code-keyword: #5b2fa8;
+  --color-code-string: #0d6229;
+  --color-code-number: #7f4500;
+  --color-code-comment: #536b59;
+  --color-code-title: #0b5e78;
+  --color-code-attr: #a3184f;
+  --color-diff-add: rgb(13 98 41 / 0.12);
+  --color-diff-del: rgb(184 29 51 / 0.1);
+
+  --color-chart-1: #0d6229;
+  --color-chart-2: #0e6e8c;
+  --color-chart-3: #9a5b00;
+  --color-chart-4: #6a3fb5;
+
+  --term-background: #e5eedb;
+  --term-foreground: #0a1f0f;
+  --term-cursor: #0d6229;
+  --term-selection: #bfe0b5;
+  --term-black: #0a1f0f;
+  --term-red: #a3182b;
+  --term-green: #0d6229;
+  --term-yellow: #7a4700;
+  --term-blue: #1d4fa8;
+  --term-magenta: #6a3fb5;
+  --term-cyan: #0b5e78;
+  --term-white: #5c7562;
+  --term-bright-black: #48604e;
+  --term-bright-red: #c42a3d;
+  --term-bright-green: #1a7d3a;
+  --term-bright-yellow: #966000;
+  --term-bright-blue: #2f66c4;
+  --term-bright-magenta: #8152cc;
+  --term-bright-cyan: #13789a;
+  --term-bright-white: #7a917f;
+}
+
+[data-theme="phosphor"].dark {
+  --font-sans: var(--font-mono);
+  --color-surface: #040805;
+  --color-surface-raised: #08100a;
+  --color-surface-sunken: #020402;
+  --color-heading: #c8ffd6;
+  --color-body: #90e2a6;
+  --color-muted: #5fa877;
+  --color-border: #11291a;
+  --color-border-strong: #1d4a2a;
+  --color-hover: #0b1a0f;
+  --color-selected: #0e2c17;
+  --color-accent: #39ff7a;
+  --color-accent-fg: #021006;
+  --color-focus: #39ff7a;
+  --color-danger: #ff6574;
+  --color-warning: #ffc23d;
+  --color-success: #5fe3ff;
+  --color-overlay: rgb(0 0 0 / 0.7);
+
+  --color-status-working: #39ff7a;
+  --color-status-blocked: #ff5f6d;
+  --color-status-stuck: #ffc23d;
+  --color-status-done: #5fe3ff;
+  --color-status-held: #c79bff;
+  --color-status-idle: #4e8a60;
+  --color-status-unknown: #33583f;
+  --color-status-fg: #021006;
+
+  --color-chrome: #000000;
+  --color-chrome-fg: #b6ffc9;
+  --color-chrome-muted: #5fa877;
+  --color-chrome-hover: #0a170d;
+  --color-chrome-border: #10291a;
+  --color-chrome-warning: #ffc23d;
+  --color-chrome-accent: #39ff7a;
+
+  --color-code-keyword: #7dffb0;
+  --color-code-string: #d9ff8a;
+  --color-code-number: #ffc23d;
+  --color-code-comment: #5a9a6e;
+  --color-code-title: #5fe3ff;
+  --color-code-attr: #ff9ccf;
+  --color-diff-add: rgb(57 255 122 / 0.1);
+  --color-diff-del: rgb(255 95 109 / 0.12);
+
+  --color-chart-1: #39ff7a;
+  --color-chart-2: #5fe3ff;
+  --color-chart-3: #ffc23d;
+  --color-chart-4: #c79bff;
+
+  --term-background: #020402;
+  --term-foreground: #9dffb8;
+  --term-cursor: #39ff7a;
+  --term-selection: #1a4a28;
+  --term-black: #0e1a10;
+  --term-red: #ff5f6d;
+  --term-green: #39ff7a;
+  --term-yellow: #ffc23d;
+  --term-blue: #4fb3ff;
+  --term-magenta: #d38cff;
+  --term-cyan: #5fe3ff;
+  --term-white: #a8d8b5;
+  --term-bright-black: #3d6a4b;
+  --term-bright-red: #ff8f99;
+  --term-bright-green: #8affb0;
+  --term-bright-yellow: #ffd77a;
+  --term-bright-blue: #8ccfff;
+  --term-bright-magenta: #e4b8ff;
+  --term-bright-cyan: #9aefff;
+  --term-bright-white: #e4ffeb;
+}

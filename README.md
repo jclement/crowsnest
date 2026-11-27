@@ -342,6 +342,15 @@ variable is read-only there ("set by the environment: change it there"): precede
 then environment, then a value saved in the app, then the config file, then the default. The
 login, the bind, the session and the data directory are never changed from a browser.
 
+**Appearance** (account menu → Appearance, the Settings sheet, or the palette) picks a theme and,
+separately, the mode (System, Light or Dark; the header's toggle cycles the mode). Five themes
+ship, each a light and a dark partner: Crowsnest (the house theme), Phosphor (a green-screen
+terminal, all in mono), Deep sea, Ember and High contrast (every text colour at WCAG AAA). The
+choice is kept per browser; **Use for new browsers** makes a theme the default for browsers that
+have not chosen (the `theme` setting, also `--theme` / `CROWSNEST_THEME`). **T** cycles themes
+from anywhere outside a text field or terminal. Adding a theme is one file in `web/src/themes/`
+(DESIGN.md 12.10).
+
 ## On your tailnet with Tailscale
 
 Two ways to reach crowsnest from your phone:
@@ -924,6 +933,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--open` | `CROWSNEST_OPEN` | `auto` | Open a browser at start on the setup link (or the app): `auto` only from a desktop terminal, `always`, `never` |
 | `--name` | `CROWSNEST_NAME` | the name chosen at setup or in the Account sheet, else the short hostname | This instance's name (letters, digits, `-`, `_`; up to 32): in the header, page title, notices, `/auth/me` and Remote Control. Given here, it wins over the stored one and the Account sheet shows it read-only |
 | `--no-remote-control` | `CROWSNEST_NO_REMOTE_CONTROL` | `false` | Start the orchestrator without Claude Code's Remote Control (on by default, named `<name> crowsnest`) |
+| `--no-instruction-restart` | `CROWSNEST_NO_INSTRUCTION_RESTART` | `false` | Do not restart the orchestrator or a lead by itself when its instructions (prompt file, hooks, settings, MCP config) changed since it started; it is shown as "instructions changed since start" and Restart takes them. In the app: Settings, "Restart for new instructions" |
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | `false` | Start job agents with Remote Control too, named `<name> <job id> <title>` |
 | `--compact-at` | `CROWSNEST_COMPACT_AT` | `150000` | Compact the orchestrator (`/compact` with a focus) once its context passes this many tokens; `0` disables |
 | `--fresh-at` | `CROWSNEST_FRESH_AT` | off | `HH:MM`: once a day after this local time, when you have been quiet 20 minutes, the orchestrator writes a hand-over and starts a new conversation |
@@ -933,6 +943,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--review` | `CROWSNEST_REVIEW` | `auto` | The review gate for builder jobs in a worktree: `auto` (the other engine when installed, else the same one), `same`, `claude`, `codex` or `off`. A job can ask for its own |
 | `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges a finished job's branch into its base: `merge` (a merge commit) or `ff` (fast-forward only) |
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | off | `HH:MM`: write the daily digest into the Inbox after this local time (also the switch in the Schedule sheet and in Settings) |
+| `--theme` | `CROWSNEST_THEME` | `crowsnest` | the theme a browser gets until it chooses its own: `crowsnest`, `phosphor`, `deep-sea`, `ember` or `contrast` (Settings → Appearance sets it; each browser's own choice wins) |
 | `--check-timeout` | `CROWSNEST_CHECK_TIMEOUT` | `30m` | Longest crowsnest's own check of a finished coding job may run (DESIGN 6.15) |
 | `--require-viewed-before-land` | `CROWSNEST_REQUIRE_VIEWED_BEFORE_LAND` | `false` | Merge and push refuse a job until every file of its diff is marked viewed (off: Land warns); also in Settings (DESIGN 6.21) |
 | `--check-rounds` | `CROWSNEST_CHECK_ROUNDS` | `3` | Failed checks sent back to the agent before the job needs you |
@@ -1158,6 +1169,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run screenshots:jobs` | Builds, then Playwright against `./bin/crowsnest --demo`: the Jobs board (light and dark), the new-job form, a running, a stuck and a done job at 375×812 and 1440×900, the 375 px checks, and giving a job |
 | `mise run screenshots:palette` | Builds, then Playwright against `./bin/crowsnest --demo`: the command palette open, with a query (highlights, Give job), and a job's actions at 375×812 and 1440×900 in light and dark, plus the keyboard shortcuts sheet |
 | `mise run screenshots:manual` | Builds, then Playwright against `./bin/crowsnest --demo`: the built-in manual's pictures (`docs/manual/img`, light theme, 1x, JPEG): Now at 1440 and 390, the board, a project, a decision packet and rescue on a phone, the Land tab, the Schedule sheet and Chat. Run it after a UI change the manual's pictures show |
+| `mise run screenshots:themes` | Builds, then Playwright against `./bin/crowsnest --demo`: Now in every theme, light and dark, at 1440 and 390, as one contact sheet per theme (`web/screenshots/themes-<id>.png`) and one of them all (`themes-all.png`), plus the Settings → Appearance gallery |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
 | `mise run e2e:voice` | Talk mode alone (also part of `e2e`). Builds, then Playwright against `./bin/crowsnest --demo` with talk mode on and a fake ElevenLabs (`web/e2e/support/fake-elevenlabs.mjs`, never the real API), Chromium's fake microphone (and WebKit's mock device for the keyboard cases): the mic, the transcript sent, the SAY reply fetched from `/voice/tts` and played with speak mode on and not synthesised with it off, the play button; hold Space with real key events (3 s and 30 s with auto-repeat, a focused button, a quick tap, Option+Space in the composer, blur mid-hold); the Voice sheet (voices, preview, a saved voice and speed); screenshots of Chat recording at 375×812 and 1440×900 |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives, `checksums.txt` and the Homebrew cask (`dist/homebrew/Casks/crowsnest.rb`); nothing signed, nothing published |

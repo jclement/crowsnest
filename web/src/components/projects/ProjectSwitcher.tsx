@@ -39,7 +39,7 @@ export function ProjectSwitcher({ list, value, onChange }: { list: ProjectList; 
           >
             {option.label}
             {option.counts.needs_you > 0 && (
-              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-blocked px-1 text-[10px] font-semibold text-white tabular-nums dark:text-surface" title="Need you">
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-blocked px-1 text-[10px] font-semibold text-status-fg tabular-nums" title="Need you">
                 {option.counts.needs_you}
                 <span className="sr-only"> need you</span>
               </span>

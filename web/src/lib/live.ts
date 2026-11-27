@@ -90,6 +90,13 @@ export function isFleet(data: unknown): data is Fleet {
   return !!candidate && Array.isArray(candidate.workspaces) && Array.isArray(candidate.agents) && typeof candidate.revision === "number";
 }
 
+/**
+ * Fired on window for every event the stream delivers: the header's heartbeat (components/brand/
+ * Heartbeat.tsx) beats on it. The machine samples arrive every two seconds while the stream is
+ * open, so a live session beats steadily and a stalled one goes flat.
+ */
+export const BEAT_EVENT = "crowsnest-beat";
+
 /** Opens the app's one event stream and wires it to the query cache. Returns its state. */
 export function useLiveQueries(): StreamState {
   const queryClient = useQueryClient();
@@ -99,6 +106,7 @@ export function useLiveQueries(): StreamState {
         Object.entries(invalidations).map(([name, keys]) => [
           name,
           (data: unknown) => {
+            window.dispatchEvent(new Event(BEAT_EVENT));
             if (name === "sys") {
               if (isSample(data)) queryClient.setQueryData<SysStats>(sysKeys.stats, (previous) => appendSample(previous, data));
               return;

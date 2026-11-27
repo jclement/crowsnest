@@ -179,7 +179,7 @@ export function FileDiff({ view, split, wrap, onMoreContext }: FileDiffProps) {
 }
 
 function rowTone(kind: DiffLine["kind"]): string {
-  return kind === "add" ? "bg-success/10" : kind === "del" ? "bg-danger/10" : "";
+  return kind === "add" ? "bg-diff-add" : kind === "del" ? "bg-diff-del" : "";
 }
 
 function LineNumber({ n, className }: { n: number; className?: string }) {

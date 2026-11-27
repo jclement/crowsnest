@@ -219,6 +219,7 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 		return o.startCodex(ctx, paneID, files, launch)
 	}
 	sessionID, resuming := o.chooseSession(ctx, resume)
+	o.noteConversationInstructions(ctx, resuming)
 	args := o.startArgs(sessionID, resuming, files, launch)
 	o.mu.Lock()
 	prior := o.knownSession
@@ -437,6 +438,8 @@ func (o *Orchestrator) writeFiles(ctx context.Context, paneID string) (startFile
 	if err := writePrivate(files.instructions, []byte(body)); err != nil {
 		return startFiles{}, err
 	}
+	o.recordFingerprint(ctx, body)
+	o.update(func(s *Status) { s.InstructionsStale = false })
 	token, err := o.mintStartToken(ctx, paneID)
 	if err != nil {
 		return startFiles{}, err

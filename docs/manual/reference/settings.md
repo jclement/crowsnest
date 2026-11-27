@@ -27,6 +27,7 @@ These appear in the **Settings** sheet (account menu → Settings), grouped as t
 
 | Setting | Flag | Applies | What it does |
 |---|---|---|---|
+| Restart for new instructions (on is `--no-instruction-restart` off) | `--no-instruction-restart` | at once | when the orchestrator's or a lead's instructions changed since it started, restart it on the same conversation at its next idle moment |
 | Poke interval | `--poke-interval` | at once | how often the timer considers poking the orchestrator; 0 turns timer pokes off |
 | Compact past (tokens) | `--compact-at` | at once | compact the orchestrator once its context passes this size; 0 off |
 | Fresh conversation at | `--fresh-at` | at once | HH:MM local time: a daily hand-over and new conversation; empty off |
@@ -61,6 +62,12 @@ These appear in the **Settings** sheet (account menu → Settings), grouped as t
 |---|---|---|---|
 | Protected hosts | `--protected-host` | when crowsnest restarts | production hosts no agent may reach unattended (added to the protected-hosts file's) |
 | Protected branches | `--protected-branch` | when crowsnest restarts | branches agents may not commit or push onto, nor force-push |
+
+### Appearance
+
+| Setting | Flag | Applies | What it does |
+|---|---|---|---|
+| Default theme | `--theme` | at once | the theme a browser gets until it chooses its own (Appearance sets it); empty: the house theme |
 
 ### Budgets and acceptance
 
@@ -130,6 +137,7 @@ All of them, in `crowsnest --help` order. The config-file key is the flag's name
 | `--daily-ceiling-usd` | `CROWSNEST_DAILY_CEILING_USD` | `0` | Budgets and acceptance → Fleet ceiling per day ($) | the fleet's spend ceiling per day in estimated dollars: bounds jobs with no budget of their own and holds new starts once reached (0: none) |
 | `--orchestrator-ceiling-usd` | `CROWSNEST_ORCHESTRATOR_CEILING_USD` | `0` | Budgets and acceptance → Orchestrator ceiling per day ($) | the orchestrator's spend ceiling per day; past it automatic pokes wait (0: none) |
 | `--lead-ceiling-usd` | `CROWSNEST_LEAD_CEILING_USD` | `0` | Budgets and acceptance → Lead ceiling per day ($) | each project lead's spend ceiling per day where its spend is measured (0: none) |
+| `--theme` | `CROWSNEST_THEME` | none | Appearance → Default theme | the theme a browser gets until it chooses its own, such as phosphor (default: the house theme, crowsnest) |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Attachments → Largest attachment (MB) | largest attachment (pasted, dropped or attached by an agent) in MB |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Attachments → Attachment quota (MB) | disk all attachments may take, in MB; past it the oldest files nobody needs are deleted |
 | `--browse-root` | `CROWSNEST_BROWSE_ROOTS` | none | no | a directory the folder picker may browse besides your home, projects' and remembered directories, e.g. /srv or /Volumes; `/` only when named here (repeatable) |
@@ -157,5 +165,6 @@ All of them, in `crowsnest --help` order. The config-file key is the flag's name
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | `false` | Agents → Remote Control for jobs | start job agents with Remote Control too, named "<name> <job id> <title>" |
 | `--compact-at` | `CROWSNEST_COMPACT_AT` | `150000` | Orchestrator upkeep → Compact past (tokens) | compact the orchestrator once its context passes this many tokens; 0 disables |
 | `--fresh-at` | `CROWSNEST_FRESH_AT` | none | Orchestrator upkeep → Fresh conversation at | HH:MM: start the orchestrator on a new conversation once a day after this local time, with a hand-over (default off) |
+| `--no-instruction-restart` | `CROWSNEST_NO_INSTRUCTION_RESTART` | `false` | Orchestrator upkeep → Restart for new instructions | do not restart the orchestrator or a lead by itself when its instructions changed since it started (it is shown, and Restart takes them) |
 
 Never changeable from a browser, whatever the database holds: the login, the bind, the port, TLS, allowed hosts and trusted proxies, the herdr session, the data directory and the orchestrator's directory.

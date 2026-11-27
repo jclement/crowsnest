@@ -46,6 +46,9 @@ type controls struct {
 	heavyDeferred string
 	landing       jobs.LandingOptions
 	logger        *slog.Logger
+	// noInstructionRestart is the Setting that keeps standing agents from being restarted for new
+	// instructions by themselves (orch freshness.go).
+	noInstructionRestart atomic.Bool
 }
 
 // newControls builds the controls. The pause file is honoured only for the real instance (a
@@ -56,6 +59,7 @@ func newControls(cfg config.Config, db *store.Store, events *hub.Hub, journalLog
 		file = pausedFile()
 	}
 	c := &controls{logger: logger, heavyDir: filepath.Join(cfg.StateDir, "heavy")}
+	c.noInstructionRestart.Store(cfg.NoInstructionRestart)
 	c.pause = pause.New(pause.Options{KV: db, File: file, Hub: events, Journal: journalLog, Logger: logger})
 	c.throttle = throttle.New(throttle.Options{KV: db, Logger: logger,
 		Defaults: throttle.Settings{MaxRunning: maxRunning(cfg), LoadPerCore: cfg.LoadHold}})
@@ -86,6 +90,7 @@ func (c *controls) run(ctx context.Context, demo bool) {
 // applyConfig pushes a Settings change of the limit, the load hold, the heavy slots, the review
 // gate and the merge mode into the running services (DESIGN.md 3.2: these apply live).
 func (c *controls) applyConfig(cfg config.Config, jobService *jobs.Service) {
+	c.noInstructionRestart.Store(cfg.NoInstructionRestart)
 	c.throttle.SetDefaults(throttle.Settings{MaxRunning: maxRunning(cfg), LoadPerCore: cfg.LoadHold})
 	if err := throttle.WriteHeavyConfig(c.heavyDir, cfg.HeavySlots); err != nil {
 		c.logger.Warn("writing the heavy-command configuration", "err", err)
@@ -95,6 +100,9 @@ func (c *controls) applyConfig(cfg config.Config, jobService *jobs.Service) {
 		jobService.SetLanding(cfg.Review, cfg.MergeMode)
 	}
 }
+
+// instructionRestart reports whether standing agents are restarted for new instructions.
+func (c *controls) instructionRestart() bool { return c == nil || !c.noInstructionRestart.Load() }
 
 // paused is the pause as a plain func, for options that take one.
 func (c *controls) paused() bool { return c != nil && c.pause.Paused() }

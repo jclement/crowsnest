@@ -23,6 +23,7 @@ export function shortcutSections(mac: boolean): ShortcutSection[] {
       shortcuts: [
         { keys: [`${mod} K`], what: mac ? "Command palette (also from inside a terminal)" : "Command palette (not inside a terminal, where Ctrl K is the shell's)" },
         { keys: ["?"], what: "Keyboard shortcuts (this sheet), with the way into the manual" },
+        { keys: ["T"], what: "Next theme (Settings → Appearance has them all)" },
         ...viewKeys.map((view) => ({ keys: ["g", view.key], what: `Go to ${view.label}` })),
         { keys: ["g", "n"], what: "Focus the needs-you tray (then y or n answers the approval you open)" },
       ],

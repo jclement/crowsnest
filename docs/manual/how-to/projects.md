@@ -90,8 +90,9 @@ Open a project from **Projects** or a row on **Now**. Top to bottom:
 
 - **What it should know**: write the project's instructions (its gate command, where things live,
   what not to touch) in **Project instructions** and **Save**. The lead and every job agent in the
-  project get it. Press **Restart with new instructions** on the Instructions card so the running
-  lead picks it up. See [Instruction layers](../concepts/instruction-layers.md).
+  project get it. A running lead restarts by itself on the same conversation to
+  pick it up at its next idle moment; **Restart with new instructions** on its Instructions card
+  does it now. See [Instruction layers](../concepts/instruction-layers.md).
 - **Its model**: leads run on the orchestrator's model (Settings → Agents → **Orchestrator
   model**). The job agents use the project's **Model** default.
 - **Its voice** (with talk mode on): account menu → **Voice**, where each standing agent has its

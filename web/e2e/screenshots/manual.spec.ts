@@ -125,3 +125,15 @@ test("the diff viewer at 1440", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "Views" })).toHaveCount(0);
   await shot(page, "diff-1440");
 });
+
+// Appearance (account menu), with the labels the manual quotes asserted.
+test("the appearance sheet at 1440", async ({ page }) => {
+  await open(page, "/", 1440, 900);
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Appearance" }).click();
+  const sheet = page.getByRole("dialog", { name: "Appearance" });
+  for (const mode of ["System", "Light", "Dark"]) await expect(sheet.getByRole("radio", { name: mode, exact: true })).toBeVisible();
+  for (const theme of ["Crowsnest", "Phosphor", "Deep sea", "Ember", "High contrast"]) await expect(sheet.getByRole("radio", { name: `${theme} theme` })).toBeAttached();
+  await expect(sheet.getByRole("button", { name: /Use for new browsers/ }).first()).toBeAttached();
+  await shot(page, "appearance-1440");
+});

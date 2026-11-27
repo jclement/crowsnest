@@ -1,4 +1,4 @@
-// The built-in user manual's model (DESIGN.md 12.10): pages are the markdown files under
+// The built-in user manual's model (DESIGN.md 12.11): pages are the markdown files under
 // docs/manual (so the same text reads on GitHub), bundled into the web app by
 // src/manual/content.ts. Everything here is pure: the contents (parsed from docs/manual/README.md,
 // the one list of pages), headings and their anchors (GitHub's slugs, so a deep link works in both

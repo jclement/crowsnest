@@ -16,8 +16,9 @@ import { useLiveQueries } from "../lib/live";
 import { useAttention, useMe } from "../lib/queries";
 import { playEarcon } from "../lib/voice/earcons";
 import { speakModeOn } from "../lib/voice/speak";
-import type { StreamStatus } from "../lib/sse";
 import { useNoStrayFileDrops } from "./attach/useAttachments";
+import { Heartbeat } from "./brand/Heartbeat";
+import { Wordmark } from "./brand/Brand";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { LimitBanner } from "./control/LimitBanner";
 import { PauseBanner } from "./control/PauseBanner";
@@ -100,8 +101,7 @@ export function AppFrame() {
     <PaletteProvider onSignOut={() => void signOut()}>
     <div className="flex h-full flex-col">
       <header className="box-content flex h-11 shrink-0 items-center gap-2 border-b border-chrome-border bg-chrome pl-3 pr-1 pt-[env(safe-area-inset-top)] text-chrome-fg md:h-10">
-        <img src="/icons/crowsnest.svg" alt="" className="h-5 w-5" />
-        <span className="hidden text-sm font-semibold tracking-tight sm:inline">crowsnest</span>
+        <Wordmark compact />
         {me.data?.features.name && (
           <span className="min-w-0 max-w-[40%] truncate text-sm font-semibold text-chrome-fg" title={`This crowsnest is ${me.data.features.name}`}>
             {me.data.features.name}
@@ -125,7 +125,7 @@ export function AppFrame() {
         <HeavyChip />
         <PaletteButton className="sm:mr-1" />
         <div className="flex items-center">
-          <ConnectionState status={stream.status} />
+          <Heartbeat status={stream.status} />
           {voice && <SpeakToggle />}
           <ThemeToggle />
           {me.data && <UserMenu me={me.data} onSignOut={() => void signOut()} />}
@@ -218,7 +218,7 @@ function RailLink({ item, count }: { item: NavItem; count: number }) {
     <Link
       to={item.to}
       activeOptions={{ exact: item.to === "/", includeSearch: false }}
-      className="flex h-8 items-center gap-2 rounded px-2 text-sm text-body hover:bg-hover data-[status=active]:bg-selected data-[status=active]:font-medium data-[status=active]:text-heading"
+      className="flex h-8 items-center gap-2 rounded px-2 text-sm text-body hover:bg-hover data-[status=active]:bg-selected data-[status=active]:font-medium data-[status=active]:text-heading data-[status=active]:shadow-[inset_2px_0_0_var(--color-accent)]"
     >
       <item.icon className="h-4 w-4" aria-hidden />
       {item.label}
@@ -234,38 +234,11 @@ function Badge({ count, className }: { count: number; className?: string }) {
     <span
       aria-label={`${count} need you`}
       className={cn(
-        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-blocked px-1 text-[10px] font-semibold leading-none text-white tabular-nums dark:text-surface",
+        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-blocked px-1 text-[10px] font-semibold leading-none text-status-fg tabular-nums",
         className,
       )}
     >
       {count > 99 ? "99+" : count}
-    </span>
-  );
-}
-
-const connectionLabels: Record<StreamStatus, string> = {
-  open: "Live",
-  connecting: "Connecting",
-  reconnecting: "Offline",
-};
-
-/** A dot and a word for the event stream: live updates on, or not. */
-function ConnectionState({ status }: { status: StreamStatus }) {
-  return (
-    <span
-      role="status"
-      title={status === "open" ? "Live updates connected" : "Live updates not connected"}
-      className="mr-1 inline-flex items-center gap-1.5 px-1.5 text-xs text-chrome-muted"
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "h-2 w-2 rounded-full",
-          status === "open" ? "bg-status-done" : status === "reconnecting" ? "bg-warning" : "animate-shimmer bg-chrome-muted",
-        )}
-      />
-      <span className="hidden sm:inline">{connectionLabels[status]}</span>
-      <span className="sr-only sm:hidden">{connectionLabels[status]}</span>
     </span>
   );
 }
