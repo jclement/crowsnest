@@ -20,7 +20,7 @@ import type { ChipTone } from "../components/ui/Chip";
 
 // ---- Commands -------------------------------------------------------------------------------
 
-export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/fleet" | "/terminal" | "/system";
+export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/fleet" | "/terminal" | "/system" | "/diff";
 export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions" | "settings" | "digests" | "worktrees" | "limits" | "pause";
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
@@ -330,6 +330,38 @@ function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
   return items;
 }
 
+/** "Changes: <job>" for each job with a checkout still there, and "Changes: <project>" for each
+ * project's main checkout: the diff viewer full screen (DESIGN.md 6.21). */
+export function changesItems(jobs: Job[], projects: ProjectView[]): PaletteItem[] {
+  const items: PaletteItem[] = [];
+  for (const job of jobs) {
+    if ((!job.worktree_branch && !job.work_dir && !job.dir) || job.torn_down_at || job.review_of || job.role === "reviewer") continue;
+    items.push({
+      id: `changes:${job.id}`,
+      group: "jobs",
+      title: `Changes: ${job.title || job.id}`,
+      subtitle: [job.id, "diff", job.worktree_branch ?? ""].filter(Boolean).join(" · "),
+      keywords: [job.id, "diff", "changes", "review", job.worktree_branch ?? ""].filter(Boolean),
+      icon: "job",
+      command: { kind: "navigate", to: "/diff", search: { job: job.id } },
+      verb: "Open",
+    });
+  }
+  for (const project of projects) {
+    items.push({
+      id: `changes:project:${project.slug}`,
+      group: "projects",
+      title: `Changes: ${project.name}`,
+      subtitle: [project.slug, "the main checkout's diff"].join(" · "),
+      keywords: [project.slug, "diff", "changes", "uncommitted", "lead"],
+      icon: "project",
+      command: { kind: "navigate", to: "/diff", search: { project: project.slug } },
+      verb: "Open",
+    });
+  }
+  return items;
+}
+
 /** A project: open it; give its lead a job; chat with its lead; start or stop the lead. */
 export function projectItem(project: ProjectView): PaletteItem {
   const open: PaletteCommand = { kind: "navigate", to: `/projects/${project.slug}` };
@@ -463,6 +495,7 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
   const jobs = [...(sources.jobs ?? [])].sort((a, b) => jobRank(a) - jobRank(b) || (b.last_activity_at ?? b.created_at).localeCompare(a.last_activity_at ?? a.created_at));
   items.push(...jobs.map(jobItem));
   items.push(...(sources.projects ?? []).filter((project) => !project.archived).map(projectItem));
+  items.push(...changesItems(jobs, (sources.projects ?? []).filter((project) => !project.archived)));
   items.push(...fleetItems(sources.fleet).filter((item) => item.group === "agents"));
 
   if (sources.orchestrator) {
@@ -663,9 +696,10 @@ export function rankItems(items: PaletteItem[], rawQuery: string, recents: reado
     for (const id of emptyOrder) {
       let members: PaletteItem[];
       if (id === "recent") members = recent;
-      else if (id === "jobs") members = items.filter((item) => item.group === "jobs" && !taken.has(item.id) && liveJob(item)).slice(0, 6);
+      else if (id === "jobs") members = items.filter((item) => item.group === "jobs" && !taken.has(item.id) && !item.id.startsWith("changes:") && liveJob(item)).slice(0, 6);
       else if (id === "navigate") members = items.filter((item) => item.group === "navigate" && item.id.startsWith("nav:") && !taken.has(item.id));
-      else members = items.filter((item) => item.group === id && !taken.has(item.id)).slice(0, GROUP_LIMIT);
+      // The diff views ("Changes: …") are found by typing, not listed before a query.
+      else members = items.filter((item) => item.group === id && !taken.has(item.id) && !item.id.startsWith("changes:")).slice(0, GROUP_LIMIT);
       if (members.length > 0) groups.push({ id, label: groupLabels[id], items: members.map(plain) });
     }
     return groups;

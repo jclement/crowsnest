@@ -115,9 +115,9 @@ test("the offline banner shows when the server dies, and goes when it returns", 
   await expect(banner.getByRole("button", { name: "Retry now" })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Offline" })).toBeAttached();
   await app.start();
-  // The button goes as soon as a reconnect starts (and with the banner once it succeeds): a click
-  // with no timeout of its own waited out the whole test for a button that was already gone.
-  await banner.getByRole("button", { name: "Retry now" }).click({ timeout: 2_000 }).catch(() => {});
+  // Retry if the banner is still up; the client may already have reconnected by itself (a quick
+  // restart), and a click with no timeout would then wait for the gone button until the test ends.
+  await banner.getByRole("button", { name: "Retry now" }).click({ timeout: 5_000 }).catch(() => {});
   await expect(banner).toHaveCount(0, { timeout: 40_000 });
   await expect(page.getByRole("status").filter({ hasText: "Live" })).toBeAttached();
   // And the data is live again: the restarted demo's board loads.

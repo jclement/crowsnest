@@ -785,11 +785,10 @@ directory.
 
 ## Landing, limits, the pause and the digest
 
-- **Review and land.** A job that ran in its own worktree gets a **Review** tab when it is done:
-  commits ahead of its base, files and lines changed, whether the tree is clean and the branch
-  pushed, every file's diff in the order the change reads best (the agent's walkthrough first,
-  then schema, logic, API, UI, tests, docs; churn last), each opened on demand, binary files
-  named only; beside it the agent's result, evidence and walkthrough, and the review rounds.
+- **Review and land.** A job that ran in its own worktree has a **Review** tab, while it runs
+  and when it is done: commits ahead of its base, whether the tree is clean and the branch
+  pushed, the live diff viewer (below), and beside it the agent's result, evidence and
+  walkthrough, and the review rounds.
   **Merge** (into the base branch in the main checkout; `--merge merge|ff`), **Push and open
   PR** (GitHub with `gh`; no reviewers assigned; other hosts are pushed only) or **Discard**,
   each after a confirmation saying exactly what happens. crowsnest's own git calls run none of
@@ -818,6 +817,42 @@ directory.
   "Digest now" in the palette: what finished, what waits on you, each lead's day, the spend, what
   is next, written from crowsnest's records (by the orchestrator when it is up), as a notice in
   the Inbox; past digests under "Past digests".
+
+## The diff view
+
+Every checkout has a live, syntax-highlighted diff (DESIGN.md 6.21), at any time:
+
+- **A job**: its Review tab (a worktree) or Changes tab (a job in a folder of its own), while it
+  runs. Switch between **All changes**, **Commits on this branch**, **Uncommitted** (untracked
+  files included) and **Since you viewed**. It follows the agent: a few seconds after the agent
+  edits a file the view updates by itself (Refresh is there too; git is read at most once every
+  4 seconds per job, and only while someone has the view open).
+- **A project's main checkout** (the lead's work): the lead's Chat and the project page have
+  **Changes**: uncommitted work and commits since the upstream (or the default branch), since the
+  lead's conversation started, or since a ref you pick. The project page lists every job's
+  checkout with its diffstat.
+- **The viewer**: unified or split (split from a wide screen, remembered), line numbers both
+  sides, the words that changed emphasised, expand context 20 lines at a time or the whole file,
+  collapse and expand per file and all, sticky file headers, a file list with status, diffstat
+  bars and a filter, whitespace and wrap toggles, copy path. Keys: **j/k** next and previous
+  file, **n/p** change, **v** viewed, **f** full screen (Esc leaves it). Lockfiles, generated
+  code, images and changes over 3,000 lines start collapsed, with the reason; binary and
+  untracked files over 2 MB are named, not shown.
+- **Viewed**, as in Azure DevOps: tick a file and it collapses; **Hide viewed** takes it off
+  the list ("12 of 30 viewed", and a bar on the job's card). The tick is tied to the file's
+  content: when the agent changes the file again the tick clears by itself and the file comes
+  back flagged "changed since you viewed it", with **Show since viewed** for only what changed.
+  Ticks live on the server (every device, survives restarts) and go when the job lands or is
+  discarded. The Land card and its confirmation say how many files are not viewed; Settings →
+  "Require all files viewed before Land" (`--require-viewed-before-land`, off) makes it a refusal.
+- **Full screen** is its own page, `/diff?job=j_12` or `/diff?project=<slug>`: the app's header,
+  nav and tray hidden, so it opens in its own tab ("Open in a new tab") and deep-links; entering
+  and leaving keeps the scope, the file and where you were. On a phone it shows one file at a
+  time: the file list as a sheet, Previous, Viewed and Next at the bottom, swipe between files.
+- The palette has **Changes: <job>** and **Changes: <project>**.
+- Read-only git with crowsnest's protective options (no hooks, external diff, textconv, pager
+  or fsmonitor), and the repository's clean/smudge filters switched off by name: the work tree is
+  read through a temporary index, never the agent's own.
 
 ## Acceptance, budgets and waits
 
@@ -936,6 +971,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges a finished job's branch into its base: `merge` (a merge commit) or `ff` (fast-forward only) |
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | off | `HH:MM`: write the daily digest into the Inbox after this local time (also the switch in the Schedule sheet and in Settings) |
 | `--check-timeout` | `CROWSNEST_CHECK_TIMEOUT` | `30m` | Longest crowsnest's own check of a finished coding job may run (DESIGN 6.15) |
+| `--require-viewed-before-land` | `CROWSNEST_REQUIRE_VIEWED_BEFORE_LAND` | `false` | Merge and push refuse a job until every file of its diff is marked viewed (off: Land warns); also in Settings (DESIGN 6.21) |
 | `--check-rounds` | `CROWSNEST_CHECK_ROUNDS` | `3` | Failed checks sent back to the agent before the job needs you |
 | `--job-budget-usd` | `CROWSNEST_JOB_BUDGET_USD` | `0` (none) | Default budget per job in estimated dollars, its delegated jobs included (DESIGN 6.16) |
 | `--job-budget-minutes` | `CROWSNEST_JOB_BUDGET_MINUTES` | `0` (none) | Default budget per job in minutes since its agent started |
@@ -1016,6 +1052,10 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /setup` | none | `{required, default_name?, min_password_length}`: whether first-run setup is waiting |
 | `POST /setup` | none (the setup token) | `{token, username, password, name}` → `201` and a session cookie; `403 BAD_TOKEN`, `400` for a field to fix, `429` with `Retry-After` (about five tries a minute, for everyone), `410` once setup is done. While setup waits, every other API route answers `403 SETUP_REQUIRED` and every page redirects to `/setup` |
 | `GET /jobs/{id}/review`, `GET /jobs/{id}/review/diff?path=` | session | The Review tab: what a worktree job produced, the files in reading order, the review rounds, the land actions open (and why not), and one file's diff |
+| `GET /changes/jobs/{id}`, `/changes/projects/{ref}`, `/changes/orchestrator` | session | The live diff (DESIGN.md 6.21): `?scope=all\|committed\|uncommitted\|since_viewed`, `&base=` (a main checkout: `""` upstream, `session`, or a ref), `&refresh=1`; the files with status, counts, content hashes and viewed marks, the scopes' totals, the base and commits |
+| `GET /changes/{who}/file?path=&scope=&context=&ws=ignore&since=1` | session | One file's unified diff (only files the diff lists), with both sides' whole text when under 256 KB; `since=1` is the change since the version you marked viewed |
+| `PUT /changes/{who}/viewed`, `DELETE /changes/{who}/viewed` | session | `{scope, files: [{path, hash}]}` or `{all: true}` marks files viewed (`409 STALE` when a file changed after it was shown); `{scope, paths}` clears (no paths: all in scope) |
+| `GET /changes/projects/{ref}/jobs`, `GET /changes/progress` | session | A project's main checkout and job checkouts with diffstats; jobs' viewed counts for the cards. A `changes` event `{subject, revision}` says a diff or its marks changed |
 | `POST /jobs/{id}/land` | session | `{action: merge\|pr\|discard, confirm: true}` → what was done and whether the teardown finished; `409 CONFIRM_REQUIRED` without `confirm`; `400` for a refusal (dirty checkout, conflict, protected branch) with nothing changed; `409 EVIDENCE_<CODE>` when crowsnest's check is stale, failed or missing, or the base moved on, unless `override: true`. Merge and pr need `expected_head` (the Review tab's `land.head`): exactly that commit lands, else `409 EVIDENCE_HEAD_MOVED` |
 | `POST /jobs/{id}/teardown`, `POST /jobs/{id}/start-anyway` | session | Retry a landed job's teardown (`{confirm: true}`); start a held job past the limits |
 | `GET /sweep`, `POST /sweep/discard` | session | Finished jobs whose worktrees are still around; discard several (`{ids, confirm: true}`) |

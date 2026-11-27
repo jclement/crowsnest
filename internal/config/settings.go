@@ -255,6 +255,8 @@ func (c Config) SettingValue(name string) string {
 		return itoa(c.ArchiveAfterDays)
 	case optDeleteAfterDays:
 		return itoa(c.DeleteAfterDays)
+	case optRequireViewed:
+		return boolText(c.RequireViewedBeforeLand)
 	}
 	return ""
 }
@@ -331,6 +333,7 @@ func (c Config) WithSettings(from Config) Config {
 	c.MaxRunningJobs, c.LoadHold, c.HeavySlots = from.MaxRunningJobs, from.LoadHold, from.HeavySlots
 	c.Review, c.MergeMode, c.DigestAt = from.Review, from.MergeMode, from.DigestAt
 	c = c.withAcceptSettings(from)
+	c.RequireViewedBeforeLand = from.RequireViewedBeforeLand
 	c.BackupEvery, c.BackupKeep = from.BackupEvery, from.BackupKeep
 	c.ArchiveAfterDays, c.DeleteAfterDays = from.ArchiveAfterDays, from.DeleteAfterDays
 	c.Sources = from.Sources

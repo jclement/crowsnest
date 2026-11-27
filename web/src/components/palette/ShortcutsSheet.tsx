@@ -42,6 +42,10 @@ function sections(mac: boolean): Array<{ title: string; shortcuts: Shortcut[] }>
         { keys: [`${talkChord} Space`], what: "Chat, in the message box: hold to talk" },
         { keys: ["esc"], what: "Close a sheet or menu; cancel a recording" },
         { keys: ["←", "→"], what: "Move between tabs" },
+        { keys: ["j", "k"], what: "Changes: next and previous file" },
+        { keys: ["n", "p"], what: "Changes: next and previous change" },
+        { keys: ["v"], what: "Changes: mark the current file viewed (again to unmark)" },
+        { keys: ["f"], what: "Changes: full screen (esc leaves it)" },
       ],
     },
   ];
