@@ -514,13 +514,15 @@ agent needs you, the same session reachable from terminal and phone).
 | `dir`, `worktree_branch` | Where it runs; a new herdr worktree when `dir` is a git repo and the job asks for isolation (the default for `builder`) |
 | `engine`, `model` | `claude` (default) or `codex`; optional model |
 | `parent_id` | Set when an agent delegated it |
-| `state` | Declared: `queued`, `running`, `needs_you`, `blocked`, `in_review`, `done`, `failed`, `cancelled` |
+| `state` | Declared: `queued`, `running`, `needs_you`, `blocked`, `in_review`, `done`, `failed`, `cancelled`. Separately, `accept_state` is crowsnest's verdict on a coding job's done (6.15) |
 | `stuck`, `cause` | Derived by the supervisor: why a `running` job is not actually moving (6.4) |
 | `progress` | One line, set by the agent: what it is doing now |
 | `result_md` | Set by `done`: what was done, what was verified, what was not |
 | `pane_id`, `agent_name`, `claude_session_id` | The one agent that holds the job |
 | `last_activity_at`, `started_at`, `settled_at` | Heartbeat and timing |
-| `budget_minutes`, `budget_tokens` | Optional caps (6.7). What a job has spent is measured by `internal/spend` and kept in its own tables keyed by the job id (7.11), not on this row |
+| `budget_usd`, `budget_tokens`, `budget_minutes`, `budget_turns`, `budget_state` | Optional caps over the job and the jobs below it (6.16). What a job has spent is measured by `internal/spend` and kept in its own tables keyed by the job id (7.11), not on this row |
+| `wake_kind`, `wake_at`, `wake_job` | What ends a blocked wait (6.18) |
+| `last_message` | What the agent last said when it ended a turn (6.18) |
 | `nudges`, `restarts` | Supervisor bookkeeping |
 
 A job has exactly one assignee and an agent holds at most one running job, so two agents never do
@@ -636,7 +638,7 @@ file in the roles directory still wins.
 
 ### 6.7 Budgets and review gates (after the core)
 
-- **Budget**: optional minutes and tokens per job (tokens summed from the transcript's usage records: since the spend branch, `jobs.Service.SpendOf(job)` returns exactly that, 7.11; budgets are to read it and are not built). At 80% the card warns; at 100% the agent is told to stop at a safe point and the job goes `needs_you` with "raise the budget or stop". Nothing is killed.
+- **Budget**: built on `wip/accept`; see 6.16.
 - **Review gate** (built on `wip/landing`, `internal/jobs/review.go`). A job may name a reviewer
   (`reviewer`: `off`, `claude`, `codex`; empty takes `--review`, which applies to builder jobs
   in a worktree: `auto`, the default, is the other engine when it is installed (`codex` on PATH)
@@ -1061,6 +1063,182 @@ within 2 minutes. **Do not disturb until HH:MM** (account menu, `PUT /presence/d
 it ends; blocking questions and dangerous approvals get through. The poke header carries
 `human=here|maybe|away`, and `CROWSNEST.md` says what to do with it. Nothing but the coarse
 states is stored or sent.
+
+### 6.15 Acceptance: crowsnest's evidence, not the agent's word (built on `wip/accept`)
+
+The R4 product reviews (`reviews/R4-fable-product.md` 2.1, `reviews/R4-codex-product.md` L1)
+found the supervisor turned "silently stopped" into "declared something", with nothing checking
+the declaration: the likely day-thirty failure is a board of jobs done on paper. So a coding
+job's `done` is now the agent's claim, and crowsnest decides whether it is **accepted**
+(`internal/jobs/accept.go`, migration `0016_accept.sql`).
+
+- **Which jobs.** A job whose agent works in a git checkout (its worktree, or its directory),
+  except reviewers, rebase jobs (their parent is checked instead) and standing agents. A job with
+  no directory, or outside git, keeps the plain done (`accept_state` stays empty). Acceptance is
+  on in `serve` and `--demo`; tests that predate it leave it off (`Options.Accept`).
+- **At done, before anything is recorded** (`planAccept`): the tree must be clean (`git status
+  --porcelain`, untracked files included; refused with the files named: uncommitted work is lost
+  work), and a job in a worktree of its own must have commits ahead of its base, or say why not
+  (`no_commits_reason`, on the MCP tool and `crowsnest job done --no-commits-reason`). A refusal
+  is an ordinary tool error the agent reads and acts on; the job does not change.
+- **The check.** The project's **check command** (`PUT /projects/{id}/accept`; the project page's
+  "Acceptance and budget" card): empty is automatic, `mise run check` when the checkout's mise
+  configuration has a `check` task (`[tasks.check]`, `check = …` under `[tasks]`, or a
+  `mise-tasks/check` file); `none` is no check. With a command, the job goes `in_review` with
+  `accept_state` `checking`, and crowsnest runs `sh -c <command>` in the worktree **itself**,
+  under the heavy gate (`<crowsnest> heavy -- sh -c …`, so a check waits for a slot like any
+  build), with HERDR_* and agent tokens removed from its environment, `CI=1`, its process group
+  killed at `--check-timeout` (30 m). Each run is a `job_checks` row: the commit it ran against
+  (HEAD before; a HEAD that moved during the run voids it and it runs again), exit code,
+  duration, the last 8 KB of output; the full output (to 256 KB) is
+  `<state>/jobs/j_N/check-<id>.txt`. A crowsnest restart mid-check runs it again (the tick
+  finds `checking` jobs whose run has no live owner).
+- **Pass** → `accepted`; then the review gate (6.7) starts its reviewer **on that revision**
+  (`review_commit`), or the job is done. **Fail** → back to `running`, `accept_state` `failed`,
+  check round N, and one line typed to the agent: `[crowsnest check] Your done for job j_N was not
+  accepted: <command> failed (exit 1, 43s) at abc1234. The output is in <file>. Fix what it
+  reports, commit, and call done again (round 1 of 3). Its last line: …`; `job_get` shows the
+  output's end too. After `--check-rounds` (3) failures, or a check that could not run at all,
+  → `needs_you`, cause `check`, the failure on the card, "Run the check again" as its action.
+  An agent cannot lift `check`, `budget`, `review` or `questions` by declaring `running`.
+- **No check command** → `unverified`: done, with a clean tree and commits, shown apart from
+  accepted ("Unverified" on the card).
+- **Pinned to a commit.** Any later commit makes the evidence **stale**: the job view compares
+  HEAD with the check's commit on every read and marks it; an approval for a revision the check
+  did not see runs the check again before done.
+- **Land** (6.11) refuses a merge or push whose evidence is stale, failed, missing or still
+  running, and one whose **base branch moved on** (`behind > 0`: "needs rebase"), with `409
+  EVIDENCE_<CODE>` and the reason; nothing changes. The human may override explicitly (`override:
+  true`, a ticked box in the confirmation; journalled as "Landed over crowsnest's evidence"); an
+  agent's land request never overrides. "Ask an agent to rebase" (`POST /jobs/{id}/rebase`)
+  starts a **rebase job** (`fix_of`): a builder in the same worktree, not isolated, no review,
+  briefed to merge the base in, resolve, check and commit; when it finishes, the job is checked
+  again and is accepted or failed on that.
+- **Shown.** Cards carry Accepted, Unverified, Check failed (round N), Evidence stale, Needs
+  rebase, or Checking beside the state; the job view has "crowsnest's check" (command, result,
+  exit, duration, commit, the output's end) with Run the check again and Ask an agent to rebase;
+  the result's Verified and Not verified are labelled "reported by the agent".
+
+The job's states with acceptance (a coding job; a job with no directory goes straight from done
+to done):
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued
+    queued --> running: launched (slot, load, pause, usage limit, ceiling allow)
+    running --> needs_you: blocking question, dialog, budget reached, auth
+    needs_you --> running: answered, dialog cleared, budget raised / finish step
+    running --> blocked: job_update blocked + wake-up
+    blocked --> running: recheck due, dependency settled, Wake it
+    running --> in_review: done (clean, commits) / accept_state checking
+    in_review --> running: check failed (round < N): output typed to the agent
+    in_review --> needs_you: check failed N rounds, or could not run (cause check)
+    in_review --> in_review: check passed → reviewer on that revision
+    in_review --> running: reviewer asks for changes (round 1)
+    in_review --> needs_you: reviewer still objects, or failed (cause review)
+    in_review --> done: passed (and approved): accepted
+    running --> done: done, no check command: unverified; or no directory
+    done --> done: later commit: stale; base moved: needs_rebase; re-check / rebase job
+    running --> failed: fail, restarts exhausted
+    running --> cancelled: the human
+    done --> [*]
+    failed --> [*]
+    cancelled --> [*]
+```
+
+### 6.16 Budgets: bounding unattended work (built on `wip/accept`)
+
+`internal/jobs/budgets.go`. A job's limits, per measure, are the first set of its own (`PUT
+/jobs/{id}/budget`; the job view's Raise), its project's (dollars, minutes), and the server's
+Settings (`--job-budget-usd`, `-tokens`, `-minutes`, `-turns`; all 0, none, by default).
+Measures: **estimated dollars** and **tokens** (internal/spend), **wall minutes** since the agent
+started, and **turns** (ended turns: Stop hooks, or the backstop's idle observations for an agent
+without hooks). Dollars, tokens and turns count **the job and every job below it** (children to
+five levels; crowsnest's own reviewer and rebase jobs are not counted). An agent whose spend is
+not measured (Codex) shows "not measured", never zero, and is bounded by minutes and turns.
+
+- A job with no dollar or token limit is bounded by the **fleet's daily ceiling**
+  (`--daily-ceiling-usd`) when one is set; once today's spend reaches it, new starts are held too
+  ("spend ceiling: …", like a slot hold; Start anyway passes it).
+- **Standing agents**: `--orchestrator-ceiling-usd` and `--lead-ceiling-usd` per day; past it
+  their automatic pokes wait (`orch.PokerOptions.Hold`), "Poke now" still works. The
+  orchestrator's spend is measured (7.11); a lead's ceiling applies where its spend is measured
+  under its agent name as the subject (lead metering is the `wip/now` branch's).
+- The tick reads each live job's budget every 30 s. At **80%** of any limit: `budget_state`
+  warned, the card's chip, and one line to the agent ("plan to finish within it"). At **100%**:
+  exceeded, the job goes `needs_you` (cause `budget`) and the agent is told to stop at a safe
+  point (finish the step, commit what is safe, job_update, end the turn); nothing is killed and
+  no tool is interrupted. The human: **Raise the budget** (back to running, the agent told),
+  **Let it finish this step** (`grace`: running, and its next Stop puts it back in front of the
+  human), or **Stop the job** (cancel).
+
+### 6.17 Spinning and the fleet's usage limit (built on `wip/accept`)
+
+**Spinning** (`spinning.go`): an agent that keeps calling tools without getting anywhere passes
+every other check. Once a minute the tick samples a running Claude job's tree (HEAD and the dirty
+files' sizes and times, hashed) and reads its transcript's end. Over the last 30 tool calls,
+spanning at least 10 minutes, it is **stuck: spinning** only when all hold: at most a third are
+distinct (tool + input, with hashes, ids and long numbers ignored); the second half brings
+fewer than three calls not seen in the first; no edit with new content and no commit; the tree's
+fingerprint did not change in the window; and the failing tests named in the results are the
+same in both halves. The card explains it ("34 tool calls in 18 minutes, only 4 different, …, the
+same failing tests (TestX)"), the human is told, and the agent gets one line asking for a
+changed hypothesis. It clears when the rule no longer holds. Tested on fixture transcripts in
+Claude Code's JSONL shape (`internal/jobs/testdata/spinning`, made by `generate.py`): three
+spinning patterns and five healthy ones, the healthy ones checked at every prefix.
+
+**The fleet's usage limit** (`fleetlimit.go`): on a subscription a plan's usage limit applies to
+every agent on the account. The first StopFailure `rate_limit` of an engine records one limit
+(kv `limits.fleet`, so it survives a restart) with its **reset time** read from the message
+("resets 3pm", "reset at 3:30 PM (…)", "try again in 2 hours"; else a guess of 30 minutes,
+doubling to 2 hours when hit again, and said to be a guess). Until the reset, for that engine:
+new starts are held ("usage limit: …"), the Stop hook lets every turn end (`limit_held`), the
+backstop does not nudge, retries wait, and the standing agents' automatic pokes wait. One banner
+with the countdown replaces a stuck card per agent (the cards read "Held"). After the reset the
+waiting jobs get their "continue" one at a time, oldest first, 20 s apart; the limit is
+forgotten once nothing waits on it.
+
+### 6.18 Every wait has an owner and a wake-up (built on `wip/accept`)
+
+`waits.go`. Every live job states who owns its wait and what ends it (`wait_owner`, `wake`,
+shown on the job view and on blocked cards): its agent ("its next turn"), crowsnest (the launch,
+a slot, the check, a retry at 14:10), the reviewer, or the human (a question, a dialog, the
+budget, the pause).
+
+- **`blocked` needs a wake-up**: exactly one of `recheck_in` (1 m to 24 h), `recheck_at`
+  (HH:MM or RFC 3339), `until_job` (j_N settles) or `until_human` (MCP `job_update`, `crowsnest
+  job update --recheck-in …`). crowsnest wakes the agent then: back to `running`, one line
+  `[crowsnest recheck] … check whether that has cleared` (or, for a dependency, the other job's
+  outcome). A dependency that settles wakes its waiters at once, and the tick wakes any whose
+  dependency settled while crowsnest was down. After three rechecks of one blocked spell the
+  human is told. `until_human` notifies at once and puts the job with the attention items; "Wake
+  it" is the human's. A blocked job from before wake-ups is given a 30-minute recheck.
+- **A question asked in prose** (`prose.go`): at the Stop hook, a last message whose last
+  paragraph ends with a question addressed to the human ("Should I…?", "Want me to…?", "Which
+  would you prefer?"), and that names no question id, gets its own refusal: "You asked a question
+  in prose: the human does not read your replies … Call ask with it". Precision first: a table of
+  final messages in `prose_test.go` (rhetorical questions, questions in code, a question already
+  asked as q_N do not count).
+- **The last message**: every Stop records `last_message` (2000 characters), shown on stuck,
+  blocked and needs-you cards and on the job view, so the human sees what the agent actually said.
+- **The invariant check**: once a minute every live job is checked (running with no agent for
+  three minutes; needs_you with no cause and no open question; blocked with no wake-up or on a
+  job that does not exist; in review with no reviewer or no check running). Each new violation is
+  journalled on the job's timeline and in the Journal (alert), and the System page's "Waits
+  without an owner" lists them (`GET /system/waits`).
+
+### 6.19 Answer receipt (built on `wip/accept`)
+
+An answer stored is not an answer taken in. Each settled question carries `receipt`: **stored**
+(decided, not typed yet), **held** (the agent was at a dialog, had a draft or was not there;
+`held_reason`, and crowsnest retries), **uncertain** (handed to the terminal, herdr's answer
+lost), **failed**, **delivered** (typed), **received**. Received is seen, not assumed: the
+answer line (`[crowsnest answer q_N]`) found in the asker's transcript (the tick looks every 15
+s for typed answers not yet received), or the asker's own long-poll returning it. Nothing is
+retyped by itself: the Inbox offers **Did it arrive?** (`POST /questions/{id}/reconcile`, a
+transcript look) and only then, for an uncertain or failed delivery not seen received, **Type it
+again** (`POST /questions/{id}/retype`, with `confirm`). The job view lists each answered
+question's receipt.
 
 ## 7. The orchestrator
 
@@ -2174,6 +2352,18 @@ idle_seconds}`), `POST /presence/gone`, `PUT /presence/dnd` `{until}`, `GET /dig
 `POST /jobs/{id}/land` (a request: 202 with the question id), `GET|POST /pause`, `POST /resume`
 (403 to an agent token), `POST /digest`.
 
+**Added on `wip/accept`** (6.15 to 6.19): `POST /jobs/{id}/recheck`, `POST /jobs/{id}/rebase`,
+`PUT /jobs/{id}/budget` `{usd?, tokens?, minutes?, turns?}`, `POST /jobs/{id}/budget/finish-step`,
+`POST /jobs/{id}/wake`, `GET /limits`, `GET /system/waits`, `GET|PUT /projects/{id}/accept`
+`{check_command, budget_usd, budget_minutes}`, `POST /questions/{id}/reconcile`, `POST
+/questions/{id}/retype` `{confirm: true}`. `POST /jobs/{id}/land` takes `override: true`, and
+answers `409 EVIDENCE_STALE|FAILED|MISSING|CHECKING|NEEDS_REBASE` without it when the evidence
+does not support the revision. Jobs carry `accept_state`, `accept_detail`, `check_rounds`,
+`budget`, `turns`, `wait_owner`, `wake`, `wake_kind`, `wake_at`, `wake_job`, `rechecks`,
+`last_message`; a job's detail adds `evidence`; questions add `receipt`, `received_at`,
+`held_reason`. Event `limits`. On the agent socket, `job_update` takes `recheck_in`,
+`recheck_at`, `until_job`, `until_human`, and `done` takes `no_commits_reason`.
+
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
 - `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host)` (`host` added by migration `0003_session_host.sql`, R1 M2: the `Host:port` the session is valid at)
@@ -3019,6 +3209,14 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 97. **The Terminal view's client gets its own state directory** (10, 20): herdr's client reads saved SSH machines from its state directory; a directory of crowsnest's own removes the one-click path from a browser session to the user's other hosts without changing herdr or the user's files. `--terminal-machines` puts it back.
 98. **Tailscale identity only from this machine's serve, for listed logins** (4.20), and a session made from it is re-checked on every request rather than trusted for 30 days.
 99. **One crowsnest per machine, a read-only Machines list** (4.21): the small version that answers "what needs me where" without moving the agent socket, hooks or terminals across machines.
+100. **Acceptance is a field beside the state, not a new state** (6.15): a running check is `in_review` with `accept_state` checking, so every existing rule for a waiting job (the Stop hook lets it rest, the slot count skips it, done is refused) holds without a new state in every query, board and filter.
+101. **crowsnest runs the check itself, under the heavy gate** (6.15): an agent's "tests pass" is a claim; the exit code crowsnest saw at a commit it recorded is evidence. A dirty tree or no commits are refused at done, cheaply, before any check.
+102. **A moved base sends the job to a rebase job, not back to its agent** (6.15): done is terminal and its tokens are revoked; a fresh builder in the same worktree, checked again after, keeps the state machine as it was.
+103. **Budgets roll children up and count turns** (6.16): delegating must not escape a budget, and turns bound what spend cannot measure.
+104. **One usage limit per engine** (6.17): one agent's limit is every agent's on that account; one record, one banner, one ordered resume.
+105. **Spinning is conservative** (6.17): a false alarm costs Jeff a look at a healthy agent; it needs repetition, time, no change in the tree and no change in the failing tests together.
+106. **A prose question is refused with its own words, not converted by crowsnest** (6.18): crowsnest cannot write the options or the recommendation; the agent can, once told.
+107. **Received means seen in the transcript** (6.19): typing an answer twice is worse than late, so reconciliation looks before anything is typed again.
 
 ## 18. Milestones
 
@@ -3165,6 +3363,25 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
   instance-wide slot. Presence's voice channel is decided in the browser (speak mode); the
   server's routing covers Web Push and the notify URL. The demo's seeded jobs carry agent names
   other than `job-N`, so the demo's queue line shows 0 running.
+
+**Acceptance, budgets and waits (`wip/accept`):**
+
+- A job can still be done on paper when its project has no check command (it is marked
+  Unverified, not Accepted), when the check command itself does not exercise the change (a
+  project whose `mise run check` skips the touched package), when the human overrides Land, or
+  for a job with no directory (the orchestrator's or a lead's own work: the agent's word, as
+  before). The review gate is still the agent-written verdict of a reviewer agent.
+- The spinning detector reads Claude transcripts only; Codex agents are bounded by minutes and
+  turns. Its fixtures are constructed in Claude Code's JSONL shape, not recorded from real
+  sessions (reading other sessions' transcripts was refused on this machine); the healthy ones
+  are checked at every prefix, which is the strongest false-positive test available.
+- A lead's daily ceiling applies only where its spend is measured under its agent name; lead
+  metering itself is the `wip/now` branch's.
+- The usage-limit reset is parsed from the StopFailure message; Codex limits (no hooks) are not
+  detected, and a reset in another timezone is read as local time.
+- Receipt is seen in the transcript, so a Codex agent's answers stop at "delivered".
+- Rebase jobs are crowsnest's own briefs to a fresh builder; a conflict it cannot resolve ends in
+  its failure, and the original job stays "needs rebase".
 
 ## 21. Projects, leads, instruction layers and app schedules
 
