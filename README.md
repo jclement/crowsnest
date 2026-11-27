@@ -20,9 +20,8 @@ see every agent in the fleet.
 > orchestrator is **poked** when something it should know about changes (another agent finishes
 > or hits a dialog, a job finishes or gets stuck, a question is settled), only when it is idle with
 > an empty input box, and never when nothing is due; job agents without hooks get a herdr-side
-> backstop nudge. A Journal records pokes, skips, sends, answers, restarts and alerts. Budgets and
-> review gates arrive in later milestones; see [DESIGN.md](DESIGN.md) section 18 and
-> [STATUS.md](STATUS.md).
+> backstop nudge. A Journal records pokes, skips, sends, answers, restarts and alerts. What is
+> verified and what is not is in [STATUS.md](STATUS.md).
 
 **The manual.** How to use crowsnest, and the ideas behind it, are in the built-in manual:
 [docs/manual](docs/manual/README.md), the same pages the app shows under **Help** (on a phone
@@ -42,6 +41,11 @@ building it; the manual explains using it:
   terminal](docs/manual/how-to/rescue.md), [landing](docs/manual/how-to/review-and-land.md) and
   [acceptance](docs/manual/concepts/acceptance.md).
 - [What crowsnest protects, and what it does not](docs/manual/safety.md).
+
+A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
+default, serves nothing but a token-gated setup page until a login exists (or an explicit
+`--no-auth`), and checks Host and Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the
+security model.
 
 ## Getting started
 
