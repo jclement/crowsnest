@@ -34,7 +34,7 @@ import type {
 } from "./landing";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
 import type { ContextInfo, ScheduleInput, ScheduleView } from "./schedule";
-import type { LeadAction, LeadStatus, ProjectInput, ProjectList, ProjectView } from "./projects";
+import type { LeadAction, LeadStatus, ProjectCreateInput, ProjectInput, ProjectList, ProjectView } from "./projects";
 import type { AgentInstructions, InstructionsList, LayerDetail, LayerScope } from "./instructions";
 import type { AttachmentLimits } from "./attachments";
 import type { PushDevice, PushKind, PushSettings, PushSubscriptionJSON, PushTestResult } from "./push";
@@ -325,7 +325,8 @@ export const endpoints = {
   projects: (archived = false) => api<ProjectList>(`/projects${archived ? "?archived=1" : ""}`),
   /** One project by id or slug; `opened` when the human opens it (applies lead_start=open). */
   project: (ref: string, opened = false) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}${opened ? "?open=1" : ""}`),
-  createProject: (input: ProjectInput) => api<ProjectView>("/projects", { method: "POST", body: input }),
+  createProject: (input: ProjectCreateInput) => api<ProjectView>("/projects", { method: "POST", body: input }),
+  trustProject: (ref: string) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}/trust`, { method: "POST" }),
   updateProject: (ref: string, input: ProjectInput) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}`, { method: "PUT", body: input }),
   leads: () => api<LeadStatus[]>("/leads"),
   /** Start, stop, restart, new conversation: the lead's status. Poke: a PokeResult. */

@@ -39,7 +39,19 @@ describe("ProjectForm: the folder", () => {
     await userEvent.clear(screen.getByLabelText(/Check command/));
     await userEvent.type(screen.getByLabelText(/Check command/), "make test");
     await userEvent.click(screen.getByRole("button", { name: "Create project" }));
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ dir: "/h/billing-api", name: "Billing api" }), { checkCommand: "make test", detectedCheck: "mise run check" });
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ dir: "/h/billing-api", name: "Billing api" }), { checkCommand: "make test", detectedCheck: "mise run check", trustFolder: true });
+  });
+
+  it("asks to trust the folder by default, and not once unticked", async () => {
+    stub();
+    const onSubmit = vi.fn();
+    renderWithClient(<ProjectForm submitLabel="Create project" pending={false} onSubmit={onSubmit} onCancel={() => {}} />);
+    await userEvent.type(screen.getByLabelText(/Directory/), "/h/billing-api");
+    const box = screen.getByRole("checkbox", { name: /Agents may work in this folder without asking/ });
+    expect(box).toBeChecked();
+    await userEvent.click(box);
+    await userEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trustFolder: false }));
   });
 
   it("takes the folder chosen in the picker", async () => {

@@ -31,6 +31,8 @@ export interface ProjectExtras {
   checkCommand: string;
   /** What crowsnest found by itself; saving the same again is not needed. */
   detectedCheck: string;
+  /** "Agents may work in this folder without asking": record the agents' folder trust (8.2.1). */
+  trustFolder: boolean;
 }
 
 interface ProjectFormProps {
@@ -68,6 +70,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
   const [browsing, setBrowsing] = useState(!!startBrowsing && creating);
   const [checkCommand, setCheckCommand] = useState("");
   const [checkTouched, setCheckTouched] = useState(false);
+  const [trustFolder, setTrustFolder] = useState(true);
   const dirs = useDirs();
   const roles = useRoles();
   const typed = useSettled(creating && isPathInput(dir) ? dir.trim() : "", TYPED_FACTS_DELAY_MS);
@@ -101,7 +104,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
       default_isolate: Number(isolate) as -1 | 0 | 1,
       permission_mode: permission,
       lead_start: leadStart,
-    }, { checkCommand: checkCommand.trim(), detectedCheck: facts?.check_command ?? "" });
+    }, { checkCommand: checkCommand.trim(), detectedCheck: facts?.check_command ?? "", trustFolder: creating && trustFolder });
   };
 
   const remembered = (dirs.data ?? []).slice(0, DIR_CHOICES);
@@ -252,6 +255,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
           </label>
         </div>
       )}
+      {creating && <TrustFolderBox checked={trustFolder} onChange={setTrustFolder} />}
       {error && (
         <Banner tone="danger" role="alert" className="rounded">
           {error}
@@ -276,6 +280,30 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * "Agents may work in this folder without asking" (DESIGN.md 8.2.1). You chose the folder, so the
+ * agents' own "do you trust this folder?" would only ask you again, from a terminal; ticked,
+ * crowsnest records that answer for Claude Code (and Codex) when it creates the project, and every
+ * job worktree made from it inherits it.
+ */
+function TrustFolderBox({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  const id = useId();
+  return (
+    <div className="flex items-start gap-2 rounded border border-border bg-surface-sunken p-2.5">
+      <input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-accent)]" />
+      <label htmlFor={id} className="flex flex-col gap-0.5 text-xs">
+        <span className="font-medium text-heading">Agents may work in this folder without asking</span>
+        <span className="text-2xs text-muted">
+          Claude Code and Codex each ask once whether to trust a new folder, in their terminal. Trusting lets them read,
+          edit and run files here, and lets the folder&apos;s own agent settings and hooks run. You chose this folder, so
+          crowsnest records that yes for you; job worktrees made from it start trusted too. Untick to answer the
+          question yourself on the agent&apos;s card.
+        </span>
+      </label>
+    </div>
   );
 }
 

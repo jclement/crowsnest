@@ -126,6 +126,18 @@ export interface ScreenDialog {
   form: boolean;
   /** Risky phrases found anywhere in the dialog. */
   warnings: string[];
+  /** Set when the dialog is a folder-trust question (DESIGN.md 8.2.1). */
+  trust?: TrustPrompt;
+}
+
+/** A folder-trust question: whose, which folder, and the option that trusts or refuses it. */
+export interface TrustPrompt {
+  engine: "claude" | "codex";
+  /** The folder as the screen shows it; "" when it could not be read. */
+  folder: string;
+  /** Each carries the whole answer in `keys`. */
+  allow: DialogOption;
+  deny: DialogOption;
 }
 
 /** Text typed at the terminal and waiting in the agent's input box (section 7.3). */
@@ -166,6 +178,8 @@ export interface KeysResponse {
   sent: string[];
   pane_id: string;
   screen_hash: string;
+  /** For an answer to a dialog: whether the dialog went (false: it was still up seconds later). */
+  dialog_gone?: boolean;
 }
 
 /** The names of the events on /api/v1/events (DESIGN.md section 10). */

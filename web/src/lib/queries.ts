@@ -8,7 +8,7 @@ import type { BrowseOptions } from "./browse";
 import type { BudgetInput, ProjectAccept } from "./accept";
 import type { JournalKind } from "./journal";
 import type { ScheduleInput, ScheduleView } from "./schedule";
-import type { LeadAction, LeadStatus, ProjectInput, ProjectView } from "./projects";
+import type { LeadAction, LeadStatus, ProjectCreateInput, ProjectInput, ProjectView } from "./projects";
 import type { LayerScope } from "./instructions";
 import type { PokeResult } from "./journal";
 import type { AnswerRequest } from "./questions";
@@ -328,9 +328,18 @@ export function useProject(ref: string | undefined) {
 export function useCreateProject() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: ProjectInput) => endpoints.createProject(input),
+    mutationFn: (input: ProjectCreateInput) => endpoints.createProject(input),
     onSettled: () =>
       Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.projects }), queryClient.invalidateQueries({ queryKey: queryKeys.dirs })]),
+  });
+}
+
+/** Records the agents' folder trust for an existing project's folder (DESIGN.md 8.2.1). */
+export function useTrustProject(ref: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => endpoints.trustProject(ref),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
   });
 }
 

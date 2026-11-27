@@ -25,9 +25,17 @@ export function NewProjectSheet({ open, onClose, onCreated, browse }: NewProject
   const toast = useToast();
   const queryClient = useQueryClient();
   const submit = (input: ProjectInput, extras: ProjectExtras) =>
-    create.mutate(input, {
+    create.mutate({ ...input, trust_folder: extras.trustFolder }, {
       onSuccess: (project) => {
         toast.show({ tone: "success", title: `Project ${project.name} created`, description: project.dir });
+        const trustProblem = (project.trust ?? []).find((result) => result.status === "failed" || (result.status === "skipped" && result.agent === "claude"));
+        if (trustProblem) {
+          toast.show({
+            tone: "warning",
+            title: "Its folder was not marked trusted",
+            description: `${trustProblem.detail ?? trustProblem.status}. Its first agent will ask in its terminal; the question comes to you as a card.`,
+          });
+        }
         create.reset();
         onClose();
         onCreated?.(project);

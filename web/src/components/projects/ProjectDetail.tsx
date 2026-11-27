@@ -4,7 +4,7 @@
 // started with, and its approval rules (ApprovalRulesCard, 8.7 Policy). Opening it tells the
 // server once (?open=1), which starts a lead set to start "when I open the project".
 import { useNavigate } from "@tanstack/react-router";
-import { CalendarClock, ListTodo, Pencil, Play, Plus, RefreshCw } from "lucide-react";
+import { CalendarClock, FolderLock, ListTodo, Pencil, Play, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys } from "../../lib/api";
@@ -12,7 +12,7 @@ import { leadSubject } from "../../lib/instructions";
 import { boardSections, type Job } from "../../lib/jobs";
 import { relativeTime } from "../../lib/format";
 import { leadRunning, type ProjectView } from "../../lib/projects";
-import { useJobs, useProject, useSchedule, useScheduleAction } from "../../lib/queries";
+import { useJobs, useProject, useSchedule, useScheduleAction, useTrustProject } from "../../lib/queries";
 import { nextDueText, targetOf } from "../../lib/schedule";
 import { ApprovalRulesCard } from "../approvals/ApprovalRulesCard";
 import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
@@ -82,6 +82,7 @@ function Detail({ project }: { project: ProjectView }) {
         {project.description && <p className="text-sm text-body">{project.description}</p>}
         <Defaults project={project} />
       </header>
+      {project.folder_trusted === false && !project.archived && <TrustFolderBanner project={project} />}
       <LeadControls project={project} />
       <ProjectChangesCard slug={project.slug} />
       <ProjectJobs project={project} />
@@ -94,6 +95,41 @@ function Detail({ project }: { project: ProjectView }) {
       <AgentInstructionsCard subject={leadSubject(project.slug)} restart={{ kind: "lead", slug: project.slug }} who={`${project.name}'s lead`} canRestart={leadRunning(project.lead)} />
       <EditProjectSheet project={project} open={editing} onClose={() => setEditing(false)} />
     </article>
+  );
+}
+
+/**
+ * The project's folder is not trusted by Claude Code yet (DESIGN.md 8.2.1): its lead and its first
+ * job will stop at the trust question. One press records the answer, as creating the project with
+ * its box ticked would have; otherwise the question comes as a card when an agent starts.
+ */
+function TrustFolderBanner({ project }: { project: ProjectView }) {
+  const trust = useTrustProject(project.slug);
+  const toast = useToast();
+  const press = () =>
+    trust.mutate(undefined, {
+      onSuccess: (saved) => {
+        const problem = (saved.trust ?? []).find((result) => result.status === "failed" || result.status === "skipped");
+        if (saved.folder_trusted) toast.show({ tone: "success", title: `Agents may work in ${project.name}'s folder`, description: project.dir });
+        if (problem) toast.show({ tone: "warning", title: `${problem.agent === "codex" ? "Codex" : "Claude Code"}: not recorded`, description: problem.detail ?? problem.status });
+      },
+      onError: (error) => toast.show({ tone: "danger", title: "The folder was not trusted", description: error.message }),
+    });
+  return (
+    <Banner
+      tone="info"
+      icon={FolderLock}
+      className="rounded"
+      action={
+        <Button compact variant="primary" disabled={trust.isPending} onClick={press}>
+          Trust this folder
+        </Button>
+      }
+    >
+      Claude Code has not been told to trust this folder, so the lead and the first job here will stop to ask (you answer on
+      their card). Trust it now if it is yours: agents may then read, edit and run files in it, and its job worktrees
+      inherit the answer.
+    </Banner>
   );
 }
 
