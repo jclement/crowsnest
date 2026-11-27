@@ -193,6 +193,11 @@ func Push(ctx context.Context, in PushInput) (PushResult, error) {
 	if err != nil {
 		return PushResult{}, err
 	}
+	if strings.HasPrefix(remote, "-") {
+		// The remote comes from the repository's configuration; one spelled as an option would
+		// be read by the push as one (R5-S5).
+		return PushResult{}, refuse("the remote %q looks like an option; push by hand", remote)
+	}
 	// The configured URL as written (get-url would apply insteadOf rewrites): it says which host
 	// the pull request belongs to.
 	url, _ := git(ctx, in.WorkDir, "config", "--get", "remote."+remote+".url")

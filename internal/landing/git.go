@@ -56,7 +56,7 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 func gitTimed(ctx context.Context, timeout time.Duration, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...) //nolint:gosec // fixed git subcommands; paths and refs are arguments
+	cmd := exec.CommandContext(ctx, "git", protectedArgs(dir, args)...) //nolint:gosec // fixed git subcommands; paths and refs are arguments
 	cmd.Env = gitEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -68,6 +68,46 @@ func gitTimed(ctx context.Context, timeout time.Duration, dir string, args ...st
 		return stdout.String(), fmt.Errorf("git %s: %w: %s", args[0], err, firstLine(message))
 	}
 	return stdout.String(), nil
+}
+
+// protectiveConfig keeps the repository from choosing commands that crowsnest's own git calls run
+// (R5-S5). A job's agent can write its repository's configuration and hooks, and these calls run
+// when the human opens Review or clicks Land, as the user and outside any approval:
+//
+//   - core.hooksPath=/dev/null: no hook runs (post-merge, pre-merge-commit, commit-msg,
+//     reference-transaction, pre-push, post-checkout, …). A project that relies on hooks gets
+//     none on a crowsnest Land; DESIGN.md 6.11 says so.
+//   - core.fsmonitor=false: no fsmonitor command on status or diff.
+//   - diff.external= and --no-ext-diff --no-textconv (on diff, log and show): no external diff
+//     or textconv program from the configuration or a committed .gitattributes.
+//   - protocol.ext.allow=never: no ext:: remote, which is a command line.
+//   - core.pager=cat: no pager (GIT_PAGER as well).
+//   - core.alternateRefsCommand=: no command to list an alternate's refs on push.
+//
+// What still runs, because git has no switch to turn it off without breaking the operation:
+// a merge driver or clean/smudge filter the repository configures and its .gitattributes names,
+// core.sshCommand and credential helpers on push, and gpg.program when commits are signed.
+var protectiveConfig = []string{
+	"core.hooksPath=/dev/null", "core.fsmonitor=false", "diff.external=", "protocol.ext.allow=never",
+	"core.pager=cat", "core.alternateRefsCommand=",
+}
+
+// diffish are the subcommands that can run an external diff or a textconv filter.
+var diffish = map[string]bool{"diff": true, "log": true, "show": true}
+
+// protectedArgs is git's command line for args in dir: the protective configuration, -C dir, the
+// subcommand, and for a diff-like one --no-ext-diff --no-textconv before its own arguments.
+func protectedArgs(dir string, args []string) []string {
+	out := make([]string, 0, len(args)+2*len(protectiveConfig)+4)
+	for _, config := range protectiveConfig {
+		out = append(out, "-c", config)
+	}
+	out = append(out, "-C", dir)
+	if len(args) > 0 && diffish[args[0]] {
+		out = append(out, args[0], "--no-ext-diff", "--no-textconv")
+		return append(out, args[1:]...)
+	}
+	return append(out, args...)
 }
 
 // gitEnv is the environment git runs with: never a prompt, never a pager, plain English output.
