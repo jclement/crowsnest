@@ -133,6 +133,14 @@ function openTerminal(container: HTMLElement, path: string, fontSize: number, la
   // ⌘K opens the command palette even from a terminal (lib/hotkeys.ts): xterm must not take it.
   // Ctrl+K is left alone, since that is the shell's kill-line.
   terminal.attachCustomKeyEventHandler((event) => !(event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k"));
+  // A right click belongs to the program in the terminal (herdr's own menus, a TUI's mouse mode),
+  // which xterm already tells about the press. Without this the browser's page menu opened on top
+  // of it. Shift+right click still gives the browser's menu, the usual terminal convention, and it
+  // is the way to reach copy and paste from the page menu.
+  const keepRightClickInTerminal = (event: MouseEvent) => {
+    if (!event.shiftKey) event.preventDefault();
+  };
+  container.addEventListener("contextmenu", keepRightClickInTerminal);
 
   const socket = new TerminalSocket({
     path,
@@ -192,6 +200,7 @@ function openTerminal(container: HTMLElement, path: string, fontSize: number, la
     themeWatcher.disconnect();
     typed.dispose();
     binary.dispose();
+    container.removeEventListener("contextmenu", keepRightClickInTerminal);
     socket.dispose();
     terminal.dispose();
   };
