@@ -192,6 +192,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	}
 	live := &liveServices{}
 	live.config.set(cfg)
+	hold := restoreHold{db: db}
 	journalLog := journal.New(db, events, logger, nil)
 	sys := newSystem(cfg, db, events, journalLog, client, agentSocketPath(cfg), hooks, live, logger)
 	identity := agentid.New(db, nil)
@@ -233,7 +234,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions,
-		orchGate{gate: sys.Gate, launch: sys.LaunchSettings(orchestratorRemoteControl)}, logger)
+		orchGate{gate: hold.gate(sys.Gate), launch: sys.LaunchSettings(orchestratorRemoteControl)}, logger)
 	sys.SetOrchestrator(orchestrator)
 	greet := greeter(ctx, client, orchestrator, logger)
 	live.greeter.Store(&greet)
@@ -243,9 +244,21 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)
 	}
 	// After a restore, take stock of the agents herdr really has before the supervisor may
-	// dispatch anything (DESIGN.md 4.17).
-	reconcileRestore(ctx, db, fleetCache, journalLog, logger)
-	startJobs(ctx, jobService, client, projectOf, logger)
+	// dispatch anything, and hold the supervisor until the human resumes (DESIGN.md 4.17). The
+	// stock-taking can wait for herdr, so a held start does it in the background and the app
+	// comes up meanwhile.
+	hold.journal = journalLog
+	if hold.held(ctx) {
+		go func() {
+			reconcileRestore(ctx, db, fleetCache, journalLog, logger)
+			if hold.wait(ctx) {
+				startJobs(ctx, jobService, client, projectOf, logger)
+			}
+		}()
+	} else {
+		reconcileRestore(ctx, db, fleetCache, journalLog, logger)
+		startJobs(ctx, jobService, client, projectOf, logger)
+	}
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
@@ -305,7 +318,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return server != nil && server.OpenStreams() > 0
 	}, logger)
 	deps.Ops = &opsWiring{cfg: live.config.get, db: db, retention: cleanup, jobs: jobService, questions: refs.questions.Load,
-		approvals: approvalService, orch: orchestrator, stats: deps.Stats}
+		approvals: approvalService, orch: orchestrator, stats: deps.Stats, hold: hold}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
 	}

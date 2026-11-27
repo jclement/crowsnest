@@ -6,6 +6,8 @@
 //	GET    /api/v1/backup                     a fresh backup as a download (Settings, Download backup)
 //	GET    /api/v1/updated                    {from, to, release_url} after an update, else null
 //	POST   /api/v1/updated/seen               the owner has seen it
+//	GET    /api/v1/restore/hold               the pause a restore left ({at, reason}), else null
+//	POST   /api/v1/restore/resume             lift it
 //	GET    /api/v1/storage                    the Storage card
 //	POST   /api/v1/storage/cleanup            {dry_run, confirm:[j_…]} → the report
 //	GET    /api/v1/summary                    this instance's headline figures; a session or a read token
@@ -50,6 +52,15 @@ type Ops interface {
 	// ArchivedJobs is the set of archived job ids; SearchJobs finds job ids by text.
 	ArchivedJobs(ctx context.Context) (map[int64]bool, error)
 	SearchJobs(ctx context.Context, query string, archivedOnly bool) ([]int64, error)
+	// RestoreHold is the pause a restore left, nil when none; ResumeAfterRestore lifts it.
+	RestoreHold(ctx context.Context) *RestoreHold
+	ResumeAfterRestore(ctx context.Context) error
+}
+
+// RestoreHold is GET /restore/hold: the instance was restored and waits for the human.
+type RestoreHold struct {
+	At     string `json:"at"`
+	Reason string `json:"reason"`
 }
 
 // UpdateNotice says crowsnest was updated since the owner last looked.
@@ -89,6 +100,8 @@ func (s *Server) registerOpsRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/backup", s.requireAuth(http.HandlerFunc(s.handleBackup)))
 	mux.Handle("GET /api/v1/updated", s.requireAuth(http.HandlerFunc(s.handleUpdated)))
 	mux.Handle("POST /api/v1/updated/seen", s.requireAuth(http.HandlerFunc(s.handleUpdatedSeen)))
+	mux.Handle("GET /api/v1/restore/hold", s.requireAuth(http.HandlerFunc(s.handleRestoreHold)))
+	mux.Handle("POST /api/v1/restore/resume", s.requireAuth(http.HandlerFunc(s.handleRestoreResume)))
 	mux.Handle("GET /api/v1/storage", s.requireAuth(http.HandlerFunc(s.handleStorage)))
 	mux.Handle("POST /api/v1/storage/cleanup", s.requireAuth(http.HandlerFunc(s.handleCleanup)))
 	mux.Handle("GET /api/v1/summary", s.requireAuthOrToken(machines.ScopeRead, http.HandlerFunc(s.handleSummary)))
@@ -139,6 +152,24 @@ func (s *Server) handleUpdatedSeen(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := ops.DismissUpdated(r.Context()); err != nil {
 		s.internalError(w, r, "dismissing the update notice", err)
+		return
+	}
+	writeData(w, http.StatusOK, nil)
+}
+
+func (s *Server) handleRestoreHold(w http.ResponseWriter, r *http.Request) {
+	if ops := s.ops(w); ops != nil {
+		writeData(w, http.StatusOK, ops.RestoreHold(r.Context()))
+	}
+}
+
+func (s *Server) handleRestoreResume(w http.ResponseWriter, r *http.Request) {
+	ops := s.ops(w)
+	if ops == nil {
+		return
+	}
+	if err := ops.ResumeAfterRestore(r.Context()); err != nil {
+		s.internalError(w, r, "resuming after a restore", err)
 		return
 	}
 	writeData(w, http.StatusOK, nil)

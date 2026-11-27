@@ -43,7 +43,12 @@ type opsWiring struct {
 	approvals *approvals.Service
 	orch      *orch.Orchestrator
 	stats     *sysstat.Sampler
+	hold      restoreHold
 }
+
+func (o *opsWiring) RestoreHold(ctx context.Context) *httpd.RestoreHold { return o.hold.state(ctx) }
+
+func (o *opsWiring) ResumeAfterRestore(ctx context.Context) error { return o.hold.resume(ctx) }
 
 func (o *opsWiring) BackupName() string {
 	return fmt.Sprintf("crowsnest-%s-%s%s", o.cfg().Session, backup.Stamp(time.Now()), backupSuffix)
@@ -77,7 +82,9 @@ func (o *opsWiring) DismissUpdated(ctx context.Context) error {
 	return err
 }
 
-func (o *opsWiring) Storage(ctx context.Context) (retention.Storage, error) { return o.retention.Storage(ctx) }
+func (o *opsWiring) Storage(ctx context.Context) (retention.Storage, error) {
+	return o.retention.Storage(ctx)
+}
 
 func (o *opsWiring) Cleanup(ctx context.Context, dryRun bool, confirm []string) (retention.Report, error) {
 	if dryRun {
