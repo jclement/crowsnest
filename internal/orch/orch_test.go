@@ -359,6 +359,11 @@ func TestRunFollowsFleetEvents(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	// Subscribed before the start: an event published the moment the status reads idle is not
+	// lost between the start and the subscription (CI lost it, and waited for the hourly tick).
+	if events.Subscribers() == 0 {
+		t.Fatal("the orchestrator is idle but not yet subscribed to fleet events")
+	}
 	_ = f.SetStatus(Name, herdr.StatusWorking)
 	events.Publish(hub.Event{Type: "fleet", Data: "changed"})
 	for rig.orch.Status().State != StateWorking {

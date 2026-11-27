@@ -329,12 +329,14 @@ func (o *Orchestrator) Run(ctx context.Context) {
 	if !o.waitForGate(ctx) {
 		return
 	}
+	// Subscribed before the start, not after: a change herdr reports while (or just after) the
+	// agent starts would otherwise fall between the two and wait for the next tick.
+	fleetChanged := o.fleetEvents(ctx)
 	if _, err := o.Ensure(ctx); err != nil {
 		o.opts.Logger.Warn("orchestrator did not start", "err", err)
 	}
 	ticker := time.NewTicker(o.opts.WatchInterval)
 	defer ticker.Stop()
-	fleetChanged := o.fleetEvents(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -357,12 +359,18 @@ func (o *Orchestrator) fleetEvents(ctx context.Context) <-chan struct{} {
 		return nil
 	}
 	changed := make(chan struct{}, 1)
+	// The first subscription is taken here, before returning, so the caller is subscribed from
+	// this point on; only renewals happen in the goroutine.
+	sub := o.opts.Hub.Subscribe(0)
 	go func() {
-		for ctx.Err() == nil {
-			sub := o.opts.Hub.Subscribe(0)
+		for {
 			forwardFleet(ctx, sub, changed)
 			sub.Close()
+			if ctx.Err() != nil {
+				return
+			}
 			time.Sleep(100 * time.Millisecond) // a closed hub must not spin this loop
+			sub = o.opts.Hub.Subscribe(0)
 		}
 	}()
 	return changed
