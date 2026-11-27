@@ -286,6 +286,7 @@ const (
 	EventAccept   = "accept" // acceptance: checks, accepted, not accepted, stale (6.15)
 	EventBudget   = "budget" // budget warnings, the limit, raises (6.16)
 	EventWake     = "wake"   // a wait's wake-up, a recheck, a dependency settled (6.18)
+	EventHold     = "hold"   // a hold placed or lifted (6.20)
 )
 
 // Detail is a job with its timeline and questions (GET /jobs/{id}).

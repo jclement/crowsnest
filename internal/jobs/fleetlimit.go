@@ -182,6 +182,19 @@ func (f *FleetLimits) mayResume(engine string) bool {
 	return true
 }
 
+// resuming reports whether engine's limit has reset but is still recorded: jobs it held are being
+// resumed one at a time.
+func (f *FleetLimits) resuming(ctx context.Context, engine string) bool {
+	if f == nil {
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loadLocked(ctx)
+	state := f.state[engine]
+	return state != nil && !f.now().Before(state.ResetAt)
+}
+
 // Clear forgets engine's limit (nothing waits on it any more).
 func (f *FleetLimits) Clear(ctx context.Context, engine string) {
 	if f == nil {

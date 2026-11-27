@@ -37,16 +37,16 @@ func (s *Service) SetApprovalWaiting(ctx context.Context, jobID string, waiting 
 
 func (s *Service) approvalWaitingLocked(r *store.JobRecord, c *change, waiting bool, summary string) error {
 	switch {
-	case waiting && State(r.State) == StateRunning:
-		r.State, r.Cause, r.CauseDetail = string(StateNeedsYou), string(CauseApprovalTool), oneLine(summary, 300)
+	case waiting && !hasHold(*r, HoldApprovalTool) && !State(r.State).Terminal():
+		s.placeHoldLocked(r, c, HoldApprovalTool, summary, "")
 		r.LastActivityAt = s.opts.Now()
 		c.event(EventStuck, "Needs you: a tool call waits for approval: "+oneLine(summary, 160), nil)
-	case waiting && State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseApprovalTool:
-		r.CauseDetail = oneLine(summary, 300) // another call, while one was already waiting
-	case !waiting && State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseApprovalTool:
-		r.State, r.Cause, r.CauseDetail = string(StateRunning), "", ""
+	case waiting && hasHold(*r, HoldApprovalTool):
+		s.placeHoldLocked(r, c, HoldApprovalTool, summary, "") // another call, while one was already waiting
+	case !waiting && hasHold(*r, HoldApprovalTool):
+		liftHoldLocked(r, c, HoldApprovalTool, LiftCrowsnest, nil)
 		r.LastActivityAt = s.opts.Now()
-		c.event(EventHook, "No tool call waits for approval any more; back to running", nil)
+		c.event(EventHook, "No tool call waits for approval any more", nil)
 	default:
 		return errSkip
 	}
@@ -56,7 +56,7 @@ func (s *Service) approvalWaitingLocked(r *store.JobRecord, c *change, waiting b
 // reconcileApprovalWait is the tick's check: a job left needs_you/approval-tool with nothing
 // pending goes back to running.
 func (s *Service) reconcileApprovalWait(ctx context.Context, r store.JobRecord) {
-	if State(r.State) != StateNeedsYou || Cause(r.Cause) != CauseApprovalTool || s.opts.ApprovalPending == nil {
+	if !hasHold(r, HoldApprovalTool) || s.opts.ApprovalPending == nil {
 		return
 	}
 	id := FormatID(r.ID)

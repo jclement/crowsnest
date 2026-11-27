@@ -513,6 +513,7 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 		}
 		switch record.Status {
 		case CheckPassed:
+			liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
 			r.AcceptState, r.AcceptDetail = AcceptAccepted, "Accepted: "+summary
 			c.event(EventAccept, "Accepted: "+summary, map[string]any{"output": path, "commit": record.Commit})
 			switch {
@@ -522,6 +523,7 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 				if review = s.reviewerFor(*r); review != "" {
 					r.ReviewRound++
 					r.ReviewCommit = record.Commit
+					s.placeHoldLocked(r, c, HoldReviewing, fmt.Sprintf("a %s reviewer looks at the change (round %d)", review, r.ReviewRound), "")
 					c.event(EventReview, fmt.Sprintf("In review (round %d of %d): a %s reviewer looks at the change that passed", r.ReviewRound, maxReviewRounds, review), nil)
 				} else {
 					r.State = string(StateDone)
@@ -530,14 +532,15 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 		case CheckFailed:
 			r.CheckRounds++
 			if r.CheckRounds >= opts.maxRounds() {
-				r.State, r.Cause = string(StateNeedsYou), string(CauseCheck)
-				r.AcceptState = AcceptFailed
-				r.CauseDetail = fmt.Sprintf("The check still fails after %d rounds: %s", r.CheckRounds, summary)
-				r.AcceptDetail = r.CauseDetail
-				c.event(EventAccept, r.CauseDetail+"; the human decides", map[string]any{"output": path})
+				liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
+				r.State, r.AcceptState = string(StateRunning), AcceptFailed
+				r.AcceptDetail = fmt.Sprintf("The check still fails after %d rounds: %s", r.CheckRounds, summary)
+				s.placeHoldLocked(r, c, HoldCheck, r.AcceptDetail, "")
+				c.event(EventAccept, r.AcceptDetail+"; the human decides", map[string]any{"output": path})
 				c.notify = fmt.Sprintf("crowsnest: job %s's check still fails after %d rounds: %s", FormatID(r.ID), r.CheckRounds, oneLine(r.Title, 80))
 				return nil
 			}
+			liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
 			r.State, r.AcceptState = string(StateRunning), AcceptFailed
 			r.AcceptDetail = fmt.Sprintf("The check failed (round %d of %d): %s", r.CheckRounds, opts.maxRounds(), summary)
 			s.markProgressLocked(r) // a fresh start for the nudge budget: there is new work
@@ -549,12 +552,15 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 			if last := lastMeaningfulLine(record.OutputTail); last != "" {
 				message += " Its last line: " + oneLine(last, 200)
 			}
+			// Kept until it is typed (R6-C07): sending it starts a builder turn, which waits for
+			// the pause to end and for any hold to be lifted (deliverFeedback).
+			r.PendingFeedback = message
 		default: // error: it could not run at all; rounds are not the agent's fault
-			r.State, r.Cause = string(StateNeedsYou), string(CauseCheck)
-			r.AcceptState = AcceptFailed
-			r.CauseDetail = "The check could not run: " + oneLine(record.OutputTail, 300)
-			r.AcceptDetail = r.CauseDetail
-			c.event(EventAccept, r.CauseDetail, map[string]any{"output": path})
+			liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
+			r.State, r.AcceptState = string(StateRunning), AcceptFailed
+			r.AcceptDetail = "The check could not run: " + oneLine(record.OutputTail, 300)
+			s.placeHoldLocked(r, c, HoldCheck, r.AcceptDetail, "")
+			c.event(EventAccept, r.AcceptDetail, map[string]any{"output": path})
 			c.notify = fmt.Sprintf("crowsnest: job %s's check could not run: %s", FormatID(r.ID), oneLine(r.Title, 80))
 		}
 		return nil
@@ -565,10 +571,8 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 	if review != "" {
 		s.startReview(ctx, job, review)
 	}
-	if message != "" && job.PaneID != "" {
-		if err := s.sendText(ctx, job.PaneID, job.AgentName, message); err != nil {
-			_ = s.Journal(ctx, id, EventAccept, "The check's failure could not be typed to the agent: "+oneLine(err.Error(), 160)+"; send it with a message", nil)
-		}
+	if message != "" {
+		s.deliverFeedback(ctx, id)
 	}
 	if job.State == StateDone {
 		s.afterSettled(ctx, job)
@@ -651,9 +655,11 @@ func (s *Service) Recheck(ctx context.Context, id string) (Job, error) {
 		switch State(r.State) {
 		case StateDone:
 		case StateNeedsYou:
-			if Cause(r.Cause) != CauseCheck {
+			if !hasHold(*r, HoldCheck) {
 				return invalid("job %s needs you for something else (%s)", FormatID(r.ID), r.Cause)
 			}
+			liftHoldLocked(r, c, HoldCheck, LiftHuman, nil)
+			s.placeHoldLocked(r, c, HoldChecking, "crowsnest is running the check again", "")
 			r.State, r.Cause, r.CauseDetail = string(StateInReview), "", ""
 			r.CheckRounds = 0
 		default:
@@ -841,4 +847,38 @@ func (s *Service) SetProjectAccept(ctx context.Context, projectID int64, input P
 		return ErrNotFound
 	}
 	return err
+}
+
+// deliverFeedback types a check failure's pending message to the agent (R6-C07): not while the
+// automation is paused, not while a hold keeps the job, and cleared only after it was typed. A
+// send that fails is journalled (at most every few minutes) and tried again by the tick.
+func (s *Service) deliverFeedback(ctx context.Context, id string) {
+	numeric, err := ParseID(id)
+	if err != nil {
+		return
+	}
+	r, err := s.opts.Store.GetJob(ctx, numeric)
+	if err != nil || r.PendingFeedback == "" || State(r.State) != StateRunning || len(holdsOf(r)) > 0 || r.PaneID == "" {
+		return
+	}
+	if s.heldWhilePaused(ctx, "feedback:"+id, "the check's findings for "+id) {
+		return
+	}
+	message := r.PendingFeedback
+	if err := s.sendText(ctx, r.PaneID, r.AgentName, message); err != nil {
+		watch := s.watchOf(id)
+		if now := s.opts.Now(); now.Sub(watch.feedbackAt) > 5*time.Minute {
+			watch.feedbackAt = now
+			_ = s.Journal(ctx, id, EventAccept, "The check's failure could not be typed to the agent yet: "+oneLine(err.Error(), 160)+"; crowsnest tries again", nil)
+		}
+		return
+	}
+	_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
+		if rec.PendingFeedback != message {
+			return errSkip
+		}
+		rec.PendingFeedback = ""
+		c.event(EventAccept, "The check's findings reached the agent", nil)
+		return nil
+	})
 }

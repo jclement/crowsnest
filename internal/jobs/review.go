@@ -225,8 +225,10 @@ func (s *Service) reviewSettled(ctx context.Context, reviewer Job) {
 			c.event(EventReview, fmt.Sprintf("Review approved by %s (round %d)", reviewer.ID, r.ReviewRound), map[string]any{"reviewer": reviewer.ID, "findings": path})
 			// The approval is for the revision the reviewer saw; evidence for another revision
 			// (a commit since the check) is checked again before the job is done (6.15).
+			liftHoldLocked(r, c, HoldReviewing, LiftCrowsnest, nil)
 			if recheck = s.evidenceMovedLocked(ctx, r); recheck {
 				r.AcceptState, r.AcceptDetail = AcceptChecking, "The branch moved after its check; crowsnest is running it again"
+				s.placeHoldLocked(r, c, HoldChecking, r.AcceptDetail, "")
 				c.event(EventAccept, r.AcceptDetail, nil)
 				return nil
 			}
@@ -298,6 +300,7 @@ func (s *Service) sendBackForChanges(ctx context.Context, parent Detail, reviewe
 		if State(r.State) != StateInReview {
 			return errSkip
 		}
+		liftHoldLocked(r, c, HoldReviewing, LiftCrowsnest, nil)
 		r.State, r.ReviewVerdict, r.ReviewMD = string(StateRunning), VerdictChanges, findings
 		s.markProgressLocked(r) // a fresh start for the nudge budget: the builder has new work
 		c.event(EventReview, fmt.Sprintf("Changes requested by %s (round %d of %d); the findings were sent to the agent", reviewer.ID, r.ReviewRound, maxReviewRounds),
@@ -328,7 +331,12 @@ func (s *Service) reviewNeedsHuman(ctx context.Context, id, why, findings string
 		if strings.HasPrefix(why, "The reviewer could not") || strings.HasPrefix(why, "The reviewer failed") || strings.HasPrefix(why, "The reviewer was cancelled") {
 			verdict = VerdictError
 		}
-		r.State, r.Cause, r.CauseDetail, r.ReviewVerdict = string(StateNeedsYou), string(CauseReview), oneLine(why, 500), verdict
+		liftHoldLocked(r, c, HoldReviewing, LiftCrowsnest, nil)
+		if State(r.State) == StateInReview {
+			r.State = string(StateRunning) // the review hold below keeps it in front of the human
+		}
+		r.ReviewVerdict = verdict
+		s.placeHoldLocked(r, c, HoldReview, why, "")
 		if findings != "" {
 			r.ReviewMD = findings
 		}

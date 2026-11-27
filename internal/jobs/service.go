@@ -462,6 +462,7 @@ func (s *Service) mutateLocked(ctx context.Context, id string, fn func(record *s
 		return Job{}, err
 	}
 	open := s.reconcileQuestionsLocked(&record, &c)
+	applyHoldsLocked(&record) // a held job stays in the state its holds imply (holdset.go)
 	if err := CheckTransition(State(before.State), State(record.State)); err != nil && before.State != record.State {
 		return Job{}, err
 	}

@@ -122,6 +122,13 @@ type JobRecord struct {
 	// LandToken binds a land request to its question (migration 0018, R5-C01).
 	LandToken       string
 	LandRequestedAt time.Time
+	// HoldsJSON is the job's holds (migration 0019, R6-C01): what keeps it where it is until the
+	// human or crowsnest lets it go, kept apart from the state its agent declares. internal/jobs
+	// owns its meaning (holdset.go).
+	HoldsJSON string
+	// PendingFeedback is a check failure's message not yet typed to the agent (migration 0019,
+	// R6-C07).
+	PendingFeedback string
 }
 
 // JobEventRecord is one row of job_events.
@@ -179,6 +186,7 @@ func jobColumns(r *JobRecord) []column {
 		intCol("rechecks", &r.Rechecks), textCol("last_message", &r.LastMessage), timeCol("last_message_at", &r.LastMessageAt),
 		textCol("tree_hash", &r.TreeHash), timeCol("tree_changed_at", &r.TreeChangedAt),
 		textCol("land_token", &r.LandToken), timeCol("land_requested_at", &r.LandRequestedAt),
+		textCol("holds_json", &r.HoldsJSON), textCol("pending_feedback", &r.PendingFeedback),
 	}
 	return cols
 }

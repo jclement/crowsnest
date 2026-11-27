@@ -134,6 +134,9 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		return
 	}
 	s.renotifyQuestions(ctx, r)
+	if r.PendingFeedback != "" {
+		s.deliverFeedback(ctx, id) // a check's finding held by the pause or a hold (R6-C07)
+	}
 	s.tickBlocked(ctx, r) // a wake-up that is due, or a job waited on that settled (6.18)
 	s.checkBudget(ctx, r) // the 80% warning and the limit (6.16)
 	if IsStanding(r.AgentName) {
@@ -396,6 +399,7 @@ func (s *Service) retry(ctx context.Context, r store.JobRecord, agent herdr.Agen
 			if !rec.Stuck || rec.Cause != r.Cause || !rec.RetryAt.Equal(r.RetryAt) || rec.RetryCount != r.RetryCount || rec.State != r.State {
 				return errSkip
 			}
+			liftHoldLocked(rec, c, HoldUsageLimit, LiftCrowsnest, nil)
 			rec.Stuck, rec.Cause, rec.CauseDetail, rec.RetryAt = false, "", "", zeroTime
 			c.event(EventRetry, "Working again; the "+r.Cause+" has cleared", nil)
 			return nil
@@ -436,6 +440,11 @@ func (s *Service) retryStep(ctx context.Context, id string, onlyIfDue bool) {
 		}
 		spent = retrySpent{count: rec.RetryCount, at: rec.RetryAt}
 		s.scheduleNextRetryLocked(rec, c)
+		// crowsnest's retry is what lifts a usage-limit hold: it types "continue" now, and a
+		// limit still in force comes back through the StopFailure hook.
+		if Cause(rec.Cause) == CauseLimit && liftHoldLocked(rec, c, HoldUsageLimit, LiftCrowsnest, nil) {
+			rec.Stuck, rec.Cause, rec.CauseDetail = true, string(CauseLimit), "Resumed after the usage limit; waiting to see it work"
+		}
 		spent.next = rec.RetryAt
 		return nil
 	})

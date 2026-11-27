@@ -182,8 +182,8 @@ func TestBudgetThresholdsChildrenAndUnmeasured(t *testing.T) {
 	if c := r.get(child.ID); c.State != StateNeedsYou || c.Cause != CauseBudget || !strings.Contains(c.CauseDetail, parent.ID) {
 		t.Fatalf("the child kept going past its parent's budget: %s %s %q", c.State, c.Cause, c.CauseDetail)
 	}
-	if _, err := r.svc.Update(ctx, parent.ID, UpdateInput{Progress: "carry on", State: "running"}); err != nil {
-		t.Fatal(err)
+	if _, err := r.svc.Update(ctx, parent.ID, UpdateInput{Progress: "carry on", State: "running"}); err == nil {
+		t.Fatal("declaring running past the budget was not refused")
 	}
 	if r.get(parent.ID).State != StateNeedsYou {
 		t.Fatal("the agent lifted its own budget")
