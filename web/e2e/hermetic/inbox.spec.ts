@@ -4,9 +4,11 @@
 // terminal dialog answered from its card, including the 409 path when the screen changed under
 // the press; History; and the badge and tab title following new questions live.
 //
-// Demo inbox (internal/questions/demo.go): q_1 confirm, blocking, with a diff and a mermaid
-// diagram; q_2 multi-select; q_3 choice; q_4 manual; q_5 ack; q_6 notice (low); q_7 answered;
-// q_8 the demo job's question. The docs-writer (pane w3:p1) sits at a terminal dialog.
+// Demo inbox (internal/questions/demo.go), each asked from a demo job's pane: q_1 confirm,
+// blocking, with a diff and a mermaid diagram (j_11, job-11); q_2 multi-select (j_12); q_3 choice
+// (the orchestrator's j_4); q_4 manual, blocking (j_15); q_5 ack (j_1); q_6 notice, low (j_2); q_7
+// answered (j_1); q_8 the release question j_4 waits on. The Handbook job j_5 (agent job-5, pane
+// w6:p1) sits at a terminal dialog.
 import type { Page, TestInfo } from "@playwright/test";
 import { askAsAgent } from "../support/agent";
 import { detailRegion, expect, isPhone, test } from "../support/fixtures";
@@ -86,14 +88,14 @@ test("single choice, multi-select, manual, ack and a notice are each answered", 
   // All of them are in History now, and none is open.
   await page.goto("/inbox");
   const open = page.getByRole("list", { name: "Needs you" });
-  for (const title of ["Where should the release notes live?", "Which findings should the builder fix before merge?", "What should the README's first sentence say?"]) {
+  for (const title of ["Where should the release notes live?", "Which findings should the builder fix before merge?", "What should the homepage hero say?"]) {
     await expect(open.getByText(title)).toHaveCount(0);
   }
   await page.getByRole("tab", { name: "History" }).click();
   const history = page.getByRole("list", { name: "History" });
   await expect(history.getByText("Where should the release notes live?")).toBeVisible();
-  await expect(history.getByText("Nightly backup finished: 1.2 GB, 14 s")).toBeVisible();
-  await expect(history.getByText("Use SQLite for the session store?")).toBeVisible();
+  await expect(history.getByText("Preview build finished: 214 pages, 14 s")).toBeVisible();
+  await expect(history.getByText("Keep the retry schedule in SQLite?")).toBeVisible();
 });
 
 test("cancelling a question records it as cancelled", async ({ page }, testInfo) => {
@@ -155,8 +157,8 @@ test("a terminal dialog is answered from its card; a press against a changed scr
   page.on("response", (response) => {
     if (response.url().endsWith("/keys")) keys.push({ status: response.status() });
   });
-  const detail = await openItem(page, testInfo, "dialog:w3:p1");
-  const card = detail.getByLabel("Dialog from docs-writer");
+  const detail = await openItem(page, testInfo, "dialog:w6:p1");
+  const card = detail.getByLabel("Dialog from job-5");
   await expect(card.getByRole("region", { name: "Screen text" }).or(card.getByLabel("Screen text"))).toContainText("rm -rf dist");
   // The risky option is badged.
   await expect(card.getByRole("button", { name: /don't ask again/ })).toContainText("Risky");
@@ -168,32 +170,34 @@ test("a terminal dialog is answered from its card; a press against a changed scr
   stale = false;
   await page.unroute("**/api/v1/agents/*/screen");
   await page.reload();
-  const fresh = detailRegion(page, testInfo, "Selected item").getByLabel("Dialog from docs-writer");
+  const fresh = detailRegion(page, testInfo, "Selected item").getByLabel("Dialog from job-5");
   await fresh.getByRole("list", { name: "Options" }).getByRole("button").first().click();
-  await expect(page.getByText(/^Sent “1” to docs-writer/)).toBeVisible();
+  await expect(page.getByText(/^Sent “1” to job-5/)).toBeVisible();
   expect(keys.at(-1)).toEqual({ status: 200 });
-  // The docs writer goes to work, so the dialog leaves the Inbox.
+  // The Handbook job goes to work, so the dialog leaves the Inbox.
   await page.goto("/inbox");
-  await expect(page.getByRole("list", { name: "Needs you" }).getByText("docs-writer is waiting at a dialog")).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByRole("list", { name: "Needs you" }).getByText("job-5 is waiting at a dialog")).toHaveCount(0, { timeout: 15_000 });
 });
 
 test("the badge and the tab title count what needs you, and follow new questions live", async ({ page, app }) => {
   await page.goto("/");
-  // Six open demo questions, the job's question, the docs writer's dialog and the three demo
-  // tool-call approvals (DESIGN.md 8.7).
-  await expect(page).toHaveTitle(/^\(11\) crowsnest/);
+  // The one attention queue (internal/attention): five open demo questions (the low notice q_6
+  // is not counted), the question j_4 waits on, the three demo tool-call approvals (DESIGN.md
+  // 8.7), the Handbook job's dialog, and three jobs: j_6 unresponsive, j_3 at the usage limit and
+  // j_9 failed.
+  await expect(page).toHaveTitle(/^\(13\) crowsnest/);
   const badge = page.getByRole("navigation", { name: "Views" }).getByLabel(/need you/).first();
-  await expect(badge).toHaveAttribute("aria-label", "11 need you");
+  await expect(badge).toHaveAttribute("aria-label", "13 need you");
 
   await askAsAgent(app, { title: "A new question from an agent", kind: "ack" });
-  await expect(page).toHaveTitle(/^\(12\) crowsnest/, { timeout: 10_000 });
-  await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("12 need you").first()).toBeAttached();
+  await expect(page).toHaveTitle(/^\(14\) crowsnest/, { timeout: 10_000 });
+  await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("14 need you").first()).toBeAttached();
 
   // Answering one from another tab brings it down here, without a reload.
   const other = await page.context().newPage();
   await other.goto("/inbox?q=q_5");
   await other.getByRole("button", { name: "Acknowledge", exact: true }).click();
-  await expect(page).toHaveTitle(/^\(11\) crowsnest/, { timeout: 10_000 });
+  await expect(page).toHaveTitle(/^\(13\) crowsnest/, { timeout: 10_000 });
   await other.close();
 });
 

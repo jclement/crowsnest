@@ -590,9 +590,11 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
 - **Backstop (M8)**: `Service.NudgeIfDue(ctx, jobID)` applies the same rule and budget for an agent
   without hooks that the caller found idle with an empty input box, and types the nudge;
   `Service.BackstopJobs` lists what the backstop watches (7.7).
-- **`--demo`** seeds ten jobs (running in a worktree, nudged, stuck on a limit with a retry
-  countdown, waiting on a question, at a dialog, unresponsive, blocked, done with evidence, failed,
-  queued) and keeps them moving; the supervisor does not run there.
+- **`--demo`** seeds seventeen jobs across its five projects (21.5): one in each state (running in
+  a worktree, nudged, stuck on a limit with a retry countdown, waiting on a question, at a dialog,
+  unresponsive, blocked, done with evidence, failed, queued), a lead's job with a child, and jobs
+  waiting on approvals and blocking questions; it keeps them moving; the supervisor does not run
+  there.
 
 ### 6.9 As fixed in R2: lifecycle steps, and what the supervisor guarantees
 
@@ -1236,7 +1238,8 @@ visibility per job."
   day; sortable; CSV with a BOM, formulas defused); the orchestrator's line in the Chat menu;
   "Spend" in the palette, and each job row's spend as secondary text.
 - **`--demo`** seeds plausible spend through `Meter.Record` (the same counting path) for every
-  started job and a week of orchestrator use; the meter does not run there.
+  started job, a week of orchestrator use and a morning for each running lead (`lead:<slug>`); the
+  meter does not run there.
 
 ### 7.12 Codex as the orchestrator (the doctor branch)
 
@@ -1399,9 +1402,10 @@ Push (8.5) reaches subscribed devices with no tab open.
   question". The badge and tab title count open questions plus dialogs. "Notify me" asks for
   Notification permission on a press; a notification is shown when a question is newly asked while
   the tab is hidden.
-- **`--demo`** seeds six open questions (every kind, a mermaid body, a diff, a multi-select) and
-  one answered one into an empty inbox, and asks another from a rotation every 90 s, from the demo
-  fleet's panes, so answers are typed into the fake agents.
+- **`--demo`** seeds six open questions (every kind, a mermaid body, a diff, a multi-select), one
+  answered one and the question the orchestrator's job waits on into an empty inbox, and asks
+  another from a rotation every 90 s. Each comes from the pane of the demo job it names (21.5), so
+  answers are typed into the fake agents and the job's card counts them.
 
 **8.5 Web Push** (built on `wip/webpush`; `internal/push`, `internal/httpd/push.go`,
 `cmd/crowsnest/push.go`, `web/public/sw.js`, `web/src/lib/push.ts`,
@@ -1735,10 +1739,12 @@ the fallback that is always there.
   `env`, `timeout`): a seatbelt for an agent that means well, not a sandbox (a script, an alias,
   `eval` or `python -c` gets past it). A missing or broken rules file allows (fail open, like
   every hook).
-- **`--demo`** seeds three approvals (a low Bash `go test`, a low Edit with a diff, a dangerous
-  force push) from the builder, linter and reviewer panes, with no hook waiting on them (so they
-  are never superseded), and adds one from a rotation every three minutes while fewer than three
-  are pending.
+- **`--demo`** seeds three approvals (a low Bash link check from Website's `j_14`, a low Edit with
+  a diff from Mobile's `j_16`, a dangerous force push from Crowsnest's reviewer `j_13`), each
+  naming its job, which is needs_you/approval-tool, with no hook waiting on them (so they are never
+  superseded); the job's pane shows the permission dialog until the approval is decided. One more
+  comes from a rotation every three minutes while fewer than three are pending, from a job with
+  nothing pending.
 - **Tests**: `internal/risk` and `internal/guard` tables; `internal/approvals` (allow wakes the
   waiter, deny with the note, the dangerous confirmation, notification only for low, expiry, a
   hook that stops polling, an active waiter kept, demo ones kept, supersession by pane, by the tool
@@ -3041,12 +3047,45 @@ repositories in this round.
 
 ### 21.5 Demo
 
-`--demo` seeds three projects in throwaway directories under its state directory: Crowsnest
-(`lead_start=job`) and Website (`lead_start=open`), whose leads run on the fake herdr and answer
-prompts with the demo orchestrator's canned replies, and Infra (lead off). The demo's jobs are
-filed under them by directory; two app schedules (`evening-review` to the Crowsnest lead,
-`link-check` a job for Website); and edited instruction layers (global, the builder role, the
-Crowsnest project).
+`--demo` tells one morning across five projects, seeded in throwaway directories under its
+state directory: Crowsnest (`lead_start=job`), Website and Mobile (`lead_start=open`), whose
+leads run on the fake herdr and answer prompts with the demo orchestrator's canned replies, and
+Infra (manual) and Handbook (`lead_start=job`), whose leads are off. Two app schedules
+(`evening-review` to the Crowsnest lead, `link-check` a job for Website) and edited instruction
+layers (global, the builder role, the Crowsnest project) come with them.
+
+The story's names live in one package, `internal/demostory`, which the fake fleet, the seeded
+jobs, questions and approvals all read, and its rules are checked end to end by
+`cmd/crowsnest`'s `TestDemoStory` (the R4 product review found a job saying one command while its
+dialog showed another):
+
+- **One workspace per project**, labelled with its slug, every agent in it working in the
+  project's made-up directory (`~/src/<slug>`, which the seeding maps to the real one), plus the
+  orchestrator's workspace and the leads' own (`lead <slug>`, agent `lead-<slug>`, started by the
+  lead manager as real leads are).
+- **A job with a pane is held by the agent of the same name** (`job-<n>` after its id, as a real
+  launch names it), in its project's workspace. The board's seventeen jobs keep one of every
+  state (running in a worktree, nudged, stuck on a limit, waiting on a question, at a dialog,
+  unresponsive, blocked, done with evidence, failed, queued) and add a lead-created job with a
+  child (origin `lead-crowsnest`, then `agent` with `parent_id`), three jobs waiting on tool-call
+  approvals and two on blocking questions. Every project has a live job; Infra has nothing
+  waiting on the human; the orchestrator holds the Unfiled work.
+- **A dialog job's cause is read from its pane** (`Demo.DialogCommand`), and a small loop keeps
+  the job in step with the screen: answered, it runs; the Handbook job's next dialog makes it
+  needs_you again with the new command.
+- **Approvals and questions are seeded after the jobs**, from the panes of the jobs they name
+  (`job_id` set, `context.repo` the job's project, an approval's cwd the job's directory). A job
+  with a pending approval is `needs_you`/`approval-tool` with the approval's summary as its
+  cause detail, and its pane shows the permission dialog until the approval is decided; a job
+  waiting on a blocking question has declared waiting. The rotations ask only from jobs that are
+  running or already waiting, so nothing they add changes what a job waits on, and nothing in
+  the script answers or removes what waits on the human.
+
+A "busy day" walk has four obligations at start-up: the dangerous force push `ap_3` from
+Crowsnest's reviewer `j_13` ("Review the rate-limiter fix on fix/limiter"), the blocking question
+`q_4` ("What should the homepage hero say?") from Website's `j_15`, the terminal dialog of
+Handbook's `j_5` ("Rebuild and publish the handbook site", `rm -rf dist && npm run build`), and
+Mobile's `j_3` ("Migrate the settings page to the new form kit") stuck on the usage limit.
 
 ### 21.6 Tests
 

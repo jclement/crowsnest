@@ -25,18 +25,18 @@ test("a Claude agent's Conversation and Terminal tabs in Fleet", async ({ page }
   const errors = collectErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${instance.baseURL}/fleet`);
-  await page.getByRole("list", { name: "Workspaces" }).getByRole("button", { name: /builder/ }).first().click();
+  await page.getByRole("list", { name: "Workspaces" }).getByRole("button", { name: /job-1(?!\d)/ }).first().click(); // the webhook builder
 
   const conversation = page.getByRole("list", { name: "Conversation" });
   await expect(conversation).toBeVisible();
-  await expect(conversation.getByText("7 tests")).toBeVisible();
+  await expect(conversation.getByText(/doubling from 1 s/)).toBeVisible();
   await expect(conversation.getByRole("button", { name: /^Bash/ })).toBeVisible();
   await page.screenshot({ path: "screenshots/fleet-conversation-1440x900-light.png", animations: "disabled", caret: "hide" });
 
-  // Message the builder from the panel: the demo builder starts working.
-  await page.getByRole("textbox", { name: /Message to builder/ }).fill("one more test please");
+  // Message job-1 from the panel: the demo agent takes the prompt.
+  await page.getByRole("textbox", { name: /Message to job-1/ }).fill("one more test please");
   const sent = page.waitForResponse((response) => response.url().includes("/prompt") && response.request().method() === "POST");
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   expect((await sent).status()).toBe(200);
 
   await page.getByRole("tab", { name: "Terminal" }).click();

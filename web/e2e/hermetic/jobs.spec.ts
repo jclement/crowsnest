@@ -4,14 +4,16 @@
 // the one action that fits; nudge; cancel behind a confirmation; a finished job's result with
 // what was and was not verified; the board's order; the empty state.
 //
-// Demo job ids, in seed order (internal/jobs/demo.go): j_1 running (worktree), j_2 nudged, j_3
-// stuck on a limit, j_4 needs you (question q_8), j_5 needs you (a dialog), j_6 unresponsive,
-// j_7 blocked, j_8 done, j_9 failed (older), j_10 queued for the orchestrator (it picks it up).
+// Demo job ids, in seed order (internal/jobs/demo.go): j_1 running (worktree, agent job-1), j_2
+// nudged, j_3 stuck on a limit, j_4 needs you (question q_8), j_5 needs you (a dialog), j_6
+// unresponsive, j_7 blocked, j_8 done, j_9 failed (older), j_10 queued for the orchestrator (it
+// picks it up); then j_11 and j_15 waiting on questions, j_13, j_14 and j_16 on approvals, j_12 and
+// j_17 running. A job given here is j_18, held by agent job-18.
 import type { Page } from "@playwright/test";
 import { detailRegion, expect, isPhone, test } from "../support/fixtures";
 
 async function openBoard(page: Page, search = "") {
-  await page.goto(`/${search}`);
+  await page.goto(`/jobs${search}`); // Jobs moved off home (Now) to /jobs
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
 }
 
@@ -34,21 +36,21 @@ test("giving a job with a directory starts an agent, and the card moves from que
   await expect(page.getByRole("button", { name: new RegExp(`To ${app.root.split("/").pop()} · tester`) })).toBeVisible();
   await page.getByRole("button", { name: "Give job" }).click();
 
-  await expect(page.getByText("Job j_11 given")).toBeVisible();
-  await expect(page).toHaveURL(/job=j_11/);
+  await expect(page.getByText("Job j_18 given")).toBeVisible();
+  await expect(page).toHaveURL(/job=j_18/);
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByRole("heading", { name: "Add a health check to the webhook sender" })).toBeVisible();
   await expect(detail.getByText("Done when: the endpoint answers and the README says how")).toBeVisible();
   // The launcher opens a pane, sends the brief and the job is running, all on the timeline.
   const timeline = detail.getByRole("list", { name: "Timeline" });
-  await expect(timeline).toContainText("Brief sent to job-11", { timeout: 15_000 });
+  await expect(timeline).toContainText("Brief sent to job-18", { timeout: 15_000 });
   await expect(timeline).toContainText("queued → running");
   await expect(detail.getByText("Running", { exact: true }).first()).toBeVisible();
 
   // On the board it sits in progress, with its agent.
   if (isPhone(testInfo)) await page.getByRole("button", { name: "Close" }).click();
   const card = page.getByRole("region", { name: "In progress" }).getByRole("button", { name: /Add a health check/ });
-  await expect(card).toContainText("job-11");
+  await expect(card).toContainText("job-18");
   // The text box was cleared for the next job.
   await expect(page.getByLabel("What needs doing?")).toHaveValue("");
 });
@@ -85,11 +87,20 @@ test("giving a job without options sends it to the orchestrator; Cmd/Ctrl+Enter 
 test("the board puts needs-you first, then stuck, then running, then finished today, older behind a toggle", async ({ page }) => {
   await openBoard(page);
   const attention = await sectionTitles(page, "Needs you or stuck");
-  // Needs-you (the question and the dialog) before stuck (the limit and the unresponsive job).
-  expect(attention.slice(0, 2).sort()).toEqual(["Decide the release date for v0.2", "Review the auth change"]);
-  expect(attention.slice(2).sort()).toEqual(["Migrate the settings page to the new form kit", "Profile the fleet cache"]);
+  // Needs-you (three questions, the dialog, three approvals) before stuck (the limit and the
+  // unresponsive job).
+  expect(attention.slice(0, 7).sort()).toEqual([
+    "Add pull-to-refresh to the inbox screen",
+    "Coalesce the fleet cache refresh",
+    "Decide the release date for v0.2",
+    "Fix the broken links the link check found",
+    "Rebuild and publish the handbook site",
+    "Review the rate-limiter fix on fix/limiter",
+    "Rewrite the homepage hero",
+  ]);
+  expect(attention.slice(7).sort()).toEqual(["Migrate the settings page to the new form kit", "Profile the fleet cache"]);
   const running = await sectionTitles(page, "In progress");
-  expect(running).toEqual(expect.arrayContaining(["Add retry back-off to the webhook sender", "Tidy the README install section", "Upgrade the Postgres driver"]));
+  expect(running).toEqual(expect.arrayContaining(["Add retry back-off to the webhook sender", "Tidy the install guide", "Upgrade the Postgres driver", "Review the fleet cache refactor", "Pin the devbox base image by digest"]));
   // The demo's finished jobs settled 2 h and 5 h before it started, so which side of midnight they
   // fall on depends on the time of day (and the timezone) the test runs in. Each one must be in
   // exactly one of the two places, today's list or behind the toggle, never lost. Asserting an
@@ -109,7 +120,7 @@ test("the board puts needs-you first, then stuck, then running, then finished to
   // Cards carry the state, the progress line and the counts.
   const limited = page.getByRole("button", { name: /Migrate the settings page/ });
   await expect(limited).toContainText("Retry in");
-  await expect(page.getByRole("button", { name: /Tidy the README/ })).toContainText(/\d+ nudges/);
+  await expect(page.getByRole("button", { name: /Tidy the install guide/ })).toContainText(/\d+ nudges/);
   await expect(page.getByRole("button", { name: /Decide the release date/ })).toContainText("1 question");
 });
 
@@ -119,11 +130,11 @@ test("a running job: message its agent and watch the timeline", async ({ page },
   await expect(detail.getByRole("heading", { name: "Add retry back-off to the webhook sender" })).toBeVisible();
   await expect(detail.getByText("Doing now:")).toBeVisible();
   await expect(detail.getByText("~/.herdr/worktrees/crowsnest/job-1 · job/1-add-retry-back-off")).toBeVisible();
-  // A job names the agent its pane holds (R3, ExpectAgent): the demo's builder pane.
-  const box = detail.getByRole("textbox", { name: "Message to builder" });
+  // A job names the agent its pane holds (R3, ExpectAgent): job-1, in the Crowsnest workspace.
+  const box = detail.getByRole("textbox", { name: "Message to job-1" });
   await box.fill("Use full jitter, not equal jitter");
   await detail.getByRole("button", { name: "Send" }).click();
-  // The builder is working, so Claude queues it.
+  // job-1 is working, so Claude queues it.
   await expect(page.getByText(/Queued for the agent|Sent to the agent/)).toBeVisible();
   await expect(box).toHaveValue("");
   await expect(detail.getByRole("list", { name: "Timeline" })).toContainText("Use full jitter", { timeout: 10_000 });
@@ -168,7 +179,7 @@ test("each stuck cause shows its reason and the one action that fits", async ({ 
   await openBoard(page, "?job=j_5");
   detail = detailRegion(page, testInfo, "Selected job");
   banner = detail.getByRole("alert");
-  await expect(banner).toContainText("Claude wants to run: rm -rf node_modules");
+  await expect(banner).toContainText("Claude wants to run: rm -rf dist && npm run build");
   await banner.getByRole("button", { name: "Open terminal" }).click();
   await expect(detail.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
   await expect(detail.locator("[data-terminal]")).toBeVisible();
@@ -230,7 +241,7 @@ test("a blocked job says what it is waiting for", async ({ page }, testInfo) => 
 
 test("an empty board invites the first job", async ({ page }) => {
   await page.route("**/api/v1/jobs", (route) => (route.request().method() === "GET" ? route.fulfill({ json: { data: [] } }) : route.continue()));
-  await page.goto("/");
+  await page.goto("/jobs");
   await expect(page.getByRole("heading", { name: "No jobs yet" })).toBeVisible();
   await expect(page.getByText("Say what needs doing above.")).toBeVisible();
 });

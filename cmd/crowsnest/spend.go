@@ -118,11 +118,17 @@ func seedDemoSpend(ctx context.Context, meter *spend.Meter, service *jobs.Servic
 			Calls: min(max(calls, 8), 60), Subagent: i%3 == 0,
 		})
 	}
-	// The orchestrator: a little every day this past week, so the by-day view has a shape.
+	// The orchestrator: a little every day this past week, so the by-day view has a shape. Today's
+	// stretch runs up to now, so some of it is today even just after midnight (the Chat menu's
+	// "today" figure was "cost unknown" for a demo started before 03:00).
 	for day := 6; day >= 0; day-- {
 		start := now.AddDate(0, 0, -day).Add(-3 * time.Hour)
+		end := start.Add(2 * time.Hour)
+		if day == 0 {
+			start, end = now.Add(-90*time.Minute), now
+		}
 		subjects = append(subjects, spend.DemoSubject{Subject: spend.OrchestratorSubject, Model: "claude-sonnet-5-5",
-			Start: start, End: start.Add(2 * time.Hour), Calls: 6 + day})
+			Start: start, End: end, Calls: 6 + day})
 	}
 	// The three running leads (DESIGN.md 21.5): a morning's worth each, on their own lines.
 	for i, slug := range []string{demostory.Crowsnest, demostory.Website, demostory.Mobile} {

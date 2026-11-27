@@ -10,7 +10,9 @@
 //
 // Demo jobs (internal/jobs/demo.go): j_3 "Migrate the settings page to the new form kit" (stuck on
 // a limit). Demo questions (internal/questions/demo.go) include "Apply the fleet cache refactor?"
-// (confirm, blocking: "Apply it" or "Not yet"). Demo agents (internal/herdr/fake/demo.go): orchestrator, builder, reviewer, docs-writer, linter.
+// (confirm, blocking: "Apply it" or "Not yet"). Demo agents (internal/herdr/fake/demo.go): the
+// orchestrator, the linter, and job-<n> for each job with a pane (job-12 reviews the fleet cache).
+// A job given here is j_18.
 import type { Page } from "@playwright/test";
 import { askAsAgent } from "../support/agent";
 import { expect, expectAccessible, expectNoSidewaysScroll, isPhone, test } from "../support/fixtures";
@@ -31,7 +33,7 @@ const input = (page: Page) => page.getByRole("combobox", { name: "Search or run 
 const activeOption = (page: Page) => palette(page).locator("[role=option][aria-selected=true]");
 
 async function openBoard(page: Page) {
-  await page.goto("/");
+  await page.goto("/jobs"); // Jobs moved off home (Now) to /jobs
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
 }
 
@@ -108,10 +110,10 @@ test("giving a job from the palette puts it on the board, and the toast opens it
   await expect(activeOption(page)).toContainText("Give job: Rewrite the onboarding emails for new users");
   await page.keyboard.press("Enter");
   await expect(palette(page)).toBeHidden();
-  await expect(page.getByText("Job j_11 given")).toBeVisible();
+  await expect(page.getByText("Job j_18 given")).toBeVisible();
   await expect(page.getByRole("region", { name: "In progress" }).or(page.getByRole("region", { name: "Needs you or stuck" })).getByText("Rewrite the onboarding emails for new users").first()).toBeVisible();
-  await page.getByRole("button", { name: "Open j_11" }).click();
-  await expect(page).toHaveURL(/job=j_11/);
+  await page.getByRole("button", { name: "Open j_18" }).click();
+  await expect(page).toHaveURL(/job=j_18/);
   const detail = isPhone(testInfo) ? page.getByRole("dialog") : page.getByRole("region", { name: "Selected job" });
   await expect(detail.getByRole("heading", { name: "Rewrite the onboarding emails for new users" })).toBeVisible();
 });
@@ -189,9 +191,9 @@ test("an agent opens straight to its terminal, and the theme changes from the pa
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByRole("button", { name: /Dark theme/ })).toBeVisible();
   await openWithButton(page);
-  await input(page).fill("reviewer");
+  await input(page).fill("job-12");
   const agent = palette(page).getByRole("group", { name: "Agents and panes" }).getByRole("option").first();
-  await expect(agent).toContainText("reviewer");
+  await expect(agent).toContainText("job-12");
   await agent.hover();
   await page.keyboard.press("ArrowRight");
   await palette(page).getByRole("option", { name: "Open terminal" }).click();

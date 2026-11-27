@@ -127,8 +127,8 @@ func demoSeeds() []demoSeed {
 			Context: map[string]string{"repo": demostory.Crowsnest, "branch": "fix/limiter", "worker": demostory.LimiterReviewer},
 		}},
 		{demostory.HeroWriter, AskInput{
-			Title: "What should the homepage's first sentence say?", Kind: KindManual, Urgency: UrgencyBlocking,
-			BodyMD:  "The hero today reads *\"Crowsnest is a web UI for herdr.\"* That undersells jobs. Write the sentence you want; I'll fit the rest of the hero to it.",
+			Title: "What should the homepage hero say?", Kind: KindManual, Urgency: UrgencyBlocking,
+			BodyMD:  "Its first sentence today reads *\"Crowsnest is a web UI for herdr.\"* That undersells jobs. Write the sentence you want; I'll fit the rest of the hero to it.",
 			Context: map[string]string{"repo": demostory.Website, "worker": demostory.HeroWriter},
 		}},
 		{demostory.WebhookBuilder, AskInput{

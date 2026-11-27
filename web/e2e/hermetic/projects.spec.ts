@@ -1,7 +1,8 @@
 // Projects, leads, instruction layers and app schedules (DESIGN.md 21) against `crowsnest --demo`,
-// which seeds three projects (crowsnest and website with their leads running and answering with
-// canned replies, infra with its lead off), jobs filed under them, the schedules evening-review
-// (to the crowsnest lead) and link-check (a job for website), and edited instruction layers.
+// which seeds five projects (crowsnest, website and mobile with their leads running and answering
+// with canned replies, infra and handbook with their leads off), jobs filed under them, the
+// schedules evening-review (to the crowsnest lead) and link-check (a job for website), and edited
+// instruction layers.
 //
 // Journeys, at 1440 and 375 px: create a project from a directory the test makes; start a lead
 // and give it a job "to the lead", held by lead-<slug>; chat with a lead and get its reply;
@@ -44,8 +45,11 @@ test("the projects list shows each lead's state and counts; a project page has i
   await page.goto("/projects");
   const list = page.getByRole("list", { name: "Projects" });
   await expect(list.getByRole("link", { name: /Crowsnest/ })).toBeVisible();
+  await expect(list.getByRole("link")).toHaveCount(5);
   await expect(list.getByRole("link", { name: /Infra/ })).toContainText("Lead off");
+  await expect(list.getByRole("link", { name: /Handbook/ })).toContainText("Lead off");
   await expect(list.getByRole("link", { name: /Website/ })).not.toContainText("Lead off");
+  await expect(list.getByRole("link", { name: /Mobile/ })).not.toContainText("Lead off");
   if (isPhone(testInfo)) await expectNoSidewaysScroll(page);
   await shot(page, testInfo, "list");
 
