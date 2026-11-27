@@ -31,6 +31,8 @@ const tuiTerm = "TERM=xterm-256color"
 type tuiBridge struct {
 	*stream
 	binary, session string
+	// stateDir is the client's XDG_STATE_HOME (HerdrLauncher.ClientStateDir); empty inherits.
+	stateDir string
 
 	// mu guards the pty field only, and is never held across I/O: Write and Resize copy the
 	// pointer and let go. The PTY master is non-blocking and owned by Go's poller (pollable),
@@ -69,6 +71,12 @@ func (b *tuiBridge) Start(cols, rows int) error {
 	b.started.Store(true)
 	cmd := exec.Command(b.binary, "--session", b.session) //nolint:gosec // fixed argv; session name is validated at startup
 	cmd.Env = childEnv(tuiTerm)
+	if b.stateDir != "" {
+		if err := os.MkdirAll(b.stateDir, 0o700); err != nil {
+			return fmt.Errorf("creating the terminal client's state directory: %w", err)
+		}
+		cmd.Env = withEnv(cmd.Env, "XDG_STATE_HOME", b.stateDir)
+	}
 	started, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}) //nolint:gosec // ValidSize bounds both
 	if err != nil {
 		return fmt.Errorf("starting the herdr client in a terminal: %w", err)

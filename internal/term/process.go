@@ -6,6 +6,7 @@ package term
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -93,6 +94,18 @@ func (s *stream) Reason() string {
 // inside a herdr pane must not be able to drive that pane's session), plus extra entries.
 func childEnv(extra ...string) []string {
 	return append(herdr.ScrubEnv(os.Environ()), extra...)
+}
+
+// withEnv returns env with key set to value, replacing any earlier value (the last one would
+// win in most libcs, but not all; one entry leaves no doubt).
+func withEnv(env []string, key, value string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, key+"=") {
+			out = append(out, entry)
+		}
+	}
+	return append(out, key+"="+value)
 }
 
 // terminate asks a child to leave and kills it if it has not by closeGrace. exited must be

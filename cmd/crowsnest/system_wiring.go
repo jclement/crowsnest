@@ -47,6 +47,9 @@ type liveServices struct {
 	system  atomic.Pointer[system.Service]
 	// ctl are the throttle and review settings (landing_wiring.go).
 	ctl atomic.Pointer[controls]
+	// config is the config with the settings changed in the app applied (backups and retention
+	// read it on every pass, ops.go).
+	config liveConfig
 }
 
 // greet runs the first-run greeting, when it is wired.
@@ -58,6 +61,9 @@ func (l *liveServices) greet() {
 
 // apply pushes the settings that apply live into the services.
 func (l *liveServices) apply(_ config.Config, next config.Config) {
+	if current := l.config.value.Load(); current != nil {
+		l.config.set(current.WithSettings(next))
+	}
 	if poker := l.poker.Load(); poker != nil {
 		poker.SetInterval(next.PokeInterval)
 	}

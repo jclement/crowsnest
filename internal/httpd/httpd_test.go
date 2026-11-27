@@ -7,7 +7,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/jclement/crowsnest/internal/attention"
+	"github.com/jclement/crowsnest/internal/machines"
+	"github.com/jclement/crowsnest/internal/tsauth"
 	"io"
 	"log/slog"
 	"net/http"
@@ -142,6 +145,12 @@ type harnessOptions struct {
 	// The attention queue and the Now view (attention_test.go); nil: 503
 	attention *attention.Service
 	now       NowSources
+	// Day thirty (ops_test.go): sign in with Tailscale (serveStatus is what `tailscale serve
+	// status --json` answers; "" fails), scoped tokens and machines, and the ops service.
+	tailscale   bool
+	serveStatus string
+	machines    bool
+	ops         Ops
 }
 
 var testWeb = fstest.MapFS{
@@ -190,7 +199,21 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	}
 	logs := &syncBuffer{}
 	events := hub.New()
+	var gate *tsauth.Gate
+	if opts.tailscale {
+		gate = tsauth.New(tsauth.Options{Enabled: true, KV: db, Port: 2769, Run: func(context.Context, ...string) ([]byte, error) {
+			if opts.serveStatus == "" {
+				return nil, errors.New("no serve config")
+			}
+			return []byte(opts.serveStatus), nil
+		}})
+	}
+	var machineService *machines.Service
+	if opts.machines {
+		machineService = &machines.Service{Store: db}
+	}
 	server, err := New(Deps{
+		Tailscale: gate, Machines: machineService, Ops: opts.ops,
 		Config:         cfg,
 		Auth:           service,
 		Hub:            events,

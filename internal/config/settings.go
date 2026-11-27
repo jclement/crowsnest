@@ -240,6 +240,14 @@ func (c Config) SettingValue(name string) string {
 		return strings.Join(c.ProtectedHosts, ",")
 	case optProtectedBranch:
 		return strings.Join(c.ProtectedBranches, ",")
+	case optBackupEvery:
+		return durationText(c.BackupEvery.String())
+	case optBackupKeep:
+		return itoa(c.BackupKeep)
+	case optArchiveAfterDays:
+		return itoa(c.ArchiveAfterDays)
+	case optDeleteAfterDays:
+		return itoa(c.DeleteAfterDays)
 	}
 	return ""
 }
@@ -314,6 +322,8 @@ func (c Config) WithSettings(from Config) Config {
 	c.ProtectedHosts, c.ProtectedBranches = from.ProtectedHosts, from.ProtectedBranches
 	c.MaxRunningJobs, c.LoadHold, c.HeavySlots = from.MaxRunningJobs, from.LoadHold, from.HeavySlots
 	c.Review, c.MergeMode, c.DigestAt = from.Review, from.MergeMode, from.DigestAt
+	c.BackupEvery, c.BackupKeep = from.BackupEvery, from.BackupKeep
+	c.ArchiveAfterDays, c.DeleteAfterDays = from.ArchiveAfterDays, from.DeleteAfterDays
 	c.Sources = from.Sources
 	return c
 }

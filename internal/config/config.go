@@ -112,6 +112,16 @@ type Config struct {
 	Review         string  // the review gate's default for isolated builder jobs: auto | off | claude | codex | same
 	MergeMode      string  // Land's merge: merge (a merge commit) | ff (fast-forward only)
 	DigestAt       string  // HH:MM: the daily digest's time; "" off
+	// ---- Day thirty: terminal reach, Tailscale sign-in, backups, retention (ops.go) ----
+
+	// TerminalMachines lets the Terminal view's herdr client show the user's saved SSH machines
+	// (--terminal-machines). Off: the client gets a state directory of crowsnest's own.
+	TerminalMachines bool
+	TailscaleAuth    bool          // accept Tailscale identity headers from a local serve proxy (--tailscale-auth)
+	BackupEvery      time.Duration // automatic backup interval; 0 off
+	BackupKeep       int           // automatic backups kept
+	ArchiveAfterDays int           // settled jobs leave the boards after this many days; 0 never
+	DeleteAfterDays  int           // settled history is deleted after this many days; 0 never
 
 	// ---- The guard hook and approvals (guard.go) ----
 

@@ -1,0 +1,6 @@
+# Everything generated: frames, clips, captions, audio, the film itself.
+/out/
+# A local ElevenLabs key, if one is put here.
+.env
+.venv/
+__pycache__/
