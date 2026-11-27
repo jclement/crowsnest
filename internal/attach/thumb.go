@@ -22,9 +22,10 @@ const (
 	// thumbEdge is the longest side of a thumbnail in pixels: twice the 160 px a card shows, for
 	// a phone's high-density screen.
 	thumbEdge = 320
-	// maxDecodePixels refuses to decode pictures larger than this (40 megapixels, about 160 MB
-	// of RGBA), so a small, highly compressed upload cannot make the server allocate gigabytes.
-	maxDecodePixels = 40_000_000
+	// maxDecodePixels refuses to decode pictures larger than this (16 megapixels: 64 MB as RGBA,
+	// 128 MB for a 16-bit PNG, R5-S12), so a small, highly compressed upload cannot make the
+	// server allocate gigabytes. A phone camera's photo fits; a bigger one gets no thumbnail.
+	maxDecodePixels = 16_000_000
 	thumbQuality    = 82
 )
 

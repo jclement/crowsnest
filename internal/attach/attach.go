@@ -238,9 +238,28 @@ func (s *Service) store(ctx context.Context, name string, body io.Reader, origin
 	return view(record), nil
 }
 
-// commit makes room, moves the blob into place (unless an identical one is already there), makes
-// its thumbnail and inserts the row, under the quota lock.
+// commit makes the thumbnail first, outside the lock (decoding a picture is the slow part, and
+// under the lock one image stalled every upload: R5-S12), then makes room, moves the blob and its
+// thumbnail into place (unless an identical blob is already there) and inserts the row, under the
+// quota lock.
 func (s *Service) commit(ctx context.Context, record *store.AttachmentRecord, tempPath string) error {
+	tempThumb := ""
+	if thumbTypes[record.Type] {
+		tempThumb = tempPath + ".thumb"
+		made, err := makeThumb(tempPath, tempThumb)
+		if err != nil {
+			s.opts.Logger.Warn("making a thumbnail failed; the attachment has none", "attachment", record.ID, "err", err)
+		}
+		if !made {
+			_ = os.Remove(tempThumb)
+			tempThumb = ""
+		}
+	}
+	defer func() {
+		if tempThumb != "" {
+			_ = os.Remove(tempThumb)
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	known, thumb, err := s.opts.Store.BlobKnown(ctx, record.SHA256)
@@ -258,12 +277,13 @@ func (s *Service) commit(ctx context.Context, record *store.AttachmentRecord, te
 		if err := os.Rename(tempPath, blob); err != nil {
 			return fmt.Errorf("storing the upload: %w", err)
 		}
-		if thumbTypes[record.Type] {
-			made, err := makeThumb(blob, s.thumbPath(record.SHA256))
-			if err != nil {
-				s.opts.Logger.Warn("making a thumbnail failed; the attachment has none", "attachment", record.ID, "err", err)
+		thumb = false
+		if tempThumb != "" {
+			if err := os.Rename(tempThumb, s.thumbPath(record.SHA256)); err != nil {
+				s.opts.Logger.Warn("storing a thumbnail failed; the attachment has none", "attachment", record.ID, "err", err)
+			} else {
+				thumb, tempThumb = true, ""
 			}
-			thumb = made
 		}
 	}
 	record.HasThumb = thumb

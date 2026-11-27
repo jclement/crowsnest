@@ -216,6 +216,13 @@ func TestNoThumbnailForUndecodableOrHugeImages(t *testing.T) {
 	if bomb.Thumb {
 		t.Fatal("a 10-gigapixel PNG got a thumbnail")
 	}
+	// R5-S12: 20 megapixels (5000×4000) is past the 16-megapixel cap; the header alone says so.
+	big := append([]byte(nil), header...)
+	big[16], big[17], big[18], big[19] = 0, 0, 0x13, 0x88 // width 5000
+	big[20], big[21], big[22], big[23] = 0, 0, 0x0f, 0xa0 // height 4000
+	if over := upload(t, service, "big.png", big); over.Thumb {
+		t.Fatal("a 20-megapixel PNG got a thumbnail")
+	}
 }
 
 // ---- Quota and cleanup ---------------------------------------------------------------------
