@@ -842,7 +842,11 @@ Every checkout has a live, syntax-highlighted diff (DESIGN.md 6.21), at any time
   the job **need a rebase** ("Ask an agent to rebase"). Land refuses both unless you tick the
   override. What Accepted proves: the project's own check passed on that commit in a clean tree.
   The branch can change that check, so the card names any change to its check definition; it is
-  not independent evidence, and the reviewer and you are the independent part.
+  not independent evidence, and the reviewer and you are the independent part. By default the
+  check runs in the job's working tree (with its dependencies), the agent's tools held meanwhile
+  and the tree's content compared before and after; the card says "checked in the working tree".
+  Tick **Isolated check** on the card (with an optional **prepare command**, such as `npm ci`)
+  to have it run in a temporary copy of exactly the commit instead: "checked in an isolated copy".
 - **Holds.** A budget reached, a check that still fails, a review that still objects, an approval
   waiting, a usage limit: each is a hold on the job that only you (or crowsnest's own recovery)
   lift. Nothing the agent declares moves it out of that.

@@ -285,7 +285,7 @@ export const endpoints = {
   clearLimit: (engine: string) => api<{ engine: string; released: number }>(`/limits/${encodeURIComponent(engine)}/clear`, { method: "POST" }),
   waits: () => api<WaitsView>("/system/waits"),
   projectAccept: (id: number) => api<ProjectAccept>(`/projects/${id}/accept`),
-  setProjectAccept: (id: number, value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes">) =>
+  setProjectAccept: (id: number, value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes" | "check_isolated" | "check_prepare">) =>
     api<ProjectAccept>(`/projects/${id}/accept`, { method: "PUT", body: value }),
   reconcileAnswer: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}/reconcile`, { method: "POST" }),
   retypeAnswer: (id: string) => api<Question>(`/questions/${encodeURIComponent(id)}/retype`, { method: "POST", body: { confirm: true } }),

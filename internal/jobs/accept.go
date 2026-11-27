@@ -39,6 +39,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/landing"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
@@ -137,6 +138,9 @@ type Evidence struct {
 	// DefinitionChanged lists files of the branch's own diff that define its check (R6-S4): the
 	// branch changed what passing means, so the pass is the branch's own word about itself.
 	DefinitionChanged []string `json:"definition_changed"`
+	// Mode is where the check ran (R7-C01): "worktree" (the job's checkout, the default) or
+	// "isolated" (a temporary copy of exactly Commit).
+	Mode string `json:"mode"`
 }
 
 // workDirOf is where a job's agent works.
@@ -366,8 +370,16 @@ func (s *Service) runCheck(ctx context.Context, id string) {
 		return
 	}
 	defs := landing.CheckDefinitionChanges(ctx, dir, base, baseCommit, commandPaths(dir, command))
+	isolated, prepare := s.checkIsolationFor(ctx, r)
 	record := store.CheckRecord{JobID: numeric, Commit: before.Head, Command: command, Status: CheckRunning,
-		ExitCode: -1, Owner: s.instance, StartedAt: s.opts.Now(), DefinitionChanged: strings.Join(defs, ",")}
+		ExitCode: -1, Owner: s.instance, StartedAt: s.opts.Now(), DefinitionChanged: strings.Join(defs, ","), Mode: CheckModeWorktree}
+	if isolated {
+		record.Mode = CheckModeIsolated
+	} else {
+		// R7-C01: a content fingerprint of the checkout (tracked and untracked files) at the start,
+		// compared with one at the end.
+		record.TreeBefore, _ = landing.TreeFingerprint(ctx, dir)
+	}
 	if record.ID, err = s.opts.Store.InsertCheck(ctx, record); err != nil {
 		// A check that cannot be recorded cannot be evidence (R6-C13): nothing is run.
 		s.opts.Logger.Warn("recording a check", "job", id, "err", err)
@@ -375,20 +387,34 @@ func (s *Service) runCheck(ctx context.Context, id string) {
 			OutputTail: "crowsnest could not record the check, so it cannot count as evidence: " + err.Error()})
 		return
 	}
-	result := s.execCheck(ctx, dir, command)
+	var result checkResult
+	if isolated {
+		result = s.execIsolatedCheck(ctx, id, dir, before.Head, prepare, command)
+	} else {
+		result = s.execWorktreeCheck(ctx, id, dir, command)
+	}
 	after, err := landing.Snap(ctx, dir, base, baseCommit)
+	if !isolated && err == nil {
+		record.TreeAfter, _ = landing.TreeFingerprint(ctx, dir)
+	}
 	moved := false
 	switch {
+	case result.status == CheckError && result.note != "":
+		// The run itself could not be made (the copy, the prepare command): that is the result.
 	case err != nil:
 		result.status, result.note = CheckError, "the worktree could not be read after the check: "+err.Error()
 	case after.Head != before.Head:
 		// A commit landed while the check ran: this evidence is about a revision that is gone.
 		moved = true
 		result.status, result.note = CheckError, fmt.Sprintf("HEAD moved from %s to %s while the check ran; it will be run again", shortHash(before.Head), shortHash(after.Head))
-	case !after.Clean:
+	case !isolated && !after.Clean:
 		// The tree changed under the check (an agent's process, or the check itself writing
-		// tracked files): what passed is not the commit (R6-C02, R6-S4).
+		// tracked files): what passed is not the commit (R6-C02, R6-S4). An isolated check ran
+		// in its own copy, so the job's checkout changing does not touch it.
 		result.status, result.note = CheckError, "the worktree changed while the check ran, so this run is not evidence for the commit: "+strings.Join(capList(after.Dirty, 8), "; ")
+	case !isolated && record.TreeBefore != "" && record.TreeAfter != record.TreeBefore:
+		result.status, result.note = CheckError, fmt.Sprintf("the checkout's content changed while the check ran (fingerprint %s, then %s), so this run is not evidence for the commit",
+			shortHash(record.TreeBefore), shortHash(record.TreeAfter))
 	}
 	record.Status, record.ExitCode, record.Duration, record.FinishedAt = result.status, result.exit, result.duration, s.opts.Now()
 	record.OutputTail = tailText(result.output, checkTailBytes)
@@ -420,6 +446,72 @@ func (s *Service) runCheck(ctx context.Context, id string) {
 	watch.checkReruns = 0
 	record.Owner = path // carried to checkFinished: where the full output is
 	s.checkFinished(ctx, id, record)
+}
+
+// Check modes (R7-C01): where crowsnest ran a check.
+const (
+	CheckModeWorktree = "worktree" // the job's own checkout (the default)
+	CheckModeIsolated = "isolated" // a temporary detached worktree of exactly the commit
+)
+
+// checkIsolationFor reads whether r's project runs its check in an isolated copy, and the
+// command that prepares the copy ("" for none).
+func (s *Service) checkIsolationFor(ctx context.Context, r store.JobRecord) (bool, string) {
+	if r.ProjectID == 0 {
+		return false, ""
+	}
+	project, err := s.opts.Store.GetProjectAccept(ctx, r.ProjectID)
+	if err != nil {
+		return false, ""
+	}
+	return project.CheckIsolated, strings.TrimSpace(project.CheckPrepare)
+}
+
+// execWorktreeCheck runs the check in the job's own checkout. While it runs, the job's agent is
+// held from using tools: the marker file beside its guard rules makes its PreToolUse hook answer
+// "wait" (R7-C01). That is not airtight: a process the agent started in the background earlier is
+// not a tool call, and the agent can remove the file; the fingerprints and the clean-tree checks
+// are what void such a run, and the isolated mode is what the project chooses to rule it out.
+func (s *Service) execWorktreeCheck(ctx context.Context, id, dir, command string) checkResult {
+	marker := s.checkingMarker(id)
+	if marker != "" {
+		deadline := s.opts.Now().Add(s.accept().timeout() + time.Minute)
+		_ = os.WriteFile(marker, []byte(deadline.UTC().Format(time.RFC3339)+"\n"), 0o600)
+		defer func() { _ = os.Remove(marker) }()
+	}
+	return s.execCheck(ctx, dir, command)
+}
+
+// execIsolatedCheck makes the isolated copy of commit, runs prepare (if any) and then the check in
+// it, and removes the copy. A copy that cannot be made, or a prepare command that fails, is the
+// run's result (an error with what happened); it never falls back to the job's checkout.
+func (s *Service) execIsolatedCheck(ctx context.Context, id, dir, commit, prepare, command string) checkResult {
+	copied, err := landing.IsolatedCheckout(ctx, dir, commit)
+	if err != nil {
+		return checkResult{status: CheckError, exit: -1, note: "the isolated copy of the commit could not be made, so nothing was checked: " + err.Error()}
+	}
+	defer copied.Remove(ctx)
+	_ = s.Journal(ctx, id, EventAccept, "Checking an isolated copy of "+shortHash(commit), nil)
+	if prepare != "" {
+		prepared := s.execCheck(ctx, copied.Dir, prepare)
+		if prepared.status != CheckPassed {
+			prepared.status = CheckError
+			prepared.note = strings.TrimSpace(fmt.Sprintf("the prepare command `%s` did not succeed (exit %d), so the check was not run. %s", oneLine(prepare, 120), prepared.exit, prepared.note))
+			return prepared
+		}
+	}
+	return s.execCheck(ctx, copied.Dir, command)
+}
+
+// checkingMarker is the file whose presence (with a deadline in it) holds the job's agent's tools
+// while crowsnest checks its worktree; it sits beside the job's guard rules ("" when the job has
+// no directory of its own).
+func (s *Service) checkingMarker(id string) string {
+	dir, err := s.jobDir(id)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, guard.CheckingMarkerFile)
 }
 
 // maxCheckReruns is how many times in a row a check is run again because HEAD moved under it.
@@ -721,7 +813,7 @@ func (s *Service) EvidenceOf(ctx context.Context, job Job) *Evidence {
 	}
 	evidence := &Evidence{Command: check.Command, Status: check.Status, ExitCode: check.ExitCode, DurationMS: check.Duration.Milliseconds(),
 		Commit: check.Commit, OutputTail: check.OutputTail, StartedAt: check.StartedAt.UTC(), FinishedAt: timePtr(check.FinishedAt),
-		DefinitionChanged: splitList(check.DefinitionChanged)}
+		DefinitionChanged: splitList(check.DefinitionChanged), Mode: firstNonEmptyDir(check.Mode, CheckModeWorktree)}
 	if job.TornDownAt != nil || job.WorkDir == "" || check.Status == CheckRunning {
 		return evidence
 	}
@@ -952,6 +1044,12 @@ type ProjectAccept struct {
 	// RestoredCheckCommand is the command a restore set aside (R7-S4): not run until the human
 	// saves a check command (this one, or another), which clears it.
 	RestoredCheckCommand string `json:"restored_check_command,omitempty"`
+	// CheckIsolated runs the check in a temporary detached worktree of exactly the commit, after
+	// CheckPrepare (installing dependencies; "" for none). R7-C01. RestoredCheckPrepare is a prepare
+	// command a restore set aside, like RestoredCheckCommand.
+	CheckIsolated        bool   `json:"check_isolated"`
+	CheckPrepare         string `json:"check_prepare"`
+	RestoredCheckPrepare string `json:"restored_check_prepare,omitempty"`
 }
 
 // ProjectAcceptOf reads a project's acceptance defaults; dir is its directory, for Effective.
@@ -963,10 +1061,14 @@ func (s *Service) ProjectAcceptOf(ctx context.Context, projectID int64, dir stri
 		}
 		return ProjectAccept{}, err
 	}
-	out := ProjectAccept{ProjectID: projectID, CheckCommand: stored.CheckCommand, BudgetUSD: stored.BudgetUSD, BudgetMinutes: stored.BudgetMinutes}
+	out := ProjectAccept{ProjectID: projectID, CheckCommand: stored.CheckCommand, BudgetUSD: stored.BudgetUSD, BudgetMinutes: stored.BudgetMinutes,
+		CheckIsolated: stored.CheckIsolated, CheckPrepare: stored.CheckPrepare}
 	out.Effective, out.EffectiveSource = s.checkCommandFor(ctx, store.JobRecord{ProjectID: projectID, Dir: dir})
 	if aside, err := s.opts.Store.GetKV(ctx, store.RestoredCheckKey(projectID)); err == nil {
 		out.RestoredCheckCommand = aside
+	}
+	if aside, err := s.opts.Store.GetKV(ctx, store.RestoredPrepareKey(projectID)); err == nil {
+		out.RestoredCheckPrepare = aside
 	}
 	return out, nil
 }
@@ -974,15 +1076,17 @@ func (s *Service) ProjectAcceptOf(ctx context.Context, projectID int64, dir stri
 // SetProjectAccept writes a project's acceptance defaults (the human's, from the app).
 func (s *Service) SetProjectAccept(ctx context.Context, projectID int64, input ProjectAccept) error {
 	command := strings.TrimSpace(input.CheckCommand)
+	prepare := strings.TrimSpace(input.CheckPrepare)
 	switch {
-	case strings.ContainsAny(command, "\n\r\x00"):
-		return invalid("the check command is one line (use && to chain, or a mise task)")
-	case len(command) > 500:
-		return invalid("the check command is longer than 500 characters; put it in a mise task or a script")
+	case strings.ContainsAny(command, "\n\r\x00"), strings.ContainsAny(prepare, "\n\r\x00"):
+		return invalid("the check and prepare commands are one line each (use && to chain, or a mise task)")
+	case len(command) > 500 || len(prepare) > 500:
+		return invalid("a check or prepare command is longer than 500 characters; put it in a mise task or a script")
 	case input.BudgetUSD < 0 || input.BudgetMinutes < 0:
 		return invalid("a budget is a positive number, or 0 for the server's default")
 	}
-	err := s.opts.Store.SetProjectAccept(ctx, projectID, store.ProjectAccept{CheckCommand: command, BudgetUSD: input.BudgetUSD, BudgetMinutes: input.BudgetMinutes})
+	err := s.opts.Store.SetProjectAccept(ctx, projectID, store.ProjectAccept{CheckCommand: command, BudgetUSD: input.BudgetUSD, BudgetMinutes: input.BudgetMinutes,
+		CheckIsolated: input.CheckIsolated, CheckPrepare: prepare})
 	if errors.Is(err, store.ErrNotFound) {
 		return ErrNotFound
 	}
@@ -990,7 +1094,10 @@ func (s *Service) SetProjectAccept(ctx context.Context, projectID int64, input P
 		return err
 	}
 	// The human has now said which check runs: a command a restore set aside is settled (R7-S4).
-	return s.opts.Store.DeleteKV(ctx, store.RestoredCheckKey(projectID))
+	if err := s.opts.Store.DeleteKV(ctx, store.RestoredCheckKey(projectID)); err != nil {
+		return err
+	}
+	return s.opts.Store.DeleteKV(ctx, store.RestoredPrepareKey(projectID))
 }
 
 // deliverFeedback types a job's pending findings (a check's failure, R6-C07, or a review's

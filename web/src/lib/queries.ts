@@ -538,7 +538,8 @@ export function useProjectAccept(id: number) {
 export function useSetProjectAccept(id: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes">) => endpoints.setProjectAccept(id, value),
+    mutationFn: (value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes" | "check_isolated" | "check_prepare">) =>
+      endpoints.setProjectAccept(id, value),
     onSuccess: (view) => queryClient.setQueryData(queryKeys.projectAccept(id), view),
   });
 }

@@ -65,7 +65,22 @@ branch's word about itself, and you should read those changes.
 - anything about a later commit: any commit after the check makes the evidence **stale**, and the
   job view says so;
 - that the base has not moved: if it has, the job shows **Needs rebase**, and Land refuses until
-  it is rebased or you override.
+  it is rebased or you override;
+- in the default mode, that nothing touched the files during the run. The check runs in the job's
+  own working tree, which has the dependencies and caches a check needs. crowsnest checks the tree
+  is clean, with the same content, at the start and the end, and holds the agent's tools while it
+  runs. But a process the agent left running could change a file and put it back in between.
+
+## Where the check runs
+
+The job's evidence says which: **checked in the working tree** (the default) or **checked in an
+isolated copy of** a commit. Turn on **Isolated check** on a project's Acceptance card to have
+crowsnest check a temporary copy of exactly the commit instead, made for the check and removed
+after it. Nothing the agent changes or leaves running reaches that copy. The copy has no ignored
+files (no `node_modules`, virtual environment or build cache), so give a **prepare command**
+(`npm ci`, `uv sync`) that crowsnest runs in the copy first. If the copy cannot be made, or the
+prepare command fails, the check is an error that says so; it is never quietly run in the working
+tree instead.
 
 The result's **Verified** and **Not verified** lists are labelled "reported by the agent": they are
 its account, not crowsnest's evidence. Read **Not verified** before you land.

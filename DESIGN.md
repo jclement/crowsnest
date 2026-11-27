@@ -1318,6 +1318,30 @@ job's `done` is now the agent's claim, and crowsnest decides whether it is **acc
   because a fresh checkout has none of the ignored files a check needs (node_modules, a virtual
   environment, build caches) and would fail for reasons the agent cannot fix. The residual: a
   process that changes files and puts them back between the two looks is not seen.
+- **Where the check runs: decided by the lead after R7-C01** (recorded here as a decision). The
+  **default stays the job's worktree**, for the reason above, and every place that shows evidence
+  says what that does and does not prove ("checked in the working tree"). In that mode crowsnest
+  also records a **content fingerprint** of the checkout (its tracked files as they are and its
+  untracked, not-ignored files, as one git tree id: `landing.TreeFingerprint`) at the start and
+  the end (`job_checks.tree_before`, `tree_after`; a run where they differ is not evidence), and
+  **holds the job's agent's tools** while the check runs: a marker file beside the job's guard
+  rules (`<state>/jobs/j_N/checking`, holding a deadline) makes its PreToolUse hook answer "wait:
+  crowsnest is running the check" for Bash and the file-writing tools (the hook's matcher is now
+  `Bash|Edit|Write|MultiEdit|NotebookEdit`). **That hold is not airtight**: a process the agent
+  started in the background earlier is no tool call, and the agent can remove the file; a change
+  made and put back between the two looks still escapes. A project that wants that ruled out turns
+  on its **isolated check** (the project's Acceptance card; `projects.check_isolated`,
+  `check_prepare`, migration 0021): the check then runs in a **temporary detached worktree of
+  exactly the pinned commit** (`landing.IsolatedCheckout`: the protective configuration, every
+  configured filter off, Git LFS's smudge skipped, made under a new temporary directory and removed
+  afterwards with `worktree remove --force` and `worktree prune`), after the project's optional
+  **prepare** command (installing dependencies) run in the copy, both under the heavy gate and
+  with the scrubbed environment. A copy that cannot be made, or a prepare command that fails, is
+  the run's result (a check error saying which); it never falls back to the worktree. The copy has
+  no ignored files, no initialised submodules and LFS pointer files only, unless the prepare
+  command makes them. The record (`job_checks.mode`: `worktree` | `isolated`) and the job card
+  say which mode produced the evidence: "checked in an isolated copy of abc1234567" or "checked in
+  the working tree". A restore sets a backup's prepare command aside like its check command (R7-S4).
 - **Durable or nothing** (R6-C13). A check whose row could not be written is not run; a result
   whose write failed is not evidence; and a job is accepted only when its newest durable check is
   that run, passed, at that commit.
@@ -3183,6 +3207,11 @@ added, deleted, at}}`; `POST /changes/jobs/{id}/demo-touch` (`--demo` only). `PO
 - Migration `0020_diff_marks.sql` (6.21): `diff_marks(subject, reviewer, scope, path, hash,
   old_blob, new_blob, viewed_at)`, primary key `(subject, reviewer, scope, path)`; a job's rows go
   when it lands, is discarded or deleted
+- Migration `0021_check_isolation.sql` (6.15, R7-C01): `job_checks` gains `mode` (`worktree` |
+  `isolated`), `tree_before`, `tree_after` (content fingerprints of a worktree check); `projects`
+  gains `check_isolated` and `check_prepare`. kv adds (no migration) `restored.check_command.<id>`,
+  `restored.check_prepare.<id>` and `instructions.restored.<scope>.<key>` (R7-S4), and
+  `budget.grace_at.<job>` (R7-C03)
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.

@@ -19,6 +19,13 @@ export interface Evidence {
   stale: boolean;
   /** Files of the branch's own diff that define its check (R6-S4). */
   definition_changed?: string[];
+  /** Where the check ran (R7-C01): the job's working tree, or an isolated copy of exactly the commit. */
+  mode?: "worktree" | "isolated";
+}
+
+/** The evidence's place in words: "an isolated copy of abc1234567" or "the working tree" (R7-C01). */
+export function checkedIn(evidence: Pick<Evidence, "mode" | "commit">): string {
+  return evidence.mode === "isolated" ? `an isolated copy of ${evidence.commit.slice(0, 10)}` : "the working tree";
 }
 
 export interface BudgetLimits {
@@ -94,6 +101,10 @@ export interface ProjectAccept {
   effective_source: string;
   /** A check command a restore set aside (R7-S4): not run until a save (this one or another) settles it. */
   restored_check_command?: string;
+  /** Run the check in a temporary copy of exactly the commit, after check_prepare (R7-C01). */
+  check_isolated?: boolean;
+  check_prepare?: string;
+  restored_check_prepare?: string;
 }
 
 export type Receipt = "" | "stored" | "held" | "uncertain" | "failed" | "delivered" | "received";

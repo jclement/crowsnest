@@ -5,7 +5,7 @@
 // the agent last said when it ended a turn.
 import { AlarmClock, Gauge, GitMerge, MessageSquareQuote, RefreshCw, ShieldCheck, Square, StepForward } from "lucide-react";
 import { useState } from "react";
-import { acceptChip, budgetRows, durationText, type Evidence } from "../../lib/accept";
+import { acceptChip, budgetRows, checkedIn, durationText, type Evidence } from "../../lib/accept";
 import { relativeTime } from "../../lib/format";
 import { isFinished, type JobDetail as Detail, type Job } from "../../lib/jobs";
 import { useJobAction, useJobGuard, useSetBudget, type GuardAction } from "../../lib/queries";
@@ -62,6 +62,10 @@ export function EvidenceCard({ job }: { job: Detail }) {
             {evidence.status !== "running" && ` · exit ${evidence.exit_code} · ${durationText(evidence.duration_ms)}`}
             {evidence.finished_at && <span className="text-muted"> · {relativeTime(evidence.finished_at)}</span>}
           </dd>
+          <dt className="text-muted">Checked in</dt>
+          <dd className="text-body" data-testid="checked-in">
+            {checkedIn(evidence)}
+          </dd>
           <dt className="text-muted">Commit</dt>
           <dd className="font-mono text-body">
             {evidence.commit.slice(0, 10)}
@@ -107,6 +111,18 @@ export function AcceptedMeans({ evidence }: { evidence?: Evidence | null }) {
         Accepted means the project's own check passed on this commit, in a clean tree. The branch can change that check, so it is not independent
         evidence: the reviewer and you are the independent part.
       </p>
+      {evidence?.mode === "isolated" ? (
+        <p className="mt-1">
+          It ran in an isolated copy of exactly this commit, with only what the project's prepare command installed: nothing the agent changed or left
+          in its worktree reached it.
+        </p>
+      ) : (
+        <p className="mt-1">
+          It ran in the job's working tree, with the dependencies and caches there: the tree was clean, with the same content, at its start and its end,
+          and the agent's tools were held meanwhile, but a process the agent left running could still have changed files and put them back. The
+          project's "isolated check" rules that out.
+        </p>
+      )}
       {changed.length > 0 && (
         <p className="mt-1 font-medium text-warning" data-testid="check-definition-changed">
           This branch changed its own check definition ({changed.join(", ")}): the pass is the branch's word about itself. Read those changes.

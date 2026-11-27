@@ -39,6 +39,19 @@ describe("EvidenceCard", () => {
     await userEvent.click(screen.getByRole("button", { name: "Run the check again" }));
     await waitFor(() => expect(calls.some((call) => call.path === "/jobs/j_1/recheck" && call.method === "POST")).toBe(true));
   });
+
+  it("says which mode produced the evidence (R7-C01)", () => {
+    const evidence = {
+      command: "mise run check", status: "passed", exit_code: 0, duration_ms: 1000, commit: "abcdef0123456789", output_tail: "",
+      started_at: "2026-11-27T10:00:00Z", finished_at: "2026-11-27T10:00:01Z", stale: false,
+    } as const;
+    const { unmount } = renderWithClient(<EvidenceCard job={makeDetail({ state: "done", accept_state: "accepted", evidence: { ...evidence, mode: "isolated" } })} />);
+    expect(screen.getByTestId("checked-in")).toHaveTextContent("an isolated copy of abcdef0123");
+    unmount();
+    renderWithClient(<EvidenceCard job={makeDetail({ state: "done", accept_state: "accepted", evidence: { ...evidence, mode: "worktree" } })} />);
+    expect(screen.getByTestId("checked-in")).toHaveTextContent("the working tree");
+    expect(screen.getByTestId("accepted-means")).toHaveTextContent("a process the agent left running");
+  });
 });
 
 describe("BudgetCard", () => {

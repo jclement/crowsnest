@@ -20,6 +20,9 @@ import (
 const (
 	// RestoredCheckPrefix + a project id holds the check command a restore set aside.
 	RestoredCheckPrefix = "restored.check_command."
+	// RestoredPreparePrefix + a project id holds the isolated check's prepare command a restore
+	// set aside (it is a shell command crowsnest runs too, R7-C01).
+	RestoredPreparePrefix = "restored.check_prepare."
 	// RestoredLayerPrefix + scope + "." + key holds the hash of a layer's text as a restore
 	// brought it; while the saved text still has that hash, the layer is withheld from agents.
 	RestoredLayerPrefix = "instructions.restored."
@@ -29,7 +32,13 @@ const (
 type RestoredCheck struct {
 	ProjectID int64
 	Name      string
-	Command   string
+	Command   string // "" when only the prepare command was set aside
+	Prepare   string
+}
+
+// RestoredPrepareKey is the kv key of a project's set-aside prepare command.
+func RestoredPrepareKey(projectID int64) string {
+	return RestoredPreparePrefix + strconv.FormatInt(projectID, 10)
 }
 
 // RestoredLayerKey is the kv key of a restored layer's mark.
@@ -47,16 +56,19 @@ func LayerTextHash(text string) string {
 }
 
 // SetAsideCheckCommands moves every project's custom check command (anything but automatic and
-// "none") aside into kv and sets the project back to automatic. It returns what it moved.
+// "none") and isolated-check prepare command aside into kv, and sets the project back to an
+// automatic check with no prepare command. It returns what it moved.
 func (s *Store) SetAsideCheckCommands(ctx context.Context) ([]RestoredCheck, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, check_command FROM projects WHERE trim(check_command) NOT IN ('', 'none') ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name,
+		CASE WHEN trim(check_command) IN ('', 'none') THEN '' ELSE check_command END, check_prepare
+		FROM projects WHERE trim(check_command) NOT IN ('', 'none') OR trim(check_prepare) != '' ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("listing check commands: %w", err)
 	}
 	var moved []RestoredCheck
 	for rows.Next() {
 		var check RestoredCheck
-		if err := rows.Scan(&check.ProjectID, &check.Name, &check.Command); err != nil {
+		if err := rows.Scan(&check.ProjectID, &check.Name, &check.Command, &check.Prepare); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -67,11 +79,21 @@ func (s *Store) SetAsideCheckCommands(ctx context.Context) ([]RestoredCheck, err
 		return nil, err
 	}
 	for _, check := range moved {
-		if err := s.SetKV(ctx, RestoredCheckKey(check.ProjectID), strings.TrimSpace(check.Command)); err != nil {
-			return nil, err
+		if command := strings.TrimSpace(check.Command); command != "" {
+			if err := s.SetKV(ctx, RestoredCheckKey(check.ProjectID), command); err != nil {
+				return nil, err
+			}
+			if _, err := s.db.ExecContext(ctx, `UPDATE projects SET check_command = '' WHERE id = ?`, check.ProjectID); err != nil {
+				return nil, fmt.Errorf("setting project %d's check back to automatic: %w", check.ProjectID, err)
+			}
 		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE projects SET check_command = '' WHERE id = ?`, check.ProjectID); err != nil {
-			return nil, fmt.Errorf("setting project %d's check back to automatic: %w", check.ProjectID, err)
+		if prepare := strings.TrimSpace(check.Prepare); prepare != "" {
+			if err := s.SetKV(ctx, RestoredPrepareKey(check.ProjectID), prepare); err != nil {
+				return nil, err
+			}
+			if _, err := s.db.ExecContext(ctx, `UPDATE projects SET check_prepare = '' WHERE id = ?`, check.ProjectID); err != nil {
+				return nil, fmt.Errorf("clearing project %d's prepare command: %w", check.ProjectID, err)
+			}
 		}
 	}
 	return moved, nil
