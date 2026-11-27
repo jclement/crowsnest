@@ -21,7 +21,9 @@ export type JobCause =
   | "launch"
   | "config"
   | "approval"
-  | "approval-tool";
+  | "approval-tool"
+  | "held"
+  | "review";
 
 /** A job as GET /jobs and GET /jobs/{id} return it. */
 export interface Job {
@@ -69,6 +71,20 @@ export interface Job {
   origin?: "" | "agent" | "orchestrator";
   /** What the job's agent has used (7.11); absent on a server that measures nothing. */
   spend?: SpendSummary;
+  // Landing and review (DESIGN.md 6.7, 6.11). Optional in fixtures.
+  base_branch?: string;
+  walkthrough_md?: string;
+  reviewer?: string;
+  review_of?: string;
+  review_round?: number;
+  review_verdict?: "" | "approve" | "changes" | "error";
+  review_md?: string;
+  land_state?: "" | "merged" | "pr" | "discarded";
+  land_detail?: string;
+  landed_at?: string | null;
+  torn_down_at?: string | null;
+  land_request?: string;
+  start_anyway?: boolean;
 }
 
 export interface JobEvent {
@@ -216,7 +232,7 @@ export function boardSections(jobs: Job[], now: Date = new Date()): Record<Board
 
 // ---- Stuck: the one action that fits ---------------------------------------------------------
 
-export type JobAction = "terminal" | "retry" | "nudge" | "inbox" | "resume";
+export type JobAction = "terminal" | "retry" | "nudge" | "inbox" | "resume" | "start" | "review";
 
 /** The one action that fits why a job is stuck or needs Jeff, or null when none is needed. */
 export function actionFor(job: Pick<Job, "state" | "stuck" | "cause">): JobAction | null {
@@ -241,6 +257,10 @@ export function actionFor(job: Pick<Job, "state" | "stuck" | "cause">): JobActio
       return "inbox";
     case "exited":
       return "resume";
+    case "held":
+      return "start";
+    case "review":
+      return "review";
     default:
       return null;
   }
@@ -252,6 +272,8 @@ export const actionLabels: Record<JobAction, string> = {
   nudge: "Nudge",
   inbox: "Answer in Inbox",
   resume: "Restart agent",
+  start: "Start anyway",
+  review: "Open the review",
 };
 
 /** "Retry in 4 min" for a scheduled retry, or "" when none is due. */
@@ -288,13 +310,40 @@ export function jobAnswerText(question: JobQuestion): string {
 /** A card's second line: why it is stuck, else what it is doing, else how it ended. */
 export function cardLine(job: Job): string {
   if (job.state === "failed") return job.fail_reason;
+  if (job.state === "done" && job.land_state) return `${landedWord(job.land_state)}: ${job.land_detail ?? ""}`;
   if (job.state === "done") return firstLine(job.result_md);
+  if (job.state === "in_review") return `In review, round ${job.review_round ?? 1}`;
   if (job.state === "blocked") return `Blocked: ${job.blocked_reason}`;
-  if ((job.stuck || job.state === "needs_you" || job.cause === "approval") && job.cause_text)
+  if ((job.stuck || job.state === "needs_you" || job.cause === "approval" || job.cause === "held") && job.cause_text)
     return job.cause_text + (job.cause_detail ? `: ${job.cause_detail}` : "");
   return job.doing_now;
 }
 
 function firstLine(markdown: string): string {
   return markdown.split("\n").find((line) => line.trim())?.replace(/^[#>*\-\s]+/, "") ?? "";
+}
+
+/** A landed job's state in words. */
+export function landedWord(state: string): string {
+  switch (state) {
+    case "merged":
+      return "Merged";
+    case "pr":
+      return "Pull request";
+    case "discarded":
+      return "Discarded";
+    default:
+      return state;
+  }
+}
+
+/** True when the job has a worktree whose Review tab is worth showing. */
+export function hasReview(job: Pick<Job, "worktree_branch" | "review_of">): boolean {
+  return !!job.worktree_branch && !job.review_of;
+}
+
+/** True when a finished job's worktree still waits to be landed or discarded. */
+export function readyToLand(job: Pick<Job, "worktree_branch" | "review_of" | "state" | "land_state" | "torn_down_at" | "cause">): boolean {
+  if (!hasReview(job) || job.torn_down_at || job.land_state) return false;
+  return job.state === "done" || (job.state === "needs_you" && job.cause === "review");
 }

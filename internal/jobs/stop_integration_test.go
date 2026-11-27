@@ -86,7 +86,7 @@ func TestIntegrationClaudeStop(t *testing.T) {
 	}
 }
 
-func newStopRig(t *testing.T) *stopRig {
+func newStopRig(t *testing.T, adjust ...func(*jobs.Options)) *stopRig {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -141,14 +141,18 @@ func newStopRig(t *testing.T) *stopRig {
 	// crowsnest's totals with the transcript's own.
 	meter := spend.NewMeter(spend.Options{Store: db, Prices: spend.Embedded(), ClaudeConfigDir: claudeDir, Logger: logger, Interval: time.Second,
 		Sources: func(ctx context.Context) ([]spend.Source, error) { return jobService.SpendSources(ctx) }})
-	jobService = jobs.New(jobs.Options{
+	options := jobs.Options{
 		Store: db, Hub: events, Logger: logger, Herdr: session.Client, Spend: meter,
 		Launch: jobs.LaunchOptions{
 			StateDir: filepath.Join(short, "state"), Executable: binary, AgentSocket: socket, BinDir: filepath.Dir(binary),
 			BasePath: os.Getenv("PATH"), Session: session.Name, PermissionMode: "auto", ClaudeConfigDir: claudeDir,
 			WorktreeRoot: filepath.Join(scratch, "worktrees"), Identity: identity,
 		},
-	})
+	}
+	for _, change := range adjust {
+		change(&options)
+	}
+	jobService = jobs.New(options)
 	listener, err := agentapi.Listen(ctx, socket)
 	if err != nil {
 		t.Fatal(err)

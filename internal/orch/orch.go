@@ -153,6 +153,11 @@ type Options struct {
 	// Launch, when set, gives the launch settings at each start (engine, model, permission mode,
 	// Remote Control), so a change in the app's Settings applies on the next start.
 	Launch func() LaunchSettings
+	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): an agent
+	// that exits meanwhile is not restarted automatically (Restart still works). Nil: never.
+	Paused func() bool
+	// ExtraEnv is added to the agent's pane environment (CROWSNEST_HEAVY_DIR, DESIGN.md 6.12).
+	ExtraEnv map[string]string
 
 	// ---- A standing agent other than the session's orchestrator (DESIGN.md 21.2) ----
 	// The lifecycle is the same for every standing agent: the orchestrator, and each project's
@@ -365,6 +370,12 @@ func forwardFleet(ctx context.Context, sub *hub.Subscription, changed chan<- str
 // transcript exists. It is idempotent: with a live orchestrator it only refreshes the status.
 func (o *Orchestrator) Ensure(ctx context.Context) (Status, error) {
 	if o.opts.Disabled {
+		return o.Status(), nil
+	}
+	// A gate that says not yet (herdr still connecting at start-up) makes this a wait, not a
+	// failure: the watch starts the agent once the gate opens (upkeep.go).
+	if reason := o.gateReason(ctx); reason != "" {
+		o.setWaiting(reason)
 		return o.Status(), nil
 	}
 	o.lifecycle.Lock()

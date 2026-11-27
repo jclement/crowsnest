@@ -253,8 +253,18 @@ func PokeHeader(at time.Time) string {
 }
 
 // PokeText is the whole poke: the header, then one line per reason.
-func PokeText(at time.Time, reasons []Reason) string {
-	lines := []string{PokeHeader(at)}
+func PokeText(at time.Time, reasons []Reason) string { return PokeTextWith(at, reasons, "") }
+
+// PokeTextWith is PokeText with the human's presence on the header (`human=here|maybe|away`,
+// DESIGN.md 6.14), so the agent knows whether to ask briefly now or batch for later. An empty or
+// unknown presence leaves the header as PokeHeader has it.
+func PokeTextWith(at time.Time, reasons []Reason, presence string) string {
+	header := PokeHeader(at)
+	switch presence {
+	case "here", "maybe", "away":
+		header = strings.TrimSuffix(header, "]") + " human=" + presence + "]"
+	}
+	lines := []string{header}
 	for _, reason := range reasons {
 		lines = append(lines, "- "+oneLine(reason.Text))
 	}

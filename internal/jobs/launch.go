@@ -36,6 +36,7 @@ import (
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/herdr"
+	"github.com/jclement/crowsnest/internal/landing"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/termtext"
@@ -66,6 +67,8 @@ type LaunchOptions struct {
 	// Guard, when set, is written to each job's guard.json and named on its PreToolUse guard hook
 	// (DESIGN.md 8.7). nil: no guard hook.
 	Guard *guard.Rules
+	// ExtraEnv is added to every job agent's pane environment (CROWSNEST_HEAVY_DIR, 6.12).
+	ExtraEnv map[string]string
 }
 
 func (o LaunchOptions) shellWait() time.Duration {
@@ -108,12 +111,25 @@ func (s *Service) launch(ctx context.Context, id string) {
 		s.DispatchStanding(ctx)
 		return
 	}
+	held := ""
 	cl, err := s.claimStep(ctx, id, opLaunch, func(r *store.JobRecord, _ *change) error {
 		if State(r.State) != StateQueued || r.PaneID != "" {
 			return errSkip // launched already; an interrupted launch with a pane is the tick's
 		}
+		// The slot limit, the load hold and the pause, weighed under the same lock as the
+		// claim, so two launches never both take the last slot (holds.go).
+		if held = s.startHoldLocked(ctx, *r); held != "" {
+			return errHeld
+		}
+		if Cause(r.Cause) == CauseHeld {
+			r.Cause, r.CauseDetail = "", ""
+		}
 		return nil
 	})
+	if errors.Is(err, errHeld) {
+		s.markHeld(ctx, id, held)
+		return
+	}
 	if err != nil {
 		return
 	}
@@ -150,6 +166,7 @@ func (s *Service) startJobAgent(ctx context.Context, cl claim, job Job) error {
 		r.PaneID, r.WorkDir, r.WorktreeBranch, r.AgentName, r.ClaudeSessionID = pane.paneID, pane.workDir, pane.branch, AgentName(job.ID), sessionID
 		// The directory its children may use, fixed now, before its agent has run (R3-H1).
 		r.RootDir = confinementRoot(pane.workDir)
+		r.BaseBranch, r.BaseCommit, r.WorkspaceID = pane.baseBranch, pane.baseCommit, pane.workspaceID
 		summary := "Opened pane " + pane.paneID + " in " + pane.workDir
 		if pane.branch != "" {
 			summary += " (worktree, branch " + pane.branch + ")"
@@ -299,6 +316,9 @@ func (s *Service) sendText(ctx context.Context, paneID, agent, text string) erro
 
 type preparedPane struct {
 	paneID, workDir, branch string
+	// For a worktree: the main checkout's branch and the commit the worktree started at, and the
+	// workspace herdr opened on it (Land's review and teardown, DESIGN.md 6.11).
+	baseBranch, baseCommit, workspaceID string
 }
 
 // preparePane finds or makes the pane a job's agent starts in.
@@ -328,6 +348,7 @@ func (s *Service) preparePane(ctx context.Context, job Job) (preparedPane, error
 // worktreePane: worktree.create, then a tab with the job env in the new workspace.
 func (s *Service) worktreePane(ctx context.Context, job Job) (preparedPane, error) {
 	branch := branchName(job)
+	baseBranch, _ := landing.CurrentBranch(ctx, job.Dir) // "" when unknown: Land then offers no merge
 	params := herdr.WorktreeCreateParams{Cwd: job.Dir, Branch: branch, Label: AgentName(job.ID)}
 	if s.opts.Launch.WorktreeRoot != "" {
 		params.Path = filepath.Join(s.opts.Launch.WorktreeRoot, strings.ReplaceAll(branch, "/", "-"))
@@ -349,7 +370,9 @@ func (s *Service) worktreePane(ctx context.Context, job Job) (preparedPane, erro
 		return preparedPane{}, fmt.Errorf("opening a tab in the job's worktree: %w", err)
 	}
 	s.bindPaneToken(ctx, token, tab.RootPane.ID, job.ID)
-	return preparedPane{paneID: tab.RootPane.ID, workDir: workDir, branch: branch}, nil
+	baseCommit, _ := landing.Head(ctx, workDir)
+	return preparedPane{paneID: tab.RootPane.ID, workDir: workDir, branch: branch,
+		baseBranch: baseBranch, baseCommit: baseCommit, workspaceID: created.Workspace.ID}, nil
 }
 
 // tabPane: a tab in a workspace open on job.Dir, else a new workspace there.
@@ -402,6 +425,9 @@ func (s *Service) paneEnv(jobID string) (map[string]string, string, error) {
 	}
 	if s.opts.Launch.BinDir != "" {
 		env["PATH"] = s.opts.Launch.BinDir + string(os.PathListSeparator) + s.opts.Launch.BasePath
+	}
+	for key, value := range s.opts.Launch.ExtraEnv {
+		env[key] = value
 	}
 	if s.opts.Launch.Identity == nil || s.opts.Launch.AgentSocket == "" {
 		return env, "", nil

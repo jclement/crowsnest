@@ -15,7 +15,10 @@ the job's state declared.
   call `job_update` with `waiting: true`, then end your turn; the answer will wake you.
 - `done(result_md, verified, not_verified)`: the job is finished. `result_md` says what was done;
   `verified` lists what you checked and saw (with commands); `not_verified` lists what you did
-  not check. Both lists are required; use [] for none.
+  not check. Both lists are required; use [] for none. Working in a git worktree, also pass
+  `walkthrough_md`: the change chunk by chunk in the order it is best understood, naming each
+  file, why each part exists, what was tested and what was not, and the risk both ways. The
+  human reviews it beside the diff, and a reviewer agent may be started on it.
 - `fail(reason)`: the job cannot be finished, and why.
 - `job_get()`: your job, its brief and your questions with their answers. Read it after a
   restart or when you lose track.
@@ -31,10 +34,16 @@ the job's state declared.
   It returns an id at once; keep working. The answer arrives later as a message starting
   `[crowsnest answer q_<n>]`.
 - `crowsnest job done --result "…" --verified "…" --not-verified "…"` (repeat the list flags;
-  pass `--not-verified none` when there is nothing): the job is finished, with evidence.
+  pass `--not-verified none` when there is nothing): the job is finished, with evidence. In a git
+  worktree add `--walkthrough-file walk.md`: the change chunk by chunk, why each part exists,
+  what was tested and not, the risk both ways.
 - `crowsnest job fail "reason"`: it cannot be finished.
 - `crowsnest job get`: your job, its brief and your questions with their answers.
 {{end}}
+Heavy commands: run builds, test suites and typechecks as `crowsnest heavy -- <command>` (for
+example `crowsnest heavy -- go test ./...`). It waits for one of the machine's few heavy slots, so
+several agents testing at once cannot freeze it. Never wrap a dev server or a watcher in it.
+
 Rules:
 
 1. Never end a turn without declaring: done, fail, blocked, or waiting on questions. An

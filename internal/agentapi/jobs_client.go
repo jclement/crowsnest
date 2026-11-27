@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/pause"
 )
 
 // ErrNoJob means no job id was given and CROWSNEST_JOB is not set.
@@ -120,4 +121,44 @@ func (c *Client) WaitApproval(ctx context.Context, id string, wait time.Duration
 // GuardDenied tells crowsnest the guard refused a command.
 func (c *Client) GuardDenied(ctx context.Context, denial GuardDenial) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/guard/denied", denial, nil)
+}
+
+// LandResponse is what a land request returns: the question the human answers.
+type LandResponse struct {
+	QuestionID string `json:"question_id"`
+	Status     string `json:"status"`
+	Note       string `json:"note"`
+}
+
+// RequestLand asks the human to merge, push or discard a finished job (DESIGN.md 6.11).
+func (c *Client) RequestLand(ctx context.Context, id, action, reason string) (LandResponse, error) {
+	var out LandResponse
+	err := c.do(ctx, http.MethodPost, jobPath(id, "/land"), LandRequest{Action: action, Reason: reason}, &out)
+	return out, err
+}
+
+// Pause pauses crowsnest's automation; until zero means until resumed (DESIGN.md 6.13).
+func (c *Client) Pause(ctx context.Context, until time.Time, reason string) (pause.State, error) {
+	var out pause.State
+	err := c.do(ctx, http.MethodPost, "/api/v1/pause", PauseRequest{Until: until, Reason: reason}, &out)
+	return out, err
+}
+
+// Resume resumes it (refused to an agent).
+func (c *Client) Resume(ctx context.Context) (pause.State, error) {
+	var out pause.State
+	err := c.do(ctx, http.MethodPost, "/api/v1/resume", nil, &out)
+	return out, err
+}
+
+// PauseState reads the switch.
+func (c *Client) PauseState(ctx context.Context) (pause.State, error) {
+	var out pause.State
+	err := c.do(ctx, http.MethodGet, "/api/v1/pause", nil, &out)
+	return out, err
+}
+
+// SubmitDigest delivers the digest the orchestrator was asked to write (DESIGN.md 7.13).
+func (c *Client) SubmitDigest(ctx context.Context, day, body string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/digest", DigestRequest{Day: day, BodyMD: body}, nil)
 }

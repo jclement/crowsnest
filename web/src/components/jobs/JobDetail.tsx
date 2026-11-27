@@ -3,11 +3,12 @@
 // (answerable right here with the Inbox's components), a message box to its agent, the
 // timeline, its estimated spend, and the agent's Conversation and Terminal (the Fleet view's slots).
 import { useNavigate } from "@tanstack/react-router";
-import { Ban, CheckCircle2, CircleSlash, MessageSquare, RefreshCw, SquareTerminal, Zap } from "lucide-react";
+import { Ban, CheckCircle2, CircleSlash, GitCompareArrows, MessageSquare, Play, RefreshCw, SquareTerminal, Zap } from "lucide-react";
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
-import { actionFor, actionLabels, isFinished, jobAnswerText, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
-import { useFleet, useJob, useJobAction } from "../../lib/queries";
+import { actionFor, actionLabels, hasReview, isFinished, jobAnswerText, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
+import { useFleet, useJob, useJobAction, useStartAnyway } from "../../lib/queries";
+import { ReviewPanel } from "./ReviewPanel";
 import { AgentConversation } from "../agent/AgentConversation";
 import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
 import { AgentTerminal } from "../agent/AgentTerminal";
@@ -24,7 +25,7 @@ import { SkeletonRows } from "../ui/Skeleton";
 import { TabPanel, Tabs } from "../ui/Tabs";
 import { useToast } from "../ui/toast-context";
 
-type DetailTab = "overview" | "conversation" | "terminal";
+type DetailTab = "overview" | "review" | "conversation" | "terminal";
 
 export function JobDetail({ id }: { id: string }) {
   const query = useJob(id);
@@ -44,16 +45,19 @@ export function JobDetail({ id }: { id: string }) {
       <Tabs<DetailTab>
         id={`job-${job.id}`}
         label="Job views"
+        className="max-w-full overflow-x-auto"
         value={tab}
         onChange={setTab}
         items={[
           { value: "overview", label: "Overview" },
+          ...(hasReview(job) ? [{ value: "review" as const, label: readyToLand(job) ? "Land" : "Review", icon: GitCompareArrows }] : []),
           { value: "conversation", label: "Conversation", icon: MessageSquare },
           { value: "terminal", label: "Terminal", icon: SquareTerminal },
         ]}
       />
       <TabPanel id={`job-${job.id}`} value={tab} className="flex min-h-0 flex-1 flex-col gap-3">
-        {tab === "overview" && <Overview job={job} openTerminal={() => setTab("terminal")} />}
+        {tab === "overview" && <Overview job={job} openTerminal={() => setTab("terminal")} openReview={() => setTab("review")} />}
+        {tab === "review" && hasReview(job) && <ReviewPanel job={job} />}
         {tab === "conversation" && <AgentPanel job={job} kind="conversation" />}
         {tab === "terminal" && <AgentPanel job={job} kind="terminal" />}
       </TabPanel>
@@ -94,14 +98,29 @@ function JobHeader({ job }: { job: Detail }) {
 
 // ---- Overview ------------------------------------------------------------------------------
 
-function Overview({ job, openTerminal }: { job: Detail; openTerminal: () => void }) {
+function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal: () => void; openReview: () => void }) {
   const open = job.questions.filter((question) => question.status === "open");
   const settled = job.questions.filter((question) => question.status !== "open");
   return (
     <>
-      <StuckBanner job={job} openTerminal={openTerminal} />
+      <StuckBanner job={job} openTerminal={openTerminal} openReview={openReview} />
+      {job.state === "in_review" && (
+        <Banner tone="info" icon={GitCompareArrows} action={<Button compact onClick={openReview}>Open the review</Button>}>
+          In review, round {job.review_round ?? 1} of 2: a reviewer agent is looking at the change.
+        </Banner>
+      )}
+      {readyToLand(job) && job.state === "done" && (
+        <Banner tone="success" icon={GitCompareArrows} action={<Button compact variant="primary" onClick={openReview}>Review and land</Button>}>
+          Finished in its worktree{job.review_verdict === "approve" ? ", review approved" : ""}: merge it, open a pull request, or discard it.
+        </Banner>
+      )}
       {job.state === "blocked" && <Banner tone="warning">Blocked: {job.blocked_reason}</Banner>}
       {job.state === "done" && <Result job={job} />}
+      {job.state === "needs_you" && job.cause === "review" && job.review_md && (
+        <Card title={`Review findings (round ${job.review_round ?? 1})`} tone="danger">
+          <Markdown className="text-sm">{job.review_md}</Markdown>
+        </Card>
+      )}
       {job.state === "failed" && (
         <Banner tone="danger" icon={CircleSlash}>
           Failed: {job.fail_reason}
@@ -140,15 +159,22 @@ function Overview({ job, openTerminal }: { job: Detail; openTerminal: () => void
 }
 
 /** Why the job is stuck, in words, and the one action that fits it. */
-function StuckBanner({ job, openTerminal }: { job: Detail; openTerminal: () => void }) {
+function StuckBanner({ job, openTerminal, openReview }: { job: Detail; openTerminal: () => void; openReview: () => void }) {
   const action = actionFor(job);
   const run = useJobAction(job.id);
+  const startAnyway = useStartAnyway();
   const navigate = useNavigate();
   const toast = useToast();
-  if (!action || (!job.stuck && job.state !== "needs_you")) return null;
+  if (!action || (!job.stuck && job.state !== "needs_you" && job.cause !== "held")) return null;
   const retry = retryLabel(job);
   const press = () => {
     if (action === "terminal") return openTerminal();
+    if (action === "review") return openReview();
+    if (action === "start")
+      return startAnyway.mutate(job.id, {
+        onSuccess: () => toast.show({ tone: "success", title: "Starting it now, past the limits" }),
+        onError: (error) => toast.show({ tone: "danger", title: "Not started", description: error.message }),
+      });
     if (action === "inbox") return void navigate({ to: "/inbox", search: { q: job.questions.find((question) => question.status === "open")?.id } });
     // mutateAsync: a nudge that works clears the stuck flag, and the refetch removes this banner
     // before mutate's own callbacks would run (see DialogCard).
@@ -159,10 +185,16 @@ function StuckBanner({ job, openTerminal }: { job: Detail; openTerminal: () => v
   };
   return (
     <Banner
-      tone={job.state === "needs_you" ? "danger" : "warning"}
+      tone={job.cause === "held" ? "info" : job.state === "needs_you" ? "danger" : "warning"}
       role="alert"
       action={
-        <Button compact variant="warning" icon={action === "terminal" ? SquareTerminal : action === "nudge" ? Zap : RefreshCw} onClick={press} disabled={run.isPending}>
+        <Button
+          compact
+          variant="warning"
+          icon={action === "terminal" ? SquareTerminal : action === "nudge" ? Zap : action === "start" ? Play : action === "review" ? GitCompareArrows : RefreshCw}
+          onClick={press}
+          disabled={run.isPending || startAnyway.isPending}
+        >
           {actionLabels[action]}
         </Button>
       }

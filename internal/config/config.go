@@ -104,6 +104,15 @@ type Config struct {
 	CompactAt        int    // compact the orchestrator past this many tokens; 0 off
 	FreshAt          int    // daily new conversation, minutes after local midnight; -1 off
 
+	// ---- Throttling, review and landing (landing.go) ----
+
+	MaxRunningJobs int     // job agents running at once; 0 means a quarter of the cores, at least 2
+	LoadHold       float64 // hold new starts while the load per core stays above this for a minute; 0 off
+	HeavySlots     int     // heavy commands at once (crowsnest heavy)
+	Review         string  // the review gate's default for isolated builder jobs: auto | off | claude | codex | same
+	MergeMode      string  // Land's merge: merge (a merge commit) | ff (fast-forward only)
+	DigestAt       string  // HH:MM: the daily digest's time; "" off
+
 	// ---- The guard hook and approvals (guard.go) ----
 
 	ProtectedHosts     []string // --protected-host; the file's hosts are added by the caller (guard.ReadHostsFile)

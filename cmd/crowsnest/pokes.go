@@ -38,6 +38,8 @@ type pokeServices struct {
 	// leads are the projects' leads; each has a poker of its own for its project's jobs and
 	// the questions those jobs asked (DESIGN.md 21.2). Nil: none.
 	leads func() *projects.Leads
+	// ctl are the pause and presence (landing_wiring.go); nil: neither.
+	ctl *controls
 }
 
 // startPoker builds the poker, feeds it from the hub, and runs it until ctx ends.
@@ -47,6 +49,9 @@ func startPoker(ctx context.Context, cfg config.Config, db *store.Store, events 
 		Status:   services.orchestrator.Status,
 		Interval: cfg.PokeInterval, Standing: standingWork(services), Alert: services.alert,
 		ManualOnly: cfg.Demo, Tasks: services.tasks,
+	}
+	if services.ctl != nil {
+		options.Paused, options.Held, options.Presence = services.ctl.paused, services.ctl.held, services.ctl.presenceWord
 	}
 	if services.tender != nil && !cfg.NoOrchestrator {
 		options.Tender = services.tender

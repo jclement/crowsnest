@@ -112,5 +112,5 @@ test("giving a job adds it to the board", async ({ page }) => {
   await page.getByLabel("What needs doing?").fill("Summarise yesterday's merged PRs");
   await page.getByRole("button", { name: "Give job" }).click();
   await expect(page.getByRole("region", { name: "Selected job" }).getByRole("heading", { name: "Summarise yesterday's merged PRs" })).toBeVisible();
-  await expect(page).toHaveURL(/job=j_11/);
+  await expect(page).toHaveURL(/job=j_16/);
 });

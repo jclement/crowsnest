@@ -3,7 +3,7 @@
 // that splits a poke message into its header and reasons for the compact Chat row.
 
 /** What a journal entry records (internal/journal Kind). */
-export const journalKinds = ["poke", "skip", "send", "answer", "restart", "alert", "backstop", "task", "upkeep", "settings"] as const;
+export const journalKinds = ["poke", "skip", "send", "answer", "restart", "alert", "backstop", "task", "upkeep", "settings", "pause", "land", "review", "digest"] as const;
 export type JournalKind = (typeof journalKinds)[number];
 
 export const journalKindLabels: Record<JournalKind, string> = {
@@ -16,6 +16,10 @@ export const journalKindLabels: Record<JournalKind, string> = {
   backstop: "Backstop",
   task: "Task",
   upkeep: "Upkeep",
+  pause: "Pause",
+  land: "Land",
+  review: "Review",
+  digest: "Digest",
   settings: "Settings",
 };
 
@@ -64,7 +68,8 @@ export interface ParsedPoke {
 
 // The talk flag was dropped when the orchestrator began writing a SAY line on every reply; older
 // transcripts still carry it, so it stays optional here.
-const pokeHeader = /^\[crowsnest poke (\S+?)(?: talk=(on|off))?\]/;
+// Since presence (DESIGN.md 6.14) the header may also carry `human=here|maybe|away`.
+const pokeHeader = /^\[crowsnest poke (\S+?)(?: talk=(on|off))?(?: human=(here|maybe|away))?\]/;
 
 /** Splits `[crowsnest poke <time>]` and its `- reason` lines. Null when it is not a poke. */
 export function parsePoke(text: string): ParsedPoke | null {

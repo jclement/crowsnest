@@ -151,6 +151,9 @@ func withProjectDefaults(input CreateInput, project ProjectInfo) CreateInput {
 // DispatchStanding gives each standing agent (the orchestrator, then every running lead) the
 // oldest queued job waiting for it, when it is ready and holds no other running job.
 func (s *Service) DispatchStanding(ctx context.Context) {
+	if s.paused() {
+		return // no new starts while paused; a queued job waits (holds.go)
+	}
 	s.DispatchOrchestrator(ctx)
 	if s.opts.Projects == nil {
 		return

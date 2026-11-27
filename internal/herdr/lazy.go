@@ -191,6 +191,24 @@ func (l *Lazy) WorktreeCreate(ctx context.Context, params WorktreeCreateParams) 
 	return c.WorktreeCreate(ctx, params)
 }
 
+// WorktreeRemove implements Client.
+func (l *Lazy) WorktreeRemove(ctx context.Context, params WorktreeRemoveParams) (WorktreeRemoved, error) {
+	c, err := l.get()
+	if err != nil {
+		return WorktreeRemoved{}, err
+	}
+	return c.WorktreeRemove(ctx, params)
+}
+
+// WorkspaceClose implements Client.
+func (l *Lazy) WorkspaceClose(ctx context.Context, workspaceID string) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.WorkspaceClose(ctx, workspaceID)
+}
+
 func (l *Lazy) PaneList(ctx context.Context, workspaceID string) ([]Pane, error) {
 	c, err := l.get()
 	if err != nil {

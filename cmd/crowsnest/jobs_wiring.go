@@ -46,6 +46,8 @@ type jobRefs struct {
 	// guard is the guard hook's rules and approvals the tool-call approvals (DESIGN.md 8.7).
 	guard     *guard.Rules
 	approvals *approvals.Service
+	// ctl are the pause, throttle and presence (landing_wiring.go).
+	ctl *controls
 }
 
 // newJobService builds the jobs service. refs is filled in by serve once the orchestrator and
@@ -58,7 +60,7 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	}
 	notify := func(text string) { logger.Info("job notice", "text", text) }
 	if cfg.NotifyURL != "" {
-		post := questions.NewTextNotifier(cfg.NotifyURL, nil, logger)
+		post := refs.ctl.notifyURL(questions.NewTextNotifier(cfg.NotifyURL, nil, logger))
 		notify = func(text string) {
 			logger.Info("job notice", "text", text)
 			post(text)
@@ -75,14 +77,22 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	if refs.projects != nil {
 		projectSource = refs.projects.source()
 	}
+	var pauseSwitch jobs.PauseSwitch
+	var startThrottle jobs.StartThrottle
+	var landingOpts jobs.LandingOptions
+	var extraEnv map[string]string
+	if refs.ctl != nil {
+		pauseSwitch, startThrottle, landingOpts, extraEnv = refs.ctl.pause, refs.ctl.throttle, refs.ctl.landing, refs.ctl.heavyEnv()
+	}
 	return jobs.New(jobs.Options{
+		Pause: pauseSwitch, Throttle: startThrottle, Landing: landingOpts,
 		Projects: projectSource,
 		Store:    db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
 		Attachments: files, Spend: meter, Instructions: jobInstructions(refs.instructions),
 		Launch: jobs.LaunchOptions{
 			StateDir: cfg.StateDir, Executable: executable, AgentSocket: socket, BinDir: binDir, BasePath: os.Getenv("PATH"),
 			Session: cfg.Session, PermissionMode: cfg.PermissionMode, ClaudeConfigDir: claudeDir,
-			Identity: identity, RemoteControlPrefix: jobRemoteControlPrefix(cfg), Guard: refs.guard,
+			Identity: identity, RemoteControlPrefix: jobRemoteControlPrefix(cfg), Guard: refs.guard, ExtraEnv: extraEnv,
 		},
 		ApprovalPending: func(ctx context.Context, jobID string) bool {
 			return refs.approvals != nil && refs.approvals.PendingForJob(ctx, jobID)
@@ -185,7 +195,7 @@ func rolesDir(cfg config.Config) string {
 }
 
 // startJobs runs the supervisor (and, under --demo, seeds the board).
-func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, projectOf func(string) (int64, string), logger *slog.Logger) {
+func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, projectOf func(string) (int64, string), stateDir string, logger *slog.Logger) {
 	if demo, ok := client.(*fake.Demo); ok {
 		panes := jobs.DemoPanes{
 			Orchestrator: demo.PaneOf(fake.DemoOrchestrator), Builder: demo.PaneOf(fake.DemoBuilder),
@@ -194,6 +204,9 @@ func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, 
 		}
 		if err := jobs.SeedDemo(ctx, service, panes); err != nil {
 			logger.Warn("seeding the demo jobs", "err", err)
+		}
+		if err := jobs.SeedDemoLanding(ctx, service, stateDir, demo.RealGitWorktrees); err != nil {
+			logger.Warn("seeding the landing demo", "err", err)
 		}
 		return // the demo's jobs are scripted; the supervisor would "recover" them
 	}

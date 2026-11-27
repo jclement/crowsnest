@@ -39,6 +39,11 @@ type CreateInput struct {
 	// To is, for a job in a project, "lead" (no directory: the project's lead holds it) or "job"
 	// (a job agent in the project's directory). Empty: "lead" without a directory, else "job".
 	To string `json:"to,omitempty"`
+	// Reviewer asks for the review gate (DESIGN.md 6.7): "" the server's default, "off",
+	// "claude" or "codex".
+	Reviewer string `json:"reviewer,omitempty"`
+
+	reviewOf int64 // set by the review gate for a reviewer job
 }
 
 // maxTitleRunes caps the title taken from the brief's first line.
@@ -181,6 +186,12 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 	if input.Isolate != nil {
 		isolate = *input.Isolate
 	}
+	reviewer := strings.ToLower(strings.TrimSpace(input.Reviewer))
+	switch reviewer {
+	case "", ReviewerOff, EngineClaude, EngineCodex:
+	default:
+		return store.JobRecord{}, invalid("reviewer must be off, claude or codex (or left out for the server's default)")
+	}
 	var parent int64
 	if parentID != "" {
 		if parent, err = ParseID(parentID); err != nil {
@@ -191,6 +202,7 @@ func (s *Service) newRecord(input CreateInput, parentID string) (store.JobRecord
 		Title: titleOf(brief), BriefMD: brief, DoneWhen: strings.TrimSpace(input.DoneWhen), Role: role, Dir: dir,
 		Isolate: isolate && dir != "", Engine: engine, Model: model, ParentID: parent, ProjectID: input.ProjectID,
 		State: string(StateQueued), VerifiedJSON: "[]", NotVerifiedJSON: "[]", CreatedAt: s.opts.Now(),
+		Reviewer: reviewer, ReviewOf: input.reviewOf,
 	}, nil
 }
 
@@ -368,6 +380,9 @@ type DoneInput struct {
 	// Attachments are files the agent attaches to its result (absolute paths inside its working
 	// or job directory). The agent socket imports them; Done itself never reads a path.
 	Attachments []string `json:"attachments,omitempty"`
+	// WalkthroughMD explains the change chunk by chunk (why each part exists, what was tested and
+	// what was not, the risk both ways). Optional: done is never refused for its absence.
+	WalkthroughMD string `json:"walkthrough_md,omitempty"`
 }
 
 // Done declares the job finished with its evidence.
@@ -381,17 +396,51 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 	case input.Verified == nil || input.NotVerified == nil:
 		return Job{}, invalid("verified and not_verified are both required (use an empty list for none): say what you checked and what you did not")
 	}
-	return s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+	walkthrough := strings.TrimSpace(input.WalkthroughMD)
+	if len(walkthrough) > maxResultBytes {
+		walkthrough = walkthrough[:maxResultBytes]
+	}
+	review := ""
+	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s", FormatID(r.ID), r.State)
 		}
+		if State(r.State) == StateInReview {
+			return invalid("job %s is already in review; wait for the reviewer's findings", FormatID(r.ID))
+		}
 		s.markProgressLocked(r)
 		r.State, r.ResultMD = string(StateDone), result
+		if walkthrough != "" {
+			r.WalkthroughMD = walkthrough
+		}
 		r.VerifiedJSON, r.NotVerifiedJSON = encodeList(input.Verified), encodeList(input.NotVerified)
 		r.Stuck, r.Cause, r.CauseDetail, r.Waiting = false, "", "", false
 		c.event(EventDone, "Done: "+oneLine(result, 160), map[string]any{"verified": len(decodeList(r.VerifiedJSON)), "not_verified": len(decodeList(r.NotVerifiedJSON))})
+		if review = s.reviewerFor(*r); review != "" {
+			// The review gate (review.go): not done yet, in review by a reviewer job.
+			r.State = string(StateInReview)
+			r.ReviewRound++
+			c.event(EventReview, fmt.Sprintf("In review (round %d of %d): a %s reviewer looks at the change", r.ReviewRound, maxReviewRounds, review), nil)
+		}
 		return nil
 	})
+	if err != nil {
+		return Job{}, err
+	}
+	if review != "" {
+		s.startReview(ctx, job, review)
+		return s.jobNow(ctx, job.ID, job), nil
+	}
+	s.afterSettled(ctx, job)
+	return job, nil
+}
+
+// jobNow re-reads a job, falling back to what the caller had.
+func (s *Service) jobNow(ctx context.Context, id string, fallback Job) Job {
+	if detail, err := s.Get(ctx, id); err == nil {
+		return detail.Job
+	}
+	return fallback
 }
 
 // Fail declares the job cannot be finished.
@@ -403,7 +452,7 @@ func (s *Service) Fail(ctx context.Context, id, reason string) (Job, error) {
 	if utf8.RuneCountInString(reason) > 4000 {
 		reason = string([]rune(reason)[:4000])
 	}
-	return s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s", FormatID(r.ID), r.State)
 		}
@@ -413,6 +462,10 @@ func (s *Service) Fail(ctx context.Context, id, reason string) (Job, error) {
 		c.notify = fmt.Sprintf("crowsnest: job %s failed: %s", FormatID(r.ID), oneLine(r.Title, 80))
 		return nil
 	})
+	if err == nil {
+		s.afterSettled(ctx, job)
+	}
+	return job, err
 }
 
 // RecordToolUse is the PostToolUse hook: progress (the nudge budget resets) and the "doing now"
@@ -469,7 +522,17 @@ func (s *Service) GetForAgent(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ContextBlock(detail) + SpendBlock(detail.Spend), nil
+	return ContextBlock(detail) + ReviewBlock(detail.Job) + SpendBlock(detail.Spend), nil
+}
+
+// ReviewBlock is the latest review round as job_get shows it to the builder: the findings it
+// must address (DESIGN.md 6.7). Empty when the job has not been reviewed.
+func ReviewBlock(job Job) string {
+	if job.ReviewMD == "" || job.ReviewOf != "" {
+		return ""
+	}
+	return fmt.Sprintf("\n## Review, round %d of %d (%s)\n\nWritten by a reviewer agent, not by the human:\n\n%s\n", job.ReviewRound, maxReviewRounds,
+		firstNonEmptyDir(job.ReviewVerdict, "pending"), indent(job.ReviewMD))
 }
 
 // SpendBlock is the job's spend as job_get shows it: so an agent can see what it has used.

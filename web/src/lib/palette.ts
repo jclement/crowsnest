@@ -20,7 +20,7 @@ import type { ChipTone } from "../components/ui/Chip";
 // ---- Commands -------------------------------------------------------------------------------
 
 export type ViewPath = "/" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal" | "/system";
-export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions" | "settings";
+export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions" | "settings" | "digests" | "worktrees" | "limits" | "pause";
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
 export type PaletteCommand =
@@ -36,6 +36,8 @@ export type PaletteCommand =
   | { kind: "answer"; questionId: string; value?: string; label: string }
   | { kind: "poke" }
   | { kind: "compact" }
+  | { kind: "resume" }
+  | { kind: "digestNow" }
   | { kind: "relaunch"; action: "restart" | "new" }
   | { kind: "pushTest" }
   | { kind: "theme"; choice: ThemeChoice }
@@ -114,6 +116,9 @@ export type PaletteIcon =
   | "voice"
   | "project"
   | "instructions"
+  | "pause"
+  | "digest"
+  | "worktrees"
   | "system"
   | "settings";
 
@@ -163,6 +168,8 @@ export interface PaletteSources {
   voiceSettings: boolean;
   /** The projects (archived ones are left out of the palette). */
   projects?: ProjectView[];
+  /** Whether the automation is paused (DESIGN.md 6.13): Pause or Resume is offered. */
+  paused?: boolean;
 }
 
 const views: Array<{ to: ViewPath; label: string; icon: PaletteIcon; keywords: string[]; key: string }> = [
@@ -463,6 +470,15 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
     });
   }
   items.push({ id: "action:pushtest", group: "actions", title: "Send test notification", subtitle: "To every device with notifications on", keywords: ["push", "notify", "bell"], icon: "bell", command: { kind: "pushTest" }, verb: "Send" });
+  items.push(
+    sources.paused
+      ? { id: "action:pause", group: "actions", title: "Resume automation", subtitle: "Pokes, nudges, scheduled tasks and new starts again", keywords: ["pause", "resume", "unpause"], icon: "pause", command: { kind: "resume" }, verb: "Resume" }
+      : { id: "action:pause", group: "actions", title: "Pause automation…", subtitle: "Agents keep running; crowsnest stops acting by itself", keywords: ["pause", "stop", "quiet", "hold"], icon: "pause", command: { kind: "sheet", sheet: "pause" }, verb: "Pause" },
+  );
+  items.push({ id: "action:digest", group: "actions", title: "Digest now", subtitle: "Write today's digest into the Inbox", keywords: ["summary", "daily", "report"], icon: "digest", command: { kind: "digestNow" }, verb: "Write" });
+  items.push({ id: "sheet:digests", group: "actions", title: "Digests", subtitle: "Past daily digests", keywords: ["summary", "daily", "history"], icon: "digest", command: { kind: "sheet", sheet: "digests" }, verb: "Open" });
+  items.push({ id: "sheet:worktrees", group: "actions", title: "Worktrees to land", subtitle: "Finished jobs whose worktrees are still around", keywords: ["sweep", "land", "merge", "discard", "branches"], icon: "worktrees", command: { kind: "sheet", sheet: "worktrees" }, verb: "Open" });
+  items.push({ id: "sheet:limits", group: "actions", title: "Limits", subtitle: "Running-job limit, load hold, heavy slots", keywords: ["throttle", "slots", "load", "heavy", "queue"], icon: "schedule", command: { kind: "sheet", sheet: "limits" }, verb: "Open" });
   items.push({ id: "action:jobform", group: "actions", title: "New job form", subtitle: "The full form: directory, role, done when", keywords: ["give", "create", "job"], icon: "form", command: { kind: "jobForm", brief: "" }, verb: "Open" });
   return items;
 }
