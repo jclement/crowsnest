@@ -88,6 +88,48 @@ func TestReviewFindingsWaitForALatentBudgetHold(t *testing.T) {
 	}
 }
 
+// TestLongWaitCirclesAreFound is R7-C06: a ring of 33 jobs, closed by its last edge, is refused
+// (a 32-hop walk used to accept it), and a 40-job ring left by an older crowsnest is found by the
+// invariant check and broken.
+func TestLongWaitCirclesAreFound(t *testing.T) {
+	r := newRig(t, nil)
+	ctx := context.Background()
+	const ring = 40
+	ids := make([]string, ring)
+	for i := range ids {
+		ids[i] = r.create(CreateInput{Brief: "Ring", Dir: t.TempDir()}).ID
+	}
+	block := func(id, on string) error {
+		_, err := r.svc.Update(ctx, id, UpdateInput{Progress: "waiting", State: "blocked", Reason: "needs " + on, UntilJob: on})
+		return err
+	}
+	for i := 0; i < 32; i++ {
+		if err := block(ids[i], ids[i+1]); err != nil {
+			t.Fatalf("edge %d: %v", i, err)
+		}
+	}
+	if err := block(ids[32], ids[0]); err == nil || !strings.Contains(err.Error(), "circle") {
+		t.Fatalf("closing a 33-job circle: %v", err)
+	}
+	// An existing 40-job circle, written directly.
+	for i := 32; i < ring; i++ {
+		next := ids[(i+1)%ring]
+		r.edit(ids[i], func(rec *store.JobRecord) {
+			rec.State, rec.WakeKind, rec.WakeJob = string(StateBlocked), WakeJob, mustParse(next)
+		})
+	}
+	r.svc.tickInvariants(ctx)
+	broken := 0
+	for _, id := range ids {
+		if r.record(id).WakeKind == WakeHuman {
+			broken++
+		}
+	}
+	if broken == 0 {
+		t.Fatal("a 40-job circle was not found")
+	}
+}
+
 // TestFindingsHaveOneOwner: the check's callback, the review's and the tick may all try to deliver
 // the same findings at once; they are typed once. A delivery a dead crowsnest left in flight is
 // settled as "may have arrived", not typed again.

@@ -1471,7 +1471,9 @@ budget, the pause).
   dependency settled while crowsnest was down. After three rechecks of one blocked spell the
   human is told. A wait that would go in a circle (`until_job` on a job that, through blocked jobs
   waiting on jobs, waits on the caller) is refused; a circle found by the invariant check (left
-  from before) is broken by moving the job to wait on the human, who is told (R6-C09). `until_human` notifies at once and puts the job with the attention items; "Wake
+  from before) is broken by moving the job to wait on the human, who is told (R6-C09). The walk
+  ends on a job already visited, not after a number of hops, so a circle of any length is found;
+  a walk that cannot finish (a job that cannot be read) refuses the new wait (R7-C06). `until_human` notifies at once and puts the job with the attention items; "Wake
   it" is the human's. A blocked job from before wake-ups is given a 30-minute recheck.
 - **A question asked in prose** (`prose.go`): at the Stop hook, a last message whose last
   paragraph ends with a question addressed to the human ("Should I…?", "Want me to…?", "Which
