@@ -1,7 +1,7 @@
 // Every view of the app against `crowsnest --demo`, at a phone (390x844) and a desktop
 // (1440x900), light theme: the "before/after" sheet of a change that moves doors around. Each
 // view is one full-page PNG under screenshots/tour/<label>/ (TOUR_LABEL, default "now"), and
-// web/scripts/tour-sheet.py lays two labels side by side as one contact sheet.
+// web/scripts/tour-sheet.mjs lays two labels side by side as one contact sheet.
 // Run with `TOUR_LABEL=after npx playwright test --project=screenshots e2e/screenshots/tour.spec.ts`.
 import { type Page } from "@playwright/test";
 import { test } from "../support/fixtures";
