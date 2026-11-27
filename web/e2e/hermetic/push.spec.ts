@@ -154,9 +154,10 @@ test("the sheet passes axe and keeps tap targets at 44 px", async ({ page }, tes
   if (isPhone(testInfo)) expect(await smallTapTargets(page, "[role=dialog]")).toEqual([]);
 });
 
-// Answering from a notification (DESIGN.md 8.7): a blocking confirm question is pushed with its
-// first two options as buttons and a single-use action token; the worker, pressed "No", posts the
-// token alone (no cookie) and the question is answered; the same token a second time is refused.
+// Answering from a notification (DESIGN.md 8.7, 23.4): a routine blocking confirm question is
+// pushed with its recommended option and Snooze as buttons and a single-use action token; the
+// worker, pressed "Yes", posts the token alone (no cookie) and the question is answered; the same
+// token a second time is refused.
 test("a question answered from a notification's button, with a single-use token", async ({ page, context, baseURL, app }) => {
   const sheet = await openNotifications(page);
   await sheet.getByRole("button", { name: "Turn on for this device" }).click();
@@ -176,7 +177,7 @@ test("a question answered from a notification's button, with a single-use token"
     action_token: string;
   };
   expect(payload.tag).toBe(id);
-  expect(payload.actions.map((action) => action.action)).toEqual(["yes", "no"]);
+  expect(payload.actions.map((action) => action.action)).toEqual(["yes", "snooze"]);
   expect(payload.action_token).toMatch(/^cna_[\w-]{43}$/);
 
   const cdp = await context.newCDPSession(page);
@@ -191,7 +192,7 @@ test("a question answered from a notification's button, with a single-use token"
     const [notification] = await scope.registration.getNotifications();
     return { actions: (notification as unknown as { actions: { action: string }[] }).actions.map((a) => a.action), data: notification!.data as Record<string, string> };
   });
-  expect(shown.actions).toEqual(["yes", "no"]);
+  expect(shown.actions).toEqual(["yes", "snooze"]);
   expect(shown.data.token).toBe(payload.action_token);
 
   // Press "No": the worker's own answer path, as notificationclick with an action runs it.
@@ -202,11 +203,11 @@ test("a question answered from a notification's button, with a single-use token"
     };
     const [notification] = await scope.registration.getNotifications();
     notification!.close();
-    await scope.crowsnestAnswer(notification!.data, "no", notification!.tag);
+    await scope.crowsnestAnswer(notification!.data, "yes", notification!.tag);
   });
   await expect
     .poll(async () => ((await (await page.request.get(`/api/v1/questions/${id}`)).json()) as { data: { status: string; answer_value: string } }).data)
-    .toMatchObject({ status: "answered", answer_value: "no" });
+    .toMatchObject({ status: "answered", answer_value: "yes" });
   const result = await page.evaluate(async () => (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body })));
   expect(result).toEqual([{ title: "crowsnest: answered", body: "Answered: Deploy the docs site?" }]);
 
