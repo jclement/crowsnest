@@ -113,7 +113,21 @@ async function holdSpace(page: Page, ms: number, repeat: boolean) {
   await page.keyboard.up("Space");
 }
 
-const pageScroll = (page: Page) => page.evaluate(() => [window.scrollY, document.querySelector("main")?.scrollTop ?? 0, document.querySelector("[data-scroll-container]")?.scrollTop ?? 0]);
+// Where the page is scrolled to, and how many messages the conversation holds. The conversation
+// follows new messages down by itself and the demo's agents keep talking, so its scrollTop may
+// only be compared when no message arrived meanwhile: comparing it always failed about one run in
+// three on a loaded machine without Space having scrolled anything.
+const pageScroll = (page: Page) =>
+  page.evaluate(() => {
+    const list = document.querySelector("[data-scroll-container]");
+    return { window: window.scrollY, main: document.querySelector("main")?.scrollTop ?? 0, conversation: list?.scrollTop ?? 0, messages: list?.querySelectorAll("article").length ?? 0 };
+  });
+type Scroll = Awaited<ReturnType<typeof pageScroll>>;
+/** Space must not have scrolled anything: the window, main, or (when nothing new arrived) the conversation. */
+function expectNotScrolled(before: Scroll, after: Scroll) {
+  expect({ window: after.window, main: after.main }).toEqual({ window: before.window, main: before.main });
+  if (after.messages === before.messages) expect(after.conversation).toBe(before.conversation);
+}
 
 // ---- The flow ----------------------------------------------------------------------------
 
@@ -267,7 +281,7 @@ test.describe("hold Space", () => {
       await holdSpace(page, ms, true);
       await expect(page.getByTestId("voice-transcript")).toHaveText("what is the status");
       expect(uploads()).toBe(1);
-      expect(await pageScroll(page)).toEqual(before);
+      expectNotScrolled(before, await pageScroll(page));
     });
   }
 
