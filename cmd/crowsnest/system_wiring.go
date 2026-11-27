@@ -98,6 +98,9 @@ func newSystem(cfg config.Config, db *store.Store, events *hub.Hub, journalLog *
 		}
 		env = doctor.DemoEnv(state)
 	}
+	if hooks.doctorEnv != nil {
+		env = *hooks.doctorEnv
+	}
 	service := system.New(system.Options{
 		Config: cfg, Version: version, KV: db, Journal: journalLog, Hub: events, Logs: hooks.logs, Herdr: lazy,
 		AgentSocket: socket, Reload: hooks.reload, Apply: live.apply, Env: env, Logger: logger,

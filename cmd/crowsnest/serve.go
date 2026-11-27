@@ -24,6 +24,7 @@ import (
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/doctor"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
@@ -115,6 +116,9 @@ type serveHooks struct {
 	reload func(stored map[string]string) (config.Config, error)
 	// open opens a URL in the browser (--open); nil never opens (tests).
 	open func(url string)
+	// doctorEnv, when set, is the machine the doctor and the start gate see (tests); nil: the
+	// real one (or --demo's scripted one).
+	doctorEnv *doctor.Env
 }
 
 func defaultServeHooks() serveHooks { return serveHooks{connect: connectHerdr} }

@@ -20,13 +20,21 @@ const levelInk: Record<Level, string> = { ok: "text-chrome-fg", busy: "text-chro
 
 /** A tiny sparkline of CPU % over the last minute: one series, a 2 px line, no axes. */
 export function Sparkline({ values, width = 48, height = 16, className }: { values: number[]; width?: number; height?: number; className?: string }) {
-  if (values.length < 2) return <span aria-hidden className={cn("inline-block", className)} style={{ width, height }} />;
+  const baseline = <line x1={0} x2={width} y1={height - 0.5} y2={height - 0.5} stroke="currentColor" strokeOpacity={0.25} strokeWidth={1} />;
+  if (values.length < 2) {
+    // Not enough samples for a line yet: the baseline alone, so the slot reads as a chart.
+    return (
+      <svg aria-hidden width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={cn("shrink-0", className)}>
+        {baseline}
+      </svg>
+    );
+  }
   const step = width / (values.length - 1);
   const y = (value: number) => height - 1 - (Math.min(100, Math.max(0, value)) / 100) * (height - 2);
   const points = values.map((value, index) => `${(index * step).toFixed(1)},${y(value).toFixed(1)}`).join(" ");
   return (
     <svg aria-hidden width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={cn("shrink-0 overflow-visible", className)}>
-      <line x1={0} x2={width} y1={height - 0.5} y2={height - 0.5} stroke="currentColor" strokeOpacity={0.25} strokeWidth={1} />
+      {baseline}
       <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
@@ -120,7 +128,7 @@ export function MachineStrip({ className }: { className?: string }) {
         aria-expanded={open}
         aria-label={`Machine: ${cpuTitle(sample)}. Show more`}
         className={cn(
-          "inline-flex h-8 items-center gap-1 rounded px-1.5 text-xs tabular-nums hover:bg-chrome-hover md:hidden",
+          "inline-flex h-11 items-center gap-1 rounded px-1.5 text-xs tabular-nums hover:bg-chrome-hover md:hidden",
           worst ? "text-chrome-warning" : "text-chrome-fg",
         )}
       >
