@@ -28,6 +28,28 @@ function stub(status: AgentStatus) {
   });
 }
 
+describe("RescuePanel and a pending approval", () => {
+  it("offers the structured approval, not the terminal's dialog for the same call", async () => {
+    const fleet = makeFleet();
+    fleet.agents = [{ ...(fleet.agents[0] as (typeof fleet.agents)[number]), pane_id: "w3:p1", name: "job-5", status: "blocked" }];
+    stubApi((call) => {
+      if (call.path === "/fleet") return { body: { data: fleet } };
+      if (call.path === "/approvals?status=pending") return { body: { data: [{ id: "ap_1", job_id: "j_5", pane_id: "w3:p1", tool_name: "Bash", status: "pending", risk: "elevated", summary: "Bash: git push" }] } };
+      if (call.path === "/agents/w3%3Ap1/screen")
+        return {
+          body: {
+            data: { target: "w3:p1", pane_id: "w3:p1", name: "job-5", kind: "claude", status: "blocked", text: "Allow this command?\n❯ 1. Yes\n  2. No", ansi: "", screen_hash: "h1", revision: 1,
+              dialog: { present: true, options: [{ number: 1, label: "Yes" }, { number: 2, label: "No" }], form: false, warnings: [] }, draft: { input_found: false, present: false, text: "" } },
+          },
+        };
+      return undefined;
+    });
+    renderWithClient(<RescuePanel job={job} defaultOpen />);
+    expect(await screen.findByTestId("rescue-approval-note")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^1\. Yes|Yes$/ })).toBeNull();
+  });
+});
+
 describe("RescuePanel", () => {
   it("interrupts with Esc, continues, and asks before a restart", async () => {
     const calls = stub("working");

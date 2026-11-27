@@ -41,10 +41,17 @@ func TestGateQuestionsGetNoButtonsAndNoToken(t *testing.T) {
 		"land context":  {Context: map[string]string{"land_for": "j_3"}, Options: []questions.Option{{Key: "yes", Label: "Yes"}, {Key: "no", Label: "No"}}, Recommend: "yes"},
 		"allow option":  {Options: []questions.Option{{Key: "allow", Label: "Allow: start it"}, {Key: "deny", Label: "Deny"}}, Recommend: "allow"},
 		"approve label": {Options: []questions.Option{{Key: "approve", Label: "Approve"}, {Key: "no", Label: "No"}}, Recommend: "approve"},
+		// R6-S9: the label, not only the key, and the title.
+		"granting label": {Options: []questions.Option{{Key: "y", Label: "Allow: merge j_5"}, {Key: "n", Label: "Not yet"}}, Recommend: "y"},
+		"deploy label":   {Options: []questions.Option{{Key: "1", Label: "Deploy it"}, {Key: "2", Label: "Wait"}}, Recommend: "1"},
+		"granting title": {Title: "OK to push the branch?", Options: []questions.Option{{Key: "yes", Label: "Yes"}, {Key: "no", Label: "No"}}, Recommend: "yes"},
 	}
 	for name, question := range cases {
 		watcher, sender := describedWatcher(t)
-		question.ID, question.Title, question.Kind, question.Urgency, question.SourcePane = "q_9", "Go?", questions.KindChoice, questions.UrgencyBlocking, "w1:p1"
+		if question.Title == "" {
+			question.Title = "Go?"
+		}
+		question.ID, question.Kind, question.Urgency, question.SourcePane = "q_9", questions.KindChoice, questions.UrgencyBlocking, "w1:p1"
 		watcher.QuestionAsked(question)
 		got := sender.got()[0]
 		if len(got.Actions) != 0 || got.ActionToken != "" {

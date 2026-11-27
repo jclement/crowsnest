@@ -282,6 +282,7 @@ export const endpoints = {
   finishStep: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/budget/finish-step`, { method: "POST" }),
   wake: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/wake`, { method: "POST" }),
   limits: () => api<FleetLimit[]>("/limits"),
+  clearLimit: (engine: string) => api<{ engine: string; released: number }>(`/limits/${encodeURIComponent(engine)}/clear`, { method: "POST" }),
   waits: () => api<WaitsView>("/system/waits"),
   projectAccept: (id: number) => api<ProjectAccept>(`/projects/${id}/accept`),
   setProjectAccept: (id: number, value: Pick<ProjectAccept, "check_command" | "budget_usd" | "budget_minutes">) =>

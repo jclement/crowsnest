@@ -661,8 +661,9 @@ func TestBrokenBodyIsRetryable(t *testing.T) {
 func TestAskRefusesReservedContext(t *testing.T) {
 	f := startSocket(t)
 	ctx := context.Background()
-	client := NewClient(f.socket, f.token(t, "w1:p2", "j_9"))
-	for _, key := range []string{"land_for", "land_action", "land_token", "approval_for", "requested_by", "task_review", "task_hash", "crowsnest_gate", "Land_For", " approval_for "} {
+	for i, key := range []string{"land_for", "land_action", "land_token", "approval_for", "requested_by", "task_review", "task_hash", "crowsnest_gate", "Land_For", " approval_for ",
+		"land_head", "task_owner", "approval_scope", "crowsnest_anything"} { // R6-I1: whole families
+		client := NewClient(f.socket, f.token(t, fmt.Sprintf("w2:p%d", i), fmt.Sprintf("j_%d", 20+i))) // a pane each: the quota is per pane
 		_, err := client.Ask(ctx, questions.AskInput{
 			Title: "Tests pass. Continue with the docs?", Kind: questions.KindConfirm, Recommend: "allow",
 			Options: []questions.Option{{Key: "allow", Label: "Yes, continue"}, {Key: "deny", Label: "No"}},

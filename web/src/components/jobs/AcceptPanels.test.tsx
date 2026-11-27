@@ -71,6 +71,24 @@ describe("BudgetCard", () => {
   });
 });
 
+describe("what accepted proves", () => {
+  it("says the branch's own check passed, and names a changed check definition (R6-C02, R6-S4)", () => {
+    stubApi(() => undefined);
+    renderWithClient(
+      <EvidenceCard
+        job={makeDetail({
+          state: "done",
+          accept_state: "accepted",
+          accept_detail: "Accepted",
+          evidence: { command: "mise run check", status: "passed", exit_code: 0, duration_ms: 1000, commit: "abcdef0123456789", output_tail: "", started_at: new Date().toISOString(), finished_at: null, stale: false, definition_changed: ["mise.toml"] },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("accepted-means")).toHaveTextContent("not independent evidence");
+    expect(screen.getByTestId("check-definition-changed")).toHaveTextContent("mise.toml");
+  });
+});
+
 describe("LimitBanner", () => {
   it("is one banner with the countdown", async () => {
     stubApi((call) =>
@@ -82,6 +100,19 @@ describe("LimitBanner", () => {
     const banner = await screen.findByRole("status", { name: "claude usage limit" });
     expect(banner).toHaveTextContent("resets in 23 min");
     expect(banner).toHaveTextContent("3 jobs waiting");
+  });
+
+  it("has a Clear hold the human can always use (R6-S3)", async () => {
+    const calls = stubApi((call) => {
+      if (call.path === "/limits") {
+        return { body: { data: [{ engine: "claude", since: new Date().toISOString(), reset_at: new Date(Date.now() + 23 * 60_000).toISOString(), guessed: true, job: "j_4", detail: "", held: 2, resuming: false, fleet: true }] } };
+      }
+      if (call.path === "/limits/claude/clear") return { body: { data: { engine: "claude", released: 2 } } };
+      return undefined;
+    });
+    renderWithClient(<LimitBanner />);
+    await userEvent.click(await screen.findByRole("button", { name: "Clear hold" }));
+    await waitFor(() => expect(calls.some((call) => call.method === "POST" && call.path === "/limits/claude/clear")).toBe(true));
   });
 });
 

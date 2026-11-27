@@ -99,6 +99,10 @@ func (s *Service) parseWake(ctx context.Context, r *store.JobRecord, input Updat
 		if State(other.State).Terminal() {
 			return invalid("job %s is already %s; read its result (it is not worth waiting on)", FormatID(target), other.State)
 		}
+		if chain := s.waitChain(ctx, target, r.ID); chain != "" {
+			// R6-C09: waiting on a job that (through others) waits on this one never ends.
+			return invalid("until_job %s would wait in a circle (%s → %s): neither job could ever wake the other. Wait on something else, or ask the human", FormatID(target), FormatID(r.ID), chain)
+		}
 		r.WakeKind, r.WakeJob = WakeJob, target
 	default:
 		r.WakeKind = WakeHuman
@@ -371,6 +375,10 @@ func (s *Service) checkInvariant(ctx context.Context, r store.JobRecord, now tim
 			if _, err := s.opts.Store.GetJob(ctx, r.WakeJob); err != nil {
 				return "blocked on a job that does not exist"
 			}
+			if chain := s.waitChain(ctx, r.WakeJob, r.ID); chain != "" {
+				s.breakCycle(ctx, FormatID(r.ID), FormatID(r.ID)+" → "+chain)
+				return "waited in a circle (" + FormatID(r.ID) + " → " + chain + "); now waits on the human"
+			}
 		}
 	case StateInReview:
 		if r.AcceptState == AcceptChecking {
@@ -459,4 +467,44 @@ func (s *Service) WaitViolations() ([]Violation, time.Time) {
 	s.inv.mu.Lock()
 	defer s.inv.mu.Unlock()
 	return append([]Violation{}, s.inv.list...), s.inv.at
+}
+
+// maxWaitChain bounds how far a chain of until_job waits is followed.
+const maxWaitChain = 32
+
+// waitChain follows until_job waits from start and returns the chain in words ("j_2 → j_1") when
+// it comes back to self, else "" (R6-C09). Only blocked jobs waiting on a job continue a chain.
+func (s *Service) waitChain(ctx context.Context, start, self int64) string {
+	path := []string{FormatID(start)}
+	seen := map[int64]bool{}
+	for current, hops := start, 0; hops < maxWaitChain; hops++ {
+		if current == self {
+			return strings.Join(path, " → ")
+		}
+		if seen[current] {
+			return "" // a circle that does not include self: its own jobs find it
+		}
+		seen[current] = true
+		record, err := s.opts.Store.GetJob(ctx, current)
+		if err != nil || State(record.State) != StateBlocked || record.WakeKind != WakeJob || record.WakeJob == 0 {
+			return ""
+		}
+		current = record.WakeJob
+		path = append(path, FormatID(current))
+	}
+	return ""
+}
+
+// breakCycle turns a job's circular until_job wait into a wait on the human, and tells them
+// (R6-C09): left alone, no job in the circle could ever wake.
+func (s *Service) breakCycle(ctx context.Context, id, chain string) {
+	_, _ = s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+		if State(r.State) != StateBlocked || r.WakeKind != WakeJob {
+			return errSkip
+		}
+		r.WakeKind, r.WakeJob = WakeHuman, 0
+		c.event(EventWake, "Its wait went in a circle ("+chain+"); it now waits on you", map[string]any{"cycle": chain})
+		c.notify = fmt.Sprintf("crowsnest: job %s waited in a circle (%s); it waits on you now", id, chain)
+		return nil
+	})
 }

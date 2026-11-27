@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/store"
@@ -72,11 +73,19 @@ func (s *Service) reconcileSettledReceipts(ctx context.Context) {
 	}
 }
 
-// markReceived marks each pending question whose answer line is in body received.
+// markReceived marks each pending question received whose answer line is in body as the answer
+// itself (R6-C12): an incoming user message (what crowsnest typed, as Claude Code records it,
+// never the agent's own text or a tool's output) that starts with the question's header and was
+// recorded no earlier than the question settled. Mentioning the marker anywhere else proves
+// nothing.
 func (s *Service) markReceived(ctx context.Context, jobID string, pending []int64, body []byte) {
+	answers := answerLines(body)
 	for _, questionID := range pending {
-		marker := []byte(fmt.Sprintf("[crowsnest answer q_%d]", questionID))
-		if !bytes.Contains(body, marker) {
+		question, err := s.opts.Store.GetQuestion(ctx, questionID)
+		if err != nil || question.SettledAt.IsZero() {
+			continue
+		}
+		if !answerSeen(answers, questionID, question.SettledAt) {
 			continue
 		}
 		if fresh, err := s.opts.Store.MarkQuestionReceived(ctx, questionID, s.opts.Now()); err == nil && fresh {
@@ -86,6 +95,33 @@ func (s *Service) markReceived(ctx context.Context, jobID string, pending []int6
 			}
 		}
 	}
+}
+
+// answerLines are the incoming user messages of a transcript that carry crowsnest's answer
+// header.
+func answerLines(body []byte) []transcript.Message {
+	normaliser := transcript.NewNormaliser()
+	var out []transcript.Message
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		for _, message := range normaliser.Line(line) {
+			if message.Kind == transcript.KindUser && message.Tag == transcript.TagAnswer {
+				out = append(out, message)
+			}
+		}
+	}
+	return out
+}
+
+// answerSeen reports whether one of answers is question id's own line, recorded after it settled
+// (settled times are whole seconds, so a second's slack).
+func answerSeen(answers []transcript.Message, id int64, settled time.Time) bool {
+	header := fmt.Sprintf("[crowsnest answer q_%d]", id)
+	for _, message := range answers {
+		if strings.HasPrefix(strings.TrimSpace(message.Text), header) && !message.At.Before(settled.Add(-time.Second)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ReconcileAnswer looks for one question's answer in its asker's transcript now (the Inbox's

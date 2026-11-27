@@ -74,10 +74,16 @@ type BranchOf func(dir string) string
 // GIT_DIR, a git alias defined on the command line), a commit or push is refused while protected
 // branches are configured: the agent can run it plainly instead.
 func Check(rules Rules, command string, branchOf BranchOf) Verdict {
-	commands, _ := Parse(command)
-	walk := walker{rules: rules, branchOf: branchOf, dirKnown: true, switched: map[string]switchTarget{}}
+	commands, readable := Parse(command)
+	// A line that cannot be read with confidence has a directory that cannot be followed either
+	// (R6-C04): a commit or push in it is refused while protected branches exist.
+	walk := walker{rules: rules, branchOf: branchOf, dirKnown: readable, switched: map[string]switchTarget{},
+		scopes: map[int]scopeDir{0: {known: readable}}}
 	for _, cmd := range commands {
-		if verdict := walk.check(cmd); verdict.Deny {
+		walk.enter(cmd)
+		verdict := walk.check(cmd)
+		walk.leave(cmd)
+		if verdict.Deny {
 			return verdict
 		}
 	}
@@ -95,8 +101,33 @@ type walker struct {
 	// absolute; dirKnown is false once a cd could not be followed.
 	dir      string
 	dirKnown bool
-	// switched is the branch a checkout or switch earlier in the line moved a directory to.
+	// switched is the branch a checkout or switch earlier in the line moved a directory to (a
+	// branch switch changes the repository, so it outlives the shell that made it).
 	switched map[string]switchTarget
+	// scopes is the directory of each shell of the line (R6-C04): an `sh -c` string starts in the
+	// directory of the shell that ran it, and its cd moves only its own.
+	scopes map[int]scopeDir
+}
+
+// scopeDir is one shell's directory.
+type scopeDir struct {
+	dir   string
+	known bool
+}
+
+// enter makes the walker's directory the one of cmd's shell (a new shell starts from its parent's).
+func (w *walker) enter(cmd Command) {
+	state, ok := w.scopes[cmd.Scope]
+	if !ok {
+		state = w.scopes[cmd.Parent]
+		w.scopes[cmd.Scope] = state
+	}
+	w.dir, w.dirKnown = state.dir, state.known
+}
+
+// leave keeps what cmd did to its shell's directory.
+func (w *walker) leave(cmd Command) {
+	w.scopes[cmd.Scope] = scopeDir{dir: w.dir, known: w.dirKnown}
 }
 
 // switchTarget is a branch an earlier command switched to. created is true for -b/-c, which

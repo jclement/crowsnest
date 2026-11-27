@@ -475,3 +475,49 @@ func Snap(ctx context.Context, workDir, base, baseCommit string) (Snapshot, erro
 	snapshot.Ahead, snapshot.Behind, snapshot.Based = produced.Ahead, produced.Behind, true
 	return snapshot, nil
 }
+
+// checkDefinitionFiles are paths (exact, or a directory prefix ending in /) that define a
+// project's check: what `mise run check`, make or npm run, and CI read (R6-S4).
+var checkDefinitionFiles = []string{
+	"mise.toml", ".mise.toml", "mise.local.toml", ".mise.local.toml", "mise/", ".mise/", "mise-tasks/", ".mise-tasks/",
+	".config/mise.toml", ".config/mise/", ".tool-versions", "Makefile", "makefile", "GNUmakefile", "justfile", "Justfile",
+	"package.json", "Taskfile.yml", "Taskfile.yaml", ".github/workflows/", ".gitlab-ci.yml", ".circleci/", "Jenkinsfile",
+	"azure-pipelines.yml", ".buildkite/",
+}
+
+// CheckDefinitionChanges lists the files the branch's committed diff (its base to HEAD) changed
+// that define its check, plus any of extra (paths the check command names, relative to the
+// checkout). Empty when nothing did or the base is unknown.
+func CheckDefinitionChanges(ctx context.Context, workDir, base, baseCommit string, extra []string) []string {
+	from := diffBase(ctx, workDir, base, baseCommit)
+	if from == "" {
+		return nil
+	}
+	out, err := git(ctx, workDir, "diff", "--no-color", "--name-only", "-z", from, "HEAD")
+	if err != nil {
+		return nil
+	}
+	var changed []string
+	for _, path := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+		if path == "" {
+			continue
+		}
+		for _, def := range append(append([]string{}, checkDefinitionFiles...), extra...) {
+			if path == def || (strings.HasSuffix(def, "/") && strings.HasPrefix(path, def)) {
+				changed = append(changed, path)
+				break
+			}
+		}
+	}
+	return changed
+}
+
+// ContainsCommit reports whether branch (a local branch of the checkout at dir) already contains
+// commit: how crowsnest verifies, after a restart, that an approved merge happened (R6-C10).
+func ContainsCommit(ctx context.Context, dir, branch, commit string) bool {
+	if branch == "" || commit == "" {
+		return false
+	}
+	_, err := git(ctx, dir, "merge-base", "--is-ancestor", commit, "refs/heads/"+branch)
+	return err == nil
+}

@@ -167,7 +167,8 @@ test("a question answered from a notification's button, with a single-use token"
   const client = await page.evaluate(() => sessionStorage.getItem("crowsnest.presence.client"));
   await page.request.post(`${baseURL}/api/v1/presence/gone`, { data: { client }, headers: { "X-Crowsnest": "1", Origin: baseURL! } });
   const before = fake.requests.length;
-  const id = await askAsAgent(app, { title: "Deploy the docs site?", kind: "confirm", recommend: "yes", urgency: "blocking" });
+  // A routine title: one that grants ("Deploy …", "Merge …") would be gate-shaped, no buttons (R6-S9).
+  const id = await askAsAgent(app, { title: "Rebuild the docs site?", kind: "confirm", recommend: "yes", urgency: "blocking" });
   await expect.poll(() => fake.requests.length, { timeout: 10_000 }).toBeGreaterThan(before);
   const payload = JSON.parse(fake.decrypt(fake.requests.at(-1)!.body)) as {
     title: string;
@@ -209,7 +210,7 @@ test("a question answered from a notification's button, with a single-use token"
     .poll(async () => ((await (await page.request.get(`/api/v1/questions/${id}`)).json()) as { data: { status: string; answer_value: string } }).data)
     .toMatchObject({ status: "answered", answer_value: "yes" });
   const result = await page.evaluate(async () => (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body })));
-  expect(result).toEqual([{ title: "crowsnest: answered", body: "Answered: Deploy the docs site?" }]);
+  expect(result).toEqual([{ title: "crowsnest: answered", body: "Answered: Rebuild the docs site?" }]);
 
   // The token is spent: a replay is refused, with no cookie involved either way.
   const replay = await page.request.post("/api/v1/push/action", {

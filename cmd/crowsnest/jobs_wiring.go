@@ -116,6 +116,11 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 			return jobs.OrchestratorInfo{PaneID: status.PaneID, Ready: ready}
 		},
 		Activity: transcriptActivity(claudeDir, cfg.Dir, refs),
+		CancelQuestions: func(ctx context.Context, jobID, reason string) {
+			if service := refs.questions.Load(); service != nil {
+				service.CancelForJob(ctx, jobID, reason)
+			}
+		},
 		AskHuman: func(ctx context.Context, input questions.AskInput, caller questions.Caller) (questions.Question, error) {
 			service := refs.questions.Load()
 			if service == nil {

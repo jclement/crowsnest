@@ -18,7 +18,7 @@ func TestAdoptForStandingOrchestrator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(job.ID, "j_") || job.Title != "Tidy the README" || job.State != StateRunning || job.ProjectID != 0 {
+	if !strings.HasPrefix(job.ID, "j_") || job.Title != "Tidy the README" || job.State != StateRunning || job.ProjectID != 0 || job.Origin != OriginOrchestrator {
 		t.Fatalf("adopted %+v", job)
 	}
 	detail := r.get(job.ID)
@@ -58,7 +58,7 @@ func TestAdoptForStandingLead(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail := r.get(job.ID)
-	if detail.ProjectID != alpha.ID || detail.AgentName != "lead-alpha" || detail.PaneID != "w3:p1" || detail.State != StateRunning {
+	if detail.ProjectID != alpha.ID || detail.AgentName != "lead-alpha" || detail.PaneID != "w3:p1" || detail.State != StateRunning || detail.Origin != "lead-alpha" {
 		t.Fatalf("lead's adopted job %+v", detail.Job)
 	}
 }

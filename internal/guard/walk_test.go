@@ -59,6 +59,38 @@ func TestCheckFollowsTheLine(t *testing.T) {
 	}
 }
 
+// TestNestedShellCdStaysInside is R6-C04 (and R5-C02's residual): a cd inside `sh -c` moves
+// only that shell, so a commit after it in the outer line runs where the outer line is, on
+// develop here. A cd inside the nested shell still counts for the commands in the same string.
+func TestNestedShellCdStaysInside(t *testing.T) {
+	rules := Rules{Session: "crowsnest", ProtectedBranches: []string{"develop"}}
+	// The hook's directory is on develop; /other is on a feature branch.
+	branchOf := func(dir string) string {
+		if filepath.Clean(dir) == "/other" {
+			return "feature/x"
+		}
+		return "develop"
+	}
+	cases := []struct {
+		command string
+		rule    string
+	}{
+		{`sh -c 'cd /other' && git commit --allow-empty -m checkpoint`, RuleProtectedBranch}, // the reviewer's spelling
+		{`bash -c "cd /other"; git commit -m x`, RuleProtectedBranch},
+		{`sh -c 'cd /other' && sh -c 'git commit -m x'`, RuleProtectedBranch},
+		{`sh -c 'cd /other && sh -c "cd /" && git commit -m x'`, ""},
+		{`sh -c 'cd /other && git commit -m x'`, ""},
+		{`cd /other && sh -c 'git commit -m x'`, ""},
+		{`eval 'cd /other' && git commit -m x`, ""},                             // eval runs in the caller's shell
+		{`cd /other && bash script.sh && git commit -m x`, RuleProtectedBranch}, // a line not read with confidence: its directory is not trusted
+	}
+	for _, c := range cases {
+		if verdict := Check(rules, c.command, branchOf); verdict.Rule != c.rule {
+			t.Errorf("%q gave %q (%s), want %q", c.command, verdict.Rule, verdict.Reason, c.rule)
+		}
+	}
+}
+
 // TestCheckNeedsNoBranchesForUncertainty: with no protected branches, nothing is refused for
 // being hard to follow.
 func TestCheckNeedsNoBranchesForUncertainty(t *testing.T) {

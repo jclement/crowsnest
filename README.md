@@ -56,7 +56,8 @@ So the phone is not a tap per test run, crowsnest keeps **approval rules** of it
 8.7, Policy): on a project's page, "Allow Bash commands matching `go test *`", "Allow edits under
 `internal/`", "Allow the tool `WebSearch`", each shown with what it would have matched in the
 project's last week before you save it; "Allow and remember for this job" on a card, gone when the
-job ends; and "Allow N low-risk calls from <agent>" for one job's waiting calls. A matching call is
+job ends (an elevated call is remembered only as exactly itself, and one crowsnest does not
+recognise not at all: write that rule on the project page); and "Allow N low-risk calls from <agent>" for one job's waiting calls. A matching call is
 allowed by the hook at once and journalled on the job's timeline. A dangerous call is never allowed
 by a rule, and a rule allows an elevated call only when you said so. Pending approvals survive a
 crowsnest restart for 150 s, enough for their hooks to come back. A `PreToolUse` guard refuses outright a few commands no agent should run unattended (reaching a
@@ -446,7 +447,9 @@ used, and the config file (it may hold the password).
 `restore` checks every file against the manifest before writing anything, refuses a backup made
 by a newer schema, refuses a data directory that already holds a database (and a running
 crowsnest) unless `--force`, and then keeps the replaced database beside it
-(`<session>.db.before-restore-<time>`). An existing role, task or risk file is left alone unless
+(`<session>.db.before-restore-<time>`, scrubbed of sessions and tokens like a backup). The
+backup's approval rules arrive revoked (add back the ones you want), and its role files are marked
+unread. An existing role, task or risk file is left alone unless
 `--force`. The restored instance **starts paused**: crowsnest first compares the restored jobs
 with the panes herdr really has (the journal says which still have one), and the pause switch
 holds every job start, restart, retry, poke and scheduled task until you resume (account menu,
@@ -827,7 +830,12 @@ directory.
   `--check-rounds` times, then the job needs you. No check command: **Unverified**. The check is
   pinned to its commit: a later commit makes it **stale**, and a base branch that moved on makes
   the job **need a rebase** ("Ask an agent to rebase"). Land refuses both unless you tick the
-  override.
+  override. What Accepted proves: the project's own check passed on that commit in a clean tree.
+  The branch can change that check, so the card names any change to its check definition; it is
+  not independent evidence, and the reviewer and you are the independent part.
+- **Holds.** A budget reached, a check that still fails, a review that still objects, an approval
+  waiting, a usage limit: each is a hold on the job that only you (or crowsnest's own recovery)
+  lift. Nothing the agent declares moves it out of that.
 - **Budgets.** Per job (the job view's Raise), per project (dollars, minutes) or in Settings
   (`--job-budget-usd`, `-tokens`, `-minutes`, `-turns`); delegated jobs count toward their
   parent. At 80% the card warns and the agent is told; at 100% the agent is asked to stop at a
@@ -1016,6 +1024,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `PUT /jobs/{id}/budget`, `POST /jobs/{id}/budget/finish-step` | session | Change (raise) a job's budget `{usd?, tokens?, minutes?, turns?}`; let a job at its budget finish the step it is in |
 | `POST /jobs/{id}/wake` | session | Wake a blocked job now |
 | `GET /limits`, `GET /system/waits` | session | The fleet's usage limits with their reset times; live jobs with no owner or wake-up |
+| `POST /limits/{engine}/clear` | session | Clear hold: forget the engine's usage limit and let the jobs it held go (resumed one at a time) |
 | `GET\|PUT /projects/{id}/accept` | session | A project's check command and budget defaults, and the check that would run now |
 | `POST /questions/{id}/reconcile`, `POST /questions/{id}/retype` | session | Look for an answer in the agent's conversation; type an uncertain or failed one again (`{confirm: true}`) |
 | `GET\|POST /presence`, `POST /presence/gone`, `PUT /presence/dnd` | session | Presence (the browser's heartbeat) and do not disturb (`{until}`) |

@@ -20,7 +20,6 @@ package push
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -191,7 +190,7 @@ func (w *Watcher) ApprovalRequested(approval approvals.Approval) {
 	w.mu.Unlock()
 	ctx := context.Background()
 	notice := ApprovalNotice(approval.ID, string(approval.Risk), approval.AgentName, approval.Summary, approval.PaneID)
-	truncated := strings.HasSuffix(approval.Summary, "…")
+	truncated := approvals.SummaryCut(approval.ToolInput)
 	notice = DecorateApproval(notice, approval.ID, string(approval.Risk), approval.AgentName, approval.Summary, truncated, w.where(ctx, approval.JobID, approval.PaneID))
 	w.notify(ctx, notice)
 }

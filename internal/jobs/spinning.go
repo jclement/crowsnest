@@ -68,10 +68,12 @@ type Step struct {
 
 // jobWatch is the supervisor's memory of one job between ticks.
 type jobWatch struct {
-	budgetAt  time.Time
-	receiptAt time.Time
-	spinAt    time.Time
-	spinSize  int64
+	budgetAt    time.Time
+	receiptAt   time.Time
+	feedbackAt  time.Time // the last failed attempt to type pending feedback (R6-C07)
+	checkReruns int       // check runs in a row voided by a moving HEAD (R6-S8)
+	spinAt      time.Time
+	spinSize    int64
 }
 
 func (s *Service) watchOf(id string) *jobWatch {

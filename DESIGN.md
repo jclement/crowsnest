@@ -390,7 +390,14 @@ database that has a schema (and, in the CLI, while the agent socket or health en
 unless `--force`, which keeps the replaced database as `<db>.before-restore-<stamp>` (with its
 `-wal`/`-shm`); existing config files are kept unless forced. The restored database is opened
 once (so newer migrations run), and gets kv `pause.state` `{paused: true, by: "restore", …}`
-(the pause switch's own row and shape, 6.13 on `wip/landing`) and `restore.pending`.
+(the pause switch's own row and shape, 6.13 on `wip/landing`) and `restore.pending`. R6-S5: a
+backup is not the human's word on this machine, so its approval rules are kept but **revoked**
+(the CLI says how many; add back the ones you want), its role files' "I've read it" marks are
+dropped, and any Remote Control link goes. The replaced database is **scrubbed** like a backup
+(sessions, token hashes, the push key, the notify URL): rolling back to it means signing in again.
+R6-S6: snapshots, backups and pre-migration copies drop every `*remote_control` key and carry a
+scrub mark (`snapshot.scrubbed`); a pre-migration copy without the current mark is scrubbed again
+at the next start.
 
 **The start after a restore.** The pause switch (6.13) reads the restore's `pause.state`
 row, so the restored instance starts paused: no job starts, restarts, retries, pokes, scheduled
@@ -498,13 +505,18 @@ What holds now:
   agent, its parent, its project's lead or the orchestrator may ask. Before R5 the land question
   had no `recommend`, so every real request was refused by validation: it is Deny now.
 - **Gates are never answered from a notification** (R5-S2). `questions.GateShaped` is a gate key,
-  or any option keyed `allow`, `approve`, `merge`, `land`, `push` or `grant`. Such a question's
+  or any option key or label, or the title, that uses a granting word (`allow`, `approve`, `merge`,
+  `land`, `push`, `deploy`, `delete`, `grant`, `permit`; R6-S9: an agent
+  could put "Allow: merge j_5" on a key "y"). Agents may not set any `land_`, `task_`,
+  `approval_` or `crowsnest_` context key (R6-I1). Such a question's
   notice gets no buttons and no action token (`internal/push/decision.go`), and `/push/action`
   refuses one (`403`). The endpoint is the authority.
 - **Task files that start a job or poke a lead are reviewed** (`internal/schedule/review.go`,
   R5-S3). Every file task with `as: job` or a `project:` runs only once the human has approved
   that exact content (a SHA-256 of the file) in the Schedule view: "new or changed: review", with
-  the body shown and `POST /schedule/{name}/approve {hash}`. An edit is a new hash and is held
+  the whole file shown as raw text (R6-S7: frontmatter, HTML and comments included, with a warning
+  when it has HTML or comments; the formatted view is a toggle; a file the task points to is not
+  reviewed, and the card says so) and `POST /schedule/{name}/approve {hash}`. An edit is a new hash and is held
   again, and only the content approved last may run. Run now is not an approval. Orchestrator
   poke files are not reviewed (they add a line to a poke the orchestrator gets anyway). App
   schedules are never reviewed (only the human makes one). A restore forgets every approval
@@ -521,11 +533,21 @@ What holds now:
   an inline git `-c`, a tool not on the list, bidi controls, and a summary over 160 characters
   are all at least elevated. The approval summary drops format characters and says how much is
   cut. The approval policy (`internal/approvals/policy.go`) and the push buttons sit on this level.
+  R6-S2 closed further holes: an unquoted `>` ends the word before it (so `x>>~/.zshrc` is a
+  redirect); an environment prefix or `export` outside a short safe list (`CI`, `NO_COLOR`,
+  `GOOS`, `GOFLAGS` without exec, …) is not low; and options that run another program or write a
+  file are refused on otherwise benign programs: `fd -x/-X/--exec`, `rg --pre`, `sort -o` and
+  `--compress-program`, `tree -o`, `uniq` with an output file, `go -exec/-toolexec/-vettool/-o`,
+  `cargo --config`, `date -s`, and on read-only git `--output`, `-O`, `--open-files-in-pager`,
+  `--upload-pack`, `--ext-diff`, `--textconv`.
 - **The guard follows the line** (`internal/guard/guard.go`, R5-C02). A `cd` moves the directory
   the next git command runs in, and `checkout`/`switch` changes the branch the next commit lands
   on. Where that cannot be followed (a cd to a variable or inside a subshell, `--git-dir`,
   `GIT_DIR`, an inline alias), a commit, merge, pull or push is refused while protected branches
-  are configured. Plain git in the repository's own directory always works.
+  are configured. Plain git in the repository's own directory always works. R6-C04: each `sh -c`
+  string is its own shell, starting in its parent's directory, and its `cd` ends with it (eval
+  keeps the caller's); a line the reader cannot read with confidence has a directory that is not
+  trusted, so a commit or push in it is refused while protected branches exist.
 - **crowsnest's own git calls run no repository commands** (`internal/landing/git.go`, R5-S5):
   `-c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c
   protocol.ext.allow=never -c core.pager=cat -c core.alternateRefsCommand=`, plus `--no-ext-diff
@@ -1244,18 +1266,40 @@ job's `done` is now the agent's claim, and crowsnest decides whether it is **acc
   under the heavy gate (`<crowsnest> heavy -- sh -c …`, so a check waits for a slot like any
   build), with HERDR_* and agent tokens removed from its environment, `CI=1`, its process group
   killed at `--check-timeout` (30 m). Each run is a `job_checks` row: the commit it ran against
-  (HEAD before; a HEAD that moved during the run voids it and it runs again), exit code,
-  duration, the last 8 KB of output; the full output (to 256 KB) is
-  `<state>/jobs/j_N/check-<id>.txt`. A crowsnest restart mid-check runs it again (the tick
-  finds `checking` jobs whose run has no live owner).
+  (HEAD before; a HEAD that moved during the run voids it and it runs again, at most three times
+  in a row, then the human decides: R6-S8), exit code, duration, the last 8 KB of output; the full
+  output (to 256 KB) is `<state>/jobs/j_N/check-<id>.txt`, written afresh, never through a link.
+  A crowsnest restart mid-check runs it again (the tick finds `checking` jobs whose run has no
+  live owner).
+- **Committed work only** (R6-C02). The check refuses a dirty tree at its start, and its run is
+  not evidence when the tree is dirty or HEAD moved at its end (an agent's process, or the check
+  itself, changed what was tested). "Run the check again" has done's prerequisite: a clean tree.
+  Decision: the check runs in the job's own worktree, not a fresh detached checkout of the commit,
+  because a fresh checkout has none of the ignored files a check needs (node_modules, a virtual
+  environment, build caches) and would fail for reasons the agent cannot fix. The residual: a
+  process that changes files and puts them back between the two looks is not seen.
+- **Durable or nothing** (R6-C13). A check whose row could not be written is not run; a result
+  whose write failed is not evidence; and a job is accepted only when its newest durable check is
+  that run, passed, at that commit.
+- **What "accepted" proves**, said on the card and on the Review tab: the project's own check
+  command passed on that commit, in a clean tree. The branch can change that check (its
+  `mise.toml`, the script the command names, a Makefile, package.json, CI files), so it is **not
+  independent evidence**: the reviewer and the human are the independent part. When the branch's
+  diff changed a file that defines its check, the evidence lists it (`definition_changed`) and
+  the card warns. The check's environment drops crowsnest's variables and credentials
+  (`*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_API_KEY`, R6-S12); a `setsid` grandchild can outlive
+  the process-group kill (residual). The automatic check reads only small regular mise files,
+  never through a link.
 - **Pass** → `accepted`; then the review gate (6.7) starts its reviewer **on that revision**
   (`review_commit`), or the job is done. **Fail** → back to `running`, `accept_state` `failed`,
   check round N, and one line typed to the agent: `[crowsnest check] Your done for job j_N was not
   accepted: <command> failed (exit 1, 43s) at abc1234. The output is in <file>. Fix what it
   reports, commit, and call done again (round 1 of 3). Its last line: …`; `job_get` shows the
-  output's end too. After `--check-rounds` (3) failures, or a check that could not run at all,
-  → `needs_you`, cause `check`, the failure on the card, "Run the check again" as its action.
-  An agent cannot lift `check`, `budget`, `review` or `questions` by declaring `running`.
+  output's end too. The line waits while the automation is paused or a hold keeps the job
+  (`pending_feedback`, typed by the tick afterwards and cleared only once typed: R6-C07). After
+  `--check-rounds` (3) failures, or a check that could not run at all, → a `check` hold
+  (`needs_you`, cause `check`), the failure on the card, "Run the check again" as its action.
+  No agent call lifts a hold (6.20).
 - **No check command** → `unverified`: done, with a clean tree and commits, shown apart from
   accepted ("Unverified" on the card).
 - **Pinned to a commit.** Any later commit makes the evidence **stale**: the job view compares
@@ -1268,7 +1312,14 @@ job's `done` is now the agent's claim, and crowsnest decides whether it is **acc
   agent's land request never overrides. "Ask an agent to rebase" (`POST /jobs/{id}/rebase`)
   starts a **rebase job** (`fix_of`): a builder in the same worktree, not isolated, no review,
   briefed to merge the base in, resolve, check and commit; when it finishes, the job is checked
-  again and is accepted or failed on that.
+  again and is accepted or failed on that. The handoff is durable (R6-C11): the parent records the
+  newest fix it took in (`fix_applied`), and the tick replays a finished fix it never took in into
+  exactly one re-check; another rebase waits for that.
+- **An allowed land request is a claimed step** (R6-C10, R5-C09): the human's Allow marks the
+  request `land_approved_at` instead of consuming it, and Land's outcome clears it. A claim whose
+  process is gone (two minutes) is finished by recovery, which first checks whether the merge
+  already happened (then it is recorded, not merged again). A request whose commit cannot be read
+  is refused rather than stored unpinned (R6-S11).
 - **What lands is what was reviewed** (R5-S4, `reviews/R5-opus-security.md`): the Review tab
   carries the branch's commit (`land.head`), the confirmation names it ("Commit abc1234, as
   reviewed: …; if the branch has moved past abc1234, nothing is landed"), and the browser must
@@ -1334,8 +1385,13 @@ not measured (Codex) shows "not measured", never zero, and is bounded by minutes
   exceeded, the job goes `needs_you` (cause `budget`) and the agent is told to stop at a safe
   point (finish the step, commit what is safe, job_update, end the turn); nothing is killed and
   no tool is interrupted. The human: **Raise the budget** (back to running, the agent told),
-  **Let it finish this step** (`grace`: running, and its next Stop puts it back in front of the
-  human), or **Stop the job** (cancel).
+  **Let it finish this step** (`grace`: running, and its next observed end of turn puts it back in
+  front of the human: the Stop hook, or for an agent without hooks the backstop, R6-C06), or
+  **Stop the job** (cancel).
+- The limit is a `budget` hold (6.20). A parent's exhausted budget puts a hold from that parent
+  on every live job below it, queued ones included, so a child waiting for a slot does not start
+  past it, Start anyway included (R6-C05); a held job cannot delegate. Raising the parent's
+  budget lifts those holds; a child still over its own budget is held by that one.
 
 ### 6.17 Spinning and the fleet's usage limit (built on `wip/accept`)
 
@@ -1363,6 +1419,15 @@ with the countdown replaces a stuck card per agent (the cards read "Held"). Afte
 waiting jobs get their "continue" one at a time, oldest first, 20 s apart; the limit is
 forgotten once nothing waits on it.
 
+R6-S3, R6-C08: the report is text an agent can write (the hook endpoint takes any job's token),
+so one job's report holds **only that job** (a `usage_limit` hold and its retry at the reset);
+the engine is held fleet-wide once **two different jobs** report it. A reset read from the
+message is capped at a day (past that it is called a guess). The banner has **Clear hold**
+(`POST /limits/{engine}/clear`): the limit is forgotten and its jobs are let go, resumed by the
+paced retry. A job whose turn ends during the fleet hold is registered for the reset (a
+`usage_limit` hold and a retry at the reset), and queued starts after the reset go one at a time
+with the retries. Two colluding agents can still hold their engine for at most a day.
+
 ### 6.18 Every wait has an owner and a wake-up (built on `wip/accept`)
 
 `waits.go`. Every live job states who owns its wait and what ends it (`wait_owner`, `wake`,
@@ -1376,7 +1441,9 @@ budget, the pause).
   `[crowsnest recheck] … check whether that has cleared` (or, for a dependency, the other job's
   outcome). A dependency that settles wakes its waiters at once, and the tick wakes any whose
   dependency settled while crowsnest was down. After three rechecks of one blocked spell the
-  human is told. `until_human` notifies at once and puts the job with the attention items; "Wake
+  human is told. A wait that would go in a circle (`until_job` on a job that, through blocked jobs
+  waiting on jobs, waits on the caller) is refused; a circle found by the invariant check (left
+  from before) is broken by moving the job to wait on the human, who is told (R6-C09). `until_human` notifies at once and puts the job with the attention items; "Wake
   it" is the human's. A blocked job from before wake-ups is given a 30-minute recheck.
 - **A question asked in prose** (`prose.go`): at the Stop hook, a last message whose last
   paragraph ends with a question addressed to the human ("Should I…?", "Want me to…?", "Which
@@ -1398,7 +1465,9 @@ An answer stored is not an answer taken in. Each settled question carries `recei
 (decided, not typed yet), **held** (the agent was at a dialog, had a draft or was not there;
 `held_reason`, and crowsnest retries), **uncertain** (handed to the terminal, herdr's answer
 lost), **failed**, **delivered** (typed), **received**. Received is seen, not assumed: the
-answer line (`[crowsnest answer q_N]`) found in the asker's transcript (the tick looks every 15
+answer line found in the asker's transcript as an incoming user message that starts with
+`[crowsnest answer q_N]` and was recorded after the question settled (R6-C12: the agent's own
+text, a tool's output, or an earlier line naming the marker prove nothing; the tick looks every 15
 s for typed answers not yet received, in live jobs and, for an hour after the delivery, in jobs
 that already finished: an agent can take its answer and call done inside one interval), or the
 asker's own long-poll returning it. Nothing is
@@ -1406,6 +1475,44 @@ retyped by itself: the Inbox offers **Did it arrive?** (`POST /questions/{id}/re
 transcript look) and only then, for an uncertain or failed delivery not seen received, **Type it
 again** (`POST /questions/{id}/retype`, with `confirm`). The job view lists each answered
 question's receipt.
+
+### 6.20 Holds: gates an agent cannot talk its way out of (R6-C01)
+
+R6 found that an agent could clear a human-only gate (a budget reached, a final review that
+objects, check rounds exhausted) by declaring `blocked` and then `running`: the dispositions lived
+only in the state and cause columns, which any declaration overwrote. Now a job carries a set of
+**holds** (`holds_json`, migration `0019_holds.sql`; `internal/jobs/holdset.go`), kept apart from
+the state its agent declares. Each hold has a kind, who lifts it, why, since, and (for a budget)
+the job whose budget ran out.
+
+| Hold | Lifted by | State it implies |
+|---|---|---|
+| `approval` (an agent's job beyond its limits) | the human (Allow) | queued, cause approval |
+| `checking` (crowsnest runs the check) | crowsnest (the result) | in_review |
+| `reviewing` (a review round runs) | crowsnest (the verdict) | in_review |
+| `budget` (own, or an ancestor's) | the human (raise, finish step, stop) | needs_you, cause budget; a queued job does not start |
+| `check` (rounds exhausted, or could not run) | the human (Run again, Land, Discard) | needs_you, cause check |
+| `review` (still objects after the last round) | the human (a message, Land, Discard) | needs_you, cause review |
+| `approval_tool` (a tool call waits) | crowsnest (the approval settles) | needs_you, cause approval-tool |
+| `questions` (a blocking question is open; derived from the questions table) | crowsnest (the answer) | needs_you, cause questions |
+| `usage_limit` | crowsnest (the paced retry) or the human (Clear hold) | stuck, cause limit |
+
+- **Every mutation** ends by putting a held job in the state its top hold implies, whatever the
+  change wrote (only a terminal state clears holds). A hold that does not apply yet stays latent:
+  a budget reached while crowsnest checks a done holds the job when the check sends it back.
+- **Every agent call** (`job_update` in any form, `done`, `fail`, `job_create`) passes one gate
+  first (`agentGateLocked`) and is checked after (`checkAgentChangeLocked`): what a hold does not
+  allow is refused, naming the hold and who lifts it. The table, tested cell by cell
+  (`TestHoldVerbTable`):
+
+| Agent verb | Under any hold |
+|---|---|
+| progress line, waiting, ask | allowed (changes no state) |
+| the hooks: a tool call, the end of a turn | allowed (observations; the projection keeps the state) |
+| blocked, running, done, fail | refused |
+| job_create | allowed only under questions, approval_tool and usage_limit (waits crowsnest ends); refused under a human's hold or while checked or reviewed |
+
+- Only the human's actions and crowsnest's own recovery lift holds (`liftHoldLocked`).
 
 ## 7. The orchestrator
 
@@ -1817,7 +1924,12 @@ door's `frontdoor-poke`, with its lessons:
   `https://claude.ai/code/session_[A-Za-z0-9]{20,64}` (a query string is dropped, a look-alike
   host or path refused); a URL that runs to the end of a line while still shorter than that shape
   is continued with the first word of the next line. The newest one wins. Nothing is ever built
-  from a display name. The banner without a readable URL still sets the note `active`.
+  from a display name. The banner without a readable URL still sets the note `active`. R6-S10:
+  the transcript's `bridge_status` is the trusted source and is read first whenever the session is
+  known; a pane URL counts only when it starts on, or within two lines after, the `/remote-control
+  is active` banner or the panel's "available in the Claude mobile app" line (a URL elsewhere in
+  the pane is text an agent could print); and a URL read while the conversation changed is not
+  published.
 - **Persistence**: kv `orchestrator.remote_control` (a lead's `lead.<slug>.remote_control`) holds
   `{session, name, url}`. A crowsnest restart that adopts the running agent restores the name and
   link when the record's session is the adopted agent's (else it assumes the name the launch
@@ -2022,6 +2134,14 @@ terminal" only. One more guard, added in M2: options with a live input line (the
 a rule) below them are an agent's numbered reply, not a dialog, because Claude hides the input
 box while a dialog is up. The options are the last run numbered 1, 2, 3…; the screen hash is
 SHA-256 over the ANSI-stripped visible screen with trailing spaces and blank lines removed.
+When a structured approval (8.7) is pending for the same pane, the job's Rescue panel offers only
+the approval: the terminal's permission dialog is the same decision, and one screen does not offer
+two ways to answer it.
+
+**A cancelled job's questions are cancelled** (found by the real-Claude journeys): cancelling a
+job, discarding a live one, or a held job that was never started cancels its open questions,
+status cancelled with the reason as the note and nothing typed back, so they do not wait in Needs
+you. A failed job's open questions are left to the human, who may still want to answer.
 
 **8.3 Telling Jeff.** The tab title and nav badge show the attention queue's count (section 22: one
 number for every surface); the page uses the browser
@@ -2462,7 +2582,17 @@ the fallback that is always there.
     crowsnest will allow …". `POST /approvals/{id}/decide` with `remember: {pattern}` checks the
     rule first, allows this call once, stores the job rule (`max_risk` the approval's risk), then
     allows by policy every other pending call of the job the rule now matches. The job's page
-    lists its remembered rules with Remove.
+    lists its remembered rules with Remove. R6-S1: an **elevated** call is remembered only as
+    itself, its exact command or tool name, shown read-only (`exact`); a wider pattern is refused;
+    a command with a glob character is not remembered; an edit outside the job's directory is not;
+    and a call that is elevated only because crowsnest does not recognise it (an interpreter, an
+    unknown program, a command it cannot read: `risk.Result.Unrecognised`) offers no remember at
+    all: that rule belongs in the project's settings, written by the human. A low call's rule
+    stays capped at low, so it never covers an elevated call.
+  - **Edit rules compare real paths** (R6-C03): the rule's directory and the target's longest
+    existing part are resolved; an unresolvable directory, or any `..` in the path, matches
+    nothing (the OS follows a link before the `..`). The risk classifier's outside-directory check
+    refuses `..` the same way.
   - **Batch allow**: when two or more low-risk approvals from one job are pending, the tray row
     (which Now and the Inbox render too) offers "Allow N low-risk calls from <agent>", which lists
     the N calls and needs one confirming tap. `POST /approvals/batch-allow {ids}` refuses the

@@ -88,6 +88,17 @@ func (s *Store) ListApprovalRules(ctx context.Context, filter ApprovalRuleFilter
 	return out, rows.Err()
 }
 
+// RevokeAllApprovalRules revokes every rule in force, with note added to each, and returns how
+// many (R6-S5: a restored database's rules allow nothing until the human adds them again).
+func (s *Store) RevokeAllApprovalRules(ctx context.Context, at time.Time, note string) (int, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE approval_rules SET revoked_at = ?, note = trim(note || ' ' || ?) WHERE revoked_at = 0`, at.Unix(), note)
+	if err != nil {
+		return 0, fmt.Errorf("revoking approval rules: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	return int(affected), err
+}
+
 // RevokeApprovalRule marks a live rule revoked. It returns ErrNotFound when there is no such rule
 // and ErrNotPending (reused: "no longer in force") when it was already revoked.
 func (s *Store) RevokeApprovalRule(ctx context.Context, id int64, at time.Time) error {

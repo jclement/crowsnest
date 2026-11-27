@@ -8,6 +8,7 @@
 //	POST /api/v1/jobs/{id}/budget/finish-step a job at its budget may finish the step it is in
 //	POST /api/v1/jobs/{id}/wake               wake a blocked job now
 //	GET  /api/v1/limits                       the fleet's usage limits, with their reset times
+//	POST /api/v1/limits/{engine}/clear        the human's Clear hold: forget the limit, let its jobs go (R6-S3)
 //	GET  /api/v1/system/waits                 live jobs that break "every wait has an owner and a wake-up"
 //	GET  /api/v1/projects/{id}/accept, PUT    a project's check command and budget defaults
 //	POST /api/v1/questions/{id}/reconcile     look for the answer in the asker's conversation
@@ -43,6 +44,7 @@ func (s *Server) registerAcceptRoutes(mux *http.ServeMux) {
 	}))
 	mux.Handle("PUT /api/v1/jobs/{id}/budget", auth(s.handleJobBudget))
 	mux.Handle("GET /api/v1/limits", auth(s.handleLimits))
+	mux.Handle("POST /api/v1/limits/{engine}/clear", auth(s.handleLimitClear))
 	mux.Handle("GET /api/v1/system/waits", auth(s.handleWaits))
 	mux.Handle("GET /api/v1/projects/{id}/accept", auth(s.handleProjectAccept))
 	mux.Handle("PUT /api/v1/projects/{id}/accept", auth(s.handleProjectAcceptSave))
@@ -74,6 +76,25 @@ func (s *Server) handleLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	list := service.FleetLimitsNow(r.Context())
 	writeList(w, list, ListMeta{Total: len(list)})
+}
+
+// handleLimitClear is POST /limits/{engine}/clear.
+func (s *Server) handleLimitClear(w http.ResponseWriter, r *http.Request) {
+	service := s.jobService(w)
+	if service == nil {
+		return
+	}
+	engine := r.PathValue("engine")
+	if engine != jobs.EngineClaude && engine != jobs.EngineCodex {
+		writeError(w, http.StatusBadRequest, codeValidation, "engine must be claude or codex")
+		return
+	}
+	released, err := service.ClearLimit(r.Context(), engine)
+	if err != nil {
+		s.writeJobError(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, map[string]any{"engine": engine, "released": released})
 }
 
 // waitsView is GET /system/waits.

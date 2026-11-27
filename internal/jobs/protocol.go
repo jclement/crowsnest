@@ -307,7 +307,14 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Job
 	if progress == "" && input.State == "" && input.Waiting == nil {
 		return Job{}, invalid("progress is required: one line saying what you are doing now")
 	}
-	return s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+	verb := VerbProgress
+	switch strings.TrimSpace(input.State) {
+	case string(StateBlocked):
+		verb = VerbBlocked
+	case string(StateRunning):
+		verb = VerbRunning
+	}
+	return s.agentMutate(ctx, id, verb, func(r *store.JobRecord, c *change) error {
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s; there is nothing to update", FormatID(r.ID), r.State)
 		}
@@ -445,7 +452,7 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 		return Job{}, err
 	}
 	review, checking := "", false
-	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+	job, err := s.agentMutate(ctx, id, VerbDone, func(r *store.JobRecord, c *change) error {
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s", FormatID(r.ID), r.State)
 		}
@@ -462,6 +469,7 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 				"but done is refused until the human lands it, discards it or sends it back with a message", FormatID(r.ID), oneLine(r.CauseDetail, 160))
 		}
 		s.markProgressLocked(r)
+		r.PendingFeedback = "" // the agent called done again: the old finding is answered
 		r.State, r.ResultMD = string(StateDone), result
 		if walkthrough != "" {
 			r.WalkthroughMD = walkthrough
@@ -470,6 +478,7 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 		r.Stuck, r.Cause, r.CauseDetail, r.Waiting = false, "", "", false
 		c.event(EventDone, "Done: "+oneLine(result, 160), map[string]any{"verified": len(decodeList(r.VerifiedJSON)), "not_verified": len(decodeList(r.NotVerifiedJSON))})
 		if checking = applyAcceptLocked(r, c, plan, input.NoCommitsReason); checking {
+			s.placeHoldLocked(r, c, HoldChecking, r.AcceptDetail, "")
 			return nil // the review gate, if any, looks at the revision that passes (accept.go)
 		}
 		if review = s.reviewerFor(*r); review != "" {
@@ -477,6 +486,7 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 			// The review gate (review.go): not done yet, in review by a reviewer job.
 			r.State = string(StateInReview)
 			r.ReviewRound++
+			s.placeHoldLocked(r, c, HoldReviewing, fmt.Sprintf("a %s reviewer looks at the change (round %d)", review, r.ReviewRound), "")
 			c.event(EventReview, fmt.Sprintf("In review (round %d of %d): a %s reviewer looks at the change", r.ReviewRound, maxReviewRounds, review), nil)
 		}
 		return nil
@@ -513,7 +523,7 @@ func (s *Service) Fail(ctx context.Context, id, reason string) (Job, error) {
 	if utf8.RuneCountInString(reason) > 4000 {
 		reason = string([]rune(reason)[:4000])
 	}
-	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+	job, err := s.agentMutate(ctx, id, VerbFail, func(r *store.JobRecord, c *change) error {
 		if State(r.State).Terminal() {
 			return invalid("job %s is already %s", FormatID(r.ID), r.State)
 		}
