@@ -202,10 +202,17 @@ test("an empty Inbox says nothing needs you", async ({ page }) => {
   await page.route("**/api/v1/approvals?status=pending", (route) => route.fulfill({ json: { data: [] } }));
   await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: { data: [] } }));
   await page.route("**/api/v1/fleet", async (route) => {
-    const response = await route.fetch();
-    const body = (await response.json()) as { data: { agents: Array<{ needs_you: boolean }> } };
-    for (const agent of body.data.agents) agent.needs_you = false;
-    await route.fulfill({ response, json: body });
+    // The app can abort a fleet request it no longer needs (a newer one superseded it) while
+    // this handler is still reading the real response; Playwright then throws "Response has been
+    // disposed" and failed the test about once in 25 runs. An aborted request needs no answer.
+    try {
+      const response = await route.fetch();
+      const body = (await response.json()) as { data: { agents: Array<{ needs_you: boolean }> } };
+      for (const agent of body.data.agents) agent.needs_you = false;
+      await route.fulfill({ response, json: body });
+    } catch {
+      await route.abort().catch(() => undefined);
+    }
   });
   await page.goto("/inbox");
   await expect(page.getByRole("heading", { name: "Nothing needs you" })).toBeVisible();
