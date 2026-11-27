@@ -14,6 +14,7 @@ import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { Approval, DecideRequest } from "./approvals";
 import type { AttentionSnapshot, NowResponse, SinceResponse } from "./attention";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
+import type { BrowseOptions, BrowsePlaces, FolderFacts, Listing } from "./browse";
 import type { BudgetInput, FleetLimit, ProjectAccept, WaitsView } from "./accept";
 import type {
   Digest,
@@ -259,6 +260,11 @@ export const endpoints = {
   jobAction: (id: string, action: "cancel" | "nudge" | "resume") => api<Job>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
   roles: () => api<RoleInfo[]>("/roles"),
   dirs: () => api<DirEntry[]>("/dirs"),
+  // ---- The folder picker (DESIGN.md 4.23) ----
+  browse: (path: string, options: BrowseOptions = {}) =>
+    api<Listing>(`/browse?path=${encodeURIComponent(path)}${options.files ? "&files=1" : ""}${options.hidden ? "&hidden=1" : ""}`),
+  browseFacts: (path: string) => api<FolderFacts>(`/browse/facts?path=${encodeURIComponent(path)}`),
+  browsePlaces: () => api<BrowsePlaces>("/browse/places"),
   // ---- Landing, throttling, the pause, presence, the digest (DESIGN.md 6.11 to 6.14, 7.12) ----
   review: (id: string) => api<ReviewView>(`/jobs/${encodeURIComponent(id)}/review`),
   reviewDiff: (id: string, path: string) => api<FileDiffView>(`/jobs/${encodeURIComponent(id)}/review/diff?path=${encodeURIComponent(path)}`),
@@ -522,6 +528,9 @@ export const queryKeys = {
   digestSettings: ["digests", "settings"] as const,
   roles: ["roles"] as const,
   dirs: ["dirs"] as const,
+  browse: (path: string, options: BrowseOptions) => ["browse", path, !!options.files, !!options.hidden] as const,
+  browseFacts: (path: string) => ["browse-facts", path] as const,
+  browsePlaces: ["browse-places"] as const,
   /** Everything about questions sits under ["questions"], so one `question` event refreshes it all. */
   questions: ["questions"] as const,
   questionList: (status: string) => ["questions", "list", status] as const,

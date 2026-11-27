@@ -38,7 +38,7 @@ cleared once the answer is in. If someone answered elsewhere, or the dialog went
 says so instead of offering buttons. After an answer it moves on to the next decision, or back to
 Now.
 
-![A decision packet on a phone: the ask, what each choice does, the answer bar](img/decide-390.jpg)
+![A decision packet on a phone: the ask, what each choice does, the answer bar](../img/decide-390.jpg)
 
 ## Answering a question
 

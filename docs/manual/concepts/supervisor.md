@@ -60,9 +60,10 @@ dialogs](questions-approvals-dialogs.md) and [Acceptance](acceptance.md).
 
 ## The fleet's usage limit
 
-On a Claude subscription a usage limit applies to every agent on the account at once. The first
-agent to hit it records one **fleet limit** with its reset time ("resets 3pm"; when the message
-gives none, a guess of 30 minutes, said to be a guess). Until the reset: new jobs are held, every
+On a Claude subscription a usage limit applies to every agent on the account at once. An agent
+that hits it holds its own job with the reset time it reported ("resets 3pm"; when the message
+gives none, a guess of 30 minutes, said to be a guess; never more than 24 hours). When two
+different jobs report it, crowsnest records one **fleet limit**. Until the reset: new jobs are held, every
 turn may end without a nudge, retries wait, and the standing agents are not poked. One banner with
 a countdown replaces a stuck card per agent (their cards read **Held**). After the reset, the
 waiting jobs get "continue" one at a time, 20 seconds apart. The reset time is read from what

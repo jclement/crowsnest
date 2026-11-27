@@ -56,7 +56,7 @@ screen:
    last twelve hours). **Mark all seen** clears it.
 4. **Give a job**: the job box, with **For** choosing the orchestrator or a project.
 
-![Now on a phone: the queue first, then projects](img/now-390.jpg)
+![Now on a phone: the queue first, then projects](../img/now-390.jpg)
 
 ## The tray
 

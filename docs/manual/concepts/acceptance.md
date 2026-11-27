@@ -14,9 +14,16 @@ no directory or outside git: those keep a plain done.
 1. **Before anything is recorded**, the tree must be clean (no uncommitted or untracked files)
    and a job in its own worktree must have commits, or say why not. Otherwise `done` is refused
    with the files named, and the agent fixes it. Uncommitted work is lost work.
-2. **The check.** crowsnest runs the project's **check command** itself, in the worktree, as a
-   heavy command (it waits for a slot like any build), with `CI=1`, cut off after 30 minutes
-   (`--check-timeout`). The job is **In review** with **Checking** meanwhile.
+2. **The check.** crowsnest runs the project's **check command** itself, in the job's worktree, as
+   a heavy command (it waits for a slot like any build), with `CI=1`, without crowsnest's or your
+   credentials in its environment, cut off after 30 minutes (`--check-timeout`). The job is **In
+   review** with **Checking** meanwhile. **Only committed work counts**: the tree must be clean
+   when the check starts, and if it is dirty or HEAD moved when the check ends (the agent, or the
+   check itself, changed what was tested), the run is not evidence and runs again (three times in a
+   row at most, then it needs you). It runs in the worktree, not in a fresh copy, because a fresh
+   copy would lack the ignored files a check needs (`node_modules`, a virtual environment, build
+   caches). **Run the check again** needs a clean tree too. A result crowsnest could not record is
+   not evidence either.
 3. **Pass** → **Accepted**. If the review gate is on, a reviewer then reads that exact revision;
    otherwise the job is done.
 4. **Fail** → back to **Running** with **Check failed (round N)**, and one line typed to the agent:

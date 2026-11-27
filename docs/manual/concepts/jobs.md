@@ -104,7 +104,7 @@ orchestrator](projects-and-leads.md).
   instructions, timeline), **Conversation**, **Terminal**, and, once finished in a worktree,
   **Land**.
 
-![The Jobs board: needs you or stuck first, then in progress, then finished today](img/jobs-1440.jpg)
+![The Jobs board: needs you or stuck first, then in progress, then finished today](../img/jobs-1440.jpg)
 
 ## What can go wrong
 

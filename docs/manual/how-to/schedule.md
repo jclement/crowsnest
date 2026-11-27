@@ -9,7 +9,7 @@ project page's **Manage**, or the palette ([Open Schedule](app:sheet/schedule)).
 task with its cadence, last run, next run, an on/off switch, and **Edit**, **Delete** and **Run
 now**. The **Project** filter narrows it.
 
-![The Schedule sheet: the daily digest, then every scheduled task](img/schedule-1440.jpg)
+![The Schedule sheet: the daily digest, then every scheduled task](../img/schedule-1440.jpg)
 
 ## Make one in the app
 

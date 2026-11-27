@@ -14,7 +14,8 @@ The job box is at the bottom of **Now** (**Give a job**) and at the top of **Job
 2. **What needs doing?**: the brief. Its first line becomes the title.
 3. Optional: press the summary button under the box (it reads, for example, **To the
    orchestrator**) for **Where** (a directory or repo; empty for the orchestrator or the project's
-   directory), **Role**, **Done when** and **Engine**.
+   directory; **Browse…** opens the [folder picker](projects.md#choosing-the-folder)), **Role**,
+   **Done when** and **Engine**.
 4. Attach files if they help: paste a screenshot, drop a file, or press **Attach files**.
 5. **Give job** (`⌘ Enter`, `Ctrl Enter` elsewhere). A toast says where it went ("Given to
    Crowsnest's lead", "Starting an agent in …", "Sent to the orchestrator"), with a link.

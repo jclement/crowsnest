@@ -141,6 +141,10 @@ type Config struct {
 	ProtectedHostsFile string   // --protected-hosts-file, ~ expanded; "" for none
 	ProtectedBranches  []string // --protected-branch
 
+	// ---- The folder picker (browse.go) ----
+
+	BrowseRoots []string // --browse-root: absolute, cleaned, ~ expanded
+
 	// ---- Attachments (attach.go) ----
 
 	AttachmentMaxMB   int // largest attachment, MB

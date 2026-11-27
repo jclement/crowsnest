@@ -12,7 +12,9 @@ A job may have limits on four measures:
 - **turns** (each time the agent ends a turn).
 
 Dollars, tokens and turns count **the job and every job below it** (its delegated children, five
-levels down). An agent whose spend is not measured (Codex) shows "not measured", never zero, and is
+levels down). When a parent's budget runs out, every live job below it is held too, queued ones
+included (they do not start), and raising the parent's budget releases them; a child's own
+budget still applies to it. An agent whose spend is not measured (Codex) shows "not measured", never zero, and is
 bounded by minutes and turns.
 
 Where a limit comes from, first match: the job's own (set from its view), its project's (the

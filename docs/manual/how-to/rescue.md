@@ -49,7 +49,7 @@ To say something in a sentence, use the message box under it (**Message to job-N
 The panel is not offered on a job the orchestrator or a lead holds in its own conversation: use
 Chat with that agent instead.
 
-![Rescue on a phone: the cause, what the agent last said, the rescue buttons](img/rescue-390.jpg)
+![Rescue on a phone: the cause, what the agent last said, the rescue buttons](../img/rescue-390.jpg)
 
 ## A typical rescue
 

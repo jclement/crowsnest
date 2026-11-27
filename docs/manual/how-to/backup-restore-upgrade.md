@@ -43,8 +43,9 @@ crowsnest restore --force FILE    # over an existing database (the old one is ke
 
 A restore is all or nothing: every file is checked against the manifest and prepared beside its
 destination first; a failure part-way puts everything back. Scheduled task files that start jobs
-must be approved again, the backup's **approval rules arrive revoked** (add back the ones you
-want), and its role files are marked unread. The replaced database is kept beside the new one,
+must be approved again, the backup's **approval rules arrive revoked** (they no longer apply;
+`crowsnest restore` says how many; add back the ones you want on each project page), its role files are marked unread, and Remote Control links are forgotten (found again
+when the agents start). The replaced database is kept beside the new one,
 scrubbed of sessions and tokens like a backup. Treat a backup from somewhere else as you would a script: it carries its
 own roles, tasks and risk rules.
 

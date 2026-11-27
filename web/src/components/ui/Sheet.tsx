@@ -1,11 +1,15 @@
 // Sheet: a dialog that is full-screen on mobile and a centred modal from md (house style: no
 // centred modals on a phone). It renders into document.body, closes on Escape and on the
 // backdrop, moves focus in on open and back to the opener on close, and locks page scroll.
+// Sheets can stack (the folder picker opens over New project): Escape closes only the top one.
 import { X } from "lucide-react";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
 import { IconButton } from "./Button";
+
+/** The open sheets, oldest first: only the last one answers Escape. */
+const openSheets: symbol[] = [];
 
 interface SheetProps {
   open: boolean;
@@ -31,17 +35,16 @@ export function Sheet({ open, onClose, title, headerExtra, size = "lg", children
     const opener = document.activeElement as HTMLElement | null;
     const { overflow } = document.body.style;
     document.body.style.overflow = "hidden";
-    panelRef.current?.focus();
+    // A field inside that asked for focus (autoFocus) keeps it; otherwise the panel takes it.
+    if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus();
+    const self = Symbol("sheet");
+    openSheets.push(self);
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      // Only the topmost sheet closes: a help sheet opened over the Schedule sheet closes alone.
-      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
-      const top = dialogs[dialogs.length - 1];
-      if (top && panelRef.current && top !== panelRef.current && top.compareDocumentPosition(panelRef.current) & Node.DOCUMENT_POSITION_PRECEDING) return;
-      onCloseRef.current();
+      if (event.key === "Escape" && openSheets[openSheets.length - 1] === self) onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => {
+      openSheets.splice(openSheets.indexOf(self), 1);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = overflow;
       opener?.focus?.();

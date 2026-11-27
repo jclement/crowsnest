@@ -131,6 +131,7 @@ All of them, in `crowsnest --help` order. The config-file key is the flag's name
 | `--lead-ceiling-usd` | `CROWSNEST_LEAD_CEILING_USD` | `0` | Budgets and acceptance → Lead ceiling per day ($) | each project lead's spend ceiling per day where its spend is measured (0: none) |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Attachments → Largest attachment (MB) | largest attachment (pasted, dropped or attached by an agent) in MB |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Attachments → Attachment quota (MB) | disk all attachments may take, in MB; past it the oldest files nobody needs are deleted |
+| `--browse-root` | `CROWSNEST_BROWSE_ROOTS` | none | no | a directory the folder picker may browse besides your home, projects' and remembered directories, e.g. /srv or /Volumes; `/` only when named here (repeatable) |
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | Guard → Protected hosts | a production host no agent may reach unattended: the guard refuses commands that would, and approvals naming it are dangerous (repeatable) |
 | `--protected-hosts-file` | `CROWSNEST_PROTECTED_HOSTS_FILE` | `~/Developer/claude-agent/config/protected-hosts` | no | file of protected hosts, one per line, # comments; read when it exists ('' for none) |
 | `--protected-branch` | `CROWSNEST_PROTECTED_BRANCHES` | none | Guard → Protected branches | a branch agents may not commit or push onto, nor force-push (repeatable; default none) |

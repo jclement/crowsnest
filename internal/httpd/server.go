@@ -25,6 +25,7 @@ import (
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/attention"
 	"github.com/jclement/crowsnest/internal/auth"
+	"github.com/jclement/crowsnest/internal/browse"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/digest"
 	"github.com/jclement/crowsnest/internal/fleet"
@@ -97,6 +98,8 @@ type Deps struct {
 
 	// Jobs serves /jobs, /roles and /dirs (M7). Nil: they answer 503.
 	Jobs *jobs.Service
+	// Browse serves the folder picker's /browse routes (DESIGN.md 4.23). Nil: they answer 503.
+	Browse *browse.Service
 	// Voice is talk mode (M11): nil unless an ElevenLabs key is configured, and then every
 	// /voice route answers 404.
 	Voice *voice.Service
@@ -264,6 +267,7 @@ func (s *Server) routes() http.Handler {
 	s.registerConversationRoutes(mux)
 	s.registerQuestionRoutes(mux)
 	s.registerJobRoutes(mux)
+	s.registerBrowseRoutes(mux)
 	s.registerLandingRoutes(mux)
 	s.registerAcceptRoutes(mux)
 	s.registerJournalRoutes(mux)

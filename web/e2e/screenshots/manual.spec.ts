@@ -78,3 +78,25 @@ test("chat at 1440", async ({ page }) => {
   await expect(page.getByRole("list", { name: "Conversation" })).toBeVisible();
   await shot(page, "chat-1440");
 });
+
+// The folder picker (New project → Browse…), with the names the manual quotes asserted, so the
+// how-to page cannot describe a button that is not there.
+test("the folder picker at 1440", async ({ page }) => {
+  await open(page, "/projects", 1440, 900);
+  await page.getByRole("button", { name: "New project" }).first().click();
+  const form = page.getByRole("form", { name: "New project" });
+  await form.getByRole("button", { name: "Browse…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Choose the project's folder" });
+  await expect(dialog.getByRole("navigation", { name: "Places" }).filter({ visible: true })).toBeVisible();
+  await expect(dialog.getByPlaceholder("Filter, or paste a path (/… or ~/…)")).toBeVisible();
+  await expect(dialog.getByText("Hidden")).toBeVisible();
+  await expect(dialog.getByText("Files", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Open Developer" }).click();
+  await dialog.getByRole("button", { name: /^acme-api/ }).click();
+  await expect(dialog.getByText("GitHub: Land can open pull requests here.")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Select this folder" })).toBeVisible();
+  await shot(page, "picker-1440");
+  await dialog.getByRole("button", { name: "Select this folder" }).click();
+  await expect(form.getByLabel(/Check command/)).toHaveValue("mise run check");
+});

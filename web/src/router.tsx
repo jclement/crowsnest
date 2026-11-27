@@ -138,7 +138,19 @@ const chatRoute = createRoute({
   }),
   component: ChatView,
 });
-const projectsRoute = createRoute({ getParentRoute: () => appRoute, path: "/projects", component: () => <ProjectsView /> });
+const projectsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/projects",
+  // ?new=1 opens New project; ?new=browse opens it with the folder picker up (the palette's
+  // "New project in…").
+  validateSearch: (search: Record<string, unknown>): { new?: "1" | "browse" } => ({
+    new: search.new === "browse" ? "browse" : search.new === "1" || search.new === 1 ? "1" : undefined,
+  }),
+  component: function ProjectsRoute() {
+    const search = projectsRoute.useSearch();
+    return <ProjectsView create={search.new} />;
+  },
+});
 const projectRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/projects/$slug",

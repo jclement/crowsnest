@@ -103,6 +103,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host: the guard hook refuses commands that would reach it, and an approval naming it is dangerous (8.7). Repeatable; added to the file's hosts |
 | `--protected-hosts-file` | `CROWSNEST_PROTECTED_HOSTS_FILE` | `~/Developer/claude-agent/config/protected-hosts` | One host per line, `#` comments; read when it exists, `''` for none (8.7) |
 | `--protected-branch` | `CROWSNEST_PROTECTED_BRANCHES` | none | A branch agents may not commit or push onto, nor force-push: the guard hook (8.7). Repeatable |
+| `--browse-root` | `CROWSNEST_BROWSE_ROOTS` | none | A directory the folder picker may browse besides the home directory and the directories projects and the remembered list use (`/srv`, `/Volumes`); `/` only when named here (4.23). Repeatable; never editable from a browser |
 | `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | false | Let the Terminal view's herdr client read the user's saved SSH machines; off, it runs with `XDG_STATE_HOME=<state>/terminal-client` (10, 20). Never editable from a browser |
 | `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | false | Sign in allowed tailnet logins from `tailscale serve`'s identity headers (4.20). Never editable from a browser |
 | `--backup-every` | `CROWSNEST_BACKUP_EVERY` | `0` (off) | Automatic backup interval, at least `1h` (4.17); editable in Settings |
@@ -590,6 +591,59 @@ What holds now:
   are not public push endpoints (R5-S13). Thumbnails are decoded outside the quota lock, at most
   16 megapixels (R5-S12). A failed spend write forgets the cached cursor (R5-C10). Argon2 memory
   is capped at 256 MiB (R5-I2). A new push device is journalled (R5-I4).
+
+### 4.23 The folder picker's browse surface (`wip/picker`)
+
+Jeff, 2026-11-27: "New project, probably needs a nice file explorer". The picker
+(`web/src/components/browse/DirPicker.tsx`) reads one directory at a time from
+`internal/browse` through `GET /browse`, `/browse/facts` and `/browse/places` (10). It is a new
+read surface on a service that is already a shell, so it adds nothing the owner could not do in
+the Terminal view; it is held to the same standard as everything else anyway:
+
+- **Owner session only.** The routes sit behind `requireAuth`: a browser session (or `--no-auth`,
+  which is the owner by definition). A scoped read token (`cnk_…`, 4.21) is refused, and the agent
+  socket has no `/browse` routes at all, so an agent cannot use crowsnest to look around the disk
+  as the owner (tested both ways). GET only; the usual host check applies (no Origin is needed for
+  a GET, as for every other read).
+- **Nothing writes, and no file's contents leave.** A listing carries names, types, link targets
+  and modification times; files are listed only on request (greyed, for orientation) and never
+  opened. The facts call reads a handful of metadata files (`.git/HEAD`, `.git/config`,
+  `commondir`, `refs/remotes/origin/HEAD`, `packed-refs`, a `mise.toml`, Claude's `~/.claude.json`)
+  and returns conclusions only. Git's state is read from those files, never by running git, so a
+  repository's own config (hooks, `fsmonitor`, aliases) cannot run anything. A worktree's `.git`
+  file can name a git directory anywhere: one outside the roots is not read (the folder shows as a
+  repository of unknown branch and remote). A remote URL has any credentials
+  (`https://user:token@…`) removed before it is returned.
+- **Roots.** A path is browsable only under a root: the home directory, every `--browse-root`, and
+  every directory a live project or the remembered job list already uses (read on every call, so
+  a new project's directory is browsable at once). `/` is never a root unless `--browse-root /`
+  names it; a `/` in the remembered list is ignored. Workspace directories and projects' parents
+  are offered as favourites, but only when they are inside a root already.
+- **Paths are cleaned and resolved server-side.** `~` is expanded, the path must be absolute (no
+  NUL, at most 4096 bytes), `filepath.Clean` removes `..`, and `EvalSymlinks` resolves every link;
+  the resolved path must be inside a resolved root. So `~/../etc` and a link out of a root are both
+  "outside". A link inside a root that points outside every root is listed, marked `outside`, and
+  never described, entered or chosen. A path that does not exist is "no such folder" only when its
+  nearest existing ancestor is inside a root; otherwise it is "outside", so the answer says nothing
+  about the rest of the disk. The breadcrumb shows the ancestors above the root for orientation,
+  not as links. A refusal is crowsnest's own sentence and never echoes a path.
+- **Bounded.** A listing returns at most 500 entries (`more` counts the rest; the filter box
+  narrows instead); every listing or facts call has a 3 s deadline (a slow or dead network mount
+  answers `504 TIMEOUT`, "took too long", rather than hanging the request); at most 4 run at once,
+  and a fifth waits a second and then answers `503` with `Retry-After`. A read stuck in the kernel
+  cannot be cancelled, so its goroutine keeps its slot until the kernel returns: a dead mount can
+  strand at most 4 goroutines, not one per click. A deadline reached while entries are being
+  described returns the names with `partial: true`.
+- **Permission errors are per entry.** An unreadable sub-folder is listed with `readable: false`
+  and "permission denied" (checked with `access(2)`, no attempt to open it); only the folder asked
+  for being unreadable fails the call (`403`).
+- **Claude's folder trust** is read from `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`
+  (the doctor's `DirTrusted`, a folder or a parent), re-read only when its size or time changes,
+  and skipped above 16 MiB ("not cheaply knowable", so the field is left out).
+- **`--demo`** browses a small real tree made in its throwaway state directory
+  (`<state>/demo-home`: a GitHub repository with a check task and AGENTS.md, an Azure DevOps one
+  with CLAUDE.md, a plain folder, `~/Work`, a hidden folder, a file) as its home, never the
+  machine's own home, so the hermetic suite and screenshots neither show nor depend on real files.
 
 ## 5. Driving herdr
 
@@ -2706,6 +2760,9 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board (archived jobs left out; `?q=` searches title, brief and result, `?archived=1` archived only, 4.19); create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, isolate?}`; `budget?` with M12) → `201` and the queued job; detail with `timeline` and `questions` (6.8) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
+| `GET /browse?path=&files=1&hidden=1` | The folder picker (4.23), owner session only: one directory `{path, resolved, label, root: Place, parent, crumbs: [{name, path, browsable}], entries: [{name, path, dir, git, symlink, target?, outside?, hidden, mtime, readable, error?}], more, hidden_count, file_count, partial, git}`; no `path` is `~`. `400` not absolute or a file, `403` outside the roots or unreadable, `404` no such folder (inside a root), `504 TIMEOUT` a slow mount, `503` + `Retry-After` busy |
+| `GET /browse/facts?path=` | One folder's facts: `{path, resolved, label, name, git, worktree, git_top?, branch?, detached?, default_branch?, remote? (no credentials), host?: github\|azure\|gitlab\|bitbucket\|other, check_command?, agents_md, claude_md, claude_trusted?, is_home, is_filesystem_root, project: {id, slug, name, dir, exact} \| null, contains: [the same]}`; errors as `/browse` |
+| `GET /browse/places` | Where the picker starts: `{home, favourites: [Place], roots: [Place]}`, a `Place` being `{path, label, kind: home\|favourite\|root\|project\|project-parent\|remembered\|recent, git?}` |
 | `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}[?open=1]`, `PUT /projects/{ref}` | Projects (21.1): `{projects: [Project + {lead, counts: {needs_you, running, total}}], unfiled: counts}`; create `{name, dir, slug?, description?, default_role?, default_engine?, default_model?, default_isolate?: -1\|0\|1, permission_mode?, lead_start?}` (`400` with the reason: not a directory, too wide, overlapping); `{ref}` is the id or slug; `?open=1` applies `lead_start=open`; `PUT` edits or `{archived}` (archiving stops the lead). A `project` event `{id, change}` |
 | `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | Project leads (21.2): the running leads' statuses (the orchestrator's status shape plus `project_id`, `slug`, `running`; state `off` when not running, `stopped` after Stop; Remote Control's `remote_control`, `remote_control_note` and `remote_control_url` as the orchestrator's, 7.10.1); the lead's controls (`poke` answers as `POST /orchestrator/poke`). A `lead` event carries a lead's status |
 | `POST /jobs/{id}/restart-agent` | Restart the job's agent on the same conversation with its start-up files and instruction layers written afresh (21.3); refused for a job a standing agent holds (restart that agent) |
@@ -2906,6 +2963,26 @@ loaded lazily. The Fleet view's Conversation and Terminal bodies are the exporte
 `components/agent/AgentConversation.tsx` and `AgentTerminal.tsx`: later milestones replace their
 bodies and keep their names and props (`{agent}`). The Inbox badge and the tab-title count are
 open questions plus agents that need you (blocked, or a dialog on screen) (M6; 8.4).
+
+**The folder picker (4.23).** `components/browse/DirPicker.tsx` in a Sheet (full screen on a
+phone with 48 px rows, a modal from `md` with the places as a sidebar): a breadcrumb, one box that
+filters the listing or, starting with `/` or `~`, takes a path to go to, Hidden and Files toggles,
+places (home, `~/Developer`, `~/Work`, `--browse-root`s, projects, projects' parents, remembered
+and workspace directories, and this browser's last eight choices in `localStorage`), repositories
+badged and floated first, and a bar that never scrolls away with the highlighted folder's facts
+in a line ("git repo on GitHub, branch main, has a check task, AGENTS.md present"), what Land can
+do with its remote, the warnings (`lib/browse.ts`: not a repository, below a repository's top,
+inside or around a project, `$HOME` or `/`) and Select this folder. Keys in the box or on a row:
+↑/↓ highlight, Enter or → open, Backspace in an empty box or ← up, Cmd/Ctrl+Enter select; a click
+highlights, a double click or the row's chevron opens. A move is fetched first and happens only
+on success, so a refused path leaves the listing and shows the refusal. It is used by New project
+(Browse… beside the typed directory, which still works: a picked or typed folder's facts prefill
+the name and the check command, saved as the project's acceptance setting only when changed from
+the one found, and note the remote's host, "Azure DevOps: Land will not open pull requests here"),
+the new-job form's Where, and the palette's "New project in…" (`/projects?new=browse`). The
+first-run checklist's orchestrator folder is `--dir`, which is never editable from a browser
+(3.2), so the picker is not offered there. Sheets now stack: Escape closes only the top one, and
+a field inside a sheet that asked for focus (`autoFocus`) keeps it.
 
 **Chat (M4).** `routes/ChatView.tsx` is the orchestrator's conversation; the Fleet panel's
 `AgentConversation` slot shows any agent's with the same `components/chat/ConversationView`.
@@ -3182,9 +3259,11 @@ flag or a known subcommand's, and that "how do I land a job" finds the landing p
 palette answering a question, the "?" on a stuck job at 390 and 1440 (Escape closing only the help
 sheet), a hint, and axe.
 
-**Stubs.** Two features were being built on other branches when the manual was written (the
-live diff viewer, `wip/diff`; the folder picker, `wip/picker`). Their pages carry a visible "Coming
-soon" note and an HTML comment `STUB(wip/…)`; whoever merges them replaces both.
+**Stubs.** Features still being built on other branches (the live diff viewer, `wip/diff`; paired
+themes with a picker, `wip/design`) have a visible "Coming soon" note and an HTML comment
+`STUB(wip/…)` where they belong (`grep -rn STUB docs/manual`); whoever merges them replaces both.
+The folder picker (`wip/picker`) is described in `how-to/projects.md`, its labels asserted by the
+manual's screenshot spec.
 
 ## 13. Talk mode
 
@@ -3371,6 +3450,7 @@ internal/agentcfg/           the --settings (hooks, allow rule) and --mcp-config
 internal/orch/               lifecycle, send, poke precheck and gate, poker, herdr-side backstop
 internal/journal/            journal entries (pokes, skips, sends, answers, restarts, alerts)
 internal/projects/           projects: records, directory rules, the lead manager (21)
+internal/browse/             the folder picker's read-only browser: roots, listings, folder facts (4.23)
 internal/instructions/       instruction layers: layering, revisions, what agents loaded (21.3)
 internal/schedule/           scheduled tasks, files and app schedules: parse, due rules, stamps, targets, run history, job tasks (7.8)
 internal/transcript/         locate, tail, normalise Claude JSONL; usage records for spend
@@ -3772,6 +3852,7 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 119. **A consequential choice never gets a shorter path than its evidence** (23.1, 23.4; Codex P2, R5-S2). Only a routine question (one choice, no files, a body under 400 characters, not gate-shaped) is answered from a row or a notification button; anything else opens the packet, and a gate's granting choice there takes a second tap. A gate, an elevated or a dangerous approval carries no action token at all, not even Snooze.
 120. **A spoken job is read back before it exists, and exists durably once confirmed** (23.3; Codex P3/V1). No auto-send for job creation: transcript, project (asked when ambiguous), readback, Create; then a real job id, with Undo for eight seconds that cancels it. The readback uses the browser's own speech, never ElevenLabs: the words are Jeff's, not an agent's, and the server's rule that only agent text is synthesised stands.
 121. **Rescue reuses existing routes; slash commands only at idle** (23.2; Fable 3.2/3.5). Interrupt is the keys route's Esc, Compact and Switch model type `/compact` and `/model …` as a plain prompt, and only while the agent is idle, because Claude queues input typed during a turn and a queued slash command arrives as text. No new server endpoint, nothing the agent can reach.
+122. **The folder picker reads git's metadata files instead of running git, and its roots are an allowlist** (4.23, `wip/picker`). Running `git` in a folder someone picked would run that repository's config (hooks, `fsmonitor`, a pager); reading `HEAD`, `config` and the origin's `HEAD` answers the picker's questions (branch, base branch guess, remote host) in microseconds and runs nothing. The roots are home, `--browse-root` and what projects and the remembered list already use rather than the whole disk, because the picker is for choosing where work runs, and a smaller surface costs nothing there; `/` is one flag away for those who want it. Sorting and the entry cap happen before the per-entry details (git, mtime, access), so a folder of 100,000 entries costs one `ReadDir` and 500 stats, not 100,000; the client floats repositories to the top of what it was given.
 
 ## 18. Milestones
 
@@ -3810,6 +3891,8 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 10. **Scheduled tasks, passkeys, Codex conversation view, multi-session**: after v1. Scheduled tasks were built on `wip/upkeep` (7.8).
 
 ## 20. Known limitations (kept honest as the build proceeds)
+
+- **The folder picker (4.23).** A read stuck on a dead network mount holds its slot until the kernel gives up; with four stuck, the picker answers "busy" until one returns. Repositories are floated to the top of the first 500 entries only (the cap is applied in name order before git is looked at). The base-branch guess is the origin's `HEAD`, else `main`, else `master`, else the current branch: a repository whose base is `develop` without an origin `HEAD` is guessed wrong. Claude's folder trust is read from its global config only (a managed or project-level trust setting is not seen). Recent choices are per browser (`localStorage`), not per account. The home folder is refused as a project only by the projects service's own rule on the real `$HOME`; under `--demo` the picker's home is the demo tree, which the projects service does not know as home (the picker still warns).
 
 - **The doctor branch.** Settings that apply "when crowsnest restarts" (attachment limits, the notify URL, protected hosts and branches, jobs' Remote Control) could be made live; they are saved and shown as pending until then. The checklist's sign-in terminal needs herdr: with herdr missing, Claude's sign-in is the printed command only. Codex as the orchestrator has the gaps in 7.12. Per-agent CPU counts only the processes under a pane's foreground process (an agent's detached daemons are not attributed). `--open auto` does not open the app on a normal start (only the setup link), by choice. The greeting is a poke-shaped turn on the orchestrator's model (a few hundred tokens once).
 - After "New conversation", and before the first prompt in a fresh directory, the conversation shows the pane text: Claude has not written a transcript yet (7.6).
@@ -4134,6 +4217,8 @@ name space and **the file wins** (the app row is flagged and never run). Every r
 repositories in this round.
 
 ### 21.5 Demo
+
+(The folder picker browses `<state>/demo-home`, a small real tree, as the demo's home: 4.23.)
 
 `--demo` tells one morning across five projects, seeded in throwaway directories under its
 state directory: Crowsnest (`lead_start=job`), Website and Mobile (`lead_start=open`), whose

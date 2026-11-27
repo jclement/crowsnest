@@ -52,6 +52,8 @@ describe("links in the manual", () => {
       if (image) {
         const name = href.replace(/^(\.\.\/)+/, "").replace(/^\.\//, "");
         if (!manual.images.has(name)) problems.push(`${where}: no such picture in docs/manual/img`);
+        // The relative path must work on GitHub too, not only in the app.
+        else if (!fs.existsSync(path.resolve(path.dirname(path.join(manualDir, page.id)), href))) problems.push(`${where}: wrong relative path (GitHub cannot find it)`);
         continue;
       }
       const link = classifyLink(page.id, href);

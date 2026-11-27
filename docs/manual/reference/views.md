@@ -42,7 +42,7 @@ A conversation with the orchestrator or a project's lead (**Chat with** at the t
 **Restart** and **New conversation**. The composer sends with Enter on a wide screen (Shift+Enter
 for a new line), takes attachments, and has the mic with talk mode on.
 
-![Chat with the orchestrator](img/chat-1440.jpg)
+![Chat with the orchestrator](../img/chat-1440.jpg)
 
 ## Jobs
 
@@ -117,5 +117,13 @@ Opened from menus and the palette, over the current view:
 The instance's name and session, the **machine strip** (CPU with a one-minute sparkline, memory,
 load; from wide screens free disk and working agents; on a phone one chip that opens the figures),
 **Search or run…** (the command palette), the connection state, **Speak replies** (with talk
-mode), the theme switch and the account menu. Banners below it: the connection, **Automation
+mode), the theme switch and the account menu.
+
+<!-- STUB(wip/design): paired light and dark themes, with a picker in Settings and the palette,
+are being built on wip/design. Describe the picker here (and in reference/settings if it adds a
+setting) once it is on main. -->
+
+> **Coming soon (not on main yet):** paired light and dark themes with a theme picker in Settings
+> and the palette. Today the header's switch cycles System, Light and Dark, and the palette has
+> **Theme: System**, **Theme: Light** and **Theme: Dark**. Banners below it: the connection, **Automation
 paused**, and the fleet's usage limit.

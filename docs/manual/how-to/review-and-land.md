@@ -51,7 +51,7 @@ marks and full screen here once wip/diff is on main. -->
 4. crowsnest merges (or pushes), then tears down: stops the agent, removes the worktree, closes the
    workspace, deletes the branch (kept for a pull request). Each step lands on the timeline.
 
-![The Land tab: what it produced, changes in reading order, the agent's account](img/land-1440.jpg)
+![The Land tab: what it produced, changes in reading order, the agent's account](../img/land-1440.jpg)
 
 ## When not to push or merge
 
