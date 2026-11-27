@@ -144,7 +144,7 @@ test("a long paste becomes a file by default, and goes back to text on request",
 });
 
 test("a file dropped on the job box is given with the job and listed in its brief", async ({ page, app }, testInfo) => {
-  await page.goto("/jobs");
+  await page.goto("/jobs?new=1"); // the board's New job sheet: the same form as Now's job box
   const form = page.getByRole("form", { name: "New job" });
   await expect(form.getByRole("button", { name: "Attach files" })).toBeVisible();
   const notes: FakeFile = { name: "repro steps.md", type: "text/markdown", content: "# Repro\n\n1. Open the board\n2. It is blank\n" };

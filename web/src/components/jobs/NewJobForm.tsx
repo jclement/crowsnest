@@ -1,4 +1,5 @@
-// NewJobForm: the one text box (DESIGN.md 6.2 and 12). "What needs doing?" is the brief; where,
+// NewJobForm: the one text box (DESIGN.md 6.2 and 12), and the one form a job is given with: Now's
+// job box, and the Jobs view's New job sheet. "What needs doing?" is the brief; where,
 // role, done-when and engine sit behind one disclosure. With no directory the job goes to the
 // orchestrator. Cmd/Ctrl+Enter gives the job from the keyboard. Files (DESIGN.md 8.6) are pasted,
 // dropped on the form or picked with the paperclip; the agent finds them listed in its brief.
@@ -24,6 +25,8 @@ interface NewJobFormProps {
   onCreated?: (job: Job) => void;
   /** The project the board shows: the job is given to it. */
   project?: ProjectView;
+  /** Focus the brief on mount (the Jobs view's New job sheet). */
+  autoFocus?: boolean;
 }
 
 type Destination = "lead" | "job";
@@ -31,7 +34,7 @@ type Destination = "lead" | "job";
 const inputClass =
   "min-h-11 w-full rounded border border-border-strong bg-surface px-2 text-sm text-heading placeholder:text-muted focus-visible:outline-2 focus-visible:outline-accent md:min-h-8";
 
-export function NewJobForm({ onCreated, project }: NewJobFormProps) {
+export function NewJobForm({ onCreated, project, autoFocus }: NewJobFormProps) {
   const [brief, setBrief] = useState("");
   const [open, setOpen] = useState(false);
   const [dir, setDir] = useState(project?.dir ?? "");
@@ -124,6 +127,7 @@ export function NewJobForm({ onCreated, project }: NewJobFormProps) {
         onPaste={onPaste}
         rows={brief.includes("\n") ? 4 : 2}
         placeholder="What needs doing?"
+        autoFocus={autoFocus}
         className={`${inputClass} resize-y py-2`}
       />
       <AttachmentTray attachments={attachments} />

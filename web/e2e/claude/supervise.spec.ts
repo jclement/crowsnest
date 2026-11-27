@@ -21,7 +21,7 @@ let instance: Instance;
 /** Gives a tester job in the scratch repository from the Jobs board; returns its id. */
 async function giveJob(page: Page, brief: string): Promise<string> {
   await cheapJobs(page);
-  await page.goto(`${instance.baseURL}/jobs`);
+  await page.goto(`${instance.baseURL}/jobs?new=1`); // the New job sheet
   await page.getByLabel("What needs doing?").fill(brief);
   await page.getByRole("button", { name: /^To / }).click();
   await page.getByLabel(/^Where/).fill(scratch.repo);

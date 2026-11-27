@@ -92,7 +92,7 @@ test.describe.serial("a project with a lead, with real Claude", () => {
 
     // A job to the lead, from the project's board: held by lead-orchard, and finished by it.
     await cheapJobs(page);
-    await page.goto(`${instance.baseURL}/jobs?project=orchard`);
+    await page.goto(`${instance.baseURL}/jobs?project=orchard&new=1`); // the New job sheet
     await expect(page.getByRole("radio", { name: "To the lead" })).toHaveAttribute("aria-checked", "true");
     await page.getByLabel("What needs doing?").fill(
       'Prove the job protocol works.\n\nDo nothing else: call crowsnest\'s done tool for this job with result_md "done-ok", verified [] and not_verified [].',

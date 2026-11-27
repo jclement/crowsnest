@@ -37,6 +37,12 @@ async function openBoard(page: Page) {
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
 }
 
+/** Opens Now, whose job box is the text field these tests type in (the board has none: R8). */
+async function openNow(page: Page) {
+  await page.goto("/");
+  await expect(page.getByLabel("What needs doing?")).toBeVisible();
+}
+
 /** Opens the palette the way a phone or a mouse does: the header button. */
 async function openWithButton(page: Page) {
   await page.getByRole("button", { name: "Search or run…" }).click();
@@ -45,7 +51,7 @@ async function openWithButton(page: Page) {
 
 test("the chord opens it from anywhere, even a text box; Esc closes it and gives focus back", async ({ page }) => {
   await pinPlatform(page, "other");
-  await openBoard(page);
+  await openNow(page);
   const box = page.getByLabel("What needs doing?");
   await box.click();
   await box.pressSequentially("draft");
@@ -66,7 +72,7 @@ test("the chord opens it from anywhere, even a text box; Esc closes it and gives
 
 test("on a Mac it is ⌘K, and Ctrl+K is left to the text field", async ({ page }) => {
   await pinPlatform(page, "mac");
-  await openBoard(page);
+  await openNow(page);
   await expect(page.getByRole("button", { name: "Search or run…" })).toHaveAttribute("aria-keyshortcuts", "Meta+K");
   await page.getByLabel("What needs doing?").click();
   await page.keyboard.press("Control+k");
@@ -76,13 +82,13 @@ test("on a Mac it is ⌘K, and Ctrl+K is left to the text field", async ({ page 
 });
 
 test("a plain k, and ? or g while typing, do nothing", async ({ page }) => {
-  await openBoard(page);
+  await openNow(page);
   const box = page.getByLabel("What needs doing?");
   await box.click();
   await box.pressSequentially("kg?gi");
   await expect(box).toHaveValue("kg?gi");
   await expect(palette(page)).toBeHidden();
-  await expect(page).toHaveURL(/\/jobs$/);
+  await expect(page).toHaveURL(/\/$/);
 });
 
 test("the header button opens it (a full-screen sheet on a phone), with the first row active", async ({ page }, testInfo) => {
@@ -128,7 +134,9 @@ test("⌘/Ctrl+Enter on Give job opens the full form with the text in it", async
   await expect(palette(page)).toBeVisible();
   await input(page).fill("> Tidy the README");
   await page.keyboard.press("Control+Enter");
-  await expect(page).toHaveURL(/\/jobs$/);
+  // The board's New job sheet: the same form as Now's job box.
+  await expect(page).toHaveURL(/\/jobs\?new=true$/);
+  await expect(page.getByRole("dialog", { name: "New job" })).toBeVisible();
   await expect(page.getByLabel("What needs doing?")).toHaveValue("Tidy the README");
   await expect(page.getByLabel(/^Where/)).toBeVisible();
 });

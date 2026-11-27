@@ -29,7 +29,7 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
 
   return useCallback(
     (command: PaletteCommand) => {
-      const go = (to: ViewPath | `/projects/${string}` | `/help/${string}`, search: Record<string, string> = {}, hash?: string) =>
+      const go = (to: ViewPath | `/projects/${string}` | `/help/${string}`, search: Record<string, string | boolean> = {}, hash?: string) =>
         void router.navigate({ to, search, hash } as unknown as Parameters<typeof router.navigate>[0]);
       const failed = (title: string) => (error: unknown) =>
         toast.show({ tone: "danger", title, description: error instanceof Error ? error.message : String(error) });
@@ -57,7 +57,7 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
           return;
         case "jobForm":
           offerJobDraft({ brief: command.brief });
-          go("/jobs");
+          go("/jobs", { new: true });
           return;
         case "giveJob":
           endpoints

@@ -37,3 +37,6 @@ web/e2e/claude/captured/
 /crowsnest
 # agent worktrees must never live inside the checkout
 /.claude/
+
+# The per-view tour shots (e2e/screenshots/tour.spec.ts); only the before/after sheet is committed
+web/screenshots/tour/

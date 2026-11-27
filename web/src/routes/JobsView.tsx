@@ -1,18 +1,21 @@
-// The Jobs view (DESIGN.md 12), the default route: the text box at the top, the board below it
-// (needs-you and stuck first, then running, then finished today; older finished jobs behind a
-// toggle), and the selected job: beside the board from md, a full-screen sheet on a phone. The
+// The Jobs view (DESIGN.md 12): a list. The board (needs-you and stuck first, then running, then
+// finished today; older finished jobs behind a toggle), and the selected job: beside the board from md, a full-screen sheet on a phone. The
 // selection is in the URL (/jobs?job=j_12) so a link or a reload lands on it. The Journal (pokes,
 // sends, answers, restarts, alerts), the Schedule (scheduled tasks) and Spend (today's and this
 // week's estimated cost, with the breakdown sheet) open from the row above the board.
 //
-// Projects (DESIGN.md 21.1): a switcher above the box picks All, one project or Unfiled, from
+// Jobs are given on Now (its job box), from the palette or by voice; this view has no composer of
+// its own (R8: one place to give a job). Its "New job" button, and ?new=1, open the same form,
+// NewJobForm, in a sheet over the board.
+//
+// Projects (DESIGN.md 21.1): a switcher above the board picks All, one project or Unfiled, from
 // the URL (?project=<slug>) or as this browser last left it; the board then shows that
-// project's jobs, the new-job box gives jobs to it ("to the lead" or "as a job"), and the
-// Schedule and Spend sheets open filtered to it. With every project shown, cards carry a chip
-// naming their project.
+// project's jobs, New job gives jobs to it ("to the lead" or "as a job"), and the Schedule and
+// Spend sheets open filtered to it. With every project shown, cards carry a chip naming their
+// project.
 import { useDiffProgress } from "../lib/changes-queries";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { CalendarClock, FolderGit2, Gauge, ListTodo, NotebookText, RefreshCw } from "lucide-react";
+import { CalendarClock, FolderGit2, Gauge, ListTodo, NotebookText, Plus, RefreshCw } from "lucide-react";
 import { LimitsSheet } from "../components/control/LimitsSheet";
 import { SweepSheet } from "../components/control/SweepSheet";
 import { queueText } from "../lib/landing";
@@ -35,10 +38,9 @@ import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { filterJobs, filterProjectId, filterToParam, projectsById, type ProjectFilter, type ProjectView } from "../lib/projects";
 import { findProject, useJobs, useProjects, useQueue, useSweep } from "../lib/queries";
 import { HelpButton } from "../components/help/HelpButton";
-import { Hint } from "../components/help/Hint";
 
 export function JobsView() {
-  const { job: selected } = useSearch({ strict: false }) as { job?: string };
+  const { job: selected, new: formParam } = useSearch({ strict: false }) as { job?: string; new?: true };
   const navigate = useNavigate();
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const projects = useProjects();
@@ -46,6 +48,7 @@ export function JobsView() {
   const project = filter.kind === "project" ? findProject(projects.data?.projects, filter.slug) : undefined;
   const projectParam = filterToParam(filter) || undefined;
   const select = (id: string | undefined) => void navigate({ to: "/jobs", search: { job: id, project: projectParam } });
+  const setFormOpen = (open: boolean) => void navigate({ to: "/jobs", search: { job: selected, project: projectParam, new: open ? true : undefined } });
   const [journalOpen, setJournalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [spendOpen, setSpendOpen] = useState(false);
@@ -60,8 +63,13 @@ export function JobsView() {
     <div className="flex h-full min-h-0 flex-col md:flex-row">
       <div className="flex min-h-0 flex-col border-border md:w-96 md:shrink-0 md:border-r lg:w-[28rem]">
         {projects.data && projects.data.projects.length > 0 && <ProjectSwitcher list={projects.data} value={filter} onChange={setFilter} />}
-        <NewJobForm onCreated={(job) => select(job.id)} project={project} />
+        <Sheet open={formParam === true} onClose={() => setFormOpen(false)} title={project ? `New job for ${project.name}` : "New job"}>
+          <NewJobForm onCreated={(job) => select(job.id)} project={project} autoFocus />
+        </Sheet>
         <div className="flex flex-wrap items-center justify-end gap-x-0.5 border-b border-border px-1 py-0.5">
+          <Button compact variant="primary" icon={Plus} onClick={() => setFormOpen(true)} disabled={project?.archived}>
+            New job
+          </Button>
           <span className="mr-auto">
             <SpendButton onOpen={() => setSpendOpen(true)} />
           </span>
@@ -82,11 +90,6 @@ export function JobsView() {
             Journal
           </Button>
           <HelpButton topic="concepts/jobs#states" what="job states" inline={false} />
-        </div>
-        <div className="px-3 pt-2 empty:hidden">
-          <Hint id="jobs" topic="concepts/jobs#states">
-            Each card's chip is the job's state; a second chip (Accepted, Unverified…) is crowsnest's own check of a coding job's done.
-          </Hint>
         </div>
         <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
         <LimitsSheet open={limitsOpen} onClose={() => setLimitsOpen(false)} />
@@ -147,8 +150,8 @@ export function Board({ selected, onSelect, filter = { kind: "all" }, projects }
     return (
       <EmptyState icon={ListTodo} title={name ? `No jobs in ${name} yet` : filter.kind === "unfiled" ? "No unfiled jobs" : "No jobs yet"}>
         {name
-          ? `Say what needs doing above: give it to ${name}'s lead, or as a job in its directory.`
-          : "Say what needs doing above. Give it a directory to start an agent there, or leave it empty and the orchestrator takes it."}
+          ? `New job gives one to ${name}'s lead, or as a job in its directory.`
+          : "Give one from Now's job box or with New job: with a directory an agent starts there; without one the orchestrator takes it."}
       </EmptyState>
     );
   }

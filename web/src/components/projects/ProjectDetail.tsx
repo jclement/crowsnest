@@ -141,7 +141,7 @@ function ProjectJobs({ project }: { project: ProjectView }) {
           <Button compact variant="ghost" icon={ListTodo} onClick={() => void navigate({ to: "/jobs", search: { project: project.slug } })}>
             Board
           </Button>
-          <Button compact variant="ghost" icon={Plus} onClick={() => void navigate({ to: "/jobs", search: { project: project.slug } })} disabled={project.archived}>
+          <Button compact variant="ghost" icon={Plus} onClick={() => void navigate({ to: "/jobs", search: { project: project.slug, new: true } })} disabled={project.archived}>
             New job
           </Button>
         </>

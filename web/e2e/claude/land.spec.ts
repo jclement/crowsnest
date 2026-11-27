@@ -148,7 +148,7 @@ test.describe.serial("a coding job from Now to landed", () => {
       if (route.request().method() !== "POST") return route.fallback();
       await route.fallback({ postData: JSON.stringify({ ...(route.request().postDataJSON() as Record<string, unknown>), reviewer: "off" }) });
     });
-    await page.goto(`${instance.baseURL}/jobs?project=${project.slug}`);
+    await page.goto(`${instance.baseURL}/jobs?project=${project.slug}&new=1`); // the New job sheet
     await page.getByRole("radio", { name: "As a job" }).click();
     await page.getByLabel("What needs doing?").fill(
       "Create a file named answer.txt containing exactly the number 41 (and nothing else). Commit it on your branch " +

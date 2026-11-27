@@ -124,10 +124,12 @@ const jobsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/jobs",
   // ?job=j_12 selects a job, so a link or a reload opens the same one; ?project=<slug> (or
-  // "unfiled", or "all") picks the board's project.
-  validateSearch: (search: Record<string, unknown>): { job?: string; project?: string } => ({
+  // "unfiled", or "all") picks the board's project; ?new=1 opens the new-job form over the board
+  // (the palette's "open the full form" and a project's New job land there; ?new=1 is read too).
+  validateSearch: (search: Record<string, unknown>): { job?: string; project?: string; new?: true } => ({
     job: typeof search.job === "string" && search.job ? search.job : undefined,
     project: typeof search.project === "string" && search.project ? search.project : undefined,
+    new: search.new === true || search.new === 1 || search.new === "1" ? true : undefined,
   }),
   component: JobsView,
 });

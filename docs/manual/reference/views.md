@@ -48,7 +48,8 @@ for a new line), takes attachments, and has the mic with talk mode on.
 
 `/jobs` · `g` then `j` · [Open Jobs](app:/jobs)
 
-The board. The project buttons filter it (All, each project, Unfiled). The job box. Spend totals,
+The board, a list. The project buttons filter it (All, each project, Unfiled). **New job** opens
+the new-job form (the same as Now's job box) in a sheet; `/jobs?new=1` opens it too. Spend totals,
 the running count (opens **Limits**), **N to land**, **Schedule** and **Journal**. Then **Needs
 you or stuck**, **In progress**, **Finished today**. A job (`/jobs?job=j_12`) has **Overview**,
 **Conversation**, **Terminal** and, for a worktree job, **Review**/**Land**. See [Jobs and their

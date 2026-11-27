@@ -1,5 +1,5 @@
 // The Jobs view as a user drives it (DESIGN.md 6 and 12), against `crowsnest --demo`: give a job
-// from the text box (with and without the options) and watch it land on the board and move; open
+// from its New job sheet, the same form as Now's job box (with and without the options) and watch it land on the board and move; open
 // a running job, message its agent, answer its question inline; a stuck job says why and offers
 // the one action that fits; nudge; cancel behind a confirmation; a finished job's result with
 // what was and was not verified; the board's order; the empty state.
@@ -20,6 +20,13 @@ async function openBoard(page: Page, search = "") {
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
 }
 
+/** Opens the new-job form: the board has no composer of its own, only New job (R8). */
+async function openForm(page: Page) {
+  await page.getByRole("button", { name: "New job" }).click();
+  await expect(page.getByRole("dialog", { name: "New job" })).toBeVisible();
+  await expect(page.getByLabel("What needs doing?")).toBeFocused();
+}
+
 /** The titles of a board section, top to bottom. */
 async function sectionTitles(page: Page, section: string): Promise<string[]> {
   const items = page.getByRole("region", { name: section }).getByRole("listitem");
@@ -28,8 +35,21 @@ async function sectionTitles(page: Page, section: string): Promise<string[]> {
   return titles;
 }
 
+test("the board is a list: no composer until New job opens the form, and ?new=1 opens it too", async ({ page }) => {
+  await openBoard(page);
+  await expect(page.getByLabel("What needs doing?")).toHaveCount(0);
+  await openForm(page);
+  await expect(page).toHaveURL(/new=true/);
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("What needs doing?")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/new=true/);
+  await openBoard(page, "?new=1");
+  await expect(page.getByLabel("What needs doing?")).toBeVisible();
+});
+
 test("giving a job with a directory starts an agent, and the card moves from queued to running", async ({ page, app }, testInfo) => {
   await openBoard(page);
+  await openForm(page);
   await page.getByLabel("What needs doing?").fill("Add a health check to the webhook sender\n\nReport the last delivery and the queue depth.");
   await page.getByRole("button", { name: /To the orchestrator/ }).click();
   // The instance's own scratch directory: it exists, and nothing else uses it.
@@ -54,12 +74,15 @@ test("giving a job with a directory starts an agent, and the card moves from que
   if (isPhone(testInfo)) await page.getByRole("button", { name: "Close" }).click();
   const card = page.getByRole("region", { name: "In progress" }).getByRole("button", { name: /Add a health check/ });
   await expect(card).toContainText("job-26");
-  // The text box was cleared for the next job.
+  // The form closed with the job given; opened again, it is empty for the next one.
+  await expect(page.getByLabel("What needs doing?")).toHaveCount(0);
+  await openForm(page);
   await expect(page.getByLabel("What needs doing?")).toHaveValue("");
 });
 
 test("a directory that does not exist is refused with a message, and the brief is kept", async ({ page }) => {
   await openBoard(page);
+  await openForm(page);
   await page.getByLabel("What needs doing?").fill("Build the thing");
   await page.getByRole("button", { name: /To the orchestrator/ }).click();
   await page.getByLabel(/^Where/).fill("/nonexistent/e2e/dir");
@@ -72,6 +95,7 @@ test("a directory that does not exist is refused with a message, and the brief i
 
 test("giving a job without options sends it to the orchestrator; Cmd/Ctrl+Enter gives it", async ({ page }, testInfo) => {
   await openBoard(page);
+  await openForm(page);
   const box = page.getByLabel("What needs doing?");
   await box.fill("Summarise yesterday's merged PRs");
   await box.press("ControlOrMeta+Enter");
@@ -84,6 +108,7 @@ test("giving a job without options sends it to the orchestrator; Cmd/Ctrl+Enter 
   await expect(detail.getByText("Queued", { exact: true }).first()).toBeVisible();
   // An empty brief cannot be given.
   if (isPhone(testInfo)) await page.getByRole("button", { name: "Close" }).click();
+  await openForm(page);
   await expect(page.getByRole("button", { name: "Give job" })).toBeDisabled();
 });
 
@@ -248,7 +273,7 @@ test("an empty board invites the first job", async ({ page }) => {
   await page.route("**/api/v1/jobs", (route) => (route.request().method() === "GET" ? route.fulfill({ json: { data: [] } }) : route.continue()));
   await page.goto("/jobs");
   await expect(page.getByRole("heading", { name: "No jobs yet" })).toBeVisible();
-  await expect(page.getByText("Say what needs doing above.")).toBeVisible();
+  await expect(page.getByText(/Give one from Now's job box or with New job/)).toBeVisible();
 });
 
 test("a job that does not exist says so", async ({ page }, testInfo) => {

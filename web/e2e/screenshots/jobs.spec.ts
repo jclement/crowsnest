@@ -17,7 +17,7 @@ const sizes = [
 
 async function openJobs(page: Page, theme: "light" | "dark", search = "") {
   await page.addInitScript((value) => localStorage.setItem("crowsnest-theme", value), theme);
-  await page.goto(`/${search}`);
+  await page.goto(`/jobs${search}`);
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
@@ -50,6 +50,7 @@ for (const size of sizes) {
   test(`new-job form open at ${size.name}`, async ({ page }) => {
     await page.setViewportSize({ width: size.width, height: size.height });
     await openJobs(page, "light");
+    await page.getByRole("button", { name: "New job" }).click();
     await page.getByLabel("What needs doing?").fill("Add a health check to the webhook sender\n\nIt should report the last delivery and the queue depth.");
     await page.getByRole("button", { name: /To the orchestrator/ }).click();
     await page.getByLabel(/Where/).fill("~/src/crowsnest");
@@ -110,8 +111,9 @@ test("tap targets on the Jobs view are at least 44 px on a phone", async ({ page
 test("giving a job adds it to the board", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openJobs(page, "light");
+  await page.getByRole("button", { name: "New job" }).click();
   await page.getByLabel("What needs doing?").fill("Summarise yesterday's merged PRs");
   await page.getByRole("button", { name: "Give job" }).click();
   await expect(page.getByRole("region", { name: "Selected job" }).getByRole("heading", { name: "Summarise yesterday's merged PRs" })).toBeVisible();
-  await expect(page).toHaveURL(/job=j_24/);
+  await expect(page).toHaveURL(/job=j_26/);
 });

@@ -5,7 +5,9 @@ supervised job. Concepts: [Jobs and their states](../concepts/jobs.md).
 
 ## From the job box
 
-The job box is at the bottom of **Now** (**Give a job**) and at the top of **Jobs**.
+The job box is at the bottom of **Now** (**Give a job**). The Jobs board is a list and has no box
+of its own: its **New job** button opens the same form in a sheet, given to the project the board
+shows (a project page's **New job** does the same).
 
 1. **For** (on Now) or the project buttons (on Jobs): who gets it.
    - **The orchestrator (no project)**: it holds the job, does it or delegates it.
@@ -45,7 +47,8 @@ With talk mode on (an ElevenLabs key; [Talk and listen](voice.md)), Now's job bo
 1. `⌘K` (`Ctrl K` elsewhere), or **Search or run…** in the header.
 2. Type the brief. The first row offers **Give job: <your text>**; Enter gives it to the
    orchestrator.
-3. `⌘ Enter` instead opens the full job form with the text filled in.
+3. `⌘ Enter` instead opens the full job form (the Jobs board's **New job** sheet) with the text
+   filled in.
 4. Start with `>` (or `job `) to offer only Give job.
 
 For a project's lead, type the project's name in the palette, press `→` for its actions, and

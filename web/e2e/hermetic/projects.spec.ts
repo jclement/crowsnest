@@ -105,6 +105,9 @@ test("start a lead and give it a job to the lead: filed in the project, for its 
 
   await page.goto("/?project=infra");
   await expect(page.getByRole("radio", { name: /^Infra/ })).toHaveAttribute("aria-checked", "true");
+  // The board has no composer; New job opens the form, given to the board's project.
+  await page.getByRole("button", { name: "New job" }).click();
+  await expect(page.getByRole("dialog", { name: "New job for Infra" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "To the lead" })).toHaveAttribute("aria-checked", "true");
   await page.getByLabel("What needs doing?").fill("Rotate the devbox image's base to the new release");
   await page.getByRole("button", { name: "Give job" }).click();
