@@ -5,16 +5,16 @@
    See crowsnest.css for what a theme file must hold. */
 
 [data-theme="ember"] {
-  --color-surface: #fffcf7;
-  --color-surface-raised: #f8f2e9;
-  --color-surface-sunken: #f1e9dd;
+  --color-surface: #fdf7ee;
+  --color-surface-raised: #f6ecdd;
+  --color-surface-sunken: #efe2cf;
   --color-heading: #2a1a0e;
   --color-body: #4a3626;
   --color-muted: #6b5544;
-  --color-border: #e6dccd;
-  --color-border-strong: #d0c0aa;
-  --color-hover: #f5ede2;
-  --color-selected: #fae4d0;
+  --color-border: #e3d4bd;
+  --color-border-strong: #cdb89a;
+  --color-hover: #f3e7d4;
+  --color-selected: #f8dcc2;
   --color-accent: #a3400d;
   --color-accent-fg: #ffffff;
   --color-focus: #a3400d;
@@ -32,18 +32,18 @@
   --color-status-unknown: #b8ab9c;
   --color-status-fg: #ffffff;
 
-  --color-chrome: #1d130c;
+  --color-chrome: #2a170b;
   --color-chrome-fg: #f6e9dc;
   --color-chrome-muted: #b8a28d;
-  --color-chrome-hover: #2d2016;
-  --color-chrome-border: #33251a;
+  --color-chrome-hover: #3a2314;
+  --color-chrome-border: #40291a;
   --color-chrome-warning: #f2d14b;
   --color-chrome-accent: #ffa45e;
 
   --color-code-keyword: #8a2fa0;
   --color-code-string: #3d6e14;
   --color-code-number: #a3400d;
-  --color-code-comment: #7a6656;
+  --color-code-comment: #6c584a;
   --color-code-title: #1f5f8a;
   --color-code-attr: #b0245e;
   --color-diff-add: rgb(63 122 22 / 0.12);
@@ -54,7 +54,7 @@
   --color-chart-3: #8a6500;
   --color-chart-4: #3f7a16;
 
-  --term-background: #f1e9dd;
+  --term-background: #efe2cf;
   --term-foreground: #2a1a0e;
   --term-cursor: #a3400d;
   --term-selection: #f2cfae;
@@ -77,16 +77,16 @@
 }
 
 [data-theme="ember"].dark {
-  --color-surface: #14100d;
-  --color-surface-raised: #1b1612;
-  --color-surface-sunken: #0e0b09;
+  --color-surface: #17100b;
+  --color-surface-raised: #1f1610;
+  --color-surface-sunken: #100b07;
   --color-heading: #f6ebe0;
   --color-body: #d7c6b5;
   --color-muted: #a6917e;
-  --color-border: #2b231c;
-  --color-border-strong: #3f3329;
-  --color-hover: #221b16;
-  --color-selected: #35210f;
+  --color-border: #30251b;
+  --color-border-strong: #45362a;
+  --color-hover: #271d15;
+  --color-selected: #3b2410;
   --color-accent: #ff9a4d;
   --color-accent-fg: #1a0d03;
   --color-focus: #ff9a4d;

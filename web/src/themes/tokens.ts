@@ -55,6 +55,12 @@ export function parseThemeFile(id: string, css: string): ThemeFile {
 }
 
 /**
+ * Tokens a theme may set but need not: the UI face (Phosphor draws everything in mono). A theme
+ * that leaves one out keeps index.css's value.
+ */
+export const optionalThemeTokens = ["--font-sans"];
+
+/**
  * The tokens a theme must define: the colours index.css declares in @theme, plus the terminal
  * palette (--term-*), which is not a Tailwind colour and is declared in index.css's :root block.
  */

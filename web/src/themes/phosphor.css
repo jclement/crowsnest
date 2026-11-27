@@ -2,9 +2,11 @@
    @order 2
    @description A green-screen terminal after dark; a greenbar printout by day. Running is the phosphor, so done turns ice-cyan here.
 
-   See crowsnest.css for what a theme file must hold. */
+   See crowsnest.css for what a theme file must hold. This theme also sets the one optional
+   token, --font-sans: a terminal draws everything in its monospace face, so this one does. */
 
 [data-theme="phosphor"] {
+  --font-sans: var(--font-mono);
   --color-surface: #f7faf2;
   --color-surface-raised: #eef4e6;
   --color-surface-sunken: #e5eedb;
@@ -77,6 +79,7 @@
 }
 
 [data-theme="phosphor"].dark {
+  --font-sans: var(--font-mono);
   --color-surface: #040805;
   --color-surface-raised: #08100a;
   --color-surface-sunken: #020402;

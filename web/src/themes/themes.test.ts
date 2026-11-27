@@ -1,7 +1,7 @@
 // The theme files are data, and this is their schema check (DESIGN.md "Design language"):
 //
 // - completeness: every theme defines every token index.css declares in @theme (and every
-//   terminal colour) in both modes, and nothing else;
+//   terminal colour) in both modes, and nothing else but the optional tokens (the UI face);
 // - contrast: every text token meets its floor on every surface it is drawn on, chips' tinted
 //   backgrounds included; the high-contrast theme (@aaa) is held to WCAG AAA (7:1), the rest to
 //   AA (4.5:1); state markers and the chrome's figures are checked too.
@@ -10,7 +10,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { contrast, mix, parseColor, parseThemeFile, themeTokenNames } from "./tokens";
+import { contrast, mix, optionalThemeTokens, parseColor, parseThemeFile, themeTokenNames } from "./tokens";
 
 const dir = import.meta.dirname;
 const files = readdirSync(dir).filter((name) => name.endsWith(".css"));
@@ -56,7 +56,11 @@ for (const file of files) {
       };
 
       it(`${mode}: defines every token, and only those`, () => {
-        expect(Object.keys(tokens).sort()).toEqual([...required].sort());
+        expect(
+          Object.keys(tokens)
+            .filter((name) => !optionalThemeTokens.includes(name))
+            .sort(),
+        ).toEqual([...required].sort());
       });
 
       it(`${mode}: text meets ${floor}:1 on every surface and in its own chip`, () => {
