@@ -71,8 +71,8 @@ type jobWatch struct {
 	budgetAt   time.Time
 	receiptAt  time.Time
 	feedbackAt time.Time // the last failed attempt to type pending feedback (R6-C07)
-	spinAt    time.Time
-	spinSize  int64
+	spinAt     time.Time
+	spinSize   int64
 }
 
 func (s *Service) watchOf(id string) *jobWatch {
