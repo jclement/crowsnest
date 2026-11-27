@@ -151,6 +151,9 @@ type PokerOptions struct {
 	// automatic poke, backstop nudge or upkeep is typed meanwhile; due reasons stay pending and
 	// go with the first poke after the resume. "Poke now" still works. Nil: never paused.
 	Paused func() bool
+	// Hold reports whether automatic pokes to this agent are held for another reason: its
+	// daily spend ceiling, or a usage limit on its engine (DESIGN.md 6.16, 6.17). Nil: never.
+	Hold func() (bool, string)
 	// Held journals, once per key while the pause lasts, what the pause held. Nil: nothing.
 	Held func(ctx context.Context, key, what string)
 	// Presence is the human's presence for the poke header (`human=here|maybe|away`, 6.14).
@@ -389,6 +392,16 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 	}
 	if !manual && p.opts.ManualOnly {
 		return result
+	}
+	if !manual && p.opts.Hold != nil {
+		// A spend ceiling or a usage limit holds automatic pokes (DESIGN.md 6.16, 6.17); the
+		// reasons stay pending and go with the first poke after.
+		if held, why := p.opts.Hold(); held {
+			if p.opts.Held != nil {
+				p.opts.Held(ctx, "hold:"+p.label(), fmt.Sprintf("a poke to %s (%s)", p.label(), why))
+			}
+			return result
+		}
 	}
 	decision := p.gate(ctx, now, status)
 	if decision.Verdict != GateSend {

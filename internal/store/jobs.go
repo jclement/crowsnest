@@ -94,7 +94,32 @@ type JobRecord struct {
 	LandRequest    string
 	LandQuestionID int64
 	StartAnyway    bool
-	// LandToken binds a land request to its question (migration 0016, R5-C01).
+
+	// Acceptance, budgets, wake-ups, the last message and the spinning detector (migration
+	// 0015, DESIGN.md 6.15 to 6.19).
+	AcceptState     string
+	AcceptDetail    string
+	CheckRounds     int
+	NoCommitsReason string
+	FixOf           int64
+	ReviewCommit    string
+	LandHead        string
+	BudgetUSD       float64
+	BudgetTokens    int64
+	BudgetMinutes   int
+	BudgetTurns     int
+	BudgetState     string
+	BudgetDetail    string
+	Turns           int
+	WakeKind        string
+	WakeAt          time.Time
+	WakeJob         int64
+	Rechecks        int
+	LastMessage     string
+	LastMessageAt   time.Time
+	TreeHash        string
+	TreeChangedAt   time.Time
+	// LandToken binds a land request to its question (migration 0017, R5-C01).
 	LandToken       string
 	LandRequestedAt time.Time
 }
@@ -146,12 +171,22 @@ func jobColumns(r *JobRecord) []column {
 		textCol("land_state", &r.LandState), textCol("land_detail", &r.LandDetail), timeCol("landed_at", &r.LandedAt),
 		timeCol("torn_down_at", &r.TornDownAt), textCol("land_request", &r.LandRequest),
 		int64Col("land_question_id", &r.LandQuestionID), boolCol("start_anyway", &r.StartAnyway),
+		textCol("accept_state", &r.AcceptState), textCol("accept_detail", &r.AcceptDetail), intCol("check_rounds", &r.CheckRounds),
+		textCol("no_commits_reason", &r.NoCommitsReason), int64Col("fix_of", &r.FixOf), textCol("review_commit", &r.ReviewCommit), textCol("land_head", &r.LandHead),
+		floatCol("budget_usd", &r.BudgetUSD), int64Col("budget_tokens", &r.BudgetTokens), intCol("budget_minutes", &r.BudgetMinutes),
+		intCol("budget_turns", &r.BudgetTurns), textCol("budget_state", &r.BudgetState), textCol("budget_detail", &r.BudgetDetail),
+		intCol("turns", &r.Turns), textCol("wake_kind", &r.WakeKind), timeCol("wake_at", &r.WakeAt), int64Col("wake_job", &r.WakeJob),
+		intCol("rechecks", &r.Rechecks), textCol("last_message", &r.LastMessage), timeCol("last_message_at", &r.LastMessageAt),
+		textCol("tree_hash", &r.TreeHash), timeCol("tree_changed_at", &r.TreeChangedAt),
 		textCol("land_token", &r.LandToken), timeCol("land_requested_at", &r.LandRequestedAt),
 	}
 	return cols
 }
 
 func textCol(name string, p *string) column {
+	return column{name: name, scan: p, value: func() any { return *p }}
+}
+func floatCol(name string, p *float64) column {
 	return column{name: name, scan: p, value: func() any { return *p }}
 }
 func boolCol(name string, p *bool) column {

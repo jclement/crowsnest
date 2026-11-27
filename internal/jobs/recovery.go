@@ -81,6 +81,14 @@ func (s *Service) Tick(ctx context.Context) {
 	if err := s.eachLive(ctx, liveStates, func(record store.JobRecord) { s.tickJob(ctx, record) }); err != nil && ctx.Err() == nil {
 		s.opts.Logger.Warn("supervisor: listing jobs", "err", err)
 	}
+	// A check nobody is running (crowsnest restarted mid-check), in review or after done (6.15).
+	if checking, err := s.opts.Store.ListCheckingJobs(ctx, superviseBatch); err == nil {
+		for _, record := range checking {
+			s.tickChecking(ctx, record)
+		}
+	}
+	s.tickLimits(ctx)
+	s.tickInvariants(ctx)
 }
 
 // tickJob looks at one live job. Every intermediate state a launch, a restart or a crash can
@@ -122,6 +130,8 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		return
 	}
 	s.renotifyQuestions(ctx, r)
+	s.tickBlocked(ctx, r) // a wake-up that is due, or a job waited on that settled (6.18)
+	s.checkBudget(ctx, r) // the 80% warning and the limit (6.16)
 	if IsStanding(r.AgentName) {
 		s.checkActivity(ctx, r, now) // a standing agent's own lifecycle is internal/orch's
 		return
@@ -163,6 +173,8 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		}
 	default:
 		s.checkActivity(ctx, r, now)
+		s.tickSpinning(ctx, r)
+		s.reconcileReceipts(ctx, r)
 	}
 }
 
@@ -388,6 +400,13 @@ func (s *Service) retry(ctx context.Context, r store.JobRecord, agent herdr.Agen
 	}
 	if r.RetryAt.IsZero() || now.Before(r.RetryAt) || !agent.AgentStatus.Ready() {
 		return
+	}
+	if Cause(r.Cause) == CauseLimit && s.opts.Limits != nil {
+		// The fleet's usage limit (6.17): nothing before its reset, then one job at a time,
+		// oldest first (the tick walks live jobs oldest first).
+		if held, _ := s.limitHeld(ctx, r.Engine); held || !s.opts.Limits.mayResume(r.Engine) {
+			return
+		}
 	}
 	s.retryStep(ctx, id, true)
 }

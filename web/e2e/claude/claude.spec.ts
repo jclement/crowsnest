@@ -216,7 +216,7 @@ test.describe.serial("real Claude through the browser", () => {
     await page.goto(`${instance.baseURL}/?job=${id}`);
     const detail = page.getByRole("region", { name: "Selected job" });
     await expect(detail.getByText("Done", { exact: true }).first()).toBeVisible();
-    await expect(detail.getByRole("region", { name: "Verified", exact: true })).toBeVisible();
+    await expect(detail.getByRole("region", { name: "Verified (reported by the agent)", exact: true })).toBeVisible();
     await expect(page.getByRole("region", { name: "Finished today" }).getByRole("button", { name: /Create a file named hello\.txt/ })).toBeVisible();
     expect(readFileSync(join(repo, "hello.txt"), "utf8")).toContain("hi from crowsnest");
   });

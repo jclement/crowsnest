@@ -63,11 +63,16 @@ func (s *Service) RequestLand(ctx context.Context, id, action string, caller que
 	if why := s.landBlocked(job, action, nil); why != "" {
 		return questions.Question{}, invalid("%s", why)
 	}
-	token, err := s.reserveLandRequest(ctx, id, action)
+	head := ""
+	if action != LandDiscard && job.WorkDir != "" {
+		// The request is for the branch as it is now (R5-S4): Allow lands this commit or nothing.
+		head, _ = landing.Head(ctx, job.WorkDir)
+	}
+	token, err := s.reserveLandRequest(ctx, id, action, head)
 	if err != nil {
 		return questions.Question{}, err
 	}
-	question, err := s.opts.AskHuman(ctx, landQuestion(job, action, reason, token, firstNonEmptyDir(s.landing().MergeMode, landing.ModeMerge)), caller)
+	question, err := s.opts.AskHuman(ctx, landQuestion(job, action, reason, token, head, firstNonEmptyDir(s.landing().MergeMode, landing.ModeMerge)), caller)
 	if err != nil {
 		s.dropLandRequest(ctx, id, token, "the question could not be asked")
 		return questions.Question{}, err
@@ -99,9 +104,9 @@ func (s *Service) mayRequestLand(caller questions.Caller, job Job) error {
 	return nil
 }
 
-// reserveLandRequest is step 1: it records the request with a fresh token, or refuses when one
-// is already waiting.
-func (s *Service) reserveLandRequest(ctx context.Context, id, action string) (string, error) {
+// reserveLandRequest is step 1: it records the request with a fresh token and the commit it is
+// for (head, R5-S4), or refuses when one is already waiting.
+func (s *Service) reserveLandRequest(ctx context.Context, id, action, head string) (string, error) {
 	token, err := newLandToken()
 	if err != nil {
 		return "", err
@@ -113,7 +118,7 @@ func (s *Service) reserveLandRequest(ctx context.Context, id, action string) (st
 		if r.LandState != "" || !r.TornDownAt.IsZero() {
 			return invalid("job %s is already landed", id)
 		}
-		r.LandRequest, r.LandToken, r.LandQuestionID, r.LandRequestedAt = action, token, 0, s.opts.Now()
+		r.LandRequest, r.LandToken, r.LandQuestionID, r.LandRequestedAt, r.LandHead = action, token, 0, s.opts.Now(), head
 		return nil
 	})
 	return token, err
@@ -129,8 +134,8 @@ func newLandToken() (string, error) {
 }
 
 // landQuestion is the human's question for one reserved request.
-func landQuestion(job Job, action, reason, token, mergeMode string) questions.AskInput {
-	body := fmt.Sprintf("An agent asks to **%s** job %s, %q.\n\n%s\n\n", landVerb(action), job.ID, job.Title, confirmText(job, action, mergeMode))
+func landQuestion(job Job, action, reason, token, head, mergeMode string) questions.AskInput {
+	body := fmt.Sprintf("An agent asks to **%s** job %s, %q.\n\n%s\n\n", landVerb(action), job.ID, job.Title, confirmText(job, action, mergeMode, head))
 	if reason = strings.TrimSpace(reason); reason != "" {
 		body += "Its reason (written by the agent, not crowsnest):\n\n" + indent(oneLine(reason, 600)) + "\n\n"
 	}
@@ -180,7 +185,7 @@ func (s *Service) dropLandRequest(ctx context.Context, id, token, why string) {
 
 // clearLandRequest removes every trace of a request from the record.
 func clearLandRequest(r *store.JobRecord) {
-	r.LandRequest, r.LandToken, r.LandQuestionID, r.LandRequestedAt = "", "", 0, time.Time{}
+	r.LandRequest, r.LandToken, r.LandQuestionID, r.LandRequestedAt, r.LandHead = "", "", 0, time.Time{}, ""
 }
 
 // landAnswer is what step 4 needs from a settled question, from the callback or the database.
@@ -210,12 +215,12 @@ func (s *Service) applyLandAnswer(ctx context.Context, jobID string, answer land
 		return
 	}
 	allowed := answer.status == string(questions.StatusAnswered) && answer.key == "allow" && strings.TrimSpace(answer.note) == ""
-	var action string
+	var action, head string
 	_, err := s.mutate(ctx, jobID, func(r *store.JobRecord, c *change) error {
 		if r.LandRequest == "" || r.LandToken != token || answer.context[questions.ContextLandAction] != r.LandRequest {
 			return errStaleLandAnswer
 		}
-		action = r.LandRequest
+		action, head = r.LandRequest, r.LandHead
 		clearLandRequest(r)
 		if allowed {
 			c.event(EventLand, "You allowed the request to "+landVerb(action)+" ("+answer.label+")", nil)
@@ -227,7 +232,7 @@ func (s *Service) applyLandAnswer(ctx context.Context, jobID string, answer land
 	if err != nil || !allowed {
 		return
 	}
-	if _, err := s.Land(ctx, jobID, action, "you, as an agent asked"); err != nil {
+	if _, err := s.LandWith(ctx, jobID, action, "you, as an agent asked", LandFlags{Head: head}); err != nil {
 		_ = s.Journal(ctx, jobID, EventLand, "The land you allowed was refused: "+oneLine(err.Error(), 240), nil)
 	}
 }

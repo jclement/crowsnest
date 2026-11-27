@@ -29,6 +29,9 @@ import (
 	"github.com/jclement/crowsnest/internal/transcript"
 )
 
+// envDemoLimit, set to 1 under --demo, seeds the fleet's usage limit so the banner shows (6.17).
+const envDemoLimit = "CROWSNEST_DEMO_LIMIT"
+
 // jobRefs are the services built after the jobs service that it reads through closures.
 type jobRefs struct {
 	orchestrator  *orch.Orchestrator
@@ -84,8 +87,15 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	if refs.ctl != nil {
 		pauseSwitch, startThrottle, landingOpts, extraEnv = refs.ctl.pause, refs.ctl.throttle, refs.ctl.landing, refs.ctl.heavyEnv()
 	}
+	questionsReceived := func(id int64) {
+		if service := refs.questions.Load(); service != nil {
+			service.MarkReceived(context.Background(), id)
+		}
+	}
 	return jobs.New(jobs.Options{
 		Pause: pauseSwitch, Throttle: startThrottle, Landing: landingOpts,
+		Accept: acceptOptions(cfg, executable), Budgets: budgetOptions(cfg), Limits: fleetLimits(db, events),
+		SpendToday: spendDayLimits(meter), OnViolation: violationJournal(journalLog), OnReceived: questionsReceived,
 		Projects: projectSource,
 		Store:    db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
 		Attachments: files, Spend: meter, Instructions: jobInstructions(refs.instructions),
@@ -200,6 +210,9 @@ func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, 
 		panes := jobs.DemoPanes{PaneOf: demo.PaneOf, DialogOf: demo.DialogCommand, ProjectOf: projectOf}
 		if err := jobs.SeedDemo(ctx, service, panes); err != nil {
 			logger.Warn("seeding the demo jobs", "err", err)
+		}
+		if os.Getenv(envDemoLimit) == "1" {
+			defer jobs.SeedDemoLimit(ctx, service)
 		}
 		if err := jobs.SeedDemoLanding(ctx, service, stateDir, demo.RealGitWorktrees); err != nil {
 			logger.Warn("seeding the landing demo", "err", err)

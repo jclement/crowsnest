@@ -9,6 +9,7 @@ import { ClipboardCopy, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { CheckList, StatusMark } from "../components/system/CheckList";
 import { MachineDetail } from "../components/system/MachineStats";
+import { WaitsCard } from "../components/system/WaitsCard";
 import { MachinesCard, StorageCard, TailscaleCard, UpdatedNotice } from "../components/system/OpsCards";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -133,6 +134,7 @@ function SystemBody({ report }: { report: SystemReport }) {
         </Card>
       </div>
       <MachineDetail />
+      <WaitsCard />
       <StorageCard />
       <MachinesCard />
       <TailscaleCard />

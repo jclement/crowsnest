@@ -65,10 +65,10 @@ func printJob(out io.Writer, job jobs.Job) error {
 }
 
 func newJobUpdateCommand(jobID *string) *cobra.Command {
-	var state, reason string
-	var waiting bool
+	var state, reason, recheckIn, recheckAt, untilJob string
+	var waiting, untilHuman bool
 	command := &cobra.Command{
-		Use:   `update "what you are doing now" [--state blocked --reason "…"] [--waiting]`,
+		Use:   `update "what you are doing now" [--state blocked --reason "…" --recheck-in 30m|--recheck-at HH:MM|--until-job j_N|--until-human] [--waiting]`,
 		Short: "Heartbeat with a one-line progress; optionally declare blocked, running or waiting",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -76,7 +76,7 @@ func newJobUpdateCommand(jobID *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			input := jobs.UpdateInput{State: state, Reason: reason}
+			input := jobs.UpdateInput{State: state, Reason: reason, RecheckIn: recheckIn, RecheckAt: recheckAt, UntilJob: untilJob, UntilHuman: untilHuman}
 			if len(args) == 1 {
 				input.Progress = args[0]
 			}
@@ -93,11 +93,15 @@ func newJobUpdateCommand(jobID *string) *cobra.Command {
 	command.Flags().StringVar(&state, "state", "", "blocked or running")
 	command.Flags().StringVar(&reason, "reason", "", "with --state blocked: what you are waiting on")
 	command.Flags().BoolVar(&waiting, "waiting", false, "nothing is left that your open questions do not block")
+	command.Flags().StringVar(&recheckIn, "recheck-in", "", "with --state blocked: wake me to look again after this long (30m, 2h)")
+	command.Flags().StringVar(&recheckAt, "recheck-at", "", "with --state blocked: wake me at this time (HH:MM local, or RFC 3339)")
+	command.Flags().StringVar(&untilJob, "until-job", "", "with --state blocked: wake me when this job (j_N) finishes")
+	command.Flags().BoolVar(&untilHuman, "until-human", false, "with --state blocked: only the human can unblock it")
 	return command
 }
 
 func newJobDoneCommand(jobID *string) *cobra.Command {
-	var result, resultFile, walkthroughFile string
+	var result, resultFile, walkthroughFile, noCommitsReason string
 	var verified, notVerified, attachments []string
 	command := &cobra.Command{
 		Use:   `done --result "…" --verified "…" --not-verified "…" [--attach file]`,
@@ -127,7 +131,7 @@ func newJobDoneCommand(jobID *string) *cobra.Command {
 				walkthrough = string(body)
 			}
 			job, err := client.DoneJob(cmd.Context(), id, jobs.DoneInput{ResultMD: result, Verified: listFlag(verified), NotVerified: listFlag(notVerified),
-				Attachments: attachments, WalkthroughMD: walkthrough})
+				Attachments: attachments, WalkthroughMD: walkthrough, NoCommitsReason: noCommitsReason})
 			if err != nil {
 				return err
 			}
@@ -135,6 +139,7 @@ func newJobDoneCommand(jobID *string) *cobra.Command {
 		},
 	}
 	command.Flags().StringVar(&result, "result", "", "what was done, in Markdown")
+	command.Flags().StringVar(&noCommitsReason, "no-commits-reason", "", "only when a worktree job needed no commit: why")
 	command.Flags().StringVar(&resultFile, "result-file", "", "read the result from a file (- for stdin)")
 	command.Flags().StringArrayVar(&verified, "verified", nil, "something you checked and saw (repeatable)")
 	command.Flags().StringArrayVar(&notVerified, "not-verified", nil, "something you did not check (repeatable)")

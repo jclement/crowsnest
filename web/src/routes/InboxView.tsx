@@ -8,7 +8,7 @@
 // notification or a reload lands on it. From md the list and the selected item sit side by side; on a phone the item opens in a
 // full-screen sheet.
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Bell, BellOff, BellRing, Bot, FileDiff, Inbox, ListTodo, MessageSquareWarning, MessagesSquare, RefreshCw, ShieldAlert } from "lucide-react";
+import { Bell, BellOff, BellRing, Bot, FileDiff, Hourglass, Inbox, ListTodo, MessageSquareWarning, MessagesSquare, RefreshCw, ShieldAlert } from "lucide-react";
 import { useState, type ReactElement } from "react";
 import { DialogCard } from "../components/fleet/DialogCard";
 import { QuestionDetail } from "../components/inbox/QuestionDetail";
@@ -170,7 +170,10 @@ function attentionIcon(item: AttentionItem): ReactElement {
     case "agent":
       return <Bot className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />;
     case "job":
+    case "wait":
       return <ListTodo className={cn("mt-0.5 h-4 w-4 shrink-0", item.job?.state === "failed" ? "text-danger" : "text-warning")} aria-hidden />;
+    case "limit":
+      return <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />;
   }
 }
 

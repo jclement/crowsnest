@@ -65,7 +65,7 @@ func TestSocketJobVerbs(t *testing.T) {
 	if _, err := client.UpdateJob(ctx, id, jobs.UpdateInput{Progress: "x", State: "blocked"}); !isStatus(err, 400) {
 		t.Fatalf("blocked without a reason: %v", err)
 	}
-	if job, _ = client.UpdateJob(ctx, id, jobs.UpdateInput{Progress: "x", State: "blocked", Reason: "CI is down"}); job.State != jobs.StateBlocked {
+	if job, _ = client.UpdateJob(ctx, id, jobs.UpdateInput{Progress: "x", State: "blocked", Reason: "CI is down", RecheckIn: "30m"}); job.State != jobs.StateBlocked {
 		t.Fatalf("blocked: %+v", job)
 	}
 	if job, _ = client.UpdateJob(ctx, id, jobs.UpdateInput{Progress: "back", State: "running"}); job.State != jobs.StateRunning {

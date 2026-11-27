@@ -104,6 +104,15 @@ const (
 	// CauseReview: needs_you after the review gate: the reviewer still objects after the last
 	// round, or the review could not run (6.7). CauseDetail says which.
 	CauseReview Cause = "review"
+	// CauseCheck: needs_you after acceptance: the check still fails after the last round, or
+	// could not run (6.15). CauseDetail says which.
+	CauseCheck Cause = "check"
+	// CauseBudget: needs_you: the job reached its budget (6.16); the human raises it, stops the
+	// job, or lets it finish the step it is in. CauseDetail names the limit.
+	CauseBudget Cause = "budget"
+	// CauseSpinning: stuck: the agent keeps calling tools without changing anything (6.17).
+	// CauseDetail is the evidence in words.
+	CauseSpinning Cause = "spinning"
 )
 
 // Describe is the cause in words, for the card and notices.
@@ -141,6 +150,12 @@ func (c Cause) Describe() string {
 		return "Waiting to start"
 	case CauseReview:
 		return "The review needs you"
+	case CauseCheck:
+		return "The check failed: crowsnest did not accept it"
+	case CauseBudget:
+		return "Reached its budget"
+	case CauseSpinning:
+		return "Busy, but not getting anywhere"
 	}
 	return ""
 }
@@ -213,6 +228,28 @@ type Job struct {
 	LandRequest   string     `json:"land_request,omitempty"` // a lead's request waiting on the human
 	StartAnyway   bool       `json:"start_anyway"`
 
+	// Acceptance (6.15): crowsnest's evidence, separate from the agent's done.
+	AcceptState     string `json:"accept_state"` // "" | checking | accepted | unverified | failed | stale | needs_rebase
+	AcceptDetail    string `json:"accept_detail"`
+	CheckRounds     int    `json:"check_rounds"`
+	NoCommitsReason string `json:"no_commits_reason,omitempty"`
+	FixOf           string `json:"fix_of,omitempty"` // a rebase job: the job whose branch it brings up to date
+
+	// Budgets (6.16): what this job may use; Budget is filled from the effective limits and spend.
+	Budget *BudgetView `json:"budget,omitempty"`
+	Turns  int         `json:"turns"`
+
+	// Every wait has an owner and a wake-up (6.18).
+	WaitOwner string     `json:"wait_owner"`
+	Wake      string     `json:"wake"` // the wake-up in words
+	WakeKind  string     `json:"wake_kind"`
+	WakeAt    *time.Time `json:"wake_at"`
+	WakeJob   string     `json:"wake_job,omitempty"`
+	Rechecks  int        `json:"rechecks"`
+	// LastMessage is what the agent said when it last ended a turn (shown on stuck and waiting cards).
+	LastMessage   string     `json:"last_message"`
+	LastMessageAt *time.Time `json:"last_message_at"`
+
 	isolate   bool // the job asked for a worktree (Isolated)
 	briefSent bool // the brief reached the agent (a restart resumes rather than briefs again)
 }
@@ -246,6 +283,9 @@ const (
 	EventSession  = "session"
 	EventReview   = "review" // the review gate (6.7)
 	EventLand     = "land"   // merged, pushed, discarded, torn down (6.11)
+	EventAccept   = "accept" // acceptance: checks, accepted, not accepted, stale (6.15)
+	EventBudget   = "budget" // budget warnings, the limit, raises (6.16)
+	EventWake     = "wake"   // a wait's wake-up, a recheck, a dependency settled (6.18)
 )
 
 // Detail is a job with its timeline and questions (GET /jobs/{id}).
@@ -255,6 +295,8 @@ type Detail struct {
 	Questions []Question `json:"questions"`
 	// SpendTurns are the job's latest model calls, oldest first, for its chart (7.11).
 	SpendTurns []spend.Turn `json:"spend_turns,omitempty"`
+	// Evidence is the job's latest check (6.15); nil when it has none.
+	Evidence *Evidence `json:"evidence,omitempty"`
 }
 
 // Question is the part of a question a job detail shows; the web app fetches the full one from
@@ -272,6 +314,9 @@ type Question struct {
 	// Options are the question's choices (key and label), so the job view can show an answer by
 	// its label ("Friday") rather than its key ("fri"). Empty for kinds that take none.
 	Options []QuestionOption `json:"options"`
+	// Receipt is the answer's journey to the agent (6.19): stored, held, uncertain, failed,
+	// delivered or received; "" while open.
+	Receipt string `json:"receipt,omitempty"`
 }
 
 // QuestionOption is one choice of a job's question: what was stored (key) and what was shown.

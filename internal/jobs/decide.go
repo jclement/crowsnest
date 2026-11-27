@@ -70,6 +70,8 @@ const (
 	RuleNudge          Rule = "nudge"           // refused: nothing declared
 	RuleNudgeQuestions Rule = "nudge_questions" // refused: questions open, but not declared waiting
 	RulePaused         Rule = "paused"          // the automation is paused: every stop is allowed (6.13)
+	RuleLimitHeld      Rule = "limit_held"      // the engine is under the fleet's usage limit (6.17)
+	RuleProseQuestion  Rule = "prose_question"  // refused: the turn ended on a question asked in prose (6.18)
 )
 
 // Decision is the check's answer.
@@ -125,6 +127,11 @@ func Decide(job *Job, openQuestions int, input StopInput, history NudgeHistory, 
 		return Decision{Allow: true, Escalate: true, Rule: RuleBudgetSpent, Streak: streak}
 	}
 	decision := Decision{Streak: streak + 1, Progress: progress, Rule: RuleNudge, Reason: NudgeText(job.ID)}
+	if LooksLikeProseQuestion(input.LastAssistantMessage) {
+		// The commonest real stop: a question to the human in the reply, which nobody reads.
+		decision.Rule, decision.Reason = RuleProseQuestion, ProseQuestionText(job.ID)
+		return decision
+	}
 	if openQuestions > 0 {
 		decision.Rule = RuleNudgeQuestions
 		decision.Reason = NudgeText(job.ID) + " " + fmt.Sprintf(questionsNudge, openQuestions)
@@ -132,12 +139,19 @@ func Decide(job *Job, openQuestions int, input StopInput, history NudgeHistory, 
 	return decision
 }
 
+// ProseQuestionText is the refusal for a turn that ended on a question asked in prose.
+func ProseQuestionText(jobID string) string {
+	return fmt.Sprintf("You asked a question in prose: the human does not read your replies, so they will never see it. "+
+		"Call ask with it (with your recommendation as an option), then keep going on whatever the answer does not block. "+
+		"If nothing is left, call job_update with waiting=true. Job %s is not finished until you call done.", jobID)
+}
+
 // NudgeText is the refusal (and the herdr-side backstop's prompt): what to do, and which call
 // ends it.
 func NudgeText(jobID string) string {
 	return fmt.Sprintf("You have not finished job %s and have not said why you are stopping. Continue the work. "+
 		"If you are finished, call done. If you need the human, call ask and keep going on what it does not block. "+
-		"If you are stuck on something else, call job_update with state blocked and the reason.", jobID)
+		"If you are stuck on something else, call job_update with state blocked, the reason and when to look again (recheck_in, or until_job).", jobID)
 }
 
 const questionsNudge = "You have %d open question(s). If truly nothing is left that they do not block, call job_update with waiting=true and then end your turn; the answers will arrive as messages."

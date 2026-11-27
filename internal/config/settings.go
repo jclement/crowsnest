@@ -199,6 +199,9 @@ func OptionNames() []string {
 // SettingValue renders an option's resolved value from cfg in the text form a flag would take,
 // for the Settings page. Write-only settings report only whether they are set.
 func (c Config) SettingValue(name string) string {
+	if value, ok := c.acceptSettingValue(name); ok {
+		return value
+	}
 	switch name {
 	case optModel:
 		return c.Model
@@ -322,6 +325,7 @@ func (c Config) WithSettings(from Config) Config {
 	c.ProtectedHosts, c.ProtectedBranches = from.ProtectedHosts, from.ProtectedBranches
 	c.MaxRunningJobs, c.LoadHold, c.HeavySlots = from.MaxRunningJobs, from.LoadHold, from.HeavySlots
 	c.Review, c.MergeMode, c.DigestAt = from.Review, from.MergeMode, from.DigestAt
+	c = c.withAcceptSettings(from)
 	c.BackupEvery, c.BackupKeep = from.BackupEvery, from.BackupKeep
 	c.ArchiveAfterDays, c.DeleteAfterDays = from.ArchiveAfterDays, from.DeleteAfterDays
 	c.Sources = from.Sources

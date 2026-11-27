@@ -56,6 +56,12 @@ export interface LandOptions {
   why?: Partial<Record<LandAction, string>>;
   confirm: Record<LandAction, string>;
   request?: string;
+  /** Why crowsnest's evidence does not support merging or pushing this revision (DESIGN.md 6.15):
+   * stale, failed, missing, checking or needs_rebase. Land then needs an explicit override. */
+  evidence?: "" | "stale" | "failed" | "missing" | "checking" | "needs_rebase";
+  evidence_why?: string;
+  /** The branch's commit as the Review tab read it; sent back so what lands is what was reviewed. */
+  head?: string;
 }
 
 export interface ReviewRound {

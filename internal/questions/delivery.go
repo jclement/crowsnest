@@ -223,6 +223,7 @@ func (d *Deliverer) hold(ctx context.Context, record store.QuestionRecord, reaso
 		d.opts.Logger.Warn("releasing a held answer delivery", "question", FormatID(record.ID), "err", err)
 		return
 	}
+	_ = d.opts.Store.SetQuestionHeld(cleanupCtx, record.ID, oneReason(reason))
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	held := d.backoff[record.ID]
@@ -242,6 +243,7 @@ func (d *Deliverer) finish(ctx context.Context, id int64, errText string) {
 		d.opts.Logger.Warn("recording an answer delivery", "question", FormatID(id), "err", err)
 		return
 	}
+	_ = d.opts.Store.SetQuestionHeld(cleanupCtx, id, "")
 	if d.opts.OnDelivered != nil {
 		d.opts.OnDelivered(id)
 	}
@@ -360,4 +362,13 @@ func labelOf(options []Option, key string) string {
 		}
 	}
 	return key
+}
+
+// oneReason is a held delivery's reason for the Inbox: the prompter's words, on one line.
+func oneReason(err error) string {
+	text := strings.Join(strings.Fields(err.Error()), " ")
+	if len(text) > 200 {
+		text = text[:200]
+	}
+	return text
 }

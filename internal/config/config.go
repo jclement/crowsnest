@@ -123,6 +123,18 @@ type Config struct {
 	ArchiveAfterDays int           // settled jobs leave the boards after this many days; 0 never
 	DeleteAfterDays  int           // settled history is deleted after this many days; 0 never
 
+	// ---- Acceptance and budgets (accept.go) ----
+
+	CheckTimeout           time.Duration // longest crowsnest's check of a finished job may run
+	CheckRounds            int           // failed checks sent back to the agent before the human decides
+	JobBudgetUSD           float64       // default budget per job, estimated dollars; 0 none
+	JobBudgetMinutes       int           // default budget per job, minutes; 0 none
+	JobBudgetTurns         int           // default budget per job, ended turns; 0 none
+	JobBudgetTokens        int64         // default budget per job, tokens; 0 none
+	DailyCeilingUSD        float64       // the fleet's ceiling per day; 0 none
+	OrchestratorCeilingUSD float64       // the orchestrator's ceiling per day; 0 none
+	LeadCeilingUSD         float64       // each lead's ceiling per day; 0 none
+
 	// ---- The guard hook and approvals (guard.go) ----
 
 	ProtectedHosts     []string // --protected-host; the file's hosts are added by the caller (guard.ReadHostsFile)

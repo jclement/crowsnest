@@ -189,7 +189,7 @@ func TestLandAnswerBeforeLinkAndAfterRestart(t *testing.T) {
 	t.Run("never asked", func(t *testing.T) {
 		l := newLandRequestRig(t)
 		job := landedJob(t, l.rig, landRepo(t))
-		if _, err := l.svc.reserveLandRequest(ctx, job.ID, LandMerge); err != nil {
+		if _, err := l.svc.reserveLandRequest(ctx, job.ID, LandMerge, ""); err != nil {
 			t.Fatal(err)
 		}
 		l.svc.ReconcileLandRequests(ctx)

@@ -36,9 +36,15 @@ const (
 )
 
 // Refusal is a land action crowsnest would not take, worded for the human: nothing was changed.
-type Refusal struct{ Message string }
+type Refusal struct {
+	Message string
+	Code    string // "" or CodeHeadMoved
+}
 
 func (r *Refusal) Error() string { return r.Message }
+
+// CodeHeadMoved marks a refusal because the branch moved past the reviewed commit (R5-S4).
+const CodeHeadMoved = "head_moved"
 
 // IsRefusal reports whether err is a Refusal.
 func IsRefusal(err error) bool {
@@ -427,4 +433,45 @@ func FileDiff(ctx context.Context, workDir, from, path, oldPath string) (diff st
 		return out[:maxFileDiffBytes], false, true, nil
 	}
 	return out, false, false, nil
+}
+
+// ---- What acceptance reads (DESIGN.md 6.15) ------------------------------------------------
+
+// Snapshot is the part of a worktree acceptance needs: its commit, whether the tree is clean,
+// and how far it is ahead of and behind its base.
+type Snapshot struct {
+	Head   string
+	Clean  bool
+	Dirty  []string // `git status --porcelain` lines, capped
+	Ahead  int
+	Behind int
+	// Based says whether the base could be found (Ahead and Behind mean nothing otherwise).
+	Based bool
+}
+
+// Snap reads a Snapshot of workDir. base and baseCommit are as for Inspect; both empty skips
+// the counts (a job that did not run in a worktree of its own).
+func Snap(ctx context.Context, workDir, base, baseCommit string) (Snapshot, error) {
+	snapshot := Snapshot{Dirty: []string{}}
+	var err error
+	if snapshot.Head, err = Head(ctx, workDir); err != nil {
+		return snapshot, fmt.Errorf("reading the worktree's commit: %w", err)
+	}
+	produced := Produced{Dirty: []string{}}
+	if err := readStatus(ctx, workDir, &produced); err != nil {
+		return snapshot, err
+	}
+	snapshot.Clean, snapshot.Dirty = produced.Clean, produced.Dirty
+	if base == "" && baseCommit == "" {
+		return snapshot, nil
+	}
+	produced.DiffBase = diffBase(ctx, workDir, base, baseCommit)
+	if produced.DiffBase == "" {
+		return snapshot, nil
+	}
+	if err := readCounts(ctx, workDir, base, &produced); err != nil {
+		return snapshot, err
+	}
+	snapshot.Ahead, snapshot.Behind, snapshot.Based = produced.Ahead, produced.Behind, true
+	return snapshot, nil
 }

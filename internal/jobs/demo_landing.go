@@ -96,8 +96,18 @@ func SeedDemoLanding(ctx context.Context, s *Service, root string, worktrees fun
 	if err := seedDemoReviewer(ctx, s, review, repo); err != nil {
 		return err
 	}
-	_ = ready
-	return seedDemoHeld(ctx, s, repo)
+	if err := seedDemoEvidence(ctx, s, ready, CheckPassed, "go vet ./...\nok\ngo test ./...\nok  widgets 0.41s", 0); err != nil {
+		return err
+	}
+	if err := seedDemoHeld(ctx, s, repo); err != nil {
+		return err
+	}
+	// After the held job, so the landing demo's ids stay as they were (j_15 waits for a slot).
+	failed, err := seedDemoWorktreeJob(ctx, s, repo, demoCheckFailed())
+	if err != nil {
+		return err
+	}
+	return seedDemoEvidence(ctx, s, failed, CheckFailed, demoFailedTail, 1)
 }
 
 // demoWork is one seeded worktree job: what it was asked, the files it changed, and its record.

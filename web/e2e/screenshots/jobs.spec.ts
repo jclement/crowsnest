@@ -6,7 +6,7 @@
 // Demo job ids, in seed order: j_1 running (worktree), j_2 nudged, j_3 stuck on a limit, j_4
 // needs you (a question), j_5 needs you (a dialog), j_6 unresponsive, j_7 blocked, j_8 done,
 // j_9 failed (older), j_10 queued for the orchestrator, then j_11 to j_17 (internal/jobs/demo.go);
-// a job given here is j_23 (the landing demo is j_18 to j_22).
+// a job given here is j_24 (the landing demo is j_18 to j_23).
 import { type Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 
@@ -87,8 +87,8 @@ test("a finished job shows its result and evidence", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openJobs(page, "dark", "?job=j_8");
   const detail = page.getByRole("region", { name: "Selected job" });
-  await expect(detail.getByRole("region", { name: "Verified", exact: true })).toContainText("mise run check: green");
-  await expect(detail.getByRole("region", { name: "Not verified" })).toContainText("Safari");
+  await expect(detail.getByRole("region", { name: "Verified (reported by the agent)", exact: true })).toContainText("mise run check: green");
+  await expect(detail.getByRole("region", { name: "Not verified (reported by the agent)" })).toContainText("Safari");
   await shot(page, "jobs-detail-done-1440x900-dark");
 });
 
@@ -113,5 +113,5 @@ test("giving a job adds it to the board", async ({ page }) => {
   await page.getByLabel("What needs doing?").fill("Summarise yesterday's merged PRs");
   await page.getByRole("button", { name: "Give job" }).click();
   await expect(page.getByRole("region", { name: "Selected job" }).getByRole("heading", { name: "Summarise yesterday's merged PRs" })).toBeVisible();
-  await expect(page).toHaveURL(/job=j_23/);
+  await expect(page).toHaveURL(/job=j_24/);
 });

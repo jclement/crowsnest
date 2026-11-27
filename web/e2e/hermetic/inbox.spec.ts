@@ -183,21 +183,21 @@ test("the badge and the tab title count what needs you, and follow new questions
   await page.goto("/");
   // The one attention queue (internal/attention): five open demo questions (the low notice q_6
   // is not counted), the question j_4 waits on, the three demo tool-call approvals (DESIGN.md
-  // 8.7), the Handbook job's dialog, and four jobs: j_6 unresponsive, j_3 at the usage limit,
-  // j_9 failed, and the landing demo's j_18 ready to land.
-  await expect(page).toHaveTitle(/^\(14\) crowsnest/);
+  // 8.7), the Handbook job's dialog, and five jobs: j_6 unresponsive, j_3 at the usage limit,
+  // j_9 failed, the landing demo's j_18 ready to land, and j_23 whose check failed (6.15).
+  await expect(page).toHaveTitle(/^\(15\) crowsnest/);
   const badge = page.getByRole("navigation", { name: "Views" }).getByLabel(/need you/).first();
-  await expect(badge).toHaveAttribute("aria-label", "14 need you");
+  await expect(badge).toHaveAttribute("aria-label", "15 need you");
 
   await askAsAgent(app, { title: "A new question from an agent", kind: "ack" });
-  await expect(page).toHaveTitle(/^\(15\) crowsnest/, { timeout: 10_000 });
-  await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("15 need you").first()).toBeAttached();
+  await expect(page).toHaveTitle(/^\(16\) crowsnest/, { timeout: 10_000 });
+  await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("16 need you").first()).toBeAttached();
 
   // Answering one from another tab brings it down here, without a reload.
   const other = await page.context().newPage();
   await other.goto("/inbox?q=q_5");
   await other.getByRole("button", { name: "Acknowledge", exact: true }).click();
-  await expect(page).toHaveTitle(/^\(14\) crowsnest/, { timeout: 10_000 });
+  await expect(page).toHaveTitle(/^\(15\) crowsnest/, { timeout: 10_000 });
   await other.close();
 });
 

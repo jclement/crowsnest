@@ -31,6 +31,9 @@ type MergeInput struct {
 	Mode      string   // ModeMerge or ModeFF
 	Message   string   // the merge commit's message (ModeMerge)
 	Protected []string // branches Land never merges into or pushes to
+	// Commit, when set, is the commit the human reviewed (R5-S4): the branch must still be at it,
+	// and it is that commit, not the branch's tip at click time, that is merged.
+	Commit string
 }
 
 // MergeResult is what a merge did.
@@ -48,13 +51,17 @@ func Merge(ctx context.Context, in MergeInput) (MergeResult, error) {
 		return MergeResult{}, err
 	}
 	before, _ := Head(ctx, in.MainDir)
-	args := []string{"merge", "--ff-only", in.Branch}
+	source := in.Branch
+	if in.Commit != "" {
+		source = in.Commit // the reviewed commit itself: a commit after the review cannot ride in
+	}
+	args := []string{"merge", "--ff-only", source}
 	if in.Mode != ModeFF {
 		message := in.Message
 		if message == "" {
 			message = "Merge " + in.Branch
 		}
-		args = []string{"merge", "--no-ff", "--no-edit", "-m", message, in.Branch}
+		args = []string{"merge", "--no-ff", "--no-edit", "-m", message, source}
 	}
 	if _, err := git(ctx, in.MainDir, args...); err != nil {
 		return MergeResult{}, mergeFailed(ctx, in, err)
@@ -99,10 +106,27 @@ func checkMerge(ctx context.Context, in MergeInput) error {
 			return refuse("the job's worktree has uncommitted work (%s): it would be lost when the worktree is removed. Ask the agent to commit it, or discard the job", listSome(dirty, 5))
 		}
 	}
-	if _, err := git(ctx, in.MainDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+in.Branch); err != nil {
+	tip, err := git(ctx, in.MainDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+in.Branch)
+	if err != nil {
 		return refuse("the branch %s does not exist in the main checkout's repository", in.Branch)
 	}
-	return nil
+	return checkPinned(in.Branch, strings.TrimSpace(tip), in.Commit)
+}
+
+// checkPinned refuses when the branch has moved past the commit the human reviewed (R5-S4).
+func checkPinned(branch, tip, reviewed string) error {
+	if reviewed == "" || tip == reviewed {
+		return nil
+	}
+	return &Refusal{Message: fmt.Sprintf("%s is now at %s, but you reviewed %s: a commit came after the review. Open the review again; nothing was changed",
+		branch, short(tip), short(reviewed)), Code: CodeHeadMoved}
+}
+
+func short(hash string) string {
+	if len(hash) > 10 {
+		return hash[:10]
+	}
+	return hash
 }
 
 // mergeFailed turns a failed merge into a refusal, aborting a merge left in progress.
@@ -168,6 +192,8 @@ type PushInput struct {
 	Protected []string
 	// GH is the gh binary ("" to look it up on PATH); tests point it at a fake.
 	GH string
+	// Commit, when set, is the commit the human reviewed (R5-S4): the branch must still be at it.
+	Commit string
 }
 
 // PushResult is what a push did.
@@ -202,9 +228,21 @@ func Push(ctx context.Context, in PushInput) (PushResult, error) {
 	// the pull request belongs to.
 	url, _ := git(ctx, in.WorkDir, "config", "--get", "remote."+remote+".url")
 	result := PushResult{Remote: remote, RemoteURL: StripCredentials(strings.TrimSpace(url))}
-	if _, err := gitTimed(ctx, pushTimeout, in.WorkDir, "push", "--set-upstream", remote, "refs/heads/"+in.Branch+":refs/heads/"+in.Branch); err != nil {
+	if tip, err := git(ctx, in.WorkDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+in.Branch); err != nil {
+		return PushResult{}, refuse("the branch %s cannot be read", in.Branch)
+	} else if err := checkPinned(in.Branch, strings.TrimSpace(tip), in.Commit); err != nil {
+		return PushResult{}, err
+	}
+	// The reviewed commit is what is pushed (R5-S4); the branch name only names the remote ref.
+	source := "refs/heads/" + in.Branch
+	if in.Commit != "" {
+		source = in.Commit
+	}
+	if _, err := gitTimed(ctx, pushTimeout, in.WorkDir, "push", remote, source+":refs/heads/"+in.Branch); err != nil {
 		return PushResult{}, refuse("pushing %s to %s failed: %v", in.Branch, remote, err)
 	}
+	// Record the upstream, as --set-upstream would (it needs a branch as the source).
+	_, _ = git(ctx, in.WorkDir, "branch", "--set-upstream-to="+remote+"/"+in.Branch, in.Branch)
 	if !IsGitHub(result.RemoteURL) {
 		result.Note = "pushed; " + hostOf(result.RemoteURL) + " is not GitHub, so open the pull request there"
 		return result, nil

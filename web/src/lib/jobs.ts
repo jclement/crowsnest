@@ -2,6 +2,7 @@
 // in internal/jobs/types.go, and the pure helpers the Jobs view uses: board sections and their
 // order, state labels and tones, and which one action fits a stuck job.
 import type { ChipTone } from "../components/ui/Chip";
+import type { AcceptState, BudgetView, Evidence, Receipt } from "./accept";
 import type { SpendSummary, SpendTurn } from "./spend";
 
 export type JobState = "queued" | "running" | "needs_you" | "blocked" | "in_review" | "done" | "failed" | "cancelled";
@@ -23,7 +24,10 @@ export type JobCause =
   | "approval"
   | "approval-tool"
   | "held"
-  | "review";
+  | "review"
+  | "check"
+  | "budget"
+  | "spinning";
 
 /** A job as GET /jobs and GET /jobs/{id} return it. */
 export interface Job {
@@ -85,6 +89,24 @@ export interface Job {
   torn_down_at?: string | null;
   land_request?: string;
   start_anyway?: boolean;
+  // Acceptance, budgets and wake-ups (DESIGN.md 6.15 to 6.18). Optional in fixtures.
+  accept_state?: AcceptState;
+  accept_detail?: string;
+  check_rounds?: number;
+  no_commits_reason?: string;
+  fix_of?: string;
+  budget?: BudgetView;
+  turns?: number;
+  /** Who owns the wait, and what ends it, in words. */
+  wait_owner?: string;
+  wake?: string;
+  wake_kind?: "" | "time" | "job" | "human";
+  wake_at?: string | null;
+  wake_job?: string;
+  rechecks?: number;
+  /** What the agent said when it last ended a turn. */
+  last_message?: string;
+  last_message_at?: string | null;
 }
 
 export interface JobEvent {
@@ -107,6 +129,8 @@ export interface JobQuestion {
   created_at: string;
   /** The choices (key and label), so an answer shows by its label. Empty for ack, manual, notice. */
   options: Array<{ key: string; label: string }>;
+  /** The answer's journey to the agent (6.19). */
+  receipt?: Receipt;
 }
 
 export interface JobDetail extends Job {
@@ -114,6 +138,8 @@ export interface JobDetail extends Job {
   questions: JobQuestion[];
   /** The latest model calls, oldest first, for the Spend chart. */
   spend_turns?: SpendTurn[];
+  /** crowsnest's latest check (6.15). */
+  evidence?: Evidence;
 }
 
 /** The `job` SSE event's data. */
@@ -167,8 +193,9 @@ export const stateLabels: Record<JobState, string> = {
 };
 
 /** The chip for a job: a stuck running job shows "Stuck" in warning colours. */
-export function stateChip(job: Pick<Job, "state" | "stuck">): { label: string; tone: ChipTone } {
+export function stateChip(job: Pick<Job, "state" | "stuck"> & { accept_state?: AcceptState }): { label: string; tone: ChipTone } {
   if (job.stuck && !isFinished(job.state)) return { label: "Stuck", tone: "warning" };
+  if (job.state === "in_review" && job.accept_state === "checking") return { label: "Checking", tone: "accent" };
   const tones: Record<JobState, ChipTone> = {
     queued: "neutral",
     running: "accent",
@@ -205,7 +232,7 @@ export function sectionOf(job: Job, now: Date = new Date()): BoardSection {
     return sameDay(settled, now) ? "today" : "older";
   }
   // A job an agent asked for that waits on the human's approval needs them as much as needs_you.
-  if (job.state === "needs_you" || job.stuck || job.cause === "approval") return "attention";
+  if (job.state === "needs_you" || job.stuck || job.cause === "approval" || (job.state === "blocked" && job.wake_kind === "human")) return "attention";
   return "running";
 }
 
@@ -232,7 +259,7 @@ export function boardSections(jobs: Job[], now: Date = new Date()): Record<Board
 
 // ---- Stuck: the one action that fits ---------------------------------------------------------
 
-export type JobAction = "terminal" | "retry" | "nudge" | "inbox" | "resume" | "start" | "review";
+export type JobAction = "terminal" | "retry" | "nudge" | "inbox" | "resume" | "start" | "review" | "recheck" | "budget";
 
 /** The one action that fits why a job is stuck or needs Jeff, or null when none is needed. */
 export function actionFor(job: Pick<Job, "state" | "stuck" | "cause">): JobAction | null {
@@ -243,6 +270,7 @@ export function actionFor(job: Pick<Job, "state" | "stuck" | "cause">): JobActio
     case "config":
     case "launch":
     case "silent":
+    case "spinning":
       return "terminal";
     case "limit":
     case "server_error":
@@ -261,6 +289,10 @@ export function actionFor(job: Pick<Job, "state" | "stuck" | "cause">): JobActio
       return "start";
     case "review":
       return "review";
+    case "check":
+      return "recheck";
+    case "budget":
+      return "budget";
     default:
       return null;
   }
@@ -274,6 +306,8 @@ export const actionLabels: Record<JobAction, string> = {
   resume: "Restart agent",
   start: "Start anyway",
   review: "Open the review",
+  recheck: "Run the check again",
+  budget: "Decide on the budget",
 };
 
 /** "Retry in 4 min" for a scheduled retry, or "" when none is due. */
@@ -312,8 +346,9 @@ export function cardLine(job: Job): string {
   if (job.state === "failed") return job.fail_reason;
   if (job.state === "done" && job.land_state) return `${landedWord(job.land_state)}: ${job.land_detail ?? ""}`;
   if (job.state === "done") return firstLine(job.result_md);
+  if (job.state === "in_review" && job.accept_state === "checking") return job.accept_detail || "crowsnest is running the check";
   if (job.state === "in_review") return `In review, round ${job.review_round ?? 1}`;
-  if (job.state === "blocked") return `Blocked: ${job.blocked_reason}`;
+  if (job.state === "blocked") return `Blocked: ${job.blocked_reason}${job.wake ? ` (${job.wake})` : ""}`;
   if ((job.stuck || job.state === "needs_you" || job.cause === "approval" || job.cause === "held") && job.cause_text)
     return job.cause_text + (job.cause_detail ? `: ${job.cause_detail}` : "");
   return job.doing_now;

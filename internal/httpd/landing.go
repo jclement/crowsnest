@@ -23,8 +23,11 @@ package httpd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/digest"
@@ -34,6 +37,9 @@ import (
 	"github.com/jclement/crowsnest/internal/presence"
 	"github.com/jclement/crowsnest/internal/throttle"
 )
+
+// commitPattern is a full commit id (SHA-1 or SHA-256).
+var commitPattern = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // landTimeout bounds a land action: a merge, or a push and a pull request over the network.
 const landTimeout = 5 * time.Minute
@@ -110,6 +116,13 @@ func (s *Server) handleReviewDiff(w http.ResponseWriter, r *http.Request) {
 type landBody struct {
 	Action  string `json:"action"`
 	Confirm bool   `json:"confirm"`
+	// Override lands a revision crowsnest's evidence does not support (stale, failed or missing
+	// check, or a base that moved on: DESIGN.md 6.15). Only ever sent by an explicit second
+	// confirmation in the app.
+	Override bool `json:"override"`
+	// ExpectedHead is the commit the Review tab showed (R5-S4): required to merge or push, so
+	// what lands is what was reviewed.
+	ExpectedHead string `json:"expected_head"`
 }
 
 func (s *Server) handleLand(w http.ResponseWriter, r *http.Request) {
@@ -125,9 +138,18 @@ func (s *Server) handleLand(w http.ResponseWriter, r *http.Request) {
 		confirmRequired(w)
 		return
 	}
+	if body.Action != jobs.LandDiscard && !commitPattern.MatchString(body.ExpectedHead) {
+		writeError(w, http.StatusBadRequest, codeValidation, "Send expected_head: the commit the Review tab showed (what lands is what you reviewed).")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), landTimeout)
 	defer cancel()
-	result, err := service.Land(ctx, r.PathValue("id"), body.Action, "you")
+	result, err := service.LandWith(ctx, r.PathValue("id"), body.Action, "you", jobs.LandFlags{Override: body.Override, Head: body.ExpectedHead})
+	var evidence *jobs.EvidenceError
+	if errors.As(err, &evidence) {
+		writeError(w, http.StatusConflict, "EVIDENCE_"+strings.ToUpper(evidence.Code), evidence.Message)
+		return
+	}
 	if err != nil {
 		s.writeJobError(w, r, err)
 		return

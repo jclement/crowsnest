@@ -34,6 +34,8 @@ const (
 	KindDialog   Kind = "dialog"   // an agent stopped at a terminal dialog
 	KindJob      Kind = "job"      // a job stuck, failed, needing a fix, or waiting to start
 	KindAgent    Kind = "agent"    // the orchestrator or a lead needs the terminal or a restart
+	KindLimit    Kind = "limit"    // an engine is under its plan's usage limit (DESIGN.md 6.17)
+	KindWait     Kind = "wait"     // a live job with no owner or no wake-up (6.18)
 )
 
 // Urgency splits the queue in two (R4 Fable 1.1): blocking means work has stopped until the human
@@ -87,6 +89,7 @@ type Item struct {
 	DialogFor *fleet.AgentEntry   `json:"dialog_agent,omitempty"`
 	Job       *jobs.Job           `json:"job,omitempty"`
 	Standing  *StandingAgent      `json:"standing,omitempty"`
+	Limit     *jobs.LimitState    `json:"limit,omitempty"`
 }
 
 // StandingAgent is the orchestrator or a project's lead as the queue needs it.
@@ -112,6 +115,10 @@ type Sources struct {
 	FirstSeen map[string]time.Time
 	// Dismissed are failed-job items the human has looked at; they leave the queue.
 	Dismissed map[string]bool
+	// Limits are the fleet's usage limits (6.17): one item each, standing for every job held by it.
+	Limits []jobs.LimitState
+	// Violations are live jobs with no owner or no wake-up (6.18).
+	Violations []jobs.Violation
 }
 
 // Ranks, higher first within an urgency band. Named so a surface's legend and the tests agree.
@@ -130,6 +137,12 @@ const (
 	rankJobHeldStart = 12
 	rankReviewObject = 36
 	rankReadyToLand  = 25
+	rankCheckFailed  = 37
+	rankBudget       = 38
+	rankSpinning     = 34
+	rankNeedsRebase  = 24
+	rankLimit        = 16
+	rankNoOwner      = 33
 )
 
 // FailedWindow is how long a failed job stays in the queue (unless dismissed): long enough to be
@@ -167,7 +180,9 @@ func Build(src Sources, now time.Time) []Item {
 	b.addQuestions()
 	dialogPanes := b.addDialogs(approvalPanes)
 	b.addStanding(dialogPanes, approvalPanes)
+	b.addLimits()
 	b.addJobs()
+	b.addViolations()
 	sortItems(b.items)
 	return b.items
 }
@@ -323,6 +338,53 @@ func (b *builder) addStanding(dialogPanes, approvalPanes map[string]bool) {
 	}
 }
 
+// addLimits lists each engine's usage limit once; the jobs it holds are covered by it (one
+// banner, not a stuck card per agent: DESIGN.md 6.17).
+func (b *builder) addLimits() {
+	for i := range b.src.Limits {
+		limit := b.src.Limits[i]
+		for _, job := range b.src.Jobs {
+			if job.Engine == limit.Engine && !job.State.Terminal() && ((job.Stuck && job.Cause == jobs.CauseLimit) || (job.Cause == jobs.CauseHeld && strings.HasPrefix(job.CauseDetail, "usage limit"))) {
+				b.covered[job.ID] = true
+			}
+		}
+		title := fmt.Sprintf("%s usage limit: resets at %s", limit.Engine, limit.ResetAt.Local().Format("15:04"))
+		if !b.now.Before(limit.ResetAt) {
+			title = fmt.Sprintf("%s usage limit reset: resuming the waiting jobs", limit.Engine)
+		}
+		detail := fmt.Sprintf("%d job(s) wait; new starts, nudges and retries resume in order after the reset", limit.Held)
+		if limit.Guessed {
+			detail += " (the reset time is a guess)"
+		}
+		b.items = append(b.items, Item{ID: "limit:" + limit.Engine, Kind: KindLimit, Urgency: CanWait, Rank: rankLimit, Since: limit.Since,
+			Title: title, Detail: detail, JobID: limit.Job, Action: Action{Kind: "open", Label: "See the waiting jobs"}, Limit: &limit})
+	}
+}
+
+// addViolations lists live jobs with no owner or wake-up that nothing else already stands for.
+func (b *builder) addViolations() {
+	listed := map[string]bool{}
+	for _, item := range b.items {
+		if item.JobID != "" {
+			listed[item.JobID] = true
+		}
+	}
+	for _, violation := range b.src.Violations {
+		if listed[violation.JobID] || b.covered[violation.JobID] {
+			continue
+		}
+		item := Item{ID: "wait:" + violation.JobID, Kind: KindWait, Urgency: Blocking, Rank: rankNoOwner, Since: violation.Since,
+			Title: violation.Title, Detail: "Nobody owns this wait: " + violation.Rule, JobID: violation.JobID, JobTitle: violation.Title,
+			Action: Action{Kind: "open", Label: "Look at it"}}
+		if job, ok := b.jobByID[violation.JobID]; ok {
+			item.Project, item.Agent, item.PaneID = b.projectRef(job.ProjectID), job.AgentName, job.PaneID
+			copied := job
+			item.Job = &copied
+		}
+		b.items = append(b.items, item)
+	}
+}
+
 // addJobs lists jobs no other item already stands for: stuck ones, ones needing a fix only the
 // human can make, ones held for approval to start, and recent failures.
 func (b *builder) addJobs() {
@@ -353,6 +415,13 @@ func (b *builder) addJobs() {
 // jobDisposition says whether a job is an item by itself, and how urgent.
 func (b *builder) jobDisposition(job jobs.Job) (Urgency, int, Action, bool) {
 	switch {
+	case readyToLand(job) && (job.AcceptState == jobs.AcceptNeedsRebase || job.AcceptState == jobs.AcceptStale || job.AcceptState == jobs.AcceptFailed):
+		// Finished, but crowsnest's evidence does not support landing it as it is (6.15).
+		label := "Run the check again"
+		if job.AcceptState == jobs.AcceptNeedsRebase {
+			label = "Ask an agent to rebase"
+		}
+		return CanWait, rankNeedsRebase, Action{Kind: "open", Label: label}, true
 	case readyToLand(job):
 		return CanWait, rankReadyToLand, Action{Kind: "land", Label: "Review and land"}, true
 	case job.State == jobs.StateNeedsYou && job.Cause == jobs.CauseReview:
@@ -371,6 +440,10 @@ func (b *builder) jobDisposition(job jobs.Job) (Urgency, int, Action, bool) {
 		switch job.Cause {
 		case jobs.CauseAuth, jobs.CauseConfig, jobs.CauseLaunch, jobs.CauseDialog:
 			return Blocking, rankJobBlocking, Action{Kind: "terminal", Label: "Open terminal"}, true
+		case jobs.CauseCheck:
+			return Blocking, rankCheckFailed, Action{Kind: "open", Label: "Run the check again"}, true
+		case jobs.CauseBudget:
+			return Blocking, rankBudget, Action{Kind: "open", Label: "Raise, finish the step or stop"}, true
 		}
 		return "", 0, Action{}, false // questions or an approval: those items stand for it
 	case job.Stuck:
@@ -381,8 +454,13 @@ func (b *builder) jobDisposition(job jobs.Job) (Urgency, int, Action, bool) {
 			return CanWait, rankJobRecover, Action{Kind: "restart", Label: "Restart agent"}, true
 		case jobs.CauseSilent:
 			return Blocking, rankJobBlocking, Action{Kind: "terminal", Label: "Open terminal"}, true
+		case jobs.CauseSpinning:
+			return Blocking, rankSpinning, Action{Kind: "terminal", Label: "Open terminal"}, true
 		}
 		return Blocking, rankJobBlocking, Action{Kind: "nudge", Label: "Nudge"}, true
+	case job.State == jobs.StateBlocked && job.WakeKind == jobs.WakeHuman:
+		// Blocked until the human looks (6.18).
+		return Blocking, rankJobBlocking, Action{Kind: "open", Label: "Wake it"}, true
 	}
 	return "", 0, Action{}, false
 }
@@ -395,6 +473,8 @@ func readyToLand(job jobs.Job) bool {
 
 func jobDetail(job jobs.Job) string {
 	switch {
+	case readyToLand(job) && job.AcceptState != jobs.AcceptNone && job.AcceptState != jobs.AcceptAccepted && job.AcceptState != jobs.AcceptUnverified:
+		return job.AcceptDetail
 	case readyToLand(job):
 		return "Ready to land: " + job.WorktreeBranch
 	case job.State == jobs.StateNeedsYou && job.Cause == jobs.CauseReview:
@@ -403,6 +483,8 @@ func jobDetail(job jobs.Job) string {
 		return "Failed: " + job.FailReason
 	case job.State == jobs.StateQueued && job.Cause == jobs.CauseApproval:
 		return "Waiting for your approval to start"
+	case job.State == jobs.StateBlocked:
+		return "Blocked until you look: " + job.BlockedReason
 	case job.CauseDetail != "":
 		return fmt.Sprintf("%s: %s", job.CauseText, job.CauseDetail)
 	}

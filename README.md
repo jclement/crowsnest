@@ -757,6 +757,36 @@ directory.
   is next, written from crowsnest's records (by the orchestrator when it is up), as a notice in
   the Inbox; past digests under "Past digests".
 
+## Acceptance, budgets and waits
+
+- **Done is checked, not believed.** When an agent working in a git checkout calls done,
+  crowsnest refuses a dirty tree, and a worktree branch with no commits unless the agent says
+  why. Then it runs the project's **check command** itself, under `crowsnest heavy`: automatic
+  is `mise run check` when the checkout's mise.toml has a `check` task; set another, or `none`,
+  in the project's "Acceptance and budget" card. A pass makes the job **Accepted** (then the
+  review gate looks at that commit); a failure goes back to the agent with the output, up to
+  `--check-rounds` times, then the job needs you. No check command: **Unverified**. The check is
+  pinned to its commit: a later commit makes it **stale**, and a base branch that moved on makes
+  the job **need a rebase** ("Ask an agent to rebase"). Land refuses both unless you tick the
+  override.
+- **Budgets.** Per job (the job view's Raise), per project (dollars, minutes) or in Settings
+  (`--job-budget-usd`, `-tokens`, `-minutes`, `-turns`); delegated jobs count toward their
+  parent. At 80% the card warns and the agent is told; at 100% the agent is asked to stop at a
+  safe point and the job needs you: raise it, let it finish the step, or stop it. Nothing is
+  killed. `--daily-ceiling-usd` bounds jobs with no budget and holds new starts once today's
+  spend reaches it; `--orchestrator-ceiling-usd` and `--lead-ceiling-usd` hold the standing
+  agents' automatic pokes. Spend that is not measured (Codex) shows as "not measured".
+- **Usage limits.** When one agent hits its plan's usage limit, one banner counts down to the
+  reset; that engine's new starts, nudges, retries and pokes wait, then resume one at a time.
+- **Spinning.** An agent repeating the same few tool calls for ten minutes or more with no change
+  to its files or its failing tests is flagged "Busy, but not getting anywhere", with the evidence.
+- **Waits.** `blocked` needs a wake-up (`--recheck-in 30m`, `--recheck-at`, `--until-job j_N`,
+  `--until-human`); crowsnest wakes the agent then. Every live job says who it waits on; the
+  System page lists any that do not. An agent that ends its turn asking you something in prose is
+  told to use `ask`, and stuck or waiting cards show what it last said.
+- **Answers.** The Inbox shows whether an answer is stored, held, uncertain, delivered or
+  received by the agent; "Did it arrive?" checks its conversation before anything is typed again.
+
 ## Spend
 
 Every job shows what its agent has used, and the orchestrator's own conversation is a line of
@@ -837,6 +867,15 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--review` | `CROWSNEST_REVIEW` | `auto` | The review gate for builder jobs in a worktree: `auto` (the other engine when installed, else the same one), `same`, `claude`, `codex` or `off`. A job can ask for its own |
 | `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges a finished job's branch into its base: `merge` (a merge commit) or `ff` (fast-forward only) |
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | off | `HH:MM`: write the daily digest into the Inbox after this local time (also the switch in the Schedule sheet and in Settings) |
+| `--check-timeout` | `CROWSNEST_CHECK_TIMEOUT` | `30m` | Longest crowsnest's own check of a finished coding job may run (DESIGN 6.15) |
+| `--check-rounds` | `CROWSNEST_CHECK_ROUNDS` | `3` | Failed checks sent back to the agent before the job needs you |
+| `--job-budget-usd` | `CROWSNEST_JOB_BUDGET_USD` | `0` (none) | Default budget per job in estimated dollars, its delegated jobs included (DESIGN 6.16) |
+| `--job-budget-minutes` | `CROWSNEST_JOB_BUDGET_MINUTES` | `0` (none) | Default budget per job in minutes since its agent started |
+| `--job-budget-turns` | `CROWSNEST_JOB_BUDGET_TURNS` | `0` (none) | Default budget per job in ended turns, delegated jobs included |
+| `--job-budget-tokens` | `CROWSNEST_JOB_BUDGET_TOKENS` | `0` (none) | Default budget per job in tokens, delegated jobs included |
+| `--daily-ceiling-usd` | `CROWSNEST_DAILY_CEILING_USD` | `0` (none) | The fleet's spend ceiling per day: bounds jobs with no budget of their own, and holds new starts once reached |
+| `--orchestrator-ceiling-usd` | `CROWSNEST_ORCHESTRATOR_CEILING_USD` | `0` (none) | The orchestrator's spend ceiling per day; past it automatic pokes wait |
+| `--lead-ceiling-usd` | `CROWSNEST_LEAD_CEILING_USD` | `0` (none) | Each project lead's spend ceiling per day, where its spend is measured |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Largest file you can paste, drop or attach, and that an agent can attach to a question or a result, in MB |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Disk all attachments may take, in MB; past it the oldest files nobody needs any more are deleted, else an upload is refused |
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host no agent may reach unattended: the guard hook refuses a command that would reach it, and an approval naming it is dangerous. Repeatable; added to the file below |
@@ -908,11 +947,17 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /setup` | none | `{required, default_name?, min_password_length}`: whether first-run setup is waiting |
 | `POST /setup` | none (the setup token) | `{token, username, password, name}` → `201` and a session cookie; `403 BAD_TOKEN`, `400` for a field to fix, `429` with `Retry-After` (about five tries a minute, for everyone), `410` once setup is done. While setup waits, every other API route answers `403 SETUP_REQUIRED` and every page redirects to `/setup` |
 | `GET /jobs/{id}/review`, `GET /jobs/{id}/review/diff?path=` | session | The Review tab: what a worktree job produced, the files in reading order, the review rounds, the land actions open (and why not), and one file's diff |
-| `POST /jobs/{id}/land` | session | `{action: merge\|pr\|discard, confirm: true}` → what was done and whether the teardown finished; `409 CONFIRM_REQUIRED` without `confirm`; `400` for a refusal (dirty checkout, conflict, protected branch) with nothing changed |
+| `POST /jobs/{id}/land` | session | `{action: merge\|pr\|discard, confirm: true}` → what was done and whether the teardown finished; `409 CONFIRM_REQUIRED` without `confirm`; `400` for a refusal (dirty checkout, conflict, protected branch) with nothing changed; `409 EVIDENCE_<CODE>` when crowsnest's check is stale, failed or missing, or the base moved on, unless `override: true`. Merge and pr need `expected_head` (the Review tab's `land.head`): exactly that commit lands, else `409 EVIDENCE_HEAD_MOVED` |
 | `POST /jobs/{id}/teardown`, `POST /jobs/{id}/start-anyway` | session | Retry a landed job's teardown (`{confirm: true}`); start a held job past the limits |
 | `GET /sweep`, `POST /sweep/discard` | session | Finished jobs whose worktrees are still around; discard several (`{ids, confirm: true}`) |
 | `GET /queue`, `GET\|PUT\|DELETE /throttle`, `GET /system/heavy` | session | Running / limit / waiting; the limits (and back to the flags); the heavy slots |
 | `GET\|POST /pause`, `POST /resume` | session | The pause switch (`{until?, reason?}`) |
+| `POST /jobs/{id}/recheck`, `POST /jobs/{id}/rebase` | session | Run crowsnest's check of a job again; start a job that merges the base into its branch (then it is checked again) |
+| `PUT /jobs/{id}/budget`, `POST /jobs/{id}/budget/finish-step` | session | Change (raise) a job's budget `{usd?, tokens?, minutes?, turns?}`; let a job at its budget finish the step it is in |
+| `POST /jobs/{id}/wake` | session | Wake a blocked job now |
+| `GET /limits`, `GET /system/waits` | session | The fleet's usage limits with their reset times; live jobs with no owner or wake-up |
+| `GET\|PUT /projects/{id}/accept` | session | A project's check command and budget defaults, and the check that would run now |
+| `POST /questions/{id}/reconcile`, `POST /questions/{id}/retype` | session | Look for an answer in the agent's conversation; type an uncertain or failed one again (`{confirm: true}`) |
 | `GET\|POST /presence`, `POST /presence/gone`, `PUT /presence/dnd` | session | Presence (the browser's heartbeat) and do not disturb (`{until}`) |
 | `GET /digests`, `GET\|PUT /digest/settings`, `POST /digest/now` | session | The digest history, its switch and time, and one now |
 | `GET /account` | session | `{username, source: database\|config\|none, name, name_managed, min_password_length}` |

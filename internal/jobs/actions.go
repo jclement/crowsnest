@@ -197,6 +197,10 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 		if r.PaneID == "" || !r.LastStopAt.Equal(job.LastStopAt) {
 			return errSkip
 		}
+		if held, _ := s.limitHeld(ctx, r.Engine); held {
+			return errSkip // the fleet's usage limit holds every agent of this engine (6.17)
+		}
+		r.Turns++ // an agent without hooks ended a turn: what bounds it when spend is not measured (6.16)
 		view := s.toJob(*r, c.questions.Open)
 		decision = Decide(&view, c.questions.Open, StopInput{}, s.historyLocked(*r, c), s.opts.Now())
 		switch {

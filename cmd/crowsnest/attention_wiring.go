@@ -70,6 +70,20 @@ func startAttention(ctx context.Context, deps attentionDeps) (*attention.Service
 		KV:       deps.db,
 		Hub:      deps.events,
 		Logger:   deps.logger,
+		// Acceptance, budgets and waits (DESIGN.md 6.15 to 6.18) are items in the same queue.
+		Limits: func(ctx context.Context) []jobs.LimitState {
+			if deps.jobs == nil {
+				return nil
+			}
+			return deps.jobs.FleetLimitsNow(ctx)
+		},
+		Violations: func() []jobs.Violation {
+			if deps.jobs == nil {
+				return nil
+			}
+			list, _ := deps.jobs.WaitViolations()
+			return list
+		},
 	})
 	go service.Run(ctx)
 	now := httpd.NowSources{
@@ -145,6 +159,7 @@ func sinceSources(ctx context.Context, deps attentionDeps) (attention.SinceSourc
 	if err != nil {
 		return attention.SinceSources{}, err
 	}
+	deps.questions.FillReceipts(ctx, asked) // answers given in the window carry how far they got (6.19)
 	names := map[int64]attention.ProjectRef{}
 	if all, err := deps.projects.List(ctx, true); err == nil {
 		for _, project := range all {

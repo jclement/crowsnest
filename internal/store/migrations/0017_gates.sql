@@ -1,4 +1,4 @@
--- 0016: the human gates must mean something (R5).
+-- 0017: the human gates must mean something (R5).
 --
 -- land_token binds a land request to the one question that approves it (R5-C01, R5-C09): the
 -- request is reserved with a fresh random token under the jobs lock before its question exists,
