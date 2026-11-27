@@ -6,7 +6,7 @@
 // its remote host (Land opens pull requests only on GitHub), not a repository, overlaps. The defaults its jobs get (role, engine, model, isolation, permission mode) and when
 // its lead starts sit behind one disclosure. The server checks the rest (the directory exists, is
 // not $HOME, does not overlap another project) and its message is shown as it comes.
-import { ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { factsSummary, folderWarnings, hostNote, isPathInput, type FolderFacts } from "../../lib/browse";
 import { leadStartLabels, permissionModes, suggestName, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
@@ -293,11 +293,15 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
  * job worktree made from it inherits it.
  */
 function TrustFolderBox({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
-  const id = useId();
+  // The whole row is the tap target (a phone's 44 px rule): the real checkbox covers it, unseen,
+  // and the drawn box shows its state.
   return (
-    <div className="flex items-start gap-2 rounded border border-border bg-surface-sunken p-2.5">
-      <input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-accent)]" />
-      <label htmlFor={id} className="flex flex-col gap-0.5 text-xs">
+    <label className="relative flex min-h-11 cursor-pointer items-start gap-2 rounded border border-border bg-surface-sunken p-2.5 text-xs has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+      <span aria-hidden className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-accent bg-accent text-accent-fg" : "border-border-strong bg-surface"}`}>
+        {checked && <Check className="h-3 w-3" />}
+      </span>
+      <span className="flex flex-col gap-0.5">
         <span className="font-medium text-heading">Agents may work in this folder without asking</span>
         <span className="text-2xs text-muted">
           Claude Code and Codex each ask once whether to trust a new folder, in their terminal. Trusting lets them read,
@@ -305,8 +309,8 @@ function TrustFolderBox({ checked, onChange }: { checked: boolean; onChange: (va
           crowsnest records that yes for you; job worktrees made from it start trusted too. Untick to answer the
           question yourself on the agent&apos;s card.
         </span>
-      </label>
-    </div>
+      </span>
+    </label>
   );
 }
 

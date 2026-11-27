@@ -24,6 +24,11 @@ interface ProjectView {
   folder_trusted?: boolean;
 }
 
+/** Waits for sheets and toasts to finish moving, so a screenshot is not a blend of two screens. */
+async function settled(page: Page) {
+  await page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity));
+}
+
 async function createProject(page: Page, dir: string, name: string, trust: boolean): Promise<ProjectView> {
   await page.goto(`${instance.baseURL}/projects`);
   await page.getByRole("button", { name: "New project" }).first().click();
@@ -33,6 +38,7 @@ async function createProject(page: Page, dir: string, name: string, trust: boole
   const box = form.getByRole("checkbox", { name: /Agents may work in this folder without asking/ });
   await expect(box).toBeChecked(); // on by default
   if (!trust) await box.uncheck();
+  await settled(page);
   await page.screenshot({ path: `screenshots/trust-project-form-${trust ? "ticked" : "unticked"}-390.png` });
   await form.getByRole("button", { name: "Create project" }).click();
   const slug = name.toLowerCase();
@@ -104,6 +110,7 @@ test.describe.serial("folder trust on a phone, with real Claude", () => {
     expect(sawDialog, "no trust question may appear for a job in a trusted project").toBe(false);
     expect(job.timeline.some((event) => event.kind === "stuck" && /dialog/i.test(event.summary)), "the job never stopped at a dialog").toBe(false);
     await page.goto(`${instance.baseURL}/jobs?job=${id}`);
+    await settled(page);
     await page.screenshot({ path: "screenshots/trust-job-running-390.png" });
   });
 
@@ -119,6 +126,7 @@ test.describe.serial("folder trust on a phone, with real Claude", () => {
       await expect(page.getByRole("heading", { name: /asks to trust/ }).or(page.getByText(/asks to trust/).first())).toBeVisible({ timeout: 15_000 });
       const bar = page.getByTestId("answer-bar");
       await expect(bar.getByRole("button", { name: "Don't trust" })).toBeVisible();
+      await settled(page);
       await page.screenshot({ path: "screenshots/trust-decision-390.png" });
       await bar.getByRole("button", { name: /^Trust this folder$/ }).click();
       answered = true;
