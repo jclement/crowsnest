@@ -39,6 +39,24 @@ const (
 	kvRemoteControl = "orchestrator.remote_control"
 )
 
+// DemoRemoteControl is the demo's made-up Remote Control: a name and a link of the real shape.
+type DemoRemoteControl struct {
+	Name string
+	URL  string
+}
+
+// showDemo puts the demo's name and link in the status; false when this is not the demo.
+func (o *Orchestrator) showDemo() bool {
+	demo := o.opts.DemoRemoteControl
+	if demo == nil {
+		return false
+	}
+	o.update(func(s *Status) {
+		s.RemoteControl, s.RemoteControlNote, s.RemoteControlURL = demo.Name, RemoteControlActive, demo.URL
+	})
+	return true
+}
+
 // rcLook schedules the looks: every tick until until, then every remoteControlRelookEvery while
 // left lasts. The zero value looks no more.
 type rcLook struct {
@@ -80,6 +98,9 @@ func (o *Orchestrator) armLook() {
 // startedRemoteControl records a start with Remote Control name ("" when off) on sessionID and
 // begins looking for its URL. start has already cleared the status.
 func (o *Orchestrator) startedRemoteControl(ctx context.Context, name, sessionID string) {
+	if o.showDemo() {
+		return
+	}
 	if name == "" {
 		o.forgetRemoteControl(ctx)
 		return
@@ -93,6 +114,9 @@ func (o *Orchestrator) startedRemoteControl(ctx context.Context, name, sessionID
 // gives back the name and URL. Without one (or for another conversation) the name the launch
 // settings would use now is assumed, and the URL is looked for again.
 func (o *Orchestrator) restoreRemoteControl(ctx context.Context, sessionID string) {
+	if o.showDemo() {
+		return
+	}
 	record, ok := o.loadRemoteControl(ctx)
 	if ok && record.Session != "" && record.Session == sessionID && record.Name != "" {
 		o.update(func(s *Status) {
@@ -122,7 +146,7 @@ func (o *Orchestrator) restoreRemoteControl(ctx context.Context, sessionID strin
 // reported late) and looks again.
 func (o *Orchestrator) sessionMoved(ctx context.Context, sessionID string) {
 	status := o.Status()
-	if status.RemoteControl == "" {
+	if status.RemoteControl == "" || o.opts.DemoRemoteControl != nil {
 		return
 	}
 	if record, ok := o.loadRemoteControl(ctx); ok && record.Session == sessionID {

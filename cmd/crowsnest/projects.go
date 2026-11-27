@@ -165,6 +165,7 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 			Session: deps.cfg.Session, Dir: project.Dir, StateDir: filepath.Join(deps.cfg.StateDir, "leads", project.Slug),
 			Model: deps.cfg.Model, PermissionMode: permission, Version: version,
 			RemoteControlName: leadRemoteControl(deps.cfg, project),
+			DemoRemoteControl: demoRemoteControl(deps.cfg, project.Name, "lead"+project.Slug),
 			BinDir:            binDir, Executable: executable, AgentSocket: deps.agentSocket, BasePath: os.Getenv("PATH"),
 			ClaudeConfigDir: claudeConfigDir(deps.cfg), Identity: deps.identity, Guard: deps.guard,
 			AgentName: projects.AgentName(project.Slug), Workspace: "lead " + project.Slug, KVPrefix: "lead." + project.Slug,

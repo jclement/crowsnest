@@ -159,6 +159,10 @@ type Options struct {
 	// Paused reports whether the human paused crowsnest's automation (DESIGN.md 6.13): an agent
 	// that exits meanwhile is not restarted automatically (Restart still works). Nil: never.
 	Paused func() bool
+	// DemoRemoteControl, under --demo, is a made-up Remote Control name and session URL the
+	// status shows after every start, so the UI has a link to draw; Claude is never started with
+	// Remote Control for it (DESIGN.md 7.10). Nil: none.
+	DemoRemoteControl *DemoRemoteControl
 	// ExtraEnv is added to the agent's pane environment (CROWSNEST_HEAVY_DIR, DESIGN.md 6.12).
 	ExtraEnv map[string]string
 

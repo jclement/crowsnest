@@ -43,6 +43,24 @@ func orchestratorRemoteControl(cfg config.Config) string {
 	return cfg.RemoteControlName()
 }
 
+// demoRemoteControl is the demo's made-up Remote Control for a standing agent (DESIGN.md 7.10):
+// a name like the real one and a link of the real shape (https://claude.ai/code/session_demo…)
+// that leads nowhere, so the UI and the hermetic tests can show "Open in Claude". Nil outside
+// the demo, and when Remote Control is off.
+func demoRemoteControl(cfg config.Config, what, key string) *orch.DemoRemoteControl {
+	if !cfg.Demo || cfg.NoRemoteControl {
+		return nil
+	}
+	id := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, key)
+	id = (id + "0000000000000000000000")[:22]
+	return &orch.DemoRemoteControl{Name: strings.TrimSpace(cfg.Name + " " + what), URL: "https://claude.ai/code/session_demo" + id}
+}
+
 // jobRemoteControlPrefix is the prefix of job agents' Remote Control names, "" when off.
 func jobRemoteControlPrefix(cfg config.Config) string {
 	if !cfg.JobRemoteControl || cfg.Demo {

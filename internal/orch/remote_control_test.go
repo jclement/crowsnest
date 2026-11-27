@@ -10,6 +10,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +124,31 @@ func TestRemoteControlURLSurvivesAdoption(t *testing.T) {
 				t.Fatalf("stale link restored: %+v", third)
 			}
 		})
+	}
+}
+
+// The demo's made-up link is shown after a start and kept, and Claude is never started with
+// --remote-control for it.
+func TestDemoRemoteControl(t *testing.T) {
+	ctx := context.Background()
+	demo := &DemoRemoteControl{Name: "demo crowsnest", URL: "https://claude.ai/code/session_demoorchestrator0000000000"}
+	rig := newRig(t, fake.New(), func(o *Options) { o.DemoRemoteControl = demo })
+	status, err := rig.orch.Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.RemoteControl != demo.Name || status.RemoteControlURL != demo.URL || status.RemoteControlNote != RemoteControlActive {
+		t.Fatalf("demo status %+v", status)
+	}
+	if slices.Contains(rig.fake.Starts()[0].Args, "--remote-control") {
+		t.Fatalf("demo started Remote Control: %v", rig.fake.Starts()[0].Args)
+	}
+	if !ValidRemoteControlURL(demo.URL) {
+		t.Fatal("the demo link must have the real shape")
+	}
+	rig.orch.Watch(ctx)
+	if got := rig.orch.Status().RemoteControlURL; got != demo.URL {
+		t.Fatalf("after a watch: %q", got)
 	}
 }
 
