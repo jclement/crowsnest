@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# A fake `tailscale` CLI for tsserve's tests and the hermetic e2e (never the real one).
+#
+# It appends every argv to $FAKE_TS_DIR/argv.log, then plays back what the state directory
+# $FAKE_TS_DIR holds:
+#
+#   version      what `tailscale version` prints (default 1.104.5)
+#   status.json  what `tailscale status --json` prints (default: running, HTTPS and MagicDNS on,
+#                named $FAKE_TS_NAME, default quark.tail1234.ts.net); absent with down present:
+#                tailscaled not running
+#   serve.json   the background serve config (default {})
+#   mode         how a foreground `serve --https=N <target>` behaves:
+#                  ok (default)      publish until interrupted
+#                  serve-disabled    print the enable-Serve message and wait until a file
+#                                    named "enabled" appears, then publish
+#                  exit-https        print an HTTPS-not-enabled error and exit 1
+#                  crash-once        exit 1 the first time, publish after
+#                  die-after         publish, then exit 1 after one second
+#
+# A foreground serve writes fg.<pid>.json (its config) and fg.pid; `serve status --json` merges
+# every fg.*.json whose process is alive under "Foreground", removing the rest, which is what
+# tailscaled does when a foreground CLI goes away. Anything outside the allowlist (funnel, --bg,
+# reset, off) is logged and refused with exit 99.
+set -u
+dir="${FAKE_TS_DIR:?FAKE_TS_DIR must be set}"
+name="${FAKE_TS_NAME:-quark.tail1234.ts.net}"
+echo "$*" >>"$dir/argv.log"
+
+foreground() {
+  local merged="" file pid
+  for file in "$dir"/fg.*.json; do
+    [ -e "$file" ] || continue
+    pid="${file##*/fg.}"
+    pid="${pid%.json}"
+    if kill -0 "$pid" 2>/dev/null; then
+      merged="$merged${merged:+,}\"s$pid\":$(cat "$file")"
+    else
+      rm -f "$file"
+    fi
+  done
+  printf '%s' "$merged"
+}
+
+publish() {
+  local port="$1" target="$2"
+  printf '{"TCP":{"%s":{"HTTPS":true}},"Web":{"%s:%s":{"Handlers":{"/":{"Proxy":"%s"}}}}}' \
+    "$port" "$name" "$port" "$target" >"$dir/fg.$$.json"
+  echo $$ >"$dir/fg.pid"
+  trap 'rm -f "$dir/fg.$$.json"; echo interrupted >>"$dir/argv.log"; exit 0' INT TERM
+  printf 'Available within your tailnet:\n\nhttps://%s:%s/\n|-- proxy %s\n\nPress Ctrl+C to exit.\n' "$name" "$port" "$target"
+  if [ "$(cat "$dir/mode" 2>/dev/null)" = "die-after" ]; then
+    sleep 1
+    rm -f "$dir/fg.$$.json"
+    echo "fake: lost connection to tailscaled" >&2
+    exit 1
+  fi
+  while :; do sleep 0.1; done
+}
+
+case "$*" in
+  "version")
+    cat "$dir/version" 2>/dev/null || printf '1.104.5\n  tailscale commit: fake\n'
+    ;;
+  "status --json")
+    if [ -e "$dir/down" ]; then
+      echo "failed to connect to local Tailscale daemon for /localapi/v0/status; not running?" >&2
+      exit 1
+    fi
+    if [ -e "$dir/status.json" ]; then cat "$dir/status.json"; else
+      printf '{"BackendState":"Running","Self":{"DNSName":"%s.","TailscaleIPs":["100.101.102.103"]},"CertDomains":["%s"],"CurrentTailnet":{"MagicDNSEnabled":true}}\n' "$name" "$name"
+    fi
+    ;;
+  "serve status --json")
+    base="$(cat "$dir/serve.json" 2>/dev/null || echo '{}')"
+    fg="$(foreground)"
+    if [ -z "$fg" ]; then echo "$base"
+    elif [ "$base" = "{}" ]; then echo "{\"Foreground\":{$fg}}"
+    else echo "${base%\}},\"Foreground\":{$fg}}"; fi
+    ;;
+  serve\ --https=*\ http://*)
+    port="${2#--https=}"
+    target="$3"
+    mode="$(cat "$dir/mode" 2>/dev/null || echo ok)"
+    case "$mode" in
+      exit-https)
+        echo "error: HTTPS certificates are not enabled for this tailnet" >&2
+        exit 1
+        ;;
+      crash-once)
+        if [ ! -e "$dir/crashed" ]; then
+          touch "$dir/crashed"
+          echo "fake: crashed" >&2
+          exit 1
+        fi
+        ;;
+      serve-disabled)
+        printf 'Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=nFAKE123\n\n'
+        trap 'echo interrupted >>"$dir/argv.log"; exit 0' INT TERM
+        while [ ! -e "$dir/enabled" ]; do sleep 0.1; done
+        trap - INT TERM
+        ;;
+    esac
+    publish "$port" "$target"
+    ;;
+  *)
+    echo "fake tailscale: refusing unexpected command: $*" >&2
+    exit 99
+    ;;
+esac
