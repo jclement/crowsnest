@@ -25,8 +25,15 @@ func init() {
 
 func (l *loader) loadAppearance(cfg *Config) error {
 	cfg.Theme = strings.ToLower(strings.TrimSpace(l.str(optTheme)))
-	if cfg.Theme != "" && !themeID.MatchString(cfg.Theme) {
-		return fmt.Errorf("--theme %q is not a theme id; give one such as crowsnest, phosphor, deep-sea, ember or contrast", cfg.Theme)
+	if cfg.Theme == "" || themeID.MatchString(cfg.Theme) {
+		return nil
 	}
-	return nil
+	if l.lookup(optTheme).where == SourceDatabase && !l.opts.StrictStored {
+		// A bad value saved in the app (or brought by a restore, R7-I5) must not stop the start:
+		// the house theme, and a warning. A flag, variable or file the human wrote still stops it.
+		l.warnings = append(l.warnings, fmt.Sprintf("the saved default theme %q is not a theme id; using the house theme", cfg.Theme))
+		cfg.Theme = ""
+		return nil
+	}
+	return fmt.Errorf("--theme %q is not a theme id; give one such as crowsnest, phosphor, deep-sea, ember or contrast", cfg.Theme)
 }

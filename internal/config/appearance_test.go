@@ -19,6 +19,7 @@ func TestThemeSetting(t *testing.T) {
 		h := newHarness(t)
 		opts := h.options()
 		opts.Stored = map[string]string{"theme": tc.stored}
+		opts.StrictStored = true // as the app validates a change
 		cfg, err := Load(h.flags(), opts)
 		if (err == nil) != tc.ok {
 			t.Errorf("theme %q: err %v, want ok=%v", tc.stored, err, tc.ok)
@@ -30,5 +31,20 @@ func TestThemeSetting(t *testing.T) {
 	}
 	if !Editable("theme") {
 		t.Error("the default theme must be editable in the app")
+	}
+}
+
+// TestBadStoredThemeDoesNotStopTheStart is R7-I5: a bad theme in the database (a restored kv)
+// is a warning and the house theme at start, not a failed start.
+func TestBadStoredThemeDoesNotStopTheStart(t *testing.T) {
+	h := newHarness(t)
+	opts := h.options()
+	opts.Stored = map[string]string{"theme": `x"><script>`}
+	cfg, err := Load(h.flags(), opts)
+	if err != nil {
+		t.Fatalf("the start failed on a stored theme: %v", err)
+	}
+	if cfg.Theme != "" || len(cfg.Warnings) == 0 {
+		t.Fatalf("theme %q, warnings %v", cfg.Theme, cfg.Warnings)
 	}
 }

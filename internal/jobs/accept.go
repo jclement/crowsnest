@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -177,11 +178,19 @@ func AutoCheckCommand(dir string) string {
 // readSmallRegular reads a regular file of at most 1 MiB, never following a link (R6-S4: a
 // committed mise.toml that links to /dev/zero or a FIFO must not hang or exhaust crowsnest).
 func readSmallRegular(path string) ([]byte, bool) {
-	info, err := os.Lstat(path)
+	// R7-I6: opened, not read by path after an Lstat, so a FIFO swapped in between cannot block:
+	// O_NOFOLLOW refuses a link, O_NONBLOCK keeps open(2) from waiting, and the opened file itself
+	// is checked to be regular and small before it is read through a limit.
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // the job's own checkout
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
 		return nil, false
 	}
-	body, err := os.ReadFile(path) //nolint:gosec // the job's own checkout, a regular file checked above
+	body, err := io.ReadAll(io.LimitReader(file, 1<<20))
 	return body, err == nil
 }
 

@@ -95,7 +95,7 @@ func reloader(flags *pflag.FlagSet) func(map[string]string) (config.Config, erro
 		return nil
 	}
 	return func(stored map[string]string) (config.Config, error) {
-		return config.Load(flags, config.Options{Stored: stored})
+		return config.Load(flags, config.Options{Stored: stored, StrictStored: true})
 	}
 }
 
