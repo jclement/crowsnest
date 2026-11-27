@@ -201,14 +201,15 @@ func (s *Server) handlePushAction(w http.ResponseWriter, r *http.Request) {
 		if service == nil {
 			return
 		}
-		// A gate is never answered from a notification (R5-S2): no button is offered for one, and
+		// A gate is never answered from a notification (R5-S2, questions.GateShaped, the same rule the
+// notices are built with; this endpoint is the authority): no button is offered for one, and
 		// a token that somehow names one is refused here too. A gate's context is fixed when it
 		// is asked, so reading it first cannot race.
 		if asked, err := service.Get(r.Context(), id); err != nil {
 			s.writeQuestionError(w, r, err)
 			return
-		} else if questions.IsGate(asked.Context) {
-			writeError(w, http.StatusForbidden, codeForbidden, "This question is one of crowsnest's own gates; answer it on its card in the Inbox.")
+		} else if questions.GateShaped(asked.Context, optionKeys(asked.Options)) {
+			writeError(w, http.StatusForbidden, codeForbidden, "This question grants something (one of crowsnest's own gates, or an allow or approve); answer it on its card in the app.")
 			return
 		}
 		value, _ := json.Marshal(request.Action)
@@ -241,4 +242,13 @@ func (s *Server) snoozeFromNotification(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeData(w, http.StatusOK, ActionResult{Item: item, Message: "Snoozed for 10 minutes. It is still waiting in crowsnest."})
+}
+
+// optionKeys lists a question's option keys.
+func optionKeys(options []questions.Option) []string {
+	keys := make([]string, 0, len(options))
+	for _, option := range options {
+		keys = append(keys, option.Key)
+	}
+	return keys
 }

@@ -83,6 +83,9 @@ func TestParse(t *testing.T) {
 		{`base64 -d <<<abc | sh`, nil, false},
 		{`(cd x; ls)`, []string{"cd x", "ls"}, true},
 		{`heavy go test ./...`, []string{"go test ./..."}, true},
+		{`go test ./... 2>&1 | tail -20`, []string{"go test ./... 2>&1", "tail -20"}, true},
+		{`make &>log; ls >&2`, []string{"make &>log", "ls >&2"}, true},
+		{`sleep 1 & ls`, []string{"sleep 1", "ls"}, true},
 	}
 	for _, c := range cases {
 		commands, ok := Parse(c.command)

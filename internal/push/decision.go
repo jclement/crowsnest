@@ -21,6 +21,8 @@ import (
 	"context"
 	"net/url"
 	"strings"
+
+	"github.com/jclement/crowsnest/internal/questions"
 )
 
 // Where says where an item belongs: its project's name ("" for unfiled work) and its job.
@@ -43,29 +45,10 @@ var snoozeButton = NoticeAction{Action: ActionSnooze, Title: "Snooze 10 min"}
 // to read, not a preview.
 const routineBodyChars = 400
 
-// gateContextKeys are context keys crowsnest sets on its own gate questions (land requests,
-// delegation approvals). A question carrying one is a gate however it is worded (R5-S1, R5-S2).
-var gateContextKeys = []string{"land_for", "land_action", "approval_for", "requested_by"}
-
-// gateOptionKeys are option keys that grant something: a question offering one is treated as a
-// gate, because an agent can shape any question to look like one (R3-I4).
-var gateOptionKeys = map[string]bool{"allow": true, "approve": true, "merge": true, "land": true, "push": true, "grant": true}
-
-// GateShaped reports whether a question looks like a gate: crowsnest's own context keys, or an
-// option that allows, approves, merges or pushes. Such questions are never answerable from a
-// notification.
+// GateShaped is questions.GateShaped, the one rule for what a notification may never answer
+// (R5-S1, R5-S2); the push action endpoint applies the same rule and is the authority.
 func GateShaped(context map[string]string, optionKeys []string) bool {
-	for _, key := range gateContextKeys {
-		if _, ok := context[key]; ok {
-			return true
-		}
-	}
-	for _, key := range optionKeys {
-		if gateOptionKeys[strings.ToLower(key)] {
-			return true
-		}
-	}
-	return false
+	return questions.GateShaped(context, optionKeys)
 }
 
 // DecideURL is the decision packet's path for an attention item id.

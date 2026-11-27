@@ -50,6 +50,14 @@ func TestRespellingsAndUnknownShapes(t *testing.T) {
 		{`npm run deploy`, Elevated},
 		{`mise run release`, Elevated},
 		{"ls‮ -la", Elevated},
+		// Redirections: a write to a file is not low; descriptor copies and /dev/null are.
+		{`echo x > ~/.bashrc`, Elevated},
+		{`go test ./... >> out.txt`, Elevated},
+		{`ls 2>errors.log`, Elevated},
+		{`ls &>all.log`, Elevated},
+		{`go test ./... 2>&1 | tail -20`, Low},
+		{`ls >/dev/null 2>&1`, Low},
+		{`echo "a>b"`, Low},
 		// Benign shapes stay low.
 		{`go test ./...`, Low},
 		{`heavy go test ./internal/risk/`, Low},

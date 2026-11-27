@@ -147,7 +147,7 @@ func (s *Store) ListScheduleRuns(ctx context.Context, name string, limit int) ([
 	return out, rows.Err()
 }
 
-// ---- Task file reviews (migration 0017, R5-S3) ---------------------------------------------
+// ---- Task file reviews (migration 0018, R5-S3) ---------------------------------------------
 
 // TaskReviewApproved is the state of an approved task file.
 const TaskReviewApproved = "approved"

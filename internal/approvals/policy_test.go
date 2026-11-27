@@ -401,7 +401,7 @@ func TestBashRuleMatchesTheFullCommandOnly(t *testing.T) {
 	if approval.Status != StatusPending {
 		t.Fatalf("a payload past the summary's cut was allowed: %s", approval.StatusReason)
 	}
-	if !strings.HasSuffix(approval.Summary, "…") {
+	if !strings.Contains(approval.Summary, "… (") { // the cut says how much is not shown (R5-S7)
 		t.Fatalf("the summary should be cut for this test to mean anything: %q", approval.Summary)
 	}
 	bidi := h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "go test ./... \u202e"})

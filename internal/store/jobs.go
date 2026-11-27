@@ -119,7 +119,7 @@ type JobRecord struct {
 	LastMessageAt   time.Time
 	TreeHash        string
 	TreeChangedAt   time.Time
-	// LandToken binds a land request to its question (migration 0017, R5-C01).
+	// LandToken binds a land request to its question (migration 0018, R5-C01).
 	LandToken       string
 	LandRequestedAt time.Time
 }

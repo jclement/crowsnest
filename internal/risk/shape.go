@@ -58,6 +58,9 @@ var scriptNames = map[string]bool{"test": true, "lint": true, "build": true, "ty
 // commandShape returns why one simple command is not benign, or "" when it is.
 func commandShape(cmd guard.Command) string {
 	program, args := cmd.Program, cmd.Args
+	if target := outputRedirect(args); target != "" {
+		return "Writes " + target + " through a redirect"
+	}
 	switch {
 	case program == "":
 		return ""
@@ -124,6 +127,28 @@ func gitShape(g guard.Git) string {
 		return ""
 	}
 	return "git " + g.Sub + " is not on crowsnest's list of harmless git commands"
+}
+
+// outputRedirect returns the file an output redirection in args writes ("" for none): `> f`,
+// `>> f`, `2>f`, `&>f`. Duplicating a descriptor (2>&1, >&2) and /dev/null write nothing, so
+// `go test ./... 2>&1 | tail` stays benign while `echo x > ~/.bashrc` does not.
+func outputRedirect(args []string) string {
+	for i, arg := range args {
+		at := strings.Index(arg, ">")
+		if at < 0 || strings.Trim(arg[:at], "0123456789&") != "" {
+			continue // no >, or text before it that is not a descriptor number
+		}
+		target := strings.TrimLeft(arg[at:], ">|")
+		if target == "" && i+1 < len(args) {
+			target = args[i+1]
+		}
+		switch {
+		case target == "", strings.HasPrefix(target, "&"), target == "/dev/null":
+			continue
+		}
+		return target
+	}
+	return ""
 }
 
 func hasAny(args []string, words ...string) bool {

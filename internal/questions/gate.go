@@ -57,6 +57,28 @@ func IsGate(context map[string]string) bool {
 	return false
 }
 
+// grantingOptionKeys are option keys that grant something. A question offering one is treated
+// as a gate for notification purposes, because an agent can word any question to look like one
+// (R3-I4): one tap on a lock screen must never grant anything.
+var grantingOptionKeys = map[string]bool{"allow": true, "approve": true, "merge": true, "land": true, "push": true, "grant": true}
+
+// GateShaped reports whether a question must be answered in the app, never from a notification:
+// one of crowsnest's own gates (IsGate), or any question offering an option that allows,
+// approves, merges, lands, pushes or grants. It is the one rule both the push notices (which
+// then carry no buttons and no token) and the push action endpoint (which refuses) apply; the
+// endpoint is the authority.
+func GateShaped(context map[string]string, optionKeys []string) bool {
+	if IsGate(context) {
+		return true
+	}
+	for _, key := range optionKeys {
+		if grantingOptionKeys[strings.ToLower(strings.TrimSpace(key))] {
+			return true
+		}
+	}
+	return false
+}
+
 // CheckAgentContext refuses a question from an agent whose context carries a key crowsnest
 // reserves for its own gates. The comparison ignores case and surrounding space, so a near-miss
 // spelling that a human could mistake for the real key is refused too.

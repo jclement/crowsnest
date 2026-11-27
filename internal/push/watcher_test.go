@@ -266,7 +266,9 @@ func TestGateQuestionsGetNoButtons(t *testing.T) {
 		watcher.QuestionAsked(questions.Question{ID: "q_" + string(rune('1'+i)), Title: "Gate", Kind: questions.KindConfirm, Urgency: questions.UrgencyBlocking,
 			SourcePane: "w1:p" + string(rune('1'+i)), Options: options, Context: map[string]string{key: "j_5"}})
 	}
-	watcher.QuestionAsked(questions.Question{ID: "q_9", Title: "Ship?", Kind: questions.KindConfirm, Urgency: questions.UrgencyBlocking, SourcePane: "w1:p9", Options: options})
+	// An ordinary confirm: its keys grant nothing (allow/deny would make it gate-shaped too).
+	watcher.QuestionAsked(questions.Question{ID: "q_9", Title: "Ship?", Kind: questions.KindConfirm, Urgency: questions.UrgencyBlocking, SourcePane: "w1:p9",
+		Recommend: "yes", Options: []questions.Option{{Key: "yes", Label: "Yes"}, {Key: "no", Label: "No"}}})
 	got := sender.got()
 	if len(got) != 4 {
 		t.Fatalf("every question is still pushed: %+v", got)

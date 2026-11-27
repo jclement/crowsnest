@@ -73,8 +73,12 @@ export function isRoutine(question: Pick<Question, "kind" | "multi" | "files" | 
   );
 }
 
-/** Context keys crowsnest sets on its own gate questions (land requests, delegation approvals). */
-const GATE_CONTEXT_KEYS = ["land_for", "land_action", "approval_for", "requested_by"];
+/**
+ * Context keys crowsnest reserves for its own gate questions (land requests, delegation approvals,
+ * task file reviews): the same list as internal/questions/gate.go, whose GateShaped is the
+ * authority (the push action endpoint refuses what it calls a gate).
+ */
+const GATE_CONTEXT_KEYS = ["land_for", "land_action", "land_token", "approval_for", "requested_by", "task_review", "task_hash", "crowsnest_gate"];
 /** Option keys that grant something: a question offering one is treated as a gate. */
 const GATE_OPTION_KEYS = new Set(["allow", "approve", "merge", "land", "push", "grant"]);
 /** Option keys that refuse: choosing one never needs the gate's confirmation. */

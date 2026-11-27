@@ -239,6 +239,11 @@ func (s *splitter) step(runes []rune, i int) int {
 			s.depth = 0
 			s.quote = -1 // unbalanced: reported as not confident
 		}
+	case r == '&' && s.inWord && (strings.HasSuffix(s.word.String(), ">") || strings.HasSuffix(s.word.String(), "<")),
+		r == '&' && i+1 < len(runes) && runes[i+1] == '>':
+		// Part of a redirection (2>&1, >&2, <&3, &>file), not a background or list separator.
+		s.word.WriteRune(r)
+		s.inWord = true
 	case strings.ContainsRune(";&|\n`", r):
 		s.endSegment()
 	case r == ' ' || r == '\t' || r == '\r':
