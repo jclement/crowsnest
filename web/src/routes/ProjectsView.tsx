@@ -18,12 +18,27 @@ import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { leadChip, leadRunning, type ProjectView } from "../lib/projects";
 import { useLeadAction, useProjects } from "../lib/queries";
 
-export function ProjectsView({ slug }: { slug?: string }) {
+export function ProjectsView({ slug, create }: { slug?: string; create?: "1" | "browse" }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(!!create);
   const navigate = useNavigate();
+  // A link that asks for New project (?new=…) opens it, also when this view is already showing.
+  const [askedFor, setAskedFor] = useState(create);
+  if (askedFor !== create) {
+    setAskedFor(create);
+    if (create) setCreating(true);
+  }
+  const closeNew = () => {
+    setCreating(false);
+    if (create) void navigate({ to: "/projects", search: {}, replace: true });
+  };
   const sheet = (
-    <NewProjectSheet open={creating} onClose={() => setCreating(false)} onCreated={(project) => void navigate({ to: "/projects/$slug", params: { slug: project.slug } })} />
+    <NewProjectSheet
+      open={creating}
+      browse={create === "browse"}
+      onClose={closeNew}
+      onCreated={(project) => void navigate({ to: "/projects/$slug", params: { slug: project.slug } })}
+    />
   );
 
   if (!desktop && slug) {

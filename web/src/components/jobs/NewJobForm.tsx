@@ -7,13 +7,14 @@
 // "To the lead" (no directory; the project's lead holds it, as the orchestrator holds unfiled
 // ones) or "As a job" (a job agent, the directory and defaults prefilled from the project; the
 // server fills anything left unset from the project's defaults too).
-import { ChevronDown, ChevronRight, Send } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderSearch, Send } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { onJobDraft, takeJobDraft } from "../../lib/jobDraft";
 import { useCreateJob, useDirs, useRoles } from "../../lib/queries";
 import type { Job } from "../../lib/jobs";
 import { leadRunning, type ProjectView } from "../../lib/projects";
 import { AttachButtons, AttachmentTray, DropOverlay } from "../attach/AttachmentTray";
+import { DirPicker } from "../browse/DirPicker";
 import { uploadHold, useAttachments, useFileDrop, usePasteToAttach } from "../attach/useAttachments";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/toast-context";
@@ -225,12 +226,20 @@ interface OptionsProps {
 function Options({ ids, dir, setDir, role, setRole, doneWhen, setDoneWhen, engine, setEngine, project }: OptionsProps) {
   const dirs = useDirs();
   const roles = useRoles();
+  const [browsing, setBrowsing] = useState(false);
   const labelClass = "flex flex-col gap-1 text-2xs font-medium text-muted";
   return (
     <div id={`${ids}-options`} className="grid gap-2 sm:grid-cols-2">
-      <label className={labelClass}>
-        {project ? `Where (empty for ${project.name}'s directory)` : "Where (a directory or repo; empty for the orchestrator)"}
-        <input value={dir} onChange={(event) => setDir(event.target.value)} list={`${ids}-dirs`} placeholder="~/src/project" className={`${inputClass} font-mono`} />
+      <div className="flex flex-col gap-1">
+        <label htmlFor={`${ids}-where`} className={labelClass}>
+          {project ? `Where (empty for ${project.name}'s directory)` : "Where (a directory or repo; empty for the orchestrator)"}
+        </label>
+        <div className="flex gap-1">
+          <input id={`${ids}-where`} value={dir} onChange={(event) => setDir(event.target.value)} list={`${ids}-dirs`} placeholder="~/src/project" className={`${inputClass} font-mono`} />
+          <Button icon={FolderSearch} onClick={() => setBrowsing(true)} title="Browse for a folder" aria-label="Browse for a folder" className="shrink-0">
+            <span className="hidden sm:inline">Browse…</span>
+          </Button>
+        </div>
         <datalist id={`${ids}-dirs`}>
           {(dirs.data ?? []).map((entry) => (
             <option key={entry.path} value={entry.path}>
@@ -238,7 +247,8 @@ function Options({ ids, dir, setDir, role, setRole, doneWhen, setDoneWhen, engin
             </option>
           ))}
         </datalist>
-      </label>
+        <DirPicker open={browsing} onClose={() => setBrowsing(false)} initialPath={dir || project?.dir} title="Where should the job run?" purpose="job" onSelect={(path) => setDir(path)} />
+      </div>
       <label className={labelClass}>
         Role
         <select value={role} onChange={(event) => setRole(event.target.value)} className={inputClass}>

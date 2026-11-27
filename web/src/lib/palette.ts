@@ -449,6 +449,16 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
     command: { kind: "sheet", sheet: id },
     verb: "Open",
   });
+  items.push({
+    id: "nav:new-project",
+    group: "navigate",
+    title: "New project in…",
+    subtitle: "Browse for its folder",
+    keywords: ["create", "add", "project", "folder", "directory", "repo", "browse"],
+    icon: "project",
+    command: { kind: "navigate", to: "/projects", search: { new: "browse" } },
+    verb: "Open",
+  });
   items.push(sheet("notifications", "Notifications", "bell", ["push", "devices", "settings"]));
   items.push(sheet("journal", "Journal", "journal", ["pokes", "history", "log"]));
   items.push(sheet("schedule", "Schedule", "schedule", ["scheduled", "tasks", "cron", "periodic", "every"]));
