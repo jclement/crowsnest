@@ -17,6 +17,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Bot, CheckCheck, CheckCircle2, ChevronRight, CircleAlert, Clock, FolderKanban, Gauge, HelpCircle, Inbox, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { NewJobForm } from "../components/jobs/NewJobForm";
+import { VoiceJob } from "../components/jobs/VoiceJob";
 import { OpenInClaude } from "../components/remote/OpenInClaude";
 import { TrayList } from "../components/tray/NeedsYouTray";
 import { useTrayItems } from "../components/tray/useTrayItems";
@@ -323,6 +324,7 @@ function GiveJobSection() {
           </select>
         </label>
       </SectionHeader>
+      <VoiceJob projects={live} chosen={slug} />
       <NewJobForm project={project} />
     </section>
   );

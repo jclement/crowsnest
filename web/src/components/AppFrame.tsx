@@ -6,7 +6,7 @@
 // DESIGN.md 22), the same number the tray, the palette, the Inbox and the Now view show.
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Activity, MoreHorizontal } from "lucide-react";
 import { endpoints, fixturesEnabled } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -14,6 +14,8 @@ import { pageTitle } from "../lib/fleet";
 import { listenForNavigation, registerServiceWorker } from "../lib/push";
 import { useLiveQueries } from "../lib/live";
 import { useAttention, useMe } from "../lib/queries";
+import { playEarcon } from "../lib/voice/earcons";
+import { speakModeOn } from "../lib/voice/speak";
 import type { StreamStatus } from "../lib/sse";
 import { useNoStrayFileDrops } from "./attach/useAttachments";
 import { ConnectionBanner } from "./ConnectionBanner";
@@ -52,6 +54,15 @@ export function AppFrame() {
   useEffect(() => {
     document.title = pageTitle(needsYou, name);
   }, [needsYou, name]);
+
+  // With speak mode on, something new joining the queue is an earcon (R4 Fable 4.1): Jeff on a
+  // walk hears that something needs him without looking. Only a rise counts, never the first load.
+  const previousNeeds = useRef<number | null>(null);
+  useEffect(() => {
+    if (!attention.data) return;
+    if (previousNeeds.current !== null && needsYou > previousNeeds.current && speakModeOn()) playEarcon("needs-you");
+    previousNeeds.current = needsYou;
+  }, [needsYou, attention.data]);
 
   // Web Push (DESIGN.md 8.5): keep the service worker registered (it caches nothing; it only shows
   // pushes), and follow a tapped notification to its item without a reload.
