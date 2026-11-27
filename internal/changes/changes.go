@@ -69,6 +69,12 @@ const (
 	debounce = 1500 * time.Millisecond
 	// WatchFor is how long after its last request a subject is still read in the background.
 	WatchFor = 2 * time.Minute
+	// maxReadings is how many checkouts are read with git at once across every subject and base
+	// (R7-C09): each reading is several git processes over a repository the agent controls.
+	maxReadings = 2
+	// evictAfter drops an entry nobody has asked about for this long (any base string the browser
+	// sent makes one, R7-C09); a later request reads it again.
+	evictAfter = 30 * time.Minute
 	// tick is how often watched subjects are read again without any activity.
 	tick = 10 * time.Second
 	// largeChange is the line count past which a file is collapsed by default.
@@ -130,6 +136,39 @@ type Service struct {
 	mu      sync.Mutex
 	entries map[string]*entry // by cache key: subject + "\x00" + base
 	marked  map[string]bool   // subjects known to have marks
+	slots   chan struct{}     // a reading holds one while git runs (maxReadings)
+}
+
+// readCheckoutSlotted is readCheckout under the global bound on concurrent readings; a reading
+// that cannot get a slot before ctx ends fails.
+func (s *Service) readCheckoutSlotted(ctx context.Context, target Target, now time.Time) (*reading, error) {
+	select {
+	case s.slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for a turn to read the diff: %w", ctx.Err())
+	}
+	defer func() { <-s.slots }()
+	return readCheckout(ctx, target, now)
+}
+
+// evictIdle drops the entries nobody has asked about in evictAfter and that no reading holds.
+func (s *Service) evictIdle(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, e := range s.entries {
+		last := e.lastOf().at
+		if e.asked.After(last) {
+			last = e.asked
+		}
+		if now.Sub(last) < evictAfter || !e.mu.TryLock() {
+			continue
+		}
+		if e.timer != nil {
+			e.timer.Stop()
+		}
+		delete(s.entries, key)
+		e.mu.Unlock()
+	}
 }
 
 // entry is one subject's last reading.
@@ -188,7 +227,7 @@ func New(opts Options) *Service {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	return &Service{opts: opts, entries: map[string]*entry{}, marked: map[string]bool{}}
+	return &Service{opts: opts, entries: map[string]*entry{}, marked: map[string]bool{}, slots: make(chan struct{}, maxReadings)}
 }
 
 // ---- Errors --------------------------------------------------------------------------------
@@ -286,7 +325,7 @@ func (s *Service) read(ctx context.Context, target Target, force, ask bool) (*re
 		return last.reading, last.err
 	}
 	previous := last.reading
-	next, err := readCheckout(ctx, target, now)
+	next, err := s.readCheckoutSlotted(ctx, target, now)
 	if err != nil {
 		e.last.Store(&taken{reading: previous, err: err, at: s.opts.Now()})
 		return previous, err
@@ -976,7 +1015,7 @@ func (s *Service) readFresh(ctx context.Context, target Target) (*reading, error
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	previous := e.lastOf().reading
-	next, err := readCheckout(ctx, target, s.opts.Now())
+	next, err := s.readCheckoutSlotted(ctx, target, s.opts.Now())
 	if err != nil {
 		e.last.Store(&taken{reading: previous, err: err, at: s.opts.Now()})
 		return nil, err
@@ -1184,6 +1223,7 @@ func (s *Service) schedule(ctx context.Context, subject string) {
 // refreshWatched reads every watched subject whose reading is older than age.
 func (s *Service) refreshWatched(ctx context.Context, age time.Duration) {
 	now := s.opts.Now()
+	s.evictIdle(now)
 	s.mu.Lock()
 	due := []Target{}
 	for _, e := range s.entries {

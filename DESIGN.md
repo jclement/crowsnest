@@ -1598,7 +1598,13 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
   because `git add` and even `write-tree` (refreshing racy entries) run a clean filter: found by
   the test, a marker written by `write-tree`. Bounds: 20 s per git call, 1,500 files listed, a
   file's diff cut at 512 KB, each side's whole text served only under 256 KB. A file is served
-  only if the comparison lists it.
+  only if the comparison lists it. The bounds are on the reading, not cuts made after it
+  (R7-C09, R7-S7): every git call's output goes through a capped buffer that stops git at its
+  limit (64 MiB by default, 64 KiB of error output, a listing 8 MiB, a file's diff 512 KB, a blob
+  its limit), and a cut listing marks the comparison truncated; at most 1,000 "not read" rows are
+  kept; at most two checkouts are read with git at once across every subject; an entry nobody has
+  asked about in 30 minutes is dropped. Every git call of landing and the diff runs with
+  `GIT_LITERAL_PATHSPECS=1`, so a file named `[a]pp.go` or `:(glob)**` names only itself.
 - **Content hashes.** Each file's hash is SHA-256 of (old blob, new blob, old path, path, modes),
   so it is the same change in any comparison that produces it (committing an edit unchanged
   keeps base → work tree's hash) and changes exactly when the file's diff does.

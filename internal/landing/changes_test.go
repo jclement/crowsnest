@@ -383,3 +383,46 @@ func TestWorkTreeDistrustsTheIndexFile(t *testing.T) {
 		})
 	}
 }
+
+// TestPatchPathsAreLiteral is R7-S7: a file whose name is pathspec magic (`[a]pp.go` globs to
+// app.go) shows its own diff only, not another file's under its card.
+func TestPatchPathsAreLiteral(t *testing.T) {
+	r := newRepo(t)
+	ctx := context.Background()
+	base := HeadTree(ctx, r.worktree)
+	write(t, r.worktree, "app.go", "package app // the real app\n")
+	write(t, r.worktree, "[a]pp.go", "package app // the odd name\n")
+	work, _, err := WorkTree(ctx, r.worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, _, _, err := Patch(ctx, r.worktree, base, work, "[a]pp.go", "", PatchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "the odd name") || strings.Contains(diff, "the real app") {
+		t.Fatalf("the diff of [a]pp.go:\n%s", diff)
+	}
+}
+
+// TestGitOutputIsBoundedWhileRead is R7-C09: a git command that prints past its bound is stopped
+// there, not read whole and cut afterwards.
+func TestGitOutputIsBoundedWhileRead(t *testing.T) {
+	stopped := false
+	buffer := newCapped(10, func() { stopped = true })
+	if n, err := buffer.Write([]byte("0123456789abcdef")); n != 16 || err != nil {
+		t.Fatalf("write = %d %v", n, err)
+	}
+	if !stopped || !buffer.over || buffer.String() != "0123456789" {
+		t.Fatalf("stopped %v, over %v, kept %q", stopped, buffer.over, buffer.String())
+	}
+	r := newRepo(t)
+	ctx := context.Background()
+	big := strings.Repeat("a line of a generated file\n", 200_000) // about 5 MB
+	write(t, r.worktree, "generated.txt", big)
+	blob := strings.TrimSpace(run(t, r.worktree, "git", "hash-object", "-w", "generated.txt"))
+	out, err := gitCall{dir: r.worktree, args: []string{"cat-file", "blob", blob}, maxOut: 1 << 20}.run(ctx)
+	if !errors.Is(err, ErrOutputCut) || len(out) != 1<<20 {
+		t.Fatalf("read %d bytes, err %v; want the first MiB and ErrOutputCut", len(out), err)
+	}
+}
