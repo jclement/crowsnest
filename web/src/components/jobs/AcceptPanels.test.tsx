@@ -71,6 +71,24 @@ describe("BudgetCard", () => {
   });
 });
 
+describe("what accepted proves", () => {
+  it("says the branch's own check passed, and names a changed check definition (R6-C02, R6-S4)", () => {
+    stubApi(() => undefined);
+    renderWithClient(
+      <EvidenceCard
+        job={makeDetail({
+          state: "done",
+          accept_state: "accepted",
+          accept_detail: "Accepted",
+          evidence: { command: "mise run check", status: "passed", exit_code: 0, duration_ms: 1000, commit: "abcdef0123456789", output_tail: "", started_at: new Date().toISOString(), finished_at: null, stale: false, definition_changed: ["mise.toml"] },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("accepted-means")).toHaveTextContent("not independent evidence");
+    expect(screen.getByTestId("check-definition-changed")).toHaveTextContent("mise.toml");
+  });
+});
+
 describe("LimitBanner", () => {
   it("is one banner with the countdown", async () => {
     stubApi((call) =>

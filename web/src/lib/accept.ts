@@ -17,6 +17,8 @@ export interface Evidence {
   finished_at: string | null;
   head?: string;
   stale: boolean;
+  /** Files of the branch's own diff that define its check (R6-S4). */
+  definition_changed?: string[];
 }
 
 export interface BudgetLimits {
