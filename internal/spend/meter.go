@@ -222,10 +222,21 @@ func (m *Meter) saveLocked(ctx context.Context, state *subjectState, batch store
 		if string(after) == string(before) {
 			return false, nil
 		}
-		return false, m.opts.Store.SaveSpendState(ctx, batch.Subject, string(after), now)
+		if err := m.opts.Store.SaveSpendState(ctx, batch.Subject, string(after), now); err != nil {
+			delete(m.states, batch.Subject)
+			return false, err
+		}
+		return false, nil
 	}
 	batch.StateJSON, batch.Now, batch.KeepTurns = string(after), now, maxChartTurns
-	return true, m.opts.Store.ApplySpend(ctx, batch)
+	if err := m.opts.Store.ApplySpend(ctx, batch); err != nil {
+		// The state in memory has already moved past this batch (its cursors, the message ids
+		// it counted, perhaps Final), but the database has not (R5-C10). Forget it: the next
+		// poll reloads the last committed state and reads the batch again.
+		delete(m.states, batch.Subject)
+		return false, err
+	}
+	return true, nil
 }
 
 // stateLocked returns a subject's state, loading it from the store the first time.

@@ -2,6 +2,7 @@ package spend
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"os"
 	"path/filepath"
@@ -286,5 +287,38 @@ func appendTo(t *testing.T, path, text string) {
 	defer func() { _ = file.Close() }()
 	if _, err := file.WriteString(text); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestMeterFailedWriteIsReadAgain is R5-C10: a write that fails must not leave the cursor in
+// memory past the batch it failed to store; the next poll reads the batch again.
+func TestMeterFailedWriteIsReadAgain(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "spend.db")
+	db, err := store.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+	if _, err := raw.ExecContext(ctx, `CREATE TRIGGER fail_spend BEFORE INSERT ON spend_daily BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	meter := testMeter(t, db, copyGolden(t), nil, Source{Subject: "j_1", Sessions: []Session{{ID: "sess-1", Cwd: "/work/repo"}}})
+	meter.Poll(ctx)
+	if totals, err := db.GetSpendTotals(ctx, "j_1"); err == nil && totals.Turns != 0 {
+		t.Fatalf("the failed write stored something: %+v", totals.SpendCounts)
+	}
+	if _, err := raw.ExecContext(ctx, `DROP TRIGGER fail_spend`); err != nil {
+		t.Fatal(err)
+	}
+	meter.Poll(ctx)
+	totals, err := db.GetSpendTotals(ctx, "j_1")
+	if err != nil || totals.SpendCounts != goldenTotals {
+		t.Fatalf("after the write works again: %+v %v, want %+v", totals.SpendCounts, err, goldenTotals)
 	}
 }
