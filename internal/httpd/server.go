@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"github.com/jclement/crowsnest/internal/machines"
 	"github.com/jclement/crowsnest/internal/tsauth"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -209,6 +211,9 @@ type Server struct {
 	OnListening func(url string)
 	// Prebound are listeners serve bound early (Bind); Run serves them instead of binding.
 	Prebound []net.Listener
+	// Early is serve's early-bound listeners already answering (ServeEarly): Run hands it the
+	// real handler instead of binding.
+	Early *Early
 }
 
 // New wires the routes and middleware.
@@ -301,22 +306,28 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 // gracefully. An optional listener (::1 from `localhost`) that fails to bind is logged and
 // skipped; any other bind failure stops the server before it serves anything.
 func (s *Server) Run(ctx context.Context) error {
-	listeners, err := s.listen(ctx)
-	if err != nil {
-		return err
-	}
-	httpServer := &http.Server{
-		Handler:           s.handler,
-		ReadHeaderTimeout: readHeaderTimeout,
-		MaxHeaderBytes:    maxHeaderBytes,
-		IdleTimeout:       2 * time.Minute,
-		ErrorLog:          slog.NewLogLogger(s.deps.Logger.Handler(), slog.LevelWarn),
-	}
-	httpServer.RegisterOnShutdown(s.beginShutdown)
-
-	errs := make(chan error, len(listeners))
-	for _, listener := range listeners {
-		go func() { errs <- s.serve(httpServer, listener) }()
+	var httpServer *http.Server
+	var errs chan error
+	if s.Early != nil {
+		// Already serving "starting" on the early listeners: from now on they get the real handler.
+		httpServer, errs = s.Early.server, s.Early.errs
+		httpServer.RegisterOnShutdown(s.beginShutdown)
+		for _, listener := range s.Early.listeners {
+			s.announce(listener)
+		}
+		handler := s.handler
+		s.Early.handler.Store(&handler)
+	} else {
+		listeners, err := s.listen(ctx)
+		if err != nil {
+			return err
+		}
+		httpServer = newHTTPServer(s.handler, s.deps.Logger)
+		httpServer.RegisterOnShutdown(s.beginShutdown)
+		errs = make(chan error, len(listeners))
+		for _, listener := range listeners {
+			go func() { errs <- serveOn(httpServer, listener, s.deps.Config) }()
+		}
 	}
 	select {
 	case <-ctx.Done():
@@ -366,6 +377,83 @@ func Bind(ctx context.Context, cfg config.Config, logger *slog.Logger) ([]net.Li
 	return listeners, nil
 }
 
+// newHTTPServer is the http.Server every listener is served by.
+func newHTTPServer(handler http.Handler, logger *slog.Logger) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
+		IdleTimeout:       2 * time.Minute,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
+	}
+}
+
+// Early is serve's listeners, bound before the slow part of its start and answering at once:
+// until Run hands it the real handler, every request gets 503 with Retry-After (DESIGN.md 4.10).
+// Before this, a request that reached a crowsnest still starting sat in the kernel's accept queue
+// with nothing to answer it, for as long as the start took.
+type Early struct {
+	listeners []net.Listener
+	server    *http.Server
+	handler   atomic.Pointer[http.Handler]
+	errs      chan error
+}
+
+// ServeEarly binds every address cfg names (Bind) and serves them at once with the "starting"
+// answer. Close it if the start fails before Run takes it over.
+func ServeEarly(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Early, error) {
+	raw, err := Bind(ctx, cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	early := &Early{errs: make(chan error, len(raw))}
+	early.server = newHTTPServer(http.HandlerFunc(early.serveHTTP), logger)
+	limiter := newConnLimiter(maxConnections, maxConnectionsPerPeer)
+	for _, listener := range raw {
+		wrapped := limiter.wrap(listener)
+		early.listeners = append(early.listeners, wrapped)
+		go func() { early.errs <- serveOn(early.server, wrapped, cfg) }()
+	}
+	return early, nil
+}
+
+func (e *Early) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if handler := e.handler.Load(); handler != nil {
+		(*handler).ServeHTTP(w, r)
+		return
+	}
+	serveStarting(w, r)
+}
+
+// Close stops serving the early listeners (a start that failed before Run).
+func (e *Early) Close() { _ = e.server.Close() }
+
+// serveStarting is the answer while crowsnest starts: 503 with Retry-After, JSON for the API and
+// a page that reloads itself for anything else. Nothing is held open.
+func serveStarting(w http.ResponseWriter, r *http.Request) {
+	header := w.Header()
+	header.Set("Retry-After", "1")
+	header.Set("Cache-Control", "no-store")
+	header.Set("Connection", "close")
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		header.Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":{"code":"STARTING","message":"crowsnest is starting; try again in a moment"}}`)
+		return
+	}
+	header.Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = io.WriteString(w, `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="1"><title>crowsnest</title><p>crowsnest is starting…</p>`)
+}
+
+// announce logs a listener and reports it to OnListening.
+func (s *Server) announce(listener net.Listener) {
+	s.deps.Logger.Info("listening", "url", s.urlFor(listener.Addr()))
+	if s.OnListening != nil {
+		s.OnListening(s.urlFor(listener.Addr()))
+	}
+}
+
 // listen returns the listeners Run serves: Prebound when serve bound them already, else freshly
 // bound ones; each is wrapped in the connection limiter, logged and reported to OnListening.
 func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
@@ -380,18 +468,15 @@ func (s *Server) listen(ctx context.Context) ([]net.Listener, error) {
 	listeners := make([]net.Listener, 0, len(raw))
 	for _, listener := range raw {
 		listeners = append(listeners, limiter.wrap(listener))
-		s.deps.Logger.Info("listening", "url", s.urlFor(listener.Addr()))
-		if s.OnListening != nil {
-			s.OnListening(s.urlFor(listener.Addr()))
-		}
+		s.announce(listener)
 	}
 	return listeners, nil
 }
 
-func (s *Server) serve(httpServer *http.Server, listener net.Listener) error {
+func serveOn(httpServer *http.Server, listener net.Listener, cfg config.Config) error {
 	var err error
-	if s.deps.Config.TLS() {
-		err = httpServer.ServeTLS(listener, s.deps.Config.TLSCert, s.deps.Config.TLSKey)
+	if cfg.TLS() {
+		err = httpServer.ServeTLS(listener, cfg.TLSCert, cfg.TLSKey)
 	} else {
 		err = httpServer.Serve(listener)
 	}

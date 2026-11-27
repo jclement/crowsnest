@@ -2684,6 +2684,21 @@ re-checks the session cookie, so a logout or password change ends open streams w
 hub closes a subscriber whose 64-event queue overflows instead of silently dropping events: the
 browser reconnects, gets `hello`, and refetches.
 
+**Across a restart** (the offline banner that never cleared): every reconnect attempt is bounded.
+The session probe before it (`/auth/me`) times out after 8 s and a new stream that has not said
+`hello` within 12 s is closed; either counts as a failed attempt and the next is scheduled, so the
+client always returns to retrying and "Retry now" is never left dead behind a probe that hangs
+(the single pending probe of R1-C08 is kept; a late answer from a timed-out probe is ignored). On
+the server, the port bound early in the start (R5) answers at once: until the server is ready,
+every request gets `503` with `Retry-After: 1` (`{"error":{"code":"STARTING"}}` for the API, a
+self-reloading page otherwise; `httpd.ServeEarly`), instead of sitting in the accept queue with
+nothing to answer it. Decision: bind early and answer "starting", rather than bind early and accept
+only when ready, because a listening socket completes the connection in the kernel either way.
+The red e2e test behind this was itself waiting forever: it clicked "Retry now" with no timeout of
+its own after the button had gone (a reconnect had already started, or succeeded), so it now
+clicks with a short timeout and keeps its assertion; a second journey restarts the server five
+times under one page.
+
 | Route | Purpose |
 |---|---|
 | `GET /health` | Unauthenticated: `{status, version, setup_required, update_available, latest_version?, release_url?}` (16.1; `setup_required`, 4.14) |

@@ -28,6 +28,14 @@ export type EventHandlers = Partial<Record<string, (data: unknown) => void>>;
 const EVENTS_URL = "/api/v1/events";
 export const INITIAL_BACKOFF_MS = 1_000;
 export const MAX_BACKOFF_MS = 30_000;
+/**
+ * How long a reconnect's session probe may take, and how long a new stream may take to say hello,
+ * before the attempt counts as failed and another is scheduled. Without them, a request sitting on
+ * a connection nobody answers (a server still starting, or one that died mid-reply) left the probe
+ * pending for good: no retry was ever scheduled and Retry now did nothing.
+ */
+export const PROBE_TIMEOUT_MS = 8_000;
+export const HELLO_TIMEOUT_MS = 12_000;
 
 /** The wait before reconnect attempt number `attempt` (0-based). */
 export function backoffDelay(attempt: number): number {
@@ -56,6 +64,7 @@ export function useEventStream(handlers: EventHandlers): StreamState {
     if (fixtures) return;
     let source: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let helloTimer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let stopped = false;
     // A session probe in flight. Reconnects are serialised on it: a second attempt while one is
@@ -69,6 +78,7 @@ export function useEventStream(handlers: EventHandlers): StreamState {
     const dispatch = (own: EventSource, name: string) => (event: MessageEvent) => {
       if (stopped || source !== own) return;
       if (name === "hello") {
+        clearTimeout(helloTimer);
         attempt = 0;
         setState({ status: "open", attempt: 0, retryAt: null });
       }
@@ -83,12 +93,16 @@ export function useEventStream(handlers: EventHandlers): StreamState {
       for (const name of new Set<string>([...eventNames, ...Object.keys(handlersRef.current)])) {
         own.addEventListener(name, dispatch(own, name) as EventListener);
       }
-      own.onerror = () => {
+      const fail = () => {
         own.close();
         if (stopped || source !== own) return;
         source = null;
         scheduleReconnect();
       };
+      own.onerror = fail;
+      // A stream that never says hello is a failed attempt too: back to retrying.
+      clearTimeout(helloTimer);
+      helloTimer = setTimeout(fail, HELLO_TIMEOUT_MS);
     };
 
     const scheduleReconnect = () => {
@@ -104,15 +118,22 @@ export function useEventStream(handlers: EventHandlers): StreamState {
       probing = true;
       clearTimeout(retryTimer);
       setState((previous) => ({ ...previous, retryAt: null }));
+      // One probe at a time (R1-C08), and never longer than PROBE_TIMEOUT_MS: a late answer of
+      // a probe that already timed out is ignored, so it cannot start a second stream.
+      let settled = false;
+      const done = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(probeTimer);
+        probing = false;
+        if (stopped) return;
+        if (ok) connect();
+        else scheduleReconnect();
+      };
+      const probeTimer = setTimeout(() => done(false), PROBE_TIMEOUT_MS);
       endpoints.me().then(
-        () => {
-          probing = false;
-          connect();
-        },
-        () => {
-          probing = false;
-          if (!stopped) scheduleReconnect();
-        },
+        () => done(true),
+        () => done(false),
       );
     };
 
@@ -122,6 +143,7 @@ export function useEventStream(handlers: EventHandlers): StreamState {
     return () => {
       stopped = true;
       clearTimeout(retryTimer);
+      clearTimeout(helloTimer);
       source?.close();
     };
   }, [fixtures]);

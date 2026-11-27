@@ -175,16 +175,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	// use is reported at once, and nothing can take it while the services are wired (the test
 	// that reserved a port and bound it seconds later lost it about one run in five to the
 	// parallel suite's own connections).
-	listeners, err := httpd.Bind(ctx, cfg, logger)
+	// They answer at once from here on: 503 with Retry-After until the server is ready, so a
+	// browser reconnecting across a restart is told to retry rather than left waiting on a
+	// connection nobody answers.
+	early, err := httpd.ServeEarly(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	handedOver := false
 	defer func() {
 		if !handedOver {
-			for _, listener := range listeners {
-				_ = listener.Close()
-			}
+			early.Close()
 		}
 	}()
 
@@ -362,7 +363,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	serverRef.Store(server)
-	server.Prebound, handedOver = listeners, true
+	server.Early, handedOver = early, true
 	var readyOnce sync.Once
 	server.OnListening = func(url string) {
 		readyOnce.Do(func() { logReady(ctx, sys, []string{browsableBase(url)}, logger) })

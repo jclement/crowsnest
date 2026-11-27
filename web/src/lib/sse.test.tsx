@@ -2,7 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectionBanner } from "../components/ConnectionBanner";
-import { backoffDelay, MAX_BACKOFF_MS, useEventStream, type EventHandlers } from "./sse";
+import { backoffDelay, HELLO_TIMEOUT_MS, MAX_BACKOFF_MS, PROBE_TIMEOUT_MS, useEventStream, type EventHandlers } from "./sse";
 
 /** A controllable stand-in for the browser's EventSource. */
 class FakeEventSource {
@@ -66,6 +66,45 @@ afterEach(() => {
 describe("backoffDelay", () => {
   it("doubles from one second and stops at the cap", () => {
     expect([0, 1, 2, 3, 4, 5, 6, 10].map(backoffDelay)).toEqual([1000, 2000, 4000, 8000, 16000, MAX_BACKOFF_MS, MAX_BACKOFF_MS, MAX_BACKOFF_MS]);
+  });
+});
+
+describe("a reconnect that hangs goes back to retrying", () => {
+  it("a session probe nobody answers times out, and Retry now works again", async () => {
+    vi.useFakeTimers();
+    render(<Harness handlers={{}} />);
+    act(() => FakeEventSource.latest.emit("hello", {}));
+    // The server is restarting: the probe's request sits on a connection nobody answers.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    act(() => FakeEventSource.latest.fail());
+    await act(async () => vi.advanceTimersByTimeAsync(1_000)); // the first attempt starts its probe
+    expect(screen.queryByRole("button", { name: "Retry now" })).toBeNull(); // probing
+    await act(async () => vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS));
+    expect(screen.getByRole("button", { name: "Retry now" })).toBeInTheDocument();
+    // The server is back: Retry now probes and opens a stream.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: { username: "jeff", features: {} } }), { status: 200 })));
+    const opened = FakeEventSource.instances.length;
+    await act(async () => {
+      screen.getByRole("button", { name: "Retry now" }).click();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(FakeEventSource.instances.length).toBe(opened + 1);
+    act(() => FakeEventSource.latest.emit("hello", {}));
+    expect(screen.getByTestId("status")).toHaveTextContent("open");
+    expect(screen.queryByText(/Connection lost/)).toBeNull();
+  });
+
+  it("a stream that never says hello is closed and tried again", async () => {
+    vi.useFakeTimers();
+    render(<Harness handlers={{}} />);
+    const silent = FakeEventSource.latest;
+    await act(async () => vi.advanceTimersByTimeAsync(HELLO_TIMEOUT_MS));
+    expect(silent.readyState).toBe(FakeEventSource.CLOSED);
+    expect(screen.getByText(/Connection lost/)).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(FakeEventSource.latest).not.toBe(silent);
+    act(() => FakeEventSource.latest.emit("hello", {}));
+    expect(screen.getByTestId("status")).toHaveTextContent("open");
   });
 });
 
