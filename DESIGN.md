@@ -662,6 +662,21 @@ the Terminal view; it is held to the same standard as everything else anyway:
   (`<state>/demo-home`: a GitHub repository with a check task and AGENTS.md, an Azure DevOps one
   with CLAUDE.md, a plain folder, `~/Work`, a hidden folder, a file) as its home, never the
   machine's own home, so the hermetic suite and screenshots neither show nor depend on real files.
+- **Home is a root by default** (said plainly, R7-S12): every name under `~` can be listed,
+  `.ssh` and `.aws` included, and with `files=1` the file names too. Contents are never served.
+- **R7 hardening.** Every filesystem touch of a route runs inside the deadline and an in-flight
+  slot: `GET /browse/places` reads favourites and roots in one bounded call (R7-C10). Every
+  metadata file (`.git/HEAD`, `config`, `packed-refs`, `commondir`, a worktree's `.git` file, and
+  Claude's trust file) is opened `O_NONBLOCK`, without following a link in its last part (Claude's
+  file may be a link), checked to be a regular file and read through a limit, so a FIFO cannot
+  hold a slot or a mutex and a linked HEAD outside is not read; the branch is one line (R7-S10).
+  Roots from crowsnest's records are checked again on each call: a remembered directory must
+  still resolve to itself (it is stored resolved), and no project or remembered directory that is
+  an ancestor of home is a root (R7-S11). A link out of the roots carries neither its target nor
+  whether that is a folder (it is listed in both modes, marked, not enterable); a path under a
+  file (`ENOTDIR`) answers like a missing one; a directory is read in batches of at most 5,000
+  names (the listing then says partial); a remote loses its query, fragment and an scp-like
+  password (R7-S12).
 
 ## 5. Driving herdr
 

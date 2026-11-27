@@ -122,12 +122,12 @@ func (s *Server) handleBrowsePlaces(w http.ResponseWriter, r *http.Request) {
 	if service == nil {
 		return
 	}
-	favourites, err := service.Favourites(r.Context())
+	places, err := service.Places(r.Context())
 	if err != nil {
 		s.writeBrowseError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusOK, BrowsePlaces{Home: service.Home(), Favourites: favourites, Roots: service.Roots(r.Context())})
+	writeData(w, http.StatusOK, BrowsePlaces{Home: service.Home(), Favourites: places.Favourites, Roots: places.Roots})
 }
 
 // writeBrowseError answers with crowsnest's own sentence for each refusal; the filesystem's

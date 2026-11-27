@@ -34,8 +34,30 @@ type FS interface {
 // OS is the real filesystem.
 type OS struct{}
 
-// ReadDir implements FS.
-func (OS) ReadDir(name string) ([]fs.DirEntry, error) { return os.ReadDir(name) }
+// MaxReadDir is the most entries one listing reads from a directory (R7-S12): a directory of a
+// million names is read in batches up to this, not whole and sorted before the cap applies.
+const MaxReadDir = 5000
+
+// ReadDir implements FS: at most MaxReadDir entries, in the directory's own order.
+func (OS) ReadDir(name string) ([]fs.DirEntry, error) {
+	dir, err := os.Open(name) //nolint:gosec // a directory inside an allowed root; names only
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = dir.Close() }()
+	var out []fs.DirEntry
+	for len(out) < MaxReadDir {
+		batch, err := dir.ReadDir(min(500, MaxReadDir-len(out)))
+		out = append(out, batch...)
+		if errors.Is(err, io.EOF) || len(batch) == 0 {
+			break
+		}
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
 
 // Stat implements FS.
 func (OS) Stat(name string) (fs.FileInfo, error) { return os.Stat(name) }
@@ -46,9 +68,22 @@ func (OS) Lstat(name string) (fs.FileInfo, error) { return os.Lstat(name) }
 // EvalSymlinks implements FS.
 func (OS) EvalSymlinks(name string) (string, error) { return filepath.EvalSymlinks(name) }
 
-// ReadFile implements FS.
+// ReadFile implements FS. It is the one way a metadata file is read (R7-S10): opened without
+// following a link in its last part (a .git/HEAD linked to a file elsewhere is not read) and
+// without blocking (a FIFO planted as .git/HEAD would otherwise hold open(2), and a slot, for
+// good), then checked to be a regular file and read through a limit.
 func (OS) ReadFile(name string, limit int64) ([]byte, error) {
-	file, err := os.Open(name) //nolint:gosec // a metadata file inside an allowed root, parsed and never served
+	return ReadMetadata(name, limit, false)
+}
+
+// ReadMetadata reads at most limit bytes of a small regular file without blocking on a FIFO or a
+// device. followLink allows a link as the last part (a dotfiles-managed ~/.claude.json).
+func ReadMetadata(name string, limit int64, followLink bool) ([]byte, error) {
+	flags := os.O_RDONLY | unix.O_NONBLOCK
+	if !followLink {
+		flags |= unix.O_NOFOLLOW
+	}
+	file, err := os.OpenFile(name, flags, 0) //nolint:gosec // a metadata file inside an allowed root, parsed and never served
 	if err != nil {
 		return nil, err
 	}

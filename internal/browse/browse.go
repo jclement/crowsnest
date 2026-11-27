@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -153,6 +154,10 @@ func (s *Service) roots(ctx context.Context) []root {
 	}
 	var out []root
 	seen := map[string]bool{}
+	homeResolved := ""
+	if s.opts.Home != "" {
+		homeResolved, _ = s.opts.FS.EvalSymlinks(s.opts.Home)
+	}
 	for _, place := range places {
 		cleaned, err := s.clean(place.Path)
 		if err != nil {
@@ -165,6 +170,9 @@ func (s *Service) roots(ctx context.Context) []root {
 		if err != nil || (resolved == "/" && place.Kind != KindRoot) || seen[resolved] {
 			continue
 		}
+		if !s.safeSourceRoot(place, cleaned, resolved, homeResolved) {
+			continue
+		}
 		seen[resolved] = true
 		place.Path = cleaned
 		out = append(out, root{Place: place, resolved: resolved})
@@ -172,8 +180,30 @@ func (s *Service) roots(ctx context.Context) []root {
 	return out
 }
 
-// Roots lists the allowed trees as the picker shows them (their paths as configured).
-func (s *Service) Roots(ctx context.Context) []Place {
+// safeSourceRoot applies the rules a root that comes from crowsnest's own records (a project, a
+// remembered directory) must meet, beyond those of --browse-root (R7-S11):
+//   - a remembered directory is stored resolved, precisely so that a link swapped in later
+//     cannot widen it: it must still resolve to itself (an agent that replaces ~/Work/p with a
+//     link to /etc does not make /etc a root);
+//   - none may be the home directory's ancestor (a directory above home once approved does not
+//     make every user's home browsable).
+func (s *Service) safeSourceRoot(place Place, cleaned, resolved, homeResolved string) bool {
+	if place.Kind != KindProject && place.Kind != KindRemembered {
+		return true
+	}
+	if place.Kind == KindRemembered && resolved != cleaned {
+		return false
+	}
+	return homeResolved == "" || resolved == homeResolved || !within(homeResolved, resolved)
+}
+
+// Roots lists the allowed trees as the picker shows them (their paths as configured), under the
+// deadline and the in-flight cap like every read.
+func (s *Service) Roots(ctx context.Context) ([]Place, error) {
+	return bounded(ctx, s, func(time.Time) ([]Place, error) { return s.rootPlaces(ctx), nil })
+}
+
+func (s *Service) rootPlaces(ctx context.Context) []Place {
 	roots := s.roots(ctx)
 	out := make([]Place, len(roots))
 	for i, r := range roots {
@@ -236,7 +266,9 @@ func (s *Service) admit(ctx context.Context, path string) (cleaned, resolved str
 		if isPermission(err) {
 			return "", "", root{}, ErrOutside
 		}
-		if errors.Is(err, fs.ErrNotExist) {
+		// ENOTDIR (/etc/passwd/x) is answered as a missing path (R7-S12): otherwise a 500 here
+		// against a 403 for a missing outside path tells whether an outside path is a file.
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			for parent := filepath.Dir(cleaned); ; parent = filepath.Dir(parent) {
 				if parentResolved, parentErr := s.opts.FS.EvalSymlinks(parent); parentErr == nil {
 					if _, ok := rootOf(roots, parentResolved); ok {
@@ -297,54 +329,73 @@ func bounded[T any](ctx context.Context, s *Service, fn func(deadline time.Time)
 	}
 }
 
+// ---- Places: favourites and roots in one bounded call (R7-C10) -------------------------------
+
+// Places is what the picker starts from: the favourites and the roots, both read inside one
+// bounded call, so a mount that gets stuck between them cannot strand a request outside the
+// deadline and the in-flight cap.
+type Places struct {
+	Favourites []Place
+	Roots      []Place
+}
+
+// Places reads the favourites and the roots under one deadline and one slot.
+func (s *Service) Places(ctx context.Context) (Places, error) {
+	return bounded(ctx, s, func(time.Time) (Places, error) {
+		return Places{Favourites: s.favourites(ctx), Roots: s.rootPlaces(ctx)}, nil
+	})
+}
+
 // ---- Favourites -----------------------------------------------------------------------------
 
 // Favourites are the places the picker offers before anything is typed: home, ~/Developer and
 // ~/Work when they exist, the roots, projects' parents, and remembered and recent directories.
 // Only places inside a root that exist are listed, each once.
 func (s *Service) Favourites(ctx context.Context) ([]Place, error) {
-	return bounded(ctx, s, func(time.Time) ([]Place, error) {
-		var candidates []Place
-		if s.opts.Home != "" {
-			candidates = append(candidates, Place{Path: s.opts.Home, Label: "Home", Kind: KindHome})
-			for _, name := range []string{"Developer", "Work"} {
-				candidates = append(candidates, Place{Path: filepath.Join(s.opts.Home, name), Label: "~/" + name, Kind: KindFavourite})
-			}
+	return bounded(ctx, s, func(time.Time) ([]Place, error) { return s.favourites(ctx), nil })
+}
+
+func (s *Service) favourites(ctx context.Context) []Place {
+	var candidates []Place
+	if s.opts.Home != "" {
+		candidates = append(candidates, Place{Path: s.opts.Home, Label: "Home", Kind: KindHome})
+		for _, name := range []string{"Developer", "Work"} {
+			candidates = append(candidates, Place{Path: filepath.Join(s.opts.Home, name), Label: "~/" + name, Kind: KindFavourite})
 		}
-		for _, extra := range s.opts.Extra {
-			candidates = append(candidates, Place{Path: extra, Label: extra, Kind: KindRoot})
+	}
+	for _, extra := range s.opts.Extra {
+		candidates = append(candidates, Place{Path: extra, Label: extra, Kind: KindRoot})
+	}
+	if s.opts.Sources != nil {
+		candidates = append(candidates, s.opts.Sources(ctx)...)
+	}
+	roots := s.roots(ctx)
+	out := []Place{}
+	seen := map[string]bool{}
+	for _, place := range candidates {
+		cleaned, err := s.clean(place.Path)
+		if err != nil || seen[cleaned] {
+			continue
 		}
-		if s.opts.Sources != nil {
-			candidates = append(candidates, s.opts.Sources(ctx)...)
+		resolved, err := s.opts.FS.EvalSymlinks(cleaned)
+		if err != nil {
+			continue
 		}
-		roots := s.roots(ctx)
-		out := []Place{}
-		seen := map[string]bool{}
-		for _, place := range candidates {
-			cleaned, err := s.clean(place.Path)
-			if err != nil || seen[cleaned] {
-				continue
-			}
-			resolved, err := s.opts.FS.EvalSymlinks(cleaned)
-			if err != nil {
-				continue
-			}
-			if info, statErr := s.opts.FS.Stat(resolved); statErr != nil || !info.IsDir() {
-				continue
-			}
-			if _, ok := rootOf(roots, resolved); !ok {
-				continue
-			}
-			seen[cleaned] = true
-			place.Path = cleaned
-			if place.Label == "" {
-				place.Label = s.label(cleaned)
-			}
-			place.Git = s.isGit(cleaned)
-			out = append(out, place)
+		if info, statErr := s.opts.FS.Stat(resolved); statErr != nil || !info.IsDir() {
+			continue
 		}
-		return out, nil
-	})
+		if _, ok := rootOf(roots, resolved); !ok {
+			continue
+		}
+		seen[cleaned] = true
+		place.Path = cleaned
+		if place.Label == "" {
+			place.Label = s.label(cleaned)
+		}
+		place.Git = s.isGit(cleaned)
+		out = append(out, place)
+	}
+	return out
 }
 
 // label is a path for display: ~ for the home directory.
@@ -366,11 +417,13 @@ func (s *Service) isGit(dir string) bool {
 	return err == nil
 }
 
-// sortEntries puts directories before files, each by name without case.
+// sortEntries puts directories (and links out of the roots, whose kind is not said) before
+// files, each by name without case.
 func sortEntries(entries []Entry) {
 	slices.SortStableFunc(entries, func(a, b Entry) int {
-		if a.Dir != b.Dir {
-			if a.Dir {
+		aDir, bDir := a.Dir || a.Outside, b.Dir || b.Outside
+		if aDir != bDir {
+			if aDir {
 				return -1
 			}
 			return 1
