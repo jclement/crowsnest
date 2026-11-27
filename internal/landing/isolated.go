@@ -40,8 +40,11 @@ func IsolatedCheckout(ctx context.Context, dir, commit string) (*Isolated, error
 		return nil, fmt.Errorf("not a commit id: %q", commit)
 	}
 	repo, err := Root(ctx, dir)
-	if err != nil || repo == "" {
-		return nil, fmt.Errorf("finding the repository of %s: %v", dir, err)
+	if err != nil {
+		return nil, fmt.Errorf("finding the repository of %s: %w", dir, err)
+	}
+	if repo == "" {
+		return nil, fmt.Errorf("%s is not in a git repository", dir)
 	}
 	parent, err := os.MkdirTemp("", "crowsnest-check-*")
 	if err != nil {
@@ -59,7 +62,10 @@ func IsolatedCheckout(ctx context.Context, dir, commit string) (*Isolated, error
 	if err != nil || strings.TrimSpace(head) != commit {
 		iso := &Isolated{Dir: copyDir, repo: repo, parent: parent}
 		iso.Remove(ctx)
-		return nil, fmt.Errorf("the isolated copy is not at %s (%s, %v)", shortID(commit), strings.TrimSpace(head), err)
+		if err != nil {
+			return nil, fmt.Errorf("reading the isolated copy's commit: %w", err)
+		}
+		return nil, fmt.Errorf("the isolated copy is at %s, not %s", shortID(strings.TrimSpace(head)), shortID(commit))
 	}
 	return &Isolated{Dir: copyDir, repo: repo, parent: parent}, nil
 }
