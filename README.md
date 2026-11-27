@@ -378,6 +378,15 @@ variable is read-only there ("set by the environment: change it there"): precede
 then environment, then a value saved in the app, then the config file, then the default. The
 login, the bind, the session and the data directory are never changed from a browser.
 
+**Appearance** (account menu → Appearance, the Settings sheet, or the palette) picks a theme and,
+separately, the mode (System, Light or Dark; the header's toggle cycles the mode). Five themes
+ship, each a light and a dark partner: Crowsnest (the house theme), Phosphor (a green-screen
+terminal, all in mono), Deep sea, Ember and High contrast (every text colour at WCAG AAA). The
+choice is kept per browser; **Use for new browsers** makes a theme the default for browsers that
+have not chosen (the `theme` setting, also `--theme` / `CROWSNEST_THEME`). **T** cycles themes
+from anywhere outside a text field or terminal. Adding a theme is one file in `web/src/themes/`
+(DESIGN.md 12.10).
+
 ## On your tailnet with Tailscale
 
 Two ways to reach crowsnest from your phone:
@@ -1154,6 +1163,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run screenshots:inbox` | (The three `screenshots:*` tasks run `web/e2e/screenshots` in the `screenshots` Playwright project, a fresh demo instance per test.) Builds, then Playwright against `./bin/crowsnest --demo`: the Inbox list and a question (mermaid and a diff) at 375×812 and 1440×900, light and dark, a multi-select, the 375 px checks, and an answer round trip |
 | `mise run screenshots:jobs` | Builds, then Playwright against `./bin/crowsnest --demo`: the Jobs board (light and dark), the new-job form, a running, a stuck and a done job at 375×812 and 1440×900, the 375 px checks, and giving a job |
 | `mise run screenshots:palette` | Builds, then Playwright against `./bin/crowsnest --demo`: the command palette open, with a query (highlights, Give job), and a job's actions at 375×812 and 1440×900 in light and dark, plus the keyboard shortcuts sheet |
+| `mise run screenshots:themes` | Builds, then Playwright against `./bin/crowsnest --demo`: Now in every theme, light and dark, at 1440 and 390, as one contact sheet per theme (`web/screenshots/themes-<id>.png`) and one of them all (`themes-all.png`), plus the Settings → Appearance gallery |
 | `mise run screenshots:chat` | Builds, then Playwright against `./bin/crowsnest --demo`: a real prompt round trip in Chat, screenshots at 375×812 and 1440×900, light and dark |
 | `mise run e2e:voice` | Talk mode alone (also part of `e2e`). Builds, then Playwright against `./bin/crowsnest --demo` with talk mode on and a fake ElevenLabs (`web/e2e/support/fake-elevenlabs.mjs`, never the real API), Chromium's fake microphone (and WebKit's mock device for the keyboard cases): the mic, the transcript sent, the SAY reply fetched from `/voice/tts` and played with speak mode on and not synthesised with it off, the play button; hold Space with real key events (3 s and 30 s with auto-repeat, a focused button, a quick tap, Option+Space in the composer, blur mid-hold); the Voice sheet (voices, preview, a saved voice and speed); screenshots of Chat recording at 375×812 and 1440×900 |
 | `mise run snapshot` | GoReleaser snapshot into `dist/`: the four archives, `checksums.txt` and the Homebrew cask (`dist/homebrew/Casks/crowsnest.rb`); nothing signed, nothing published |
