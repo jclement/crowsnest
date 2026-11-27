@@ -392,6 +392,16 @@ func SkippedFiles(skipped []Skipped, listed []DiffFile) []DiffFile {
 	return out
 }
 
+// GroupRank is a reading-order group's place (schema first, churn last).
+func GroupRank(group string) int {
+	for i, name := range groups {
+		if name == group {
+			return i
+		}
+	}
+	return len(groups)
+}
+
 // FileHash is a file's content hash: the same diff, the same hash.
 func FileHash(file DiffFile) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{file.OldBlob, file.NewBlob, file.OldPath, file.Path, file.OldMode, file.NewMode}, "\x00")))

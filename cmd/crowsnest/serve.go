@@ -26,6 +26,7 @@ import (
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/demostory"
 	"github.com/jclement/crowsnest/internal/doctor"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
@@ -268,6 +269,14 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	// herdr, so it runs in the background and the app comes up.
 	go reconcileRestore(ctx, db, fleetCache, journalLog, logger)
 	startJobs(ctx, jobService, client, projectOf, cfg.StateDir, logger)
+	if cfg.Demo && projectOf != nil {
+		if id, dir := projectOf(demostory.Dir(demostory.Website)); dir != "" {
+			if err := jobs.SeedDemoDiffs(ctx, jobService, dir, id); err != nil {
+				logger.Warn("seeding the diff demo", "err", err)
+			}
+		}
+	}
+	changeService := startChanges(ctx, cfg, db, events, jobService, refs.projects.service, logger)
 	if demo, ok := client.(*fake.Demo); ok {
 		// After the jobs: each demo approval and question names the job whose pane raised it.
 		inbox := demoInbox{demo: demo, jobs: jobService, approvals: approvalService, questions: questionService, files: files, stateDir: cfg.StateDir}
@@ -333,6 +342,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(), Attention: attentionService, Now: nowSources,
+		Changes:       changeService,
+		RequireViewed: func() bool { return live.config.get().RequireViewedBeforeLand },
+	}
+	if cfg.Demo {
+		deps.DemoTouch = func(ctx context.Context, id string) error { return jobs.DemoDiffTouch(ctx, jobService, id) }
 	}
 	// The nightly clean-up and the automatic backup are automation: the pause switch holds both
 	// (DESIGN.md 6.13). Clean up now and Download backup are the human's and are not held.

@@ -516,6 +516,13 @@ func (s *Service) summarize(target Target, r *reading, marks []store.DiffMark, s
 			summary.Viewed++
 		}
 	}
+	sort.SliceStable(summary.Files, func(i, j int) bool {
+		a, b := summary.Files[i], summary.Files[j]
+		if ra, rb := landing.GroupRank(a.Group), landing.GroupRank(b.Group); ra != rb {
+			return ra < rb
+		}
+		return a.Path < b.Path
+	})
 	summary.Total = len(summary.Files)
 	return summary
 }
