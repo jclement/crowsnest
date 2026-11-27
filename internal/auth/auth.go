@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/store"
@@ -108,6 +109,25 @@ type Session struct {
 	// Refreshed is true when this request pushed the expiry forward, so the cookie should be
 	// re-sent with the new lifetime.
 	Refreshed bool
+	// TailscaleLogin is the tailnet login a session signed in with Tailscale was issued to
+	// (DESIGN.md 4.20); "" for a password session. Such a session is honoured only while each
+	// request still arrives through tailscale serve for that login, and the login is allowed.
+	TailscaleLogin string
+}
+
+// TailscaleAgentPrefix starts the stored user agent of a session signed in with Tailscale:
+// "tailscale:<login> <browser user agent>". It is how a session remembers its login without a
+// schema change.
+const TailscaleAgentPrefix = "tailscale:"
+
+// tailscaleLoginOf is the login a stored user agent names, or "".
+func tailscaleLoginOf(userAgent string) string {
+	rest, ok := strings.CutPrefix(userAgent, TailscaleAgentPrefix)
+	if !ok {
+		return ""
+	}
+	login, _, _ := strings.Cut(rest, " ")
+	return login
 }
 
 // New builds a Service. With auth on, it derives the credential digest (salted with a random
@@ -406,7 +426,7 @@ func (s *Service) Authenticate(ctx context.Context, token, host string) (Session
 	if row.Host != host {
 		return Session{}, ErrNoSession
 	}
-	session := Session{Username: username, ExpiresAt: row.ExpiresAt}
+	session := Session{Username: username, ExpiresAt: row.ExpiresAt, TailscaleLogin: tailscaleLoginOf(row.UserAgent)}
 	if now.Sub(row.LastSeenAt) >= touchInterval {
 		session.ExpiresAt = now.Add(SessionTTL)
 		session.Refreshed = true
