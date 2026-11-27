@@ -321,3 +321,25 @@ func TestStartAnywayWhilePausedGetsItsBriefAfterADialog(t *testing.T) {
 		t.Fatalf("the brief was held while paused after Start anyway: %s %s", d.State, d.Cause)
 	}
 }
+
+// TestLaunchClaimHoldsASlot is R5-C06: a job whose launch is claimed but whose pane is still
+// being prepared (no agent name yet) holds its slot, so a second launch waits.
+func TestLaunchClaimHoldsASlot(t *testing.T) {
+	limit := &fakeThrottle{settings: throttle.Settings{MaxRunning: 1}}
+	r := newRig(t, func(o *Options) { o.Throttle = limit })
+	ctx := context.Background()
+	first := r.create(CreateInput{Brief: "One", Dir: t.TempDir()})
+	// Put the first back to the moment after its claim and before its pane exists.
+	record, err := r.db.GetJob(ctx, mustParse(first.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.State, record.PaneID, record.AgentName, record.LifecycleOp = string(StateQueued), "", "", opLaunch
+	if err := r.db.UpdateJob(ctx, record); err != nil { // straight to the store: no transition check
+		t.Fatal(err)
+	}
+	second := r.create(CreateInput{Brief: "Two", Dir: t.TempDir()})
+	if second.State != StateQueued || second.Cause != CauseHeld {
+		t.Fatalf("a launch in preparation did not hold its slot: %s %s %q", second.State, second.Cause, second.CauseDetail)
+	}
+}

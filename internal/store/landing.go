@@ -24,6 +24,15 @@ type SlotCount struct {
 	Ahead int
 }
 
+// holdsSlot is the one definition of a job agent holding a slot, shared by the start check and
+// the counts shown (R5-C06): a live job whose own agent (job-N) has a pane or is being launched,
+// or a directory job whose launch is claimed but whose agent is not named yet (the name is set
+// only once the pane exists, so without this a launch preparing its worktree held no slot and a
+// second launch could take the same one).
+const holdsSlot = `state IN ('queued', 'running', 'needs_you', 'blocked')
+	AND ((agent_name LIKE 'job-%' AND (pane_id != '' OR lifecycle_op = 'launch'))
+	  OR (agent_name = '' AND dir != '' AND lifecycle_op = 'launch'))`
+
 // CountSlots weighs job id's start: in the whole instance when projectID is 0, else in that
 // project only. The job itself is never counted.
 func (s *Store) CountSlots(ctx context.Context, id, projectID int64) (SlotCount, error) {
@@ -32,9 +41,7 @@ func (s *Store) CountSlots(ctx context.Context, id, projectID int64) (SlotCount,
 		scope, args = " AND project_id = ?", append(args, projectID)
 	}
 	var count SlotCount
-	running := `SELECT COUNT(*) FROM jobs WHERE id != ? AND agent_name LIKE 'job-%'
-		AND state IN ('queued', 'running', 'needs_you', 'blocked')
-		AND (pane_id != '' OR lifecycle_op = 'launch')` + scope
+	running := `SELECT COUNT(*) FROM jobs WHERE id != ? AND ` + holdsSlot + scope
 	if err := s.db.QueryRowContext(ctx, running, args...).Scan(&count.Running); err != nil {
 		return SlotCount{}, fmt.Errorf("counting running job agents: %w", err)
 	}
@@ -49,9 +56,7 @@ func (s *Store) CountSlots(ctx context.Context, id, projectID int64) (SlotCount,
 // RunningAgentsByProject counts the job agents holding a slot, per project (0 Unfiled), for the
 // System page and the queue line.
 func (s *Store) RunningAgentsByProject(ctx context.Context) (map[int64]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, COUNT(*) FROM jobs WHERE agent_name LIKE 'job-%'
-		AND state IN ('queued', 'running', 'needs_you', 'blocked') AND (pane_id != '' OR lifecycle_op = 'launch')
-		GROUP BY project_id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, COUNT(*) FROM jobs WHERE `+holdsSlot+` GROUP BY project_id`)
 	if err != nil {
 		return nil, fmt.Errorf("counting running job agents by project: %w", err)
 	}
