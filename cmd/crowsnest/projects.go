@@ -1,8 +1,8 @@
 // Wiring for projects and their leads (DESIGN.md 21): the projects service, the adapter the jobs
 // service sees projects and running leads through, and the factory that builds a project's lead
-// from the same pieces as the orchestrator (internal/orch's lifecycle, its own poker, Remote
-// Control named "<instance> <project>", the CROWSNEST.md template with the project named, plus
-// the human's instruction layers).
+// from the same pieces as the orchestrator (internal/orch's lifecycle, its own poker with the
+// timer and the upkeep the orchestrator has, Remote Control named "<instance> <project>", the
+// CROWSNEST.md template with the project named, plus the human's instruction layers).
 
 package main
 
@@ -24,7 +24,9 @@ import (
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/projects"
+	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/transcript"
 )
 
 // projectWiring holds the projects service and, once serve has built them, the leads.
@@ -36,7 +38,23 @@ type projectWiring struct {
 	extra atomic.Pointer[func(ctx context.Context, project projects.Project) string]
 	// taskSource gives a lead's poker its project's scheduled tasks; nil gives none.
 	taskSource atomic.Pointer[func(projectID int64) orch.TaskSource]
+	// upkeep gives a lead's poker its timer list and its tender; nil gives neither.
+	upkeep atomic.Pointer[leadUpkeep]
 }
+
+// leadUpkeep is what a lead's poker shares with the orchestrator's (DESIGN.md 7.4, 7.9): the
+// services its timer list reads, the conversations its context size is read from, and the
+// orchestrator's poker and tender, whose live settings a lead's timer and thresholds follow.
+type leadUpkeep struct {
+	jobs          *jobs.Service
+	questions     *questions.Service
+	conversations *transcript.Manager
+	poker         *orch.Poker  // the orchestrator's; nil: the lead keeps --poke-interval
+	tender        *orch.Tender // the orchestrator's; nil: the lead keeps the flags' thresholds
+}
+
+// useUpkeep gives leads started from now on their timer list and their tender.
+func (w *projectWiring) useUpkeep(upkeep leadUpkeep) { w.upkeep.Store(&upkeep) }
 
 func newProjectWiring(cfg config.Config, db *store.Store, events *hub.Hub) *projectWiring {
 	roles, _ := jobs.LoadRoles(rolesDir(cfg))
@@ -155,16 +173,35 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 				}
 			},
 		})
-		options := orch.PokerOptions{
-			Client: deps.client, KV: deps.db, Journal: deps.journal, Hub: deps.events, Logger: deps.logger.With("lead", project.Slug),
-			Status: agent.Status, ManualOnly: deps.cfg.Demo, NoAgentReasons: true,
-			StateKey: "lead." + project.Slug + ".poke.state", Label: "the lead of " + project.Name,
-		}
-		if source := w.taskSource.Load(); source != nil {
-			options.Tasks = (*source)(project.ID)
-		}
-		return agent, orch.NewPoker(options)
+		return agent, orch.NewPoker(w.leadPokerOptions(deps, project, agent))
 	}
+}
+
+// leadPokerOptions are a lead's poker: its own bookkeeping and label, no "another agent
+// settled" reasons, its project's tasks, the orchestrator's timer interval with its project's
+// standing list, and a tender of its own.
+func (w *projectWiring) leadPokerOptions(deps leadDeps, project projects.Project, agent *orch.Orchestrator) orch.PokerOptions {
+	options := orch.PokerOptions{
+		Client: deps.client, KV: deps.db, Journal: deps.journal, Hub: deps.events, Logger: deps.logger.With("lead", project.Slug),
+		Status: agent.Status, ManualOnly: deps.cfg.Demo, NoAgentReasons: true,
+		StateKey: "lead." + project.Slug + ".poke.state", Label: "the lead of " + project.Name,
+		Interval: deps.cfg.PokeInterval,
+	}
+	if source := w.taskSource.Load(); source != nil {
+		options.Tasks = (*source)(project.ID)
+	}
+	upkeep := w.upkeep.Load()
+	if upkeep == nil {
+		return options
+	}
+	if upkeep.poker != nil {
+		options.IntervalFrom = upkeep.poker.Interval
+	}
+	options.Standing = leadStandingWork(upkeep.jobs, upkeep.questions, project.ID)
+	if upkeep.conversations != nil {
+		options.Tender = newLeadTender(deps, project, agent, *upkeep)
+	}
+	return options
 }
 
 // leadInstructions is a lead's CROWSNEST.md: the orchestrator's template with the project named,
@@ -193,6 +230,16 @@ func (w *projectWiring) subjectOf(_ context.Context, paneID string) string {
 		}
 	}
 	return ""
+}
+
+// leadProjectInPane is the project whose lead is in paneID.
+func (w *projectWiring) leadProjectInPane(paneID string) (projects.Project, bool) {
+	if leads := w.leads.Load(); leads != nil {
+		if lead := leads.ByPane(paneID); lead != nil {
+			return lead.Project, true
+		}
+	}
+	return projects.Project{}, false
 }
 
 // leadInPane is the agent name of the lead in paneID, "" when none is there.

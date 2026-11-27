@@ -250,6 +250,7 @@ func (s *Service) List(ctx context.Context, states []State) ([]Job, error) {
 // spendInfo is what internal/spend needs to know about a job.
 func spendInfo(job Job) spend.JobInfo {
 	return spend.JobInfo{ID: job.ID, Engine: job.Engine, Orchestrated: IsStanding(job.AgentName),
+		LeadHeld: strings.HasPrefix(job.AgentName, LeadPrefix),
 		StartedAt: job.StartedAt, SettledAt: job.SettledAt}
 }
 

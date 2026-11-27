@@ -46,6 +46,8 @@ const (
 	maxDelivered = 1000
 	// pokeSendTimeout bounds one poke: Prompt waits up to 30 s for the turn to start.
 	pokeSendTimeout = 45 * time.Second
+	// escalationEvery is how often Escalations is asked: it reads every live job.
+	escalationEvery = 30 * time.Second
 )
 
 // Outcomes of a poke attempt.
@@ -73,6 +75,7 @@ type PokeResult struct {
 type QuestionInfo struct {
 	ID, Title, Status, Kind string
 	SourcePane              string // the asker's pane; the orchestrator's own are not news
+	Prefix                  string // starts the reason's text (lead-first routing)
 }
 
 // JobInfo is a job that changed, as the poker needs it.
@@ -81,6 +84,11 @@ type JobInfo struct {
 	Stuck            bool
 	Cause            string // stuck or needs-you cause, in words
 	PaneID           string // the agent holding it; the orchestrator's own are not news
+	// Prefix starts the reason's text (lead-first routing: "project X has no lead running: ").
+	Prefix string
+	// HandedOver words the reason as the outcome of work this agent handed to a project
+	// ("job j_N you handed it is done").
+	HandedOver bool
 }
 
 // PokerOptions configure a Poker. Client, KV and Status are required.
@@ -124,6 +132,19 @@ type PokerOptions struct {
 	// NoAgentReasons drops the "another agent settled" reasons: they are the orchestrator's to
 	// hear, as the session's front door; a project's lead hears about its own project's jobs.
 	NoAgentReasons bool
+	// IntervalFrom, when set, is the timer interval in effect (a lead follows the orchestrator's
+	// live --poke-interval); SetInterval still overrides it.
+	IntervalFrom func() time.Duration
+
+	// ---- Lead-first routing (DESIGN.md 7.4) ----
+
+	// OwnedElsewhere reports a pane whose settling is another standing agent's business (a
+	// lead's pane, or a job agent holding a job of a project whose lead is up): no "another
+	// agent settled" reason is made for it. Nil: none.
+	OwnedElsewhere func(paneID string) bool
+	// Escalations lists what a lead could not resolve (EscalateAfter, a lead that failed), at
+	// most every escalationEvery. Each reason is sent once per key. Nil: none.
+	Escalations func(ctx context.Context, now time.Time) []Reason
 }
 
 func (p *Poker) stateKey() string {
@@ -188,6 +209,7 @@ type Poker struct {
 	pending    []Reason
 	agents     map[string]AgentSeen // by pane, as last observed
 	lastTimer  time.Time
+	lastEscal  time.Time // when Escalations was last asked
 	draftSince time.Time
 	alerted    bool   // the draft alert for this draft was sent
 	lastSkip   string // the gate refusal last journalled, so a held poke is journalled once
@@ -271,7 +293,7 @@ func (p *Poker) QuestionSettled(ctx context.Context, q QuestionInfo) {
 		return
 	}
 	// The title is the asker's words: quoted, so it cannot pass for a header (internal/termtext).
-	text := q.ID + " (asked by pane " + q.SourcePane + ") was " + q.Status + ": " + termtext.Quote(q.Title)
+	text := q.Prefix + q.ID + " (asked by pane " + q.SourcePane + ") was " + q.Status + ": " + termtext.Quote(q.Title)
 	p.Add(ctx, Reason{Key: "question:" + q.ID, Source: SourceQuestion, Text: text})
 }
 
@@ -293,7 +315,11 @@ func (p *Poker) JobChanged(ctx context.Context, job JobInfo) {
 	default:
 		return
 	}
-	p.Add(ctx, Reason{Key: key, Source: SourceJob, Text: "job " + job.ID + " " + what + ": " + termtext.Quote(job.Title)})
+	subject := "job " + job.ID
+	if job.HandedOver {
+		subject += " you handed it"
+	}
+	p.Add(ctx, Reason{Key: key, Source: SourceJob, Text: job.Prefix + subject + " " + what + ": " + termtext.Quote(job.Title)})
 }
 
 // Check observes the agents, runs the backstop and the timer, and pokes if anything is due and
@@ -305,6 +331,7 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 	p.observe(ctx, now)
 	p.runBackstop(ctx, now)
 	p.timerReason(ctx, now)
+	p.escalate(ctx, now)
 
 	status := p.opts.Status()
 	if status.State == StateDisabled {
@@ -321,6 +348,7 @@ func (p *Poker) Check(ctx context.Context, manual bool) PokeResult {
 		return result
 	}
 	input := p.precheckInput(now, manual)
+	input.Owned = p.ownedPanes(input.Agents)
 	input.Tasks, input.RideAlong = p.dueTasks(ctx, now)
 	due := Precheck(input)
 	result := PokeResult{Outcome: OutcomeNothing, Reasons: ReasonTexts(due.Reasons), Manual: manual, At: now, Agent: status.Name}
@@ -450,6 +478,43 @@ func (p *Poker) timerReason(ctx context.Context, now time.Time) {
 		return
 	}
 	p.Add(ctx, Reason{Key: "timer:" + fingerprint, Source: SourceTimer, Text: "still open: " + strings.Join(lines, "; ")})
+}
+
+// escalate queues what a lead could not resolve, at most every escalationEvery.
+func (p *Poker) escalate(ctx context.Context, now time.Time) {
+	if p.opts.Escalations == nil {
+		return
+	}
+	p.mu.Lock()
+	due := p.lastEscal.IsZero() || now.Sub(p.lastEscal) >= escalationEvery
+	if due {
+		p.lastEscal = now
+	}
+	p.mu.Unlock()
+	if !due {
+		return
+	}
+	for _, reason := range p.opts.Escalations(ctx, now) {
+		p.Add(ctx, reason)
+	}
+}
+
+// ownedPanes asks OwnedElsewhere about the settled agents only (the others make no reason), so
+// Precheck stays pure: it reads the answer from its input.
+func (p *Poker) ownedPanes(agents []AgentSeen) map[string]bool {
+	if p.opts.OwnedElsewhere == nil {
+		return nil
+	}
+	owned := map[string]bool{}
+	for _, agent := range agents {
+		if agent.Status != herdr.StatusDone && agent.Status != herdr.StatusBlocked {
+			continue
+		}
+		if p.opts.OwnedElsewhere(agent.PaneID) {
+			owned[agent.PaneID] = true
+		}
+	}
+	return owned
 }
 
 func fingerprintOf(lines []string) string {
@@ -687,10 +752,16 @@ func unixTime(seconds int64) time.Time {
 // off.
 func (p *Poker) SetInterval(interval time.Duration) { p.liveInterval.Store(&interval) }
 
-// interval is the timer poke interval in effect.
+// Interval is the timer poke interval in effect: SetInterval's, else IntervalFrom's, else
+// Options.Interval.
+func (p *Poker) Interval() time.Duration { return p.interval() }
+
 func (p *Poker) interval() time.Duration {
 	if live := p.liveInterval.Load(); live != nil {
 		return *live
+	}
+	if p.opts.IntervalFrom != nil {
+		return p.opts.IntervalFrom()
 	}
 	return p.opts.Interval
 }

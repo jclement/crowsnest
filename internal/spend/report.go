@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/store"
@@ -98,6 +99,9 @@ func (r *Reader) Report(ctx context.Context, from, to, group string, labels Labe
 		}
 		if key == OrchestratorSubject && group == GroupJob {
 			row.Label = "Orchestrator"
+		}
+		if slug, lead := strings.CutPrefix(key, LeadSubjectPrefix); lead && group == GroupJob && names[key] == "" {
+			row.Label = "Lead of " + slug
 		}
 		fillCounts(&row.Summary, b.counts)
 		b.cost.apply(&row.Summary)

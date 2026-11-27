@@ -69,6 +69,8 @@ func Describe(s Summary) string {
 			return "Not measured: Codex jobs are not measured."
 		case ReasonOrchestrator:
 			return "Not measured separately: the orchestrator does this job in its own conversation, so its use is on the orchestrator's line."
+		case ReasonLead:
+			return "Not measured separately: the project's lead does this job in its own conversation, so its use is on the lead's line."
 		}
 		return "Not measured."
 	}

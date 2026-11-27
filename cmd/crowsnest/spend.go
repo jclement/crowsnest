@@ -1,6 +1,7 @@
 // Wiring for spend (DESIGN.md 7.11): the price table (embedded, or ~/.config/crowsnest/
-// prices.json on top), the meter that reads every job's and the orchestrator's transcripts into
-// the store, and under --demo a seeded history instead (there are no real transcripts to read).
+// prices.json on top), the meter that reads every job's, the orchestrator's and each running
+// project lead's transcripts into the store, and under --demo a seeded history instead (there
+// are no real transcripts to read).
 
 package main
 
@@ -13,6 +14,7 @@ import (
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -54,9 +56,30 @@ func newSpendMeter(cfg config.Config, db *store.Store, events *hub.Hub, refs *jo
 						Sessions: []spend.Session{{ID: status.SessionID, Cwd: cfg.Dir}}})
 				}
 			}
-			return sources, nil
+			return append(sources, leadSpendSources(refs.projects)...), nil
 		},
 	})
+}
+
+// leadSpendSources are the running leads' conversations, one subject each ("lead:<slug>", in
+// the project's directory). The meter keeps every session id it has seen per subject, so a
+// lead's earlier conversations stay counted across new conversations and restarts.
+func leadSpendSources(wiring *projectWiring) []spend.Source {
+	if wiring == nil {
+		return nil
+	}
+	leads := wiring.leads.Load()
+	if leads == nil {
+		return nil
+	}
+	var out []spend.Source
+	for _, lead := range leads.Running() {
+		if status := lead.Agent.Status(); status.SessionID != "" {
+			out = append(out, spend.Source{Subject: projects.Subject(lead.Project.Slug),
+				Sessions: []spend.Session{{ID: status.SessionID, Cwd: lead.Project.Dir}}})
+		}
+	}
+	return out
 }
 
 // startSpend runs the meter, or under --demo seeds the demo's history once the jobs exist.
