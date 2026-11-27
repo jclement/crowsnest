@@ -372,6 +372,12 @@ func (o *Orchestrator) Ensure(ctx context.Context) (Status, error) {
 	if o.opts.Disabled {
 		return o.Status(), nil
 	}
+	// A gate that says not yet (herdr still connecting at start-up) makes this a wait, not a
+	// failure: the watch starts the agent once the gate opens (upkeep.go).
+	if reason := o.gateReason(ctx); reason != "" {
+		o.setWaiting(reason)
+		return o.Status(), nil
+	}
 	o.lifecycle.Lock()
 	defer o.lifecycle.Unlock()
 	return o.ensureLocked(ctx, true)

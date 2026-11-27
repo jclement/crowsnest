@@ -152,6 +152,7 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 			AgentName: projects.AgentName(project.Slug), Workspace: "lead " + project.Slug, KVPrefix: "lead." + project.Slug,
 			Render:   func() (string, error) { return w.leadInstructions(deps.cfg.Session, project) },
 			Paused:   deps.ctl.paused,
+			Gate:     herdrGate(deps.client),
 			ExtraEnv: deps.ctl.heavyEnv(),
 			OnStatus: func(status orch.Status) {
 				if deps.onStatus != nil {
@@ -237,4 +238,20 @@ func (w *projectWiring) startLeads(ctx context.Context, deps leadDeps) *projects
 	w.leads.Store(leads)
 	go leads.Resume(ctx)
 	return leads
+}
+
+// herdrGate is a lead's start gate: wait while the lazy herdr client has not connected yet (at
+// start-up, or herdr not installed), instead of failing the lead's start. The orchestrator's gate
+// (system.Gate) also waits for the first-run checklist; a lead needs only herdr.
+func herdrGate(client herdr.Client) func(context.Context) string {
+	lazy, ok := client.(*herdr.Lazy)
+	if !ok {
+		return nil
+	}
+	return func(context.Context) string {
+		if lazy.Connected() {
+			return ""
+		}
+		return "herdr is not running yet; the lead starts as soon as it is."
+	}
 }
