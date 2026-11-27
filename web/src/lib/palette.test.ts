@@ -341,8 +341,12 @@ describe("projects in the palette", () => {
     const list = makeProjectList();
     list.projects.push({ ...list.projects[0]!, id: 9, slug: "old", name: "Old", archived: true });
     const items = buildItems(sources({ projects: list.projects }));
-    const projects = items.filter((item) => item.group === "projects");
+    const projects = items.filter((item) => item.group === "projects" && !item.id.startsWith("changes:"));
     expect(projects.map((item) => item.title)).toEqual(["Crowsnest", "Website", "Infra"]);
+    // Each live project's main checkout has its diff view too ("Changes: <project>", DESIGN.md 6.20).
+    const changes = items.filter((item) => item.id.startsWith("changes:project:"));
+    expect(changes.map((item) => item.title)).toEqual(["Changes: Crowsnest", "Changes: Website", "Changes: Infra"]);
+    expect(changes[0]!.command).toEqual({ kind: "navigate", to: "/diff", search: { project: "crowsnest" } });
     const crowsnest = projects[0]!;
     expect(crowsnest.command).toEqual({ kind: "navigate", to: "/projects/crowsnest" });
     expect(crowsnest.chip?.label).toBe("Lead idle");

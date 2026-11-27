@@ -1,16 +1,17 @@
-// ReviewPanel: a finished job's Review tab (DESIGN.md 6.11). What the branch produced (commits
-// ahead of its base, files and lines, whether the tree is clean and the branch pushed), the diff
-// per file in the order the change is best understood (the agent's walkthrough's order, then
-// schema → logic → API → UI → tests → docs, churn last and collapsed), every file collapsed and
-// fetched only when opened, binary files named and never shown; beside it the agent's own account
+// ReviewPanel: a job's Review tab (DESIGN.md 6.11, 6.20). What the branch produced (commits
+// ahead of its base, files and lines, whether the tree is clean and the branch pushed), the live
+// diff viewer (components/changes: syntax-highlighted, with Viewed ticks tied to each file's
+// content, "N files not viewed" here and in Land's confirmation); beside it the agent's own account
 // (result, evidence, walkthrough) and the review rounds; and the Land actions, each behind a
 // confirmation that says exactly what will happen. Diff text is rendered as text nodes only.
-import { AlertTriangle, ChevronRight, FileCode2, GitBranch, GitMerge, GitPullRequest, Trash2 } from "lucide-react";
+import { AlertTriangle, Eye, GitBranch, GitMerge, GitPullRequest, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/cn";
-import { landActions, landLabels, parseUnified, verdictText, type FileChange, type LandAction, type ReviewView } from "../../lib/landing";
+import { landActions, landLabels, verdictText, type LandAction, type ReviewView } from "../../lib/landing";
 import { landedWord, type JobDetail } from "../../lib/jobs";
-import { useLand, useLandOverride, useReview, useReviewDiff, useTeardown } from "../../lib/queries";
+import { useLand, useLandOverride, useReview, useTeardown } from "../../lib/queries";
+import { useDiffSummary } from "../../lib/changes-queries";
+import { EmbeddedDiff } from "../changes/JobChanges";
 import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
@@ -29,10 +30,10 @@ export function ReviewPanel({ job }: { job: JobDetail }) {
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <LandCard job={job} view={view} />
+      {view.produced && <EmbeddedDiff who={{ kind: "job", id: job.id }} />}
       <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex min-w-0 flex-col gap-3">
           <Summary view={view} />
-          <Files jobId={job.id} view={view} />
         </div>
         <aside aria-label="The agent's account" className="flex min-w-0 flex-col gap-3">
           {view.reviews.length > 0 && <Reviews view={view} />}
@@ -73,6 +74,10 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
   const [override, setOverride] = useState(false);
   const options = view.land;
   const plainLand = useLand(job.id, options.head);
+  // What Land merges is the committed work: its files not yet marked viewed (a warning, unless
+  // Settings require them all viewed; then the server refuses with UNVIEWED).
+  const committed = useDiffSummary({ kind: "job", id: job.id }, "committed", "", !options.state && !options.torn_down);
+  const unviewed = committed.data ? committed.data.total - committed.data.viewed : 0;
   const overrideLand = useLandOverride(job.id, options.head);
   const teardown = useTeardown();
   const toast = useToast();
@@ -141,6 +146,11 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
           Overview; landing it anyway needs an explicit override.
         </Banner>
       )}
+      {unviewed > 0 && committed.data && (
+        <p className="mb-2 flex items-center gap-1.5 text-xs text-warning">
+          <Eye className="h-4 w-4" aria-hidden /> {unviewed} of {committed.data.total} files not viewed
+        </p>
+      )}
       {options.base_protected && (
         <p className="mb-2 text-xs text-warning">{options.base} is protected: Land never merges into it. Use the pull request.</p>
       )}
@@ -176,6 +186,11 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
       {confirming && (
         <div role="alertdialog" aria-label={`Confirm ${landLabels[confirming]}`} className="mt-3 rounded border border-border bg-surface-raised p-3 text-sm">
           <p className="text-body">{options.confirm[confirming]}</p>
+          {confirming !== "discard" && unviewed > 0 && (
+            <p className="mt-2 text-xs text-warning">
+              {unviewed} of {committed.data?.total} files are not marked viewed.
+            </p>
+          )}
           {blocked(confirming) && (
             <label className="mt-2 flex items-start gap-2 text-xs text-warning">
               <input type="checkbox" checked={override} onChange={(event) => setOverride(event.target.checked)} className="mt-0.5" />
@@ -232,84 +247,6 @@ function Summary({ view }: { view: ReviewView }) {
         <pre className="mt-2 overflow-x-auto rounded bg-surface-sunken p-2 font-mono text-2xs text-warning">{produced.dirty.join("\n")}</pre>
       )}
     </Card>
-  );
-}
-
-function Files({ jobId, view }: { jobId: string; view: ReviewView }) {
-  const files = view.produced?.files ?? [];
-  if (files.length === 0) return null;
-  return (
-    <Card title="Changes, in reading order" bodyClassName="p-0">
-      <ol aria-label="Changed files" className="divide-y divide-border">
-        {files.map((file) => (
-          <FileRow key={file.path} jobId={jobId} file={file} />
-        ))}
-      </ol>
-    </Card>
-  );
-}
-
-function FileRow({ jobId, file }: { jobId: string; file: FileChange }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <li>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="flex min-h-9 w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-hover"
-      >
-        <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted transition-transform", open && "rotate-90")} aria-hidden />
-        <FileCode2 className="h-3.5 w-3.5 shrink-0 text-muted" aria-hidden />
-        <span className="min-w-0 flex-1 truncate font-mono text-body">
-          {file.old_path ? `${file.old_path} → ${file.path}` : file.path}
-        </span>
-        <span className="shrink-0 text-2xs text-muted">{file.group}</span>
-        {file.binary ? (
-          <span className="shrink-0 text-2xs text-muted">binary</span>
-        ) : (
-          <span className="shrink-0 font-mono text-2xs">
-            <span className="text-success">+{file.added}</span> <span className="text-danger">−{file.deleted}</span>
-          </span>
-        )}
-      </button>
-      {open && <FileBody jobId={jobId} file={file} />}
-    </li>
-  );
-}
-
-function FileBody({ jobId, file }: { jobId: string; file: FileChange }) {
-  const query = useReviewDiff(jobId, file.path, !file.binary);
-  if (file.binary) return <p className="px-3 pb-2 text-xs text-muted">Binary file ({file.status}); not shown.</p>;
-  if (query.isPending) return <SkeletonRows rows={3} label={`Loading ${file.path}`} />;
-  if (query.isError) return <p className="px-3 pb-2 text-xs text-danger">Could not load the diff: {query.error.message}</p>;
-  if (query.data.binary) return <p className="px-3 pb-2 text-xs text-muted">Binary file; not shown.</p>;
-  const lines = parseUnified(query.data.diff);
-  return (
-    <div className="max-h-[32rem] overflow-auto border-t border-border bg-surface-sunken">
-      <table className="w-full border-collapse font-mono text-2xs leading-5">
-        <tbody>
-          {lines.map((line, index) => (
-            <tr
-              key={index}
-              className={cn(
-                line.kind === "add" && "bg-success/10",
-                line.kind === "del" && "bg-danger/10",
-                (line.kind === "hunk" || line.kind === "meta") && "bg-surface-raised text-muted",
-              )}
-            >
-              <td className="w-10 select-none px-1 text-right text-muted">{line.old}</td>
-              <td className="w-10 select-none px-1 text-right text-muted">{line.new}</td>
-              <td className={cn("w-4 select-none text-center", line.kind === "add" && "text-success", line.kind === "del" && "text-danger")}>
-                {line.kind === "add" ? "+" : line.kind === "del" ? "−" : ""}
-              </td>
-              <td className="whitespace-pre pr-3 text-body">{line.text}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {query.data.cut && <p className="px-3 py-1 text-2xs text-warning">The diff was cut at 512 KB.</p>}
-    </div>
   );
 }
 

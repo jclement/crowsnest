@@ -1,3 +1,4 @@
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
@@ -44,14 +45,32 @@ const view: ReviewView = {
   },
 };
 
+// The live diff (components/changes) the Review tab embeds: two committed files, one viewed.
+const diffFile = (path: string, viewed: boolean) => ({
+  path, status: "modified", added: 3, deleted: 1, binary: false, old_blob: "a".repeat(40), new_blob: "b".repeat(40), hash: path + "-h",
+  group: "server", churn: false, viewed, changed_since_viewed: false, since_available: false,
+});
+const summary = (scope: string) => ({
+  subject: "j_1", kind: "job", label: "j_1: Retry", root: "/w", job_id: "j_1", scope, base: "abc", base_label: "where it left main", base_ref: "",
+  head: "def", commits: [], files: [diffFile("retry.go", true), diffFile("store.go", false)], added: 6, deleted: 2, viewed: 1, total: 2,
+  truncated: false, computed_at: "2026-11-27T10:00:00Z", revision: "r1",
+  scopes: ["all", "committed", "uncommitted", "since_viewed"].map((name) => ({ name, label: name, files: 2, added: 6, deleted: 2 })),
+});
+
 function render(review: ReviewView = view) {
   const calls = stubApi((call) => {
+    const changes = /^\/changes\/jobs\/j_1\?scope=(\w+)/.exec(call.path);
+    if (changes) return { body: { data: summary(changes[1] ?? "all") } };
+    if (call.path.startsWith("/changes/jobs/j_1/file")) return { body: { data: { path: "store.go", status: "modified", hash: "store.go-h", diff: "@@ -1,1 +1,1 @@\n-old\n+new\n", binary: false, too_large: false, cut: false, old_text: "old\n", new_text: "new\n", since: false, context: 0 } } };
     if (call.path === "/jobs/j_1/review") return { body: { data: review } };
     if (call.path.startsWith("/jobs/j_1/review/diff")) return { body: { data: { path: "retry.go", diff: "@@ -1,1 +1,2 @@\n-old\n+new\n+more\n", binary: false, cut: false } } };
     if (call.path === "/jobs/j_1/land") return { body: { data: { action: "merge", detail: "Merged into main", torn_down: true } } };
     return undefined;
   });
-  renderWithClient(<ReviewPanel job={makeDetail({ worktree_branch: "job/1-retry", state: "done" })} />);
+  const root = createRootRoute();
+  const home = createRoute({ getParentRoute: () => root, path: "/", component: () => <ReviewPanel job={makeDetail({ worktree_branch: "job/1-retry", state: "done" })} /> });
+  const router = createRouter({ routeTree: root.addChildren([home]), history: createMemoryHistory({ initialEntries: ["/"] }) });
+  renderWithClient(<RouterProvider router={router} />);
   return calls;
 }
 
@@ -65,15 +84,10 @@ describe("ReviewPanel", () => {
     expect(screen.getByRole("region", { name: "Not verified" })).toHaveTextContent("the real service");
   });
 
-  it("loads a file's diff only when opened, and never shows a binary file", async () => {
-    const calls = render();
-    const files = await screen.findByRole("list", { name: "Changed files" });
-    expect(calls.some((call) => call.path.includes("/review/diff"))).toBe(false);
-    await userEvent.click(within(files).getByRole("button", { name: /retry\.go/ }));
-    expect(await screen.findByText("more")).toBeInTheDocument();
-    await userEvent.click(within(files).getByRole("button", { name: /logo\.png/ }));
-    expect(screen.getByText(/Binary file/)).toBeInTheDocument();
-    expect(calls.filter((call) => call.path.includes("/review/diff")).length).toBe(1);
+  it("embeds the live diff viewer and says how many committed files are not viewed", async () => {
+    render();
+    expect(await screen.findByRole("region", { name: "Changes: j_1: Retry" })).toBeInTheDocument();
+    expect(await screen.findByText("1 of 2 files not viewed")).toBeInTheDocument();
   });
 
   it("lands only after a confirmation that says what will happen", async () => {
@@ -81,6 +95,7 @@ describe("ReviewPanel", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Merge" }));
     const dialog = screen.getByRole("alertdialog", { name: "Confirm Merge" });
     expect(dialog).toHaveTextContent("Merge job/1-retry into main with a merge commit.");
+    expect(dialog).toHaveTextContent("1 of 2 files are not marked viewed.");
     expect(calls.some((call) => call.path === "/jobs/j_1/land")).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: "Yes, merge" }));
     await waitFor(() => expect(calls.find((call) => call.path === "/jobs/j_1/land")?.body).toEqual({ action: "merge", confirm: true }));

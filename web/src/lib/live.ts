@@ -52,6 +52,9 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   system: [systemKeys.system, systemKeys.onboarding],
   // The attention queue (DESIGN.md 22) arrives whole; the Now rows' waiting counts come from it.
   attention: [queryKeys.attention, queryKeys.now],
+  // A diff changed or its marks did (6.20): the summaries refetch; a file's own diff is keyed by
+  // its content hash, so only files that changed are fetched again.
+  changes: [["changes", "summary"], ["changes", "project"], ["changes", "progress"]],
 };
 
 /**

@@ -9,6 +9,7 @@ import { cardLine, retryLabel, stateChip, type Job } from "../../lib/jobs";
 import { LastMessage } from "./AcceptPanels";
 import { SpendChip } from "../spend/SpendChip";
 import { Chip } from "../ui/Chip";
+import { viewedText, type DiffProgress } from "../../lib/changes";
 
 interface JobCardProps {
   job: Job;
@@ -16,9 +17,11 @@ interface JobCardProps {
   onSelect: (id: string) => void;
   /** The project's name, for a chip (the board shows it when it lists every project). */
   projectName?: string;
+  /** How much of its diff is marked viewed, once its diff was opened (DESIGN.md 6.20). */
+  progress?: DiffProgress;
 }
 
-export function JobCard({ job, selected, onSelect, projectName }: JobCardProps) {
+export function JobCard({ job, selected, onSelect, projectName, progress }: JobCardProps) {
   const chip = stateChip(job);
   const line = cardLine(job);
   const retry = retryLabel(job);
@@ -51,6 +54,14 @@ export function JobCard({ job, selected, onSelect, projectName }: JobCardProps) 
           </span>
         )}
         {!limitHeld && <LastMessage job={job} clamp />}
+        {progress && progress.total > 0 && (
+          <span className="flex items-center gap-2 text-2xs text-muted">
+            <span className="h-1 w-16 overflow-hidden rounded bg-surface-sunken" role="progressbar" aria-label="Files viewed" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.viewed}>
+              <span className="block h-full bg-success" style={{ width: `${Math.round((progress.viewed / progress.total) * 100)}%` }} />
+            </span>
+            {viewedText(progress.viewed, progress.total)}
+          </span>
+        )}
         <span className="flex flex-wrap items-center gap-1 text-2xs text-muted">
           <span>{job.state === "queued" ? `queued ${relativeTime(job.created_at)}` : `active ${relativeTime(active)}`}</span>
           {job.open_questions > 0 && (
