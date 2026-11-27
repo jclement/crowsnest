@@ -91,13 +91,13 @@ type routeRig struct {
 
 func newRouteRig(t *testing.T) *routeRig {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	db, err := store.OpenMemory(ctx)
+	db, err := store.OpenMemory(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // runs before the store closes: the leads stop first
 	r := &routeRig{t: t, ctx: ctx, f: fake.New(), db: db, clock: &routeClock{now: routeEpoch}}
 	r.jobs = jobs.New(jobs.Options{Store: db})
 	r.questions = questions.New(questions.Options{Store: db})
