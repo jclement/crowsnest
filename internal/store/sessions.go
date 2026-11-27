@@ -112,6 +112,26 @@ func (s *Store) SetKV(ctx context.Context, key, value string) error {
 }
 
 // DeleteKV removes key; a missing key is not an error.
+// DeleteKVPrefix removes every kv row whose key starts with prefix and returns how many.
+func (s *Store) DeleteKVPrefix(ctx context.Context, prefix string) (int, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM kv WHERE substr(key, 1, ?) = ?`, len(prefix), prefix)
+	if err != nil {
+		return 0, fmt.Errorf("deleting kv %s*: %w", prefix, err)
+	}
+	affected, err := result.RowsAffected()
+	return int(affected), err
+}
+
+// DeleteKVSuffix removes every kv row whose key ends with suffix and returns how many.
+func (s *Store) DeleteKVSuffix(ctx context.Context, suffix string) (int, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM kv WHERE length(key) >= ? AND substr(key, length(key) - ? + 1) = ?`, len(suffix), len(suffix), suffix)
+	if err != nil {
+		return 0, fmt.Errorf("deleting kv *%s: %w", suffix, err)
+	}
+	affected, err := result.RowsAffected()
+	return int(affected), err
+}
+
 func (s *Store) DeleteKV(ctx context.Context, key string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM kv WHERE key = ?`, key); err != nil {
 		return fmt.Errorf("deleting kv %q: %w", key, err)

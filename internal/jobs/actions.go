@@ -52,10 +52,9 @@ func (s *Service) Message(ctx context.Context, id string, input MessageInput) (o
 		if r.Stuck && Cause(r.Cause) == CauseUnresponsive {
 			r.Stuck, r.Cause, r.CauseDetail = false, "", ""
 		}
-		if State(r.State) == StateNeedsYou && Cause(r.Cause) == CauseReview {
+		if liftHoldLocked(r, c, HoldReview, LiftHuman, nil) {
 			// A message is the human's decision to send the job back after its review (R5-C07):
 			// it runs again, and its next done is accepted (the reviewer's verdict stays on it).
-			r.State, r.Cause, r.CauseDetail = string(StateRunning), "", ""
 			c.event(EventReview, "You sent it back to the builder after its review", nil)
 		}
 		c.event(EventMessage, "You: "+oneLine(text, 200), nil)
@@ -199,6 +198,7 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 	var decision Decision
 	var cl claim
 	var spent budgetSpent
+	graceStopped := false
 	_, err := s.mutate(ctx, job.ID, func(r *store.JobRecord, c *change) error {
 		if r.PaneID == "" || !r.LastStopAt.Equal(job.LastStopAt) {
 			return errSkip
@@ -207,6 +207,14 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 			return errSkip // the fleet's usage limit holds every agent of this engine (6.17)
 		}
 		r.Turns++ // an agent without hooks ended a turn: what bounds it when spend is not measured (6.16)
+		if s.budgetStopLocked(r, c) {
+			// The step the human let it finish is over (R6-C06): the same once-per-stop grace
+			// stop the Stop hook applies, before any nudge. Marking the stop handled keeps the
+			// backstop from coming back to it.
+			r.LastStopAt = s.opts.Now()
+			graceStopped = true
+			return nil
+		}
 		view := s.toJob(*r, c.questions.Open)
 		decision = Decide(&view, c.questions.Open, StopInput{}, s.historyLocked(*r, c), s.opts.Now())
 		switch {
@@ -229,7 +237,7 @@ func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, e
 		return false, nil
 	case err != nil:
 		return false, err
-	case decision.Allow:
+	case decision.Allow, graceStopped:
 		return false, nil
 	}
 	detail, err := s.Get(ctx, job.ID)

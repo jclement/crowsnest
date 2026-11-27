@@ -77,7 +77,23 @@ func PrepareUpgrade(ctx context.Context, dbPath, dir, session, version string, n
 	if _, err := Prune(dir, upgradePrefix+session+"-", upgradeSuffix, UpgradeKeep); err != nil {
 		return check, err
 	}
+	RescrubOld(ctx, dir, session)
 	return check, nil
+}
+
+// RescrubOld scrubs the pre-migration copies in dir that do not carry the current scrub mark
+// (R6-S6): copies an older crowsnest made before they were scrubbed, or before Remote Control links
+// were. Best effort: a copy that cannot be scrubbed is left, and the start goes on.
+func RescrubOld(ctx context.Context, dir, session string) {
+	copies, err := UpgradeBackups(dir, session)
+	if err != nil {
+		return
+	}
+	for _, path := range copies {
+		if !store.Scrubbed(ctx, path) {
+			_ = store.ScrubSnapshot(ctx, path)
+		}
+	}
 }
 
 // writeUpgradeCopy makes the pre-migration copy at final (R5-S8): it is written to a private

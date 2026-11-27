@@ -52,6 +52,22 @@ func TestParseRemoteControlURLEdges(t *testing.T) {
 		{"query string dropped", firstURL + "?x=1\n", firstURL},
 		{"lookalike host", "https://claude.ai.evil.com/code/session_01QzP4vRk8sTn2LmWx7yBc3D", ""},
 	}
+	const banner = "  /remote-control is active · Continue here, on your phone, or at\n"
+	for _, c := range cases {
+		if got := ParseRemoteControlURL(banner + c.text); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestPaneURLMustFollowTheBanner is R6-S10: a session URL printed anywhere else in the pane (by
+// an agent, a log, a tool) is not taken, and one far below the banner is not either.
+func TestPaneURLMustFollowTheBanner(t *testing.T) {
+	cases := []struct{ name, text, want string }{
+		{"no banner", "  Open " + secondURL + "\n", ""},
+		{"agent text after the banner, much later", "  /remote-control is active · Continue here, or at\n  " + firstURL + "\n\n\n\n\nsee " + secondURL + "\n", firstURL},
+		{"panel", "  This session is available in the Claude mobile app and at\n  " + secondURL + ".\n", secondURL},
+	}
 	for _, c := range cases {
 		if got := ParseRemoteControlURL(c.text); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)

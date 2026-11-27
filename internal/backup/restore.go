@@ -76,6 +76,10 @@ type Result struct {
 	Written  []string // files written outside the database
 	Skipped  []string // config files left alone because they exist (pass Force to replace)
 	Migrated int      // the schema version after opening (higher than the backup's when migrations ran)
+	// RevokedRules is how many approval rules the backup carried, revoked (R6-S5); ForgotSeen how
+	// many role files' "I've read it" marks were dropped, so changed role files show as unread.
+	RevokedRules int
+	ForgotSeen   int
 }
 
 // ErrNotEmpty is returned when the target already holds data and Force is off.
@@ -241,7 +245,7 @@ func Restore(ctx context.Context, path string, target Target) (Result, error) {
 	if err := markRestored(ctx, stagedDB, path, manifest, now(), &result); err != nil {
 		return result, err
 	}
-	if err := install(staging, manifest, target, now(), &result); err != nil {
+	if err := install(ctx, staging, manifest, target, now(), &result); err != nil {
 		return Result{Manifest: manifest}, err
 	}
 	return result, nil
@@ -288,7 +292,7 @@ func stage(staging, name string, body io.Reader) error {
 // <name>.before-restore-<stamp>), and last the database (the replaced one kept likewise; the
 // staged database is in the data directory, so that rename stays on one filesystem). A failure
 // during those renames undoes the ones already made, in reverse.
-func install(staging string, manifest Manifest, target Target, at time.Time, result *Result) error {
+func install(ctx context.Context, staging string, manifest Manifest, target Target, at time.Time, result *Result) error {
 	var moves []move
 	defer func() {
 		for _, m := range moves {
@@ -330,6 +334,12 @@ func install(staging string, manifest Manifest, target Target, at time.Time, res
 		if m.destination == target.DatabasePath {
 			if m.kept {
 				result.Replaced = m.keep
+				// The replaced database is kept to roll back to, but scrubbed like a backup (R6-S5):
+				// its sessions, token hashes, push key and notify URL are not left lying in the
+				// data directory. Rolling back then means signing in again.
+				if err := store.ScrubSnapshot(ctx, m.keep); err != nil {
+					return fmt.Errorf("the restore is done, but scrubbing the replaced database %s failed (delete it if you do not need it): %w", m.keep, err)
+				}
 			}
 			continue
 		}
@@ -463,6 +473,18 @@ func markRestored(ctx context.Context, dbPath, file string, manifest Manifest, a
 		return fmt.Errorf("recording the restore: %w", err)
 	}
 	if err := db.ClearTaskReviews(ctx); err != nil {
+		return err
+	}
+	// R6-S5: a backup is not the human's word on this machine. Its approval rules would allow
+	// calls without asking once resumed, and its "already read" marks would hide its role files
+	// from review: the rules are kept but revoked (listed, to add again), the marks dropped.
+	if result.RevokedRules, err = db.RevokeAllApprovalRules(ctx, at, "(revoked by a restore: add it again if you want it)"); err != nil {
+		return err
+	}
+	if result.ForgotSeen, err = db.DeleteKVPrefix(ctx, "instructions.file-seen."); err != nil {
+		return err
+	}
+	if _, err := db.DeleteKVSuffix(ctx, "remote_control"); err != nil {
 		return err
 	}
 	return db.Close()

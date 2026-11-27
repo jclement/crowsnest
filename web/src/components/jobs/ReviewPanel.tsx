@@ -1,4 +1,4 @@
-// ReviewPanel: a job's Review tab (DESIGN.md 6.11, 6.20). What the branch produced (commits
+// ReviewPanel: a job's Review tab (DESIGN.md 6.11, 6.21). What the branch produced (commits
 // ahead of its base, files and lines, whether the tree is clean and the branch pushed), the live
 // diff viewer (components/changes: syntax-highlighted, with Viewed ticks tied to each file's
 // content, "N files not viewed" here and in Land's confirmation); beside it the agent's own account
@@ -16,6 +16,7 @@ import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
+import { AcceptedMeans } from "./AcceptPanels";
 import { Chip } from "../ui/Chip";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
@@ -146,6 +147,7 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
           Overview; landing it anyway needs an explicit override.
         </Banner>
       )}
+      {job.accept_state && job.accept_state !== "unverified" && <AcceptedMeans evidence={job.evidence} />}
       {unviewed > 0 && committed.data && (
         <p className="mb-2 flex items-center gap-1.5 text-xs text-warning">
           <Eye className="h-4 w-4" aria-hidden /> {unviewed} of {committed.data.total} files not viewed

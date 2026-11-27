@@ -5,7 +5,7 @@
 // the agent last said when it ended a turn.
 import { AlarmClock, Gauge, GitMerge, MessageSquareQuote, RefreshCw, ShieldCheck, Square, StepForward } from "lucide-react";
 import { useState } from "react";
-import { acceptChip, budgetRows, durationText } from "../../lib/accept";
+import { acceptChip, budgetRows, durationText, type Evidence } from "../../lib/accept";
 import { relativeTime } from "../../lib/format";
 import { isFinished, type JobDetail as Detail, type Job } from "../../lib/jobs";
 import { useJobAction, useJobGuard, useSetBudget, type GuardAction } from "../../lib/queries";
@@ -63,6 +63,7 @@ export function EvidenceCard({ job }: { job: Detail }) {
           </dd>
         </dl>
       )}
+      {(job.accept_state === "accepted" || evidence?.status === "passed") && <AcceptedMeans evidence={evidence} />}
       {evidence?.output_tail && (
         <details className="mt-2" open={evidence.status !== "passed"}>
           <summary className="cursor-pointer text-xs text-muted">The end of its output</summary>
@@ -84,6 +85,28 @@ export function EvidenceCard({ job }: { job: Detail }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * What "accepted" proves, said plainly (R6-C02, R6-S4): the project's own check passed on that
+ * commit, in a clean tree. The branch can change its check, so this is not independent evidence;
+ * when it did, the files are named.
+ */
+export function AcceptedMeans({ evidence }: { evidence?: Evidence | null }) {
+  const changed = evidence?.definition_changed ?? [];
+  return (
+    <div className="mt-2 text-2xs text-muted" data-testid="accepted-means">
+      <p>
+        Accepted means the project's own check passed on this commit, in a clean tree. The branch can change that check, so it is not independent
+        evidence: the reviewer and you are the independent part.
+      </p>
+      {changed.length > 0 && (
+        <p className="mt-1 font-medium text-warning" data-testid="check-definition-changed">
+          This branch changed its own check definition ({changed.join(", ")}): the pass is the branch's word about itself. Read those changes.
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -140,3 +140,18 @@ test("a ninth terminal is refused with the cap's message and does not retry by i
   await page.getByRole("button", { name: "Reconnect" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
 });
+
+test("a right click stays in the terminal; Shift+right click still gives the browser's menu", async ({ page }) => {
+  await page.goto("/terminal");
+  await expect(rows(page)).toContainText("demo", { timeout: 15_000 });
+  // The page's context menu is what a right click opens unless the event is cancelled.
+  const prevented = (shiftKey: boolean) =>
+    page.evaluate((shift) => {
+      const target = document.querySelector("[data-terminal] .xterm-screen") ?? document.querySelector("[data-terminal]");
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, shiftKey: shift });
+      target?.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, shiftKey);
+  expect(await prevented(false)).toBe(true);
+  expect(await prevented(true)).toBe(false);
+});

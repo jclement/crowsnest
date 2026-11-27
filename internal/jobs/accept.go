@@ -132,6 +132,9 @@ type Evidence struct {
 	// commit the check ran against.
 	Head  string `json:"head,omitempty"`
 	Stale bool   `json:"stale"`
+	// DefinitionChanged lists files of the branch's own diff that define its check (R6-S4): the
+	// branch changed what passing means, so the pass is the branch's own word about itself.
+	DefinitionChanged []string `json:"definition_changed"`
 }
 
 // workDirOf is where a job's agent works.
@@ -157,8 +160,8 @@ var miseCheckTask = regexp.MustCompile(`(?m)^\s*\[tasks\.(?:"check"|'check'|chec
 // check` when the checkout's mise configuration has a check task, else "".
 func AutoCheckCommand(dir string) string {
 	for _, name := range []string{"mise.toml", ".mise.toml", "mise/config.toml", ".mise/config.toml", ".config/mise.toml", ".config/mise/config.toml"} {
-		body, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // the job's own checkout
-		if err == nil && miseCheckTask.Match(body) {
+		body, ok := readSmallRegular(filepath.Join(dir, name))
+		if ok && miseCheckTask.Match(body) {
 			return "mise run check"
 		}
 	}
@@ -168,6 +171,17 @@ func AutoCheckCommand(dir string) string {
 		}
 	}
 	return ""
+}
+
+// readSmallRegular reads a regular file of at most 1 MiB, never following a link (R6-S4: a
+// committed mise.toml that links to /dev/zero or a FIFO must not hang or exhaust crowsnest).
+func readSmallRegular(path string) ([]byte, bool) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+		return nil, false
+	}
+	body, err := os.ReadFile(path) //nolint:gosec // the job's own checkout, a regular file checked above
+	return body, err == nil
 }
 
 // checkCommandFor is the command that accepts r's work ("" for none) and where it came from.
@@ -333,38 +347,89 @@ func (s *Service) runCheck(ctx context.Context, id string) {
 		s.checkFinished(ctx, id, store.CheckRecord{Status: CheckError, Command: command, OutputTail: "the worktree could not be read: " + err.Error()})
 		return
 	}
+	if !before.Clean {
+		// Evidence is about a commit: a check over uncommitted files would pass code that is not
+		// what lands (R6-C02).
+		s.checkFinished(ctx, id, store.CheckRecord{Status: CheckError, Command: command, Commit: before.Head,
+			OutputTail: "the worktree has uncommitted changes, so a check now would not test the commit: " + strings.Join(capList(before.Dirty, 8), "; ") +
+				". Commit them (or remove them) and run the check again"})
+		return
+	}
+	defs := landing.CheckDefinitionChanges(ctx, dir, base, baseCommit, commandPaths(dir, command))
 	record := store.CheckRecord{JobID: numeric, Commit: before.Head, Command: command, Status: CheckRunning,
-		ExitCode: -1, Owner: s.instance, StartedAt: s.opts.Now()}
+		ExitCode: -1, Owner: s.instance, StartedAt: s.opts.Now(), DefinitionChanged: strings.Join(defs, ",")}
 	if record.ID, err = s.opts.Store.InsertCheck(ctx, record); err != nil {
+		// A check that cannot be recorded cannot be evidence (R6-C13): nothing is run.
 		s.opts.Logger.Warn("recording a check", "job", id, "err", err)
+		s.checkFinished(ctx, id, store.CheckRecord{Status: CheckError, Command: command, Commit: before.Head,
+			OutputTail: "crowsnest could not record the check, so it cannot count as evidence: " + err.Error()})
+		return
 	}
 	result := s.execCheck(ctx, dir, command)
 	after, err := landing.Snap(ctx, dir, base, baseCommit)
+	moved := false
 	switch {
 	case err != nil:
 		result.status, result.note = CheckError, "the worktree could not be read after the check: "+err.Error()
 	case after.Head != before.Head:
 		// A commit landed while the check ran: this evidence is about a revision that is gone.
+		moved = true
 		result.status, result.note = CheckError, fmt.Sprintf("HEAD moved from %s to %s while the check ran; it will be run again", shortHash(before.Head), shortHash(after.Head))
+	case !after.Clean:
+		// The tree changed under the check (an agent's process, or the check itself writing
+		// tracked files): what passed is not the commit (R6-C02, R6-S4).
+		result.status, result.note = CheckError, "the worktree changed while the check ran, so this run is not evidence for the commit: "+strings.Join(capList(after.Dirty, 8), "; ")
 	}
 	record.Status, record.ExitCode, record.Duration, record.FinishedAt = result.status, result.exit, result.duration, s.opts.Now()
 	record.OutputTail = tailText(result.output, checkTailBytes)
 	if result.note != "" {
 		record.OutputTail = strings.TrimSpace(record.OutputTail + "\n[crowsnest] " + result.note)
 	}
-	if record.ID != 0 {
-		if err := s.opts.Store.FinishCheck(ctx, record); err != nil {
+	if err := s.opts.Store.FinishCheck(ctx, record); err != nil {
+		if err = s.opts.Store.FinishCheck(ctx, record); err != nil {
 			s.opts.Logger.Warn("recording a check's result", "job", id, "err", err)
+			// Not recorded, not evidence (R6-C13): the job is not accepted on a result that is
+			// only in memory.
+			record.Status, record.ID = CheckError, 0
+			record.OutputTail = strings.TrimSpace(record.OutputTail + "\n[crowsnest] the result could not be recorded, so it does not count: " + err.Error())
 		}
 	}
 	path := s.writeCheckOutput(id, record, result.output)
-	if after.Head != before.Head && err == nil {
-		_ = s.Journal(ctx, id, EventAccept, "The check is run again: "+result.note, nil)
-		s.goCheckAgain(ctx, id)
-		return
+	watch := s.watchOf(id)
+	if moved && record.ID != 0 {
+		// Re-runs for a moving HEAD are bounded (R6-S8): a busy agent committing in the
+		// background cannot hold the heavy slots for ever.
+		watch.checkReruns++
+		if watch.checkReruns <= maxCheckReruns {
+			_ = s.Journal(ctx, id, EventAccept, "The check is run again: "+result.note, nil)
+			s.goCheckAgain(ctx, id)
+			return
+		}
+		record.OutputTail = strings.TrimSpace(record.OutputTail + fmt.Sprintf("\n[crowsnest] HEAD moved during %d runs in a row; the check is not run again until the branch is still", watch.checkReruns))
 	}
+	watch.checkReruns = 0
 	record.Owner = path // carried to checkFinished: where the full output is
 	s.checkFinished(ctx, id, record)
+}
+
+// maxCheckReruns is how many times in a row a check is run again because HEAD moved under it.
+const maxCheckReruns = 3
+
+// commandPaths are the files a check command names (relative to dir, existing), so a branch that
+// rewrites the script its check runs is shown as changing its check (R6-S4).
+func commandPaths(dir, command string) []string {
+	var out []string
+	for _, word := range strings.Fields(command) {
+		word = strings.Trim(word, `"'`)
+		if !strings.Contains(word, "/") || filepath.IsAbs(word) || strings.Contains(word, "..") {
+			continue
+		}
+		clean := filepath.Clean(strings.TrimPrefix(word, "./"))
+		if info, err := os.Lstat(filepath.Join(dir, clean)); err == nil && info.Mode().IsRegular() {
+			out = append(out, filepath.ToSlash(clean))
+		}
+	}
+	return out
 }
 
 // goCheckAgain runs the check once more after the current run returns.
@@ -413,13 +478,21 @@ func (s *Service) execCheck(ctx context.Context, dir, command string) checkResul
 	return result
 }
 
-// checkEnv is the environment a check runs in: crowsnest's own, without herdr's session or any
-// agent's identity, plus the pane extras (the heavy directory).
+// checkEnv is the environment a check runs in: crowsnest's own, without herdr's session, any
+// crowsnest variable (socket, session, token, job), Claude's markers, or a credential the operator
+// exported (R6-S12: *_TOKEN, *_SECRET, *_PASSWORD, *_API_KEY), plus the pane extras (the heavy
+// directory).
 func checkEnv(extra map[string]string) []string {
 	env := []string{}
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
-		if strings.HasPrefix(name, "HERDR_") || name == "CROWSNEST_TOKEN" || name == "CROWSNEST_JOB" || name == "CLAUDECODE" {
+		upper := strings.ToUpper(name)
+		switch {
+		case strings.HasPrefix(name, "HERDR_"), strings.HasPrefix(name, "CROWSNEST_"), strings.HasPrefix(name, "ELEVENLABS_"),
+			name == "CLAUDECODE", strings.HasPrefix(name, "CLAUDE_CODE_"):
+			continue
+		case strings.HasSuffix(upper, "_TOKEN"), strings.HasSuffix(upper, "_SECRET"), strings.Contains(upper, "PASSWORD"),
+			strings.HasSuffix(upper, "_API_KEY"), strings.HasSuffix(upper, "_ACCESS_KEY"):
 			continue
 		}
 		env = append(env, entry)
@@ -475,7 +548,14 @@ func (s *Service) writeCheckOutput(id string, record store.CheckRecord, output [
 	path := filepath.Join(dir, fmt.Sprintf("check-%d.txt", record.ID))
 	header := fmt.Sprintf("# crowsnest check for %s: `%s` at %s: %s (exit %d, %s)\n\n", id, record.Command, record.Commit, record.Status, record.ExitCode,
 		record.Duration.Round(time.Second))
-	if err := os.WriteFile(path, append([]byte(header), output...), 0o600); err != nil {
+	// Never through a link an agent left at that name (R6-S12): remove it, then create afresh.
+	_ = os.Remove(path)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600) //nolint:gosec // crowsnest's own job directory
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+	if _, err := file.Write(append([]byte(header), output...)); err != nil {
 		return ""
 	}
 	return path
@@ -492,9 +572,21 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 		summary = fmt.Sprintf("`%s` %s at %s (exit %d, %s)", oneLine(record.Command, 120), record.Status, shortHash(record.Commit), record.ExitCode,
 			record.Duration.Round(time.Second))
 	}
+	if record.DefinitionChanged != "" {
+		summary += "; the branch changed its own check definition (" + oneLine(strings.ReplaceAll(record.DefinitionChanged, ",", ", "), 160) + ")"
+	}
 	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		if r.AcceptState != AcceptChecking {
 			return errSkip
+		}
+		if record.Status == CheckPassed {
+			// Accepted only on evidence that is in the database (R6-C13): the job's newest check
+			// must be this one, passed, at this commit.
+			latest, err := s.opts.Store.LatestCheck(ctx, r.ID)
+			if err != nil || record.ID == 0 || latest.ID != record.ID || latest.Status != CheckPassed || latest.Commit != record.Commit {
+				record.Status = CheckError
+				record.OutputTail = "the passing check could not be found in crowsnest's records, so it does not count; run the check again"
+			}
 		}
 		if State(r.State) == StateDone {
 			// A re-check of a finished job (after a fix job, or the human's Re-run): evidence only.
@@ -513,6 +605,7 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 		}
 		switch record.Status {
 		case CheckPassed:
+			liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
 			r.AcceptState, r.AcceptDetail = AcceptAccepted, "Accepted: "+summary
 			c.event(EventAccept, "Accepted: "+summary, map[string]any{"output": path, "commit": record.Commit})
 			switch {
@@ -522,6 +615,7 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 				if review = s.reviewerFor(*r); review != "" {
 					r.ReviewRound++
 					r.ReviewCommit = record.Commit
+					s.placeHoldLocked(r, c, HoldReviewing, fmt.Sprintf("a %s reviewer looks at the change (round %d)", review, r.ReviewRound), "")
 					c.event(EventReview, fmt.Sprintf("In review (round %d of %d): a %s reviewer looks at the change that passed", r.ReviewRound, maxReviewRounds, review), nil)
 				} else {
 					r.State = string(StateDone)
@@ -530,14 +624,15 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 		case CheckFailed:
 			r.CheckRounds++
 			if r.CheckRounds >= opts.maxRounds() {
-				r.State, r.Cause = string(StateNeedsYou), string(CauseCheck)
-				r.AcceptState = AcceptFailed
-				r.CauseDetail = fmt.Sprintf("The check still fails after %d rounds: %s", r.CheckRounds, summary)
-				r.AcceptDetail = r.CauseDetail
-				c.event(EventAccept, r.CauseDetail+"; the human decides", map[string]any{"output": path})
+				liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
+				r.State, r.AcceptState = string(StateRunning), AcceptFailed
+				r.AcceptDetail = fmt.Sprintf("The check still fails after %d rounds: %s", r.CheckRounds, summary)
+				s.placeHoldLocked(r, c, HoldCheck, r.AcceptDetail, "")
+				c.event(EventAccept, r.AcceptDetail+"; the human decides", map[string]any{"output": path})
 				c.notify = fmt.Sprintf("crowsnest: job %s's check still fails after %d rounds: %s", FormatID(r.ID), r.CheckRounds, oneLine(r.Title, 80))
 				return nil
 			}
+			liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
 			r.State, r.AcceptState = string(StateRunning), AcceptFailed
 			r.AcceptDetail = fmt.Sprintf("The check failed (round %d of %d): %s", r.CheckRounds, opts.maxRounds(), summary)
 			s.markProgressLocked(r) // a fresh start for the nudge budget: there is new work
@@ -549,12 +644,15 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 			if last := lastMeaningfulLine(record.OutputTail); last != "" {
 				message += " Its last line: " + oneLine(last, 200)
 			}
+			// Kept until it is typed (R6-C07): sending it starts a builder turn, which waits for
+			// the pause to end and for any hold to be lifted (deliverFeedback).
+			r.PendingFeedback = message
 		default: // error: it could not run at all; rounds are not the agent's fault
-			r.State, r.Cause = string(StateNeedsYou), string(CauseCheck)
-			r.AcceptState = AcceptFailed
-			r.CauseDetail = "The check could not run: " + oneLine(record.OutputTail, 300)
-			r.AcceptDetail = r.CauseDetail
-			c.event(EventAccept, r.CauseDetail, map[string]any{"output": path})
+			liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
+			r.State, r.AcceptState = string(StateRunning), AcceptFailed
+			r.AcceptDetail = "The check could not run: " + oneLine(record.OutputTail, 300)
+			s.placeHoldLocked(r, c, HoldCheck, r.AcceptDetail, "")
+			c.event(EventAccept, r.AcceptDetail, map[string]any{"output": path})
 			c.notify = fmt.Sprintf("crowsnest: job %s's check could not run: %s", FormatID(r.ID), oneLine(r.Title, 80))
 		}
 		return nil
@@ -565,10 +663,8 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 	if review != "" {
 		s.startReview(ctx, job, review)
 	}
-	if message != "" && job.PaneID != "" {
-		if err := s.sendText(ctx, job.PaneID, job.AgentName, message); err != nil {
-			_ = s.Journal(ctx, id, EventAccept, "The check's failure could not be typed to the agent: "+oneLine(err.Error(), 160)+"; send it with a message", nil)
-		}
+	if message != "" {
+		s.deliverFeedback(ctx, id)
 	}
 	if job.State == StateDone {
 		s.afterSettled(ctx, job)
@@ -614,7 +710,8 @@ func (s *Service) EvidenceOf(ctx context.Context, job Job) *Evidence {
 		return nil
 	}
 	evidence := &Evidence{Command: check.Command, Status: check.Status, ExitCode: check.ExitCode, DurationMS: check.Duration.Milliseconds(),
-		Commit: check.Commit, OutputTail: check.OutputTail, StartedAt: check.StartedAt.UTC(), FinishedAt: timePtr(check.FinishedAt)}
+		Commit: check.Commit, OutputTail: check.OutputTail, StartedAt: check.StartedAt.UTC(), FinishedAt: timePtr(check.FinishedAt),
+		DefinitionChanged: splitList(check.DefinitionChanged)}
 	if job.TornDownAt != nil || job.WorkDir == "" || check.Status == CheckRunning {
 		return evidence
 	}
@@ -648,12 +745,21 @@ func (s *Service) Recheck(ctx context.Context, id string) (Job, error) {
 		if r.AcceptState == AcceptChecking {
 			return invalid("job %s's check is already running", FormatID(r.ID))
 		}
+		// The same prerequisite as done (R6-C02): only committed work is checked.
+		if snap, err := landing.Snap(ctx, workDirOf(*r), "", ""); err != nil {
+			return invalid("job %s's worktree could not be read: %v", FormatID(r.ID), err)
+		} else if !snap.Clean {
+			return invalid("job %s's worktree has uncommitted changes (%s); a check now would not test what lands. Commit or remove them first",
+				FormatID(r.ID), strings.Join(capList(snap.Dirty, 6), "; "))
+		}
 		switch State(r.State) {
 		case StateDone:
 		case StateNeedsYou:
-			if Cause(r.Cause) != CauseCheck {
+			if !hasHold(*r, HoldCheck) {
 				return invalid("job %s needs you for something else (%s)", FormatID(r.ID), r.Cause)
 			}
+			liftHoldLocked(r, c, HoldCheck, LiftHuman, nil)
+			s.placeHoldLocked(r, c, HoldChecking, "crowsnest is running the check again", "")
 			r.State, r.Cause, r.CauseDetail = string(StateInReview), "", ""
 			r.CheckRounds = 0
 		default:
@@ -692,10 +798,18 @@ func (s *Service) AskRebase(ctx context.Context, id string) (Job, error) {
 		return Job{}, invalid("crowsnest does not know the branch job %s started from", job.ID)
 	}
 	numeric, _ := ParseID(job.ID)
+	applied := int64(0)
+	if record, err := s.opts.Store.GetJob(ctx, numeric); err == nil {
+		applied = record.FixApplied
+	}
 	if fixes, err := s.opts.Store.ListFixJobs(ctx, numeric); err == nil {
 		for _, fix := range fixes {
 			if !State(fix.State).Terminal() {
 				return Job{}, invalid("job %s is already being rebased by %s", job.ID, FormatID(fix.ID))
+			}
+			if fix.ID > applied {
+				// R6-C11: a finished rebase whose result is not applied yet; the tick applies it.
+				return Job{}, invalid("job %s's rebase by %s has finished and is being checked; wait for that result", job.ID, FormatID(fix.ID))
 			}
 		}
 	}
@@ -721,10 +835,12 @@ func (s *Service) fixSettled(ctx context.Context, fix Job) {
 	if fix.FixOf == "" {
 		return
 	}
+	fixID := mustParse(fix.ID)
 	parent, err := s.mutate(ctx, fix.FixOf, func(r *store.JobRecord, c *change) error {
-		if State(r.State) != StateDone || r.LandState != "" {
-			return errSkip
+		if State(r.State) != StateDone || r.LandState != "" || r.FixApplied >= fixID {
+			return errSkip // already taken in (the tick's replay and the callback can both arrive)
 		}
+		r.FixApplied = fixID
 		if fix.State != StateDone {
 			c.event(EventAccept, "The rebase by "+fix.ID+" did not finish ("+string(fix.State)+"); the job still needs one", nil)
 			return nil
@@ -735,6 +851,20 @@ func (s *Service) fixSettled(ctx context.Context, fix Job) {
 	})
 	if err == nil && parent.AcceptState == AcceptChecking {
 		s.startCheck(ctx, parent.ID)
+	}
+}
+
+// reconcileFixes replays finished fix jobs whose parent never took them in (crowsnest stopped
+// between the fix's done and its parent's re-check): exactly one re-check each (R6-C11).
+func (s *Service) reconcileFixes(ctx context.Context) {
+	fixes, err := s.opts.Store.ListUnappliedFixes(ctx, superviseBatch)
+	if err != nil {
+		return
+	}
+	for _, fix := range fixes {
+		job := s.toJob(fix, 0)
+		_ = s.Journal(ctx, job.FixOf, EventAccept, "The rebase by "+job.ID+" finished while its result was not applied (crowsnest stopped); applying it now", nil)
+		s.fixSettled(ctx, job)
 	}
 }
 
@@ -841,4 +971,49 @@ func (s *Service) SetProjectAccept(ctx context.Context, projectID int64, input P
 		return ErrNotFound
 	}
 	return err
+}
+
+// deliverFeedback types a check failure's pending message to the agent (R6-C07): not while the
+// automation is paused, not while a hold keeps the job, and cleared only after it was typed. A
+// send that fails is journalled (at most every few minutes) and tried again by the tick.
+func (s *Service) deliverFeedback(ctx context.Context, id string) {
+	numeric, err := ParseID(id)
+	if err != nil {
+		return
+	}
+	r, err := s.opts.Store.GetJob(ctx, numeric)
+	if err != nil || r.PendingFeedback == "" || State(r.State) != StateRunning || len(holdsOf(r)) > 0 || r.PaneID == "" {
+		return
+	}
+	if s.heldWhilePaused(ctx, "feedback:"+id, "the check's findings for "+id) {
+		return
+	}
+	message := r.PendingFeedback
+	if err := s.sendText(ctx, r.PaneID, r.AgentName, message); err != nil {
+		watch := s.watchOf(id)
+		if now := s.opts.Now(); now.Sub(watch.feedbackAt) > 5*time.Minute {
+			watch.feedbackAt = now
+			_ = s.Journal(ctx, id, EventAccept, "The check's failure could not be typed to the agent yet: "+oneLine(err.Error(), 160)+"; crowsnest tries again", nil)
+		}
+		return
+	}
+	_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
+		if rec.PendingFeedback != message {
+			return errSkip
+		}
+		rec.PendingFeedback = ""
+		c.event(EventAccept, "The check's findings reached the agent", nil)
+		return nil
+	})
+}
+
+// splitList reads a comma-separated list ("" is empty).
+func splitList(text string) []string {
+	out := []string{}
+	for _, item := range strings.Split(text, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }

@@ -550,6 +550,10 @@ type TaskView struct {
 	// (review.go). Hash is the content the view shows, which Approve must name.
 	Review string `json:"review,omitempty"`
 	Hash   string `json:"hash,omitempty"`
+	// Source is the whole file as the hash covers it, for a task that needs review (R6-S7): the
+	// card shows this raw text, so nothing Markdown would hide (an HTML comment, raw HTML, the
+	// frontmatter) is approved unseen.
+	Source string `json:"source,omitempty"`
 }
 
 // RunView is one line of a task's run history.
@@ -588,6 +592,7 @@ func (s *Service) List(ctx context.Context) View {
 		if NeedsReview(task) {
 			// The human approves what they read here: the body and the hash of these bytes.
 			view.Tasks[i].Review, view.Tasks[i].Hash, view.Tasks[i].BodyMD = s.reviewState(ctx, task), task.Hash, task.Body
+			view.Tasks[i].Source = task.Raw
 		}
 	}
 	for _, task := range all.shadowed {

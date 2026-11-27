@@ -110,13 +110,56 @@ func TestFleetLimitAllowsStops(t *testing.T) {
 	r := newRig(t, func(o *Options) { o.Limits = NewFleetLimits(o.Store, nil, o.Now) })
 	ctx := context.Background()
 	limited := r.create(CreateInput{Brief: "Limited", Dir: t.TempDir()})
+	also := r.create(CreateInput{Brief: "Also limited", Dir: t.TempDir()})
 	busy := r.create(CreateInput{Brief: "Busy", Dir: t.TempDir()})
+	// R6-S3: one job's report holds only that job; a second job agreeing holds the fleet.
 	_, _ = r.svc.HandleHook(ctx, HookStopFailure, limited.ID, "", HookInput{Error: "rate_limit", ErrorDetails: "resets 11pm"})
+	if held, _ := r.svc.limitHeld(ctx, EngineClaude); held {
+		t.Fatal("one job's report held the whole fleet")
+	}
+	_, _ = r.svc.HandleHook(ctx, HookStopFailure, also.ID, "", HookInput{Error: "rate_limit", ErrorDetails: "resets 11pm"})
 	if reply := r.stop(busy.ID); reply != "" {
 		t.Fatalf("a stop under the fleet's limit was nudged: %s", reply)
 	}
-	if !hasEvent(r.get(busy.ID), EventHook, "usage limit") {
+	d := r.get(busy.ID)
+	if !hasEvent(d, EventHook, "usage limit") {
 		t.Fatal("the timeline does not say why the stop was allowed")
+	}
+	// R6-C08: that stop is registered for the reset: held by the usage limit, retried after it.
+	if !hasHold(r.record(busy.ID), HoldUsageLimit) || !d.Stuck || d.Cause != CauseLimit || d.RetryAt == nil {
+		t.Fatalf("a stop during the fleet's limit was not registered for the reset: %+v", d.Job)
+	}
+}
+
+// TestLimitResetIsCappedAndClearable (R6-S3): a reset time past a day is capped and called a
+// guess, and the human's Clear forgets the limit and lets its jobs go.
+func TestLimitResetIsCappedAndClearable(t *testing.T) {
+	now := time.Now()
+	at, guessed := ParseLimitReset("usage limit reached, try again in 2000000 hours", now)
+	if !guessed || at.Sub(now) > limitMax {
+		t.Fatalf("an absurd reset was believed: %s guessed %v", at.Sub(now), guessed)
+	}
+	r := newRig(t, func(o *Options) { o.Limits = NewFleetLimits(o.Store, nil, o.Now) })
+	ctx := context.Background()
+	first := r.create(CreateInput{Brief: "First", Dir: t.TempDir()})
+	second := r.create(CreateInput{Brief: "Second", Dir: t.TempDir()})
+	for _, job := range []Detail{first, second} {
+		_, _ = r.svc.HandleHook(ctx, HookStopFailure, job.ID, "", HookInput{Error: "rate_limit", ErrorDetails: "try again in 2000000 hours"})
+	}
+	if held, state := r.svc.limitHeld(ctx, EngineClaude); !held || state.ResetAt.Sub(r.clock.Now()) > limitMax {
+		t.Fatalf("held %v until %s", held, state.ResetAt)
+	}
+	released, err := r.svc.ClearLimit(ctx, EngineClaude)
+	if err != nil || released != 2 {
+		t.Fatalf("clear: %d %v", released, err)
+	}
+	if held, _ := r.svc.limitHeld(ctx, EngineClaude); held {
+		t.Fatal("still held after the human cleared it")
+	}
+	for _, job := range []Detail{first, second} {
+		if hasHold(r.record(job.ID), HoldUsageLimit) {
+			t.Fatalf("%s still held", job.ID)
+		}
 	}
 }
 
@@ -185,8 +228,8 @@ func TestBudgetThresholdsChildrenAndUnmeasured(t *testing.T) {
 	if c := r.get(child.ID); c.State != StateNeedsYou || c.Cause != CauseBudget || !strings.Contains(c.CauseDetail, parent.ID) {
 		t.Fatalf("the child kept going past its parent's budget: %s %s %q", c.State, c.Cause, c.CauseDetail)
 	}
-	if _, err := r.svc.Update(ctx, parent.ID, UpdateInput{Progress: "carry on", State: "running"}); err != nil {
-		t.Fatal(err)
+	if _, err := r.svc.Update(ctx, parent.ID, UpdateInput{Progress: "carry on", State: "running"}); err == nil {
+		t.Fatal("declaring running past the budget was not refused")
 	}
 	if r.get(parent.ID).State != StateNeedsYou {
 		t.Fatal("the agent lifted its own budget")
@@ -417,8 +460,21 @@ func TestReceiptFromTheTranscript(t *testing.T) {
 	if err != nil || len(list) != 2 {
 		t.Fatalf("unreceived %v %v", list, err)
 	}
-	body := []byte(fmt.Sprintf(`{"type":"user","message":{"content":"[crowsnest answer q_%d] Ship it? → yes"}}`+"\n"+
-		`{"type":"user","message":{"content":"[crowsnest answer q_%d] Rename it? → yes"}}`+"\n", delivered, uncertain))
+	// Transcript lines as Claude Code writes them (a timestamp on each). R6-C12: only an incoming
+	// user message that is the answer line, recorded after the question settled, counts; the
+	// agent's own text, a tool's output and a line from before the answer do not.
+	after := now.Add(5 * time.Second).UTC().Format(time.RFC3339)
+	before := now.Add(-time.Minute).UTC().Format(time.RFC3339)
+	body := []byte(fmt.Sprintf(`{"type":"assistant","uuid":"a1","timestamp":%q,"message":{"content":[{"type":"text","text":"[crowsnest answer q_%d] I am waiting for this"}]}}`+"\n"+
+		`{"type":"user","uuid":"u0","timestamp":%q,"message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"[crowsnest answer q_%d] from a log"}]}}`+"\n"+
+		`{"type":"user","uuid":"u00","timestamp":%q,"message":{"content":"[crowsnest answer q_%d] Later? → yes"}}`+"\n",
+		after, pending, after, pending, before, pending))
+	r.svc.markReceived(ctx, job.ID, []int64{pending}, body)
+	if receipt, _ := r.db.GetQuestionReceipt(ctx, pending); !receipt.ReceivedAt.IsZero() {
+		t.Fatal("a marker in the agent's text, a tool result or an earlier line was taken as the answer's receipt")
+	}
+	body = []byte(fmt.Sprintf(`{"type":"user","uuid":"u1","timestamp":%q,"message":{"content":"[crowsnest answer q_%d] Ship it? → yes"}}`+"\n"+
+		`{"type":"user","uuid":"u2","timestamp":%q,"message":{"content":"[crowsnest answer q_%d] Rename it? → yes"}}`+"\n", after, delivered, after, uncertain))
 	r.svc.markReceived(ctx, job.ID, list, body)
 	for _, id := range []int64{delivered, uncertain} {
 		if receipt, _ := r.db.GetQuestionReceipt(ctx, id); receipt.ReceivedAt.IsZero() {
@@ -476,7 +532,9 @@ func TestReceiptOfAJobThatFinishedFirst(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		line := fmt.Sprintf(`{"type":"user","message":{"content":"[crowsnest answer q_%d] Which colour? → yes"}}`+"\n", id)
+		// As Claude Code writes it: with its timestamp (R6-C12 reads it: after the answer settled).
+		line := fmt.Sprintf(`{"type":"user","uuid":"u1","timestamp":%q,"message":{"content":"[crowsnest answer q_%d] Which colour? → yes"}}`+"\n",
+			delivered.Add(time.Second).UTC().Format(time.RFC3339), id)
 		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
 			t.Fatal(err)
 		}

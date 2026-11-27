@@ -45,7 +45,8 @@ export function DiffNavigator({ files }: { files: QuestionFile[] }) {
   const jump = (index: number) => {
     setOpen((current) => new Set(current).add(index));
     // After the section opens, bring its header to the top of the scroll area.
-    requestAnimationFrame(() => sections.current[index]?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    // (scrollIntoView is optional: jsdom has none, and the frame can run after a test ended.)
+    requestAnimationFrame(() => sections.current[index]?.scrollIntoView?.({ block: "start", behavior: "smooth" }));
   };
 
   return (

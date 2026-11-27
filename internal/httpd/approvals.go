@@ -208,7 +208,7 @@ func (s *Server) handlePushAction(w http.ResponseWriter, r *http.Request) {
 		if asked, err := service.Get(r.Context(), id); err != nil {
 			s.writeQuestionError(w, r, err)
 			return
-		} else if questions.GateShaped(asked.Context, optionKeys(asked.Options)) {
+		} else if questions.GateShaped(asked.Context, questions.QuestionTexts(asked)) {
 			writeError(w, http.StatusForbidden, codeForbidden, "This question grants something (one of crowsnest's own gates, or an allow or approve); answer it on its card in the app.")
 			return
 		}
@@ -242,13 +242,4 @@ func (s *Server) snoozeFromNotification(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeData(w, http.StatusOK, ActionResult{Item: item, Message: "Snoozed for 10 minutes. It is still waiting in crowsnest."})
-}
-
-// optionKeys lists a question's option keys.
-func optionKeys(options []questions.Option) []string {
-	keys := make([]string, 0, len(options))
-	for _, option := range options {
-		keys = append(keys, option.Key)
-	}
-	return keys
 }

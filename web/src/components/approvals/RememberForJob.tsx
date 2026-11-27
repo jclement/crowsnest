@@ -1,7 +1,8 @@
 // RememberForJob: the inline confirm behind "Allow and remember for this job" on an ApprovalCard
 // (DESIGN.md 8.7, Policy). It shows the job rule the server proposed (for Bash the command's first
 // two words and *, for an edit the file's directory, otherwise the tool), editable, and says in one
-// sentence what it will do until the job ends. Never offered for a dangerous call.
+// sentence what it will do until the job ends. Never offered for a dangerous call. For an elevated
+// call the server offers only the call itself (exact, R6-S1): shown read-only, never a prefix.
 import { BookmarkCheck } from "lucide-react";
 import { useId, useState } from "react";
 import type { Approval } from "../../lib/approvals";
@@ -26,7 +27,7 @@ export function RememberForJob({ approval, busy, onConfirm, onCancel }: Remember
   const [pattern, setPattern] = useState(suggestion.pattern);
   const fieldId = useId();
   const trimmed = pattern.trim();
-  const elevated = approval.risk === "elevated";
+  const exact = suggestion.exact === true;
   return (
     <form
       aria-label="Remember for this job"
@@ -43,14 +44,24 @@ export function RememberForJob({ approval, busy, onConfirm, onCancel }: Remember
         id={fieldId}
         value={pattern}
         onChange={(event) => setPattern(event.target.value)}
+        readOnly={exact}
         maxLength={300}
         spellCheck={false}
         autoCapitalize="off"
         className="min-h-11 w-full rounded border border-border-strong bg-surface px-2 font-mono text-sm text-heading md:min-h-8 md:text-xs"
       />
       <p data-testid="remember-sentence" className="text-xs text-body">
-        Until {approval.job_id} ends, crowsnest will allow {what[suggestion.kind](trimmed || "…")}
-        {elevated ? ", also when elevated," : ""} without asking. Dangerous calls are always asked.
+        {exact ? (
+          <>
+            Until {approval.job_id} ends, crowsnest will allow exactly this {suggestion.kind === "bash" ? "command" : "tool"}, word for word, without asking. Every other
+            elevated call (an unrecognised program, an interpreter, a different command) and every dangerous call is still asked.
+          </>
+        ) : (
+          <>
+            Until {approval.job_id} ends, crowsnest will allow {what[suggestion.kind](trimmed || "…")} without asking, but only while each call is low
+            risk. Elevated and dangerous calls are always asked.
+          </>
+        )}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" icon={BookmarkCheck} disabled={busy || !trimmed}>

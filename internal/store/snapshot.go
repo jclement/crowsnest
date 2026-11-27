@@ -51,7 +51,22 @@ var scrubStatements = []struct{ table, sql string }{
 	{"push_subscriptions", `DELETE FROM push_subscriptions`},
 	{"api_tokens", `DELETE FROM api_tokens`},
 	{"machines", `UPDATE machines SET token = ''`},
-	{"kv", `DELETE FROM kv WHERE key LIKE 'agent_token:%' OR key IN ('push.vapid', 'settings.notify-url')`},
+	{"kv", `DELETE FROM kv WHERE key LIKE 'agent_token:%' OR key IN ('push.vapid', 'settings.notify-url') OR key LIKE '%remote_control'`},
+	// The mark that this copy is scrubbed to this list (R6-S6): a copy without it, or with an older
+	// one, is scrubbed again (RescrubOld).
+	{"kv", `INSERT OR REPLACE INTO kv (key, value) VALUES ('` + ScrubbedKey + `', '` + ScrubVersion + `')`},
+}
+
+// ScrubbedKey and ScrubVersion mark a scrubbed copy; bump ScrubVersion when the list above grows.
+const (
+	ScrubbedKey  = "snapshot.scrubbed"
+	ScrubVersion = "2" // 2: Remote Control session links (R6-S6)
+)
+
+// Scrubbed reports whether the database copy at path carries the current scrub mark.
+func Scrubbed(ctx context.Context, path string) bool {
+	rows, err := ReadKVPrefix(ctx, path, ScrubbedKey)
+	return err == nil && rows[""] == ScrubVersion
 }
 
 // ScrubSnapshot removes credentials from the database copy at path (see the file comment) and

@@ -114,10 +114,16 @@ func printRestore(out io.Writer, cfg config.Config, result backup.Result) {
 	_, _ = fmt.Fprintf(out, "Restored a backup of %q made %s (crowsnest %s) into %s.\n",
 		result.Manifest.Name, result.Manifest.CreatedAt.Local().Format(time.RFC1123), result.Manifest.Version, cfg.DatabasePath())
 	if result.Replaced != "" {
-		_, _ = fmt.Fprintf(out, "The database it replaced is kept at %s.\n", result.Replaced)
+		_, _ = fmt.Fprintf(out, "The database it replaced is kept at %s, scrubbed of sessions and tokens; delete it once you no longer need to roll back.\n", result.Replaced)
 	}
 	for _, path := range result.Skipped {
 		_, _ = fmt.Fprintf(out, "Left %s as it was (it exists; --force replaces it).\n", path)
+	}
+	if result.RevokedRules > 0 {
+		_, _ = fmt.Fprintf(out, "%d approval rule(s) from the backup are kept but revoked: add again, on the project page, the ones you want.\n", result.RevokedRules)
+	}
+	if result.ForgotSeen > 0 {
+		_, _ = fmt.Fprintf(out, "%d role file(s) are marked unread: review them in Instructions.\n", result.ForgotSeen)
 	}
 	_, _ = fmt.Fprintln(out, "It starts PAUSED. Start crowsnest, check the agents on the System page and the journal, then resume.")
 }

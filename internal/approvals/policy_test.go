@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,17 +19,27 @@ import (
 type policyHarness struct {
 	*harness
 	ended map[string]bool
+	root  string // a real directory standing for /work/crow (edit rules compare real paths, R6-C03)
 }
 
 func newPolicyHarness(t *testing.T) *policyHarness {
 	t.Helper()
-	h := &policyHarness{harness: newHarness(t), ended: map[string]bool{"j_9": true}}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"internal/x", "cmd", "docs", "internal2"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := &policyHarness{harness: newHarness(t), ended: map[string]bool{"j_9": true}, root: root}
 	h.service.opts.Scope = func(_ context.Context, jobID, paneID string) Scope {
 		switch {
 		case jobID != "":
-			return Scope{ProjectID: 1, ProjectName: "Crowsnest", JobLive: !h.ended[jobID], Root: "/work/crow"}
+			return Scope{ProjectID: 1, ProjectName: "Crowsnest", JobLive: !h.ended[jobID], Root: root}
 		case paneID == "lead":
-			return Scope{ProjectID: 1, ProjectName: "Crowsnest", Root: "/work/crow"}
+			return Scope{ProjectID: 1, ProjectName: "Crowsnest", Root: root}
 		}
 		return Scope{}
 	}
@@ -55,6 +67,11 @@ func (h *policyHarness) jobRule(t *testing.T, jobID, kind, pattern string, maxRi
 
 func (h *policyHarness) ask(t *testing.T, jobID, paneID, tool string, input map[string]any) Approval {
 	t.Helper()
+	for key, value := range input {
+		if text, ok := value.(string); ok && strings.HasPrefix(text, "/work/crow") {
+			input[key] = h.root + strings.TrimPrefix(text, "/work/crow")
+		}
+	}
 	body, _ := json.Marshal(input)
 	approval, err := h.service.Request(context.Background(), RequestInput{JobID: jobID, PaneID: paneID, ToolName: tool, ToolInput: body, Hooked: true})
 	if err != nil {
@@ -255,11 +272,11 @@ func TestSuggest(t *testing.T) {
 		input string
 		want  Suggestion
 	}{
-		{"Bash", `{"command":"go test ./internal/... -run X"}`, Suggestion{KindBash, "go test *"}},
-		{"Bash", `{"command":"ls"}`, Suggestion{KindBash, "ls"}},
-		{"Edit", `{"file_path":"/work/crow/internal/x/y.go"}`, Suggestion{KindEdit, "internal/x/"}},
-		{"Write", `{"file_path":"/work/crow/README.md"}`, Suggestion{KindEdit, "."}},
-		{"WebFetch", `{"url":"https://example.com"}`, Suggestion{KindTool, "WebFetch"}},
+		{"Bash", `{"command":"go test ./internal/... -run X"}`, Suggestion{Kind: KindBash, Pattern: "go test *"}},
+		{"Bash", `{"command":"ls"}`, Suggestion{Kind: KindBash, Pattern: "ls"}},
+		{"Edit", `{"file_path":"/work/crow/internal/x/y.go"}`, Suggestion{Kind: KindEdit, Pattern: "internal/x/"}},
+		{"Write", `{"file_path":"/work/crow/README.md"}`, Suggestion{Kind: KindEdit, Pattern: "."}},
+		{"WebFetch", `{"url":"https://example.com"}`, Suggestion{Kind: KindTool, Pattern: "WebFetch"}},
 	}
 	for _, tc := range cases {
 		if got := Suggest(tc.tool, json.RawMessage(tc.input), "/work/crow"); got != tc.want {
@@ -333,6 +350,47 @@ func TestRememberRefusals(t *testing.T) {
 		if got, _ := h.service.Get(ctx, id); got.Status != StatusPending {
 			t.Fatalf("%s must stay pending after a refused remember: %s", id, got.Status)
 		}
+	}
+}
+
+// TestElevatedIsRememberedOnlyExactly is R6-S1: remembering an elevated call never makes a
+// prefix rule. An interpreter one-liner (elevated only because crowsnest does not recognise it)
+// offers no remember at all, and is refused; a recognised elevated call offers itself, word for
+// word, and a wider pattern is refused; the exact rule then allows that call and nothing else.
+func TestElevatedIsRememberedOnlyExactly(t *testing.T) {
+	ctx := context.Background()
+	h := newPolicyHarness(t)
+	var refusal *RefusedError
+
+	oneLiner := h.ask(t, "j_1", "p1", "Bash", map[string]any{"command": "python3 -c 'print(1)'"})
+	if oneLiner.Risk != risk.Elevated || oneLiner.Remember != nil {
+		t.Fatalf("an unrecognised elevated call offered %+v (%s)", oneLiner.Remember, oneLiner.Risk)
+	}
+	wide := "python3 -c *"
+	if _, err := h.service.Decide(ctx, oneLiner.ID, Decision{Allow: true, Remember: &wide}); !errors.As(err, &refusal) {
+		t.Fatalf("remembering an interpreter one-liner: %v", err)
+	}
+
+	push := h.ask(t, "j_1", "p2", "Bash", map[string]any{"command": "git push origin feature/x"})
+	if push.Risk != risk.Elevated || push.Remember == nil || !push.Remember.Exact || push.Remember.Pattern != "git push origin feature/x" {
+		t.Fatalf("a recognised elevated call offered %+v", push.Remember)
+	}
+	widePush := "git push *"
+	if _, err := h.service.Decide(ctx, push.ID, Decision{Allow: true, Remember: &widePush}); !errors.As(err, &refusal) {
+		t.Fatalf("a wildcard for an elevated call: %v", err)
+	}
+	exact := "git push origin feature/x"
+	if _, err := h.service.Decide(ctx, push.ID, Decision{Allow: true, Remember: &exact}); err != nil {
+		t.Fatal(err)
+	}
+	if again := h.ask(t, "j_1", "p3", "Bash", map[string]any{"command": "git push origin feature/x"}); again.Status != StatusAllowed {
+		t.Fatalf("the exact call again: %s", again.Status)
+	}
+	if other := h.ask(t, "j_1", "p4", "Bash", map[string]any{"command": "git push origin main"}); other.Status != StatusPending {
+		t.Fatalf("another push was allowed by the exact rule: %s", other.Status)
+	}
+	if spoof := h.ask(t, "j_1", "p5", "Bash", map[string]any{"command": "python3 -c 'import shutil;shutil.rmtree(\"/\")'"}); spoof.Status != StatusPending {
+		t.Fatalf("an interpreter call was allowed: %s", spoof.Status)
 	}
 }
 
@@ -441,5 +499,29 @@ func TestPreviewRule(t *testing.T) {
 	var ruleErr *RuleError
 	if _, err := h.service.PreviewRule(ctx, 1, KindBash, "*", risk.Low); !errors.As(err, &ruleErr) {
 		t.Fatalf("a bad pattern is refused in the preview too: %v", err)
+	}
+}
+
+// TestEditRuleDoesNotFollowALinkOut is R6-C03 (and R6-I4): a rule for edits under internal/ does
+// not cover a file reached through a link inside internal/ that points elsewhere, even when the
+// target is still inside the job's root; an elevated rule cannot reach outside the root that way
+// either. A path that does not exist yet, inside the directory, still matches.
+func TestEditRuleDoesNotFollowALinkOut(t *testing.T) {
+	h := newPolicyHarness(t)
+	h.projectRule(t, KindEdit, "internal/", risk.Elevated)
+	if err := os.Symlink(filepath.Join(h.root, "cmd"), filepath.Join(h.root, "internal", "shared")); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(h.root, "internal", "away")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/work/crow/internal/shared/main.go", "/work/crow/internal/away/x.go", "/work/crow/internal/away/../x.go"} {
+		if got := h.ask(t, "j_1", "p1", "Edit", map[string]any{"file_path": path}); got.Status != StatusPending {
+			t.Fatalf("%s through a link was allowed by the internal/ rule: %s", path, got.Status)
+		}
+	}
+	if got := h.ask(t, "j_1", "p1", "Edit", map[string]any{"file_path": "/work/crow/internal/x/new.go"}); got.Status != StatusAllowed {
+		t.Fatalf("a new file inside internal/: %s", got.Status)
 	}
 }

@@ -29,6 +29,10 @@ type Command struct {
 	Subshell bool
 	// Nested is true for a command read out of an `sh -c` or `eval` string.
 	Nested bool
+	// Scope numbers the shell the command runs in: 0 for the line itself, a new number for each
+	// `sh -c` string, whose cd ends with it (R6-C04); Parent is the scope that started it. eval
+	// runs in its caller's shell, so its commands keep the caller's scope.
+	Scope, Parent int
 }
 
 // maxNesting bounds `sh -c "sh -c '…'"`: deeper than this is not read with confidence.
@@ -38,10 +42,11 @@ const maxNesting = 4
 // strings. ok is false when the line cannot be read with confidence; the commands returned are
 // then a best effort and must not be taken as the whole story.
 func Parse(command string) (commands []Command, ok bool) {
-	return parse(command, 0)
+	scopes := 0
+	return parse(command, 0, 0, 0, &scopes)
 }
 
-func parse(command string, depth int) ([]Command, bool) {
+func parse(command string, depth, scope, parent int, scopes *int) ([]Command, bool) {
 	if depth > maxNesting {
 		return nil, false
 	}
@@ -49,14 +54,19 @@ func parse(command string, depth int) ([]Command, bool) {
 	var out []Command
 	for _, segment := range segments {
 		cmd := commandOfSegment(segment.words)
-		cmd.Subshell, cmd.Nested = segment.subshell, depth > 0
+		cmd.Subshell, cmd.Nested, cmd.Scope, cmd.Parent = segment.subshell, depth > 0, scope, parent
 		if inner, isShell := shellString(cmd); isShell {
 			if inner == "" {
 				ok = false // a shell reading a script or stdin: what it runs cannot be seen
 				out = append(out, cmd)
 				continue
 			}
-			nested, innerOK := parse(inner, depth+1)
+			innerScope, innerParent := scope, parent
+			if cmd.Program != "eval" {
+				*scopes++
+				innerScope, innerParent = *scopes, scope
+			}
+			nested, innerOK := parse(inner, depth+1, innerScope, innerParent, scopes)
 			ok = ok && innerOK
 			out = append(out, nested...)
 			continue
@@ -248,6 +258,12 @@ func (s *splitter) step(runes []rune, i int) int {
 		s.inWord = true
 	case strings.ContainsRune(";&|\n`", r):
 		s.endSegment()
+	case r == '>' && s.inWord && strings.Trim(s.word.String(), "0123456789&>") != "":
+		// An unquoted > ends the word before it (R6-S2): `x>>~/.zshrc` is the word x and the
+		// redirection >>~/.zshrc, as the shell reads it. A descriptor number (2>) stays with it.
+		s.endWord()
+		s.word.WriteRune(r)
+		s.inWord = true
 	case r == ' ' || r == '\t' || r == '\r':
 		s.endWord()
 	default:

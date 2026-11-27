@@ -26,16 +26,19 @@ type CheckRecord struct {
 	Owner      string
 	StartedAt  time.Time
 	FinishedAt time.Time
+	// DefinitionChanged lists files of the job's diff that define its check (migration 0019,
+	// R6-S4), comma-separated.
+	DefinitionChanged string
 }
 
 const checkSelect = `SELECT id, job_id, commit_sha, base_sha, command, status, exit_code, duration_ms, output_tail, owner,
-	started_at, finished_at FROM job_checks`
+	started_at, finished_at, definition_changed FROM job_checks`
 
 func scanCheck(row interface{ Scan(...any) error }) (CheckRecord, error) {
 	var r CheckRecord
 	var duration, started, finished int64
 	err := row.Scan(&r.ID, &r.JobID, &r.Commit, &r.BaseCommit, &r.Command, &r.Status, &r.ExitCode, &duration, &r.OutputTail, &r.Owner,
-		&started, &finished)
+		&started, &finished, &r.DefinitionChanged)
 	r.Duration = time.Duration(duration) * time.Millisecond
 	r.StartedAt, r.FinishedAt = unixToTime(started), unixToTime(finished)
 	return r, err
@@ -44,9 +47,9 @@ func scanCheck(row interface{ Scan(...any) error }) (CheckRecord, error) {
 // InsertCheck records a check that has started and returns its id.
 func (s *Store) InsertCheck(ctx context.Context, r CheckRecord) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `INSERT INTO job_checks (job_id, commit_sha, base_sha, command, status, exit_code,
-		duration_ms, output_tail, owner, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		duration_ms, output_tail, owner, started_at, finished_at, definition_changed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.JobID, r.Commit, r.BaseCommit, r.Command, r.Status, r.ExitCode, r.Duration.Milliseconds(), r.OutputTail, r.Owner,
-		unixOrNil(r.StartedAt), unixOrNil(r.FinishedAt))
+		unixOrNil(r.StartedAt), unixOrNil(r.FinishedAt), r.DefinitionChanged)
 	if err != nil {
 		return 0, fmt.Errorf("recording a check: %w", err)
 	}
@@ -56,8 +59,8 @@ func (s *Store) InsertCheck(ctx context.Context, r CheckRecord) (int64, error) {
 // FinishCheck records how a check ended.
 func (s *Store) FinishCheck(ctx context.Context, r CheckRecord) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE job_checks SET status = ?, exit_code = ?, duration_ms = ?, output_tail = ?,
-		finished_at = ?, commit_sha = ? WHERE id = ?`, r.Status, r.ExitCode, r.Duration.Milliseconds(), r.OutputTail,
-		unixOrNil(r.FinishedAt), r.Commit, r.ID)
+		finished_at = ?, commit_sha = ?, definition_changed = ? WHERE id = ?`, r.Status, r.ExitCode, r.Duration.Milliseconds(), r.OutputTail,
+		unixOrNil(r.FinishedAt), r.Commit, r.DefinitionChanged, r.ID)
 	if err != nil {
 		return fmt.Errorf("finishing check %d: %w", r.ID, err)
 	}
@@ -141,6 +144,14 @@ func (s *Store) ListChildJobs(ctx context.Context, id int64) ([]JobRecord, error
 // ListFixJobs returns the jobs crowsnest started to rebase job id's branch, oldest first.
 func (s *Store) ListFixJobs(ctx context.Context, id int64) ([]JobRecord, error) {
 	return s.queryJobs(ctx, jobSelect+` WHERE fix_of = ? ORDER BY id`, id)
+}
+
+// ListUnappliedFixes returns finished fix jobs whose completion their parent has not taken in
+// yet (the parent is done, not landed, and its fix_applied is older), oldest first (R6-C11).
+func (s *Store) ListUnappliedFixes(ctx context.Context, limit int) ([]JobRecord, error) {
+	return s.queryJobs(ctx, jobSelect+` WHERE fix_of != 0 AND state IN ('done', 'failed', 'cancelled')
+		AND id > (SELECT p.fix_applied FROM jobs p WHERE p.id = jobs.fix_of AND p.state = 'done' AND p.land_state = '')
+		ORDER BY id LIMIT ?`, limit)
 }
 
 // ListAcceptedJobs returns finished jobs whose evidence matters to Land (accept_state set) and
