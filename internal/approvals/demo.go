@@ -54,7 +54,7 @@ func demoRequests() []demoCall {
 		return body
 	}
 	return []demoCall{
-		{demostory.LinkFixer, "Bash", fixed(`{"command":"npx linkinator ./dist --recurse","description":"Check the built site for broken links"}`)},
+		{demostory.LinkFixer, "Bash", fixed(`{"command":"npm run test:links","description":"Check the built site for broken links"}`)},
 		{demostory.RefreshBuilder, "Edit", edit},
 		{demostory.LimiterReviewer, "Bash", fixed(`{"command":"git push --force origin main","description":"Force-push the rebased fix/limiter onto main"}`)},
 	}

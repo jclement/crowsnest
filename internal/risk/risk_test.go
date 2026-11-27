@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,7 +35,7 @@ func TestClassify(t *testing.T) {
 		{"rm -rf", "Bash", map[string]any{"command": "rm -rf build"}, Dangerous},
 		{"rm -fr", "Bash", map[string]any{"command": "rm -fr build"}, Dangerous},
 		{"rm -r -f", "Bash", map[string]any{"command": "rm -r -f build"}, Dangerous},
-		{"rm one file", "Bash", map[string]any{"command": "rm notes.txt"}, Low},
+		{"rm one file", "Bash", map[string]any{"command": "rm notes.txt"}, Elevated}, // R5-S7: not a benign shape
 		{"reset hard", "Bash", map[string]any{"command": "git reset --hard HEAD~1"}, Dangerous},
 		{"drop table", "Bash", map[string]any{"command": `psql -c "DROP TABLE users"`}, Dangerous},
 		{"truncate", "Bash", map[string]any{"command": `sqlite3 x.db "truncate table logs"`}, Dangerous},
@@ -54,7 +55,7 @@ func TestClassify(t *testing.T) {
 		{"secrets in command", "Bash", map[string]any{"command": "cat ~/.ssh/id_ed25519"}, Elevated},
 		{"pem", "Write", map[string]any{"file_path": filepath.Join(root, "server.pem"), "content": "x"}, Elevated},
 		{"mcp tool", "mcp__github__create_issue", map[string]any{"title": "x"}, Elevated},
-		{"web fetch", "WebFetch", map[string]any{"url": "https://example.com", "prompt": "summarise"}, Low},
+		{"web fetch", "WebFetch", map[string]any{"url": "https://example.com", "prompt": "summarise"}, Elevated}, // a URL can carry data out
 		{"unknown tool", "Glob", map[string]any{"pattern": "**/*.go"}, Low},
 	}
 	classifier := Default()
@@ -115,8 +116,10 @@ rules:
 	if got := classifier.Classify("Bash", input(t, map[string]any{"command": "git push origin feature/x"}), Context{}); got.Level != Low {
 		t.Fatalf("a file rule may lower the level: %+v", got)
 	}
-	if got := classifier.Classify("Bash", input(t, map[string]any{"command": "curl https://example.com"}), Context{}); got.Level != Low {
-		t.Fatalf("disabled rule still applied: %+v", got)
+	// Disabling a built-in drops its reason, but low still means a known-benign shape (R5-S7):
+	// curl is not one, so it stays elevated for the shape alone. A file rule can lower it.
+	if got := classifier.Classify("Bash", input(t, map[string]any{"command": "curl https://example.com"}), Context{}); got.Level != Elevated || strings.Contains(strings.Join(got.Reasons, " "), "Talks to another machine") {
+		t.Fatalf("disabled rule still applied, or the shape check was lost: %+v", got)
 	}
 	if got := classifier.Classify("Bash", input(t, map[string]any{"command": "rm -rf x"}), Context{}); got.Level != Dangerous {
 		t.Fatalf("other built-ins stay: %+v", got)

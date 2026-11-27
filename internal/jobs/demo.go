@@ -187,7 +187,7 @@ func demoStory(now time.Time, panes DemoPanes) []demoJob {
 	limiter.Cause, limiter.CauseDetail = string(CauseApprovalTool), "Bash: git push --force origin main"
 
 	links := demoBase(now, panes, "Fix the broken links the link check found", "The link check found 3 broken links in the built site. Fix them and check again.", "builder", website, string(StateNeedsYou), demostory.LinkFixer, 20*time.Minute)
-	links.Cause, links.CauseDetail = string(CauseApprovalTool), "Bash: npx linkinator ./dist --recurse"
+	links.Cause, links.CauseDetail = string(CauseApprovalTool), "Bash: npm run test:links"
 
 	hero := demoBase(now, panes, "Rewrite the homepage hero", "Rewrite the homepage hero so it says what crowsnest does, not what it is built on.", "builder", website, string(StateNeedsYou), demostory.HeroWriter, 50*time.Minute)
 	hero.Cause, hero.CauseDetail, hero.Waiting, hero.Progress = string(CauseQuestions), "1 open question(s)", true, "Waiting on the first sentence"

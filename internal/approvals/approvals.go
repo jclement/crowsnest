@@ -30,6 +30,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/risk"
+	"github.com/jclement/crowsnest/internal/termtext"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -590,20 +591,18 @@ func HookOutput(approval Approval) string {
 func Summary(tool string, input json.RawMessage) string {
 	var fields map[string]any
 	_ = json.Unmarshal(input, &fields)
-	for _, key := range []string{"command", "file_path", "notebook_path", "url", "path", "pattern", "query", "description"} {
-		if value, ok := fields[key].(string); ok && strings.TrimSpace(value) != "" {
-			return tool + ": " + oneLine(value, 160)
-		}
+	text := termtext.Clean(risk.SummaryText(fields)) // format characters (bidi among them) go: R5-S7
+	if text == "" {
+		return tool
 	}
-	return tool
-}
-
-func oneLine(text string, max int) string {
-	text = strings.Join(strings.Fields(text), " ")
-	if runes := []rune(text); len(runes) > max {
-		return string(runes[:max-1]) + "…"
+	runes := []rune(text)
+	if len(runes) <= risk.MaxSummaryRunes {
+		return tool + ": " + text
 	}
-	return text
+	// Say how much is not shown: a bare ellipsis hid that a payload could sit past the cut. Such
+	// a call is never low (risk.shapeHits), so no notification offers to allow it unseen.
+	more := fmt.Sprintf("… (%d more characters)", len(runes)-(risk.MaxSummaryRunes-1))
+	return tool + ": " + string(runes[:risk.MaxSummaryRunes-1]) + more
 }
 
 func toApproval(r store.ApprovalRecord) Approval {

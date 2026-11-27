@@ -4,8 +4,8 @@
 // confirmation; a question answered from the tray; the keyboard path (g n, Enter, y/n only on a
 // focused card); axe. Screenshots of each view with the tray into web/screenshots.
 //
-// Demo approvals (internal/approvals/demo.go), each from a demo job's pane: ap_1 Bash `npx
-// linkinator ./dist --recurse` (Website's j_14, job-14, low), ap_2 Edit of InboxScreen.tsx
+// Demo approvals (internal/approvals/demo.go), each from a demo job's pane: ap_1 Bash `npm
+// run test:links` (Website's j_14, job-14, low), ap_2 Edit of InboxScreen.tsx
 // (Mobile's j_16, job-16, low), ap_3 `git push --force origin main` (Crowsnest's reviewer j_13,
 // job-13, dangerous). Demo questions: q_1 blocking confirm, q_3 a choice ("Where should the
 // release notes live?").
@@ -103,13 +103,13 @@ for (const path of ["/", "/inbox"]) {
 test("an approval allowed and one denied with a note, from the tray", async ({ page }, testInfo) => {
   await page.goto("/jobs");
   let tray = await openTray(page, testInfo);
-  await row(tray, /npx linkinator/).click();
+  await row(tray, /npm run test:links/).click();
   const card = tray.locator("[data-approval=ap_1]");
-  await expect(card.getByLabel("Command")).toHaveText("npx linkinator ./dist --recurse");
+  await expect(card.getByLabel("Command")).toHaveText("npm run test:links");
   await expect(card.getByTestId("risk-line")).toContainText("No risky pattern");
   await card.getByRole("button", { name: "Allow once" }).click();
   await expect.poll(async () => (await approvalStatus(page, "ap_1")).status).toBe("allowed");
-  await expect(tray.getByRole("button", { name: /npx linkinator/, expanded: false })).toHaveCount(0);
+  await expect(tray.getByRole("button", { name: /npm run test:links/, expanded: false })).toHaveCount(0);
 
   if (isPhone(testInfo) && !(await tray.isVisible())) tray = await openTray(page, testInfo);
   await row(tray, /InboxScreen\.tsx/).click();
@@ -191,12 +191,12 @@ test("the keyboard: g n focuses the tray, y and n answer only a focused card", a
 test("snooze hides an item for ten minutes", async ({ page }, testInfo) => {
   await page.goto("/jobs");
   const tray = await openTray(page, testInfo);
-  await tray.getByRole("button", { name: /Snooze for 10 minutes: Bash: npx linkinator/ }).click();
-  await expect(tray.getByRole("button", { name: /Snooze for 10 minutes: Bash: npx linkinator/ })).toHaveCount(0);
+  await tray.getByRole("button", { name: /Snooze for 10 minutes: Bash: npm run test:links/ }).click();
+  await expect(tray.getByRole("button", { name: /Snooze for 10 minutes: Bash: npm run test:links/ })).toHaveCount(0);
   await page.reload();
   const again = await openTray(page, testInfo);
   await expect(again.getByRole("button", { name: /git push --force/, expanded: false })).toBeVisible();
-  await expect(again.getByRole("button", { name: /Snooze for 10 minutes: Bash: npx linkinator/ })).toHaveCount(0);
+  await expect(again.getByRole("button", { name: /Snooze for 10 minutes: Bash: npm run test:links/ })).toHaveCount(0);
 });
 
 test("the Inbox lists approvals and opens one by its link", async ({ page }, testInfo) => {
@@ -210,7 +210,7 @@ test("the Inbox lists approvals and opens one by its link", async ({ page }, tes
 test("axe: the tray open with an approval card", async ({ page }, testInfo) => {
   await page.goto("/jobs");
   const tray = await openTray(page, testInfo);
-  await row(tray, /npx linkinator/).click();
+  await row(tray, /npm run test:links/).click();
   await expect(tray.locator("[data-approval=ap_1]")).toBeVisible();
   await expectAccessible(page, testInfo, "tray");
 });

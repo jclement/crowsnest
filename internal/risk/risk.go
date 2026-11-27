@@ -23,6 +23,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/jclement/crowsnest/internal/guard"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 // Level is how risky a call is.
@@ -203,25 +204,40 @@ func compile(rule Rule) (Rule, error) {
 	return rule, nil
 }
 
-// Classify rates one tool call.
+// hit is one rule or check that applies to a call.
+type hit struct {
+	level  Level
+	reason string
+}
+
+// Classify rates one tool call. A Bash command is read first (guard.Parse): the table's command
+// rules are matched against the line as written and against each simple command written plainly
+// (quotes, wrappers and git's global options removed), so a respelling cannot slip under a rule.
+// The call stays low only if every part of it is a known-benign shape (shape.go).
 func (c *Classifier) Classify(tool string, input json.RawMessage, ctx Context) Result {
 	var fields map[string]any
 	_ = json.Unmarshal(input, &fields)
+	var commands []guard.Command
+	readable := true
+	plain := []string{}
+	if command, ok := fields["command"].(string); ok && tool == "Bash" {
+		commands, readable = guard.Parse(command)
+		for _, cmd := range commands {
+			plain = append(plain, cmd.Text())
+		}
+	}
 	for _, rule := range c.custom {
-		if rule.matches(tool, fields) {
+		if rule.matches(tool, fields, plain) {
 			return Result{Level: rule.Level, Reasons: []string{rule.Reason}}
 		}
 	}
-	type hit struct {
-		level  Level
-		reason string
-	}
 	var hits []hit
 	for _, rule := range c.builtins {
-		if !c.disabled[rule.ID] && rule.matches(tool, fields) {
+		if !c.disabled[rule.ID] && rule.matches(tool, fields, plain) {
 			hits = append(hits, hit{rule.Level, rule.Reason})
 		}
 	}
+	hits = append(hits, shapeHits(tool, fields, commands, readable)...)
 	if !c.disabled[CheckProtectedHost] {
 		if host := guard.HostNamed(ctx.ProtectedHosts, strings.Join(stringsIn(fields), "\n")); host != "" {
 			hits = append(hits, hit{Dangerous, "Names " + host + ", a protected (production) host"})
@@ -266,7 +282,9 @@ func (c *Classifier) Classify(tool string, input json.RawMessage, ctx Context) R
 	return result
 }
 
-func (r Rule) matches(tool string, fields map[string]any) bool {
+// matches reports whether the rule applies. plain holds a Bash command's simple commands written
+// plainly; a command rule is matched against them as well as the line.
+func (r Rule) matches(tool string, fields map[string]any, plain []string) bool {
 	if len(r.Tools) > 0 {
 		ok := false
 		for _, pattern := range r.Tools {
@@ -283,7 +301,7 @@ func (r Rule) matches(tool string, fields map[string]any) bool {
 	switch r.Field {
 	case "command":
 		if command, ok := fields["command"].(string); ok {
-			texts = []string{command}
+			texts = append([]string{command}, plain...)
 		}
 	case "path":
 		texts = pathsIn(fields)
@@ -303,6 +321,52 @@ func (r Rule) matches(tool string, fields map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// shapeHits keeps a call at low only when it is a known-benign shape: a listed tool, or a Bash
+// line read with confidence whose every command is on the list (shape.go). A line too long to
+// show whole on a lock screen, or carrying bidi controls that can reorder what is shown, is not
+// low either: low is what a notification may allow.
+func shapeHits(tool string, fields map[string]any, commands []guard.Command, readable bool) []hit {
+	var hits []hit
+	switch {
+	case tool == "Bash" && !readable:
+		hits = append(hits, hit{Elevated, "crowsnest cannot read this command with confidence (an unterminated quote, a shell reading a script or stdin, or deep nesting)"})
+	case tool == "Bash":
+		for _, cmd := range commands {
+			if reason := commandShape(cmd); reason != "" {
+				hits = append(hits, hit{Elevated, reason})
+				break
+			}
+		}
+	case !lowTools[tool]:
+		hits = append(hits, hit{Elevated, unlistedTool(tool)})
+	}
+	text := SummaryText(fields)
+	switch {
+	case termtext.HasBidiControl(strings.Join(stringsIn(fields), "")):
+		hits = append(hits, hit{Elevated, "Contains bidirectional control characters, which can reorder what is shown"})
+	case len([]rune(text)) > MaxSummaryRunes:
+		hits = append(hits, hit{Elevated, "Too long to show whole on a lock screen"})
+	}
+	return hits
+}
+
+// MaxSummaryRunes is the longest a call's summary may be: a notification shows it whole, so a
+// longer one is never low (anything past the cut could be the payload).
+const MaxSummaryRunes = 160
+
+// summaryKeys are the input fields a summary is made from, first present wins.
+var summaryKeys = []string{"command", "file_path", "notebook_path", "url", "path", "pattern", "query", "description"}
+
+// SummaryText is the field a call's one-line summary shows, whitespace collapsed ("" for none).
+func SummaryText(fields map[string]any) string {
+	for _, key := range summaryKeys {
+		if value, ok := fields[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.Join(strings.Fields(value), " ")
+		}
+	}
+	return ""
 }
 
 // writes reports whether a tool writes the files it names.
