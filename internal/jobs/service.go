@@ -175,6 +175,8 @@ type Service struct {
 	opts Options
 	// liveDefaults overrides opts.DefaultModel and the default engine (Settings, SetDefaults).
 	liveDefaults atomic.Pointer[[2]string]
+	// viewedGate is the "require all files viewed before Land" gate (SetViewedGate, R7-C07).
+	viewedGate atomic.Pointer[ViewedGate]
 	// liveLanding overrides opts.Landing's review default and merge mode (Settings, SetLanding).
 	liveLanding atomic.Pointer[LandingOptions]
 	// liveAccept and liveBudgets override opts.Accept and opts.Budgets (Settings).
@@ -697,6 +699,13 @@ func firstNonEmptyDir(dirs ...string) string {
 // engine of a job with a directory that names none (the app's Settings). engine "" or "auto"
 // means claude.
 func (s *Service) SetDefaults(engine, model string) { s.liveDefaults.Store(&[2]string{engine, model}) }
+
+// ViewedGate decides whether a merge or push of jobID at head may go ahead as far as the diff's
+// Viewed marks go: nil when it may (or the setting is off), otherwise the refusal.
+type ViewedGate func(ctx context.Context, jobID, head string) error
+
+// SetViewedGate wires the Viewed gate into every Land (the app's and an agent's approved request).
+func (s *Service) SetViewedGate(gate ViewedGate) { s.viewedGate.Store(&gate) }
 
 // SetLanding applies a change of the review gate's default or Land's merge mode made in Settings.
 func (s *Service) SetLanding(reviewDefault, mergeMode string) {

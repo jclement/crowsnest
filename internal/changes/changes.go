@@ -909,6 +909,85 @@ func (s *Service) Unviewed(ctx context.Context, jobID string) (int, int, error) 
 	return summary.Total - summary.Viewed, summary.Total, nil
 }
 
+// LandRefusal is the Land gate's refusal with "require all files viewed" on (R7-C07, R7-S9).
+// Unknown is true when crowsnest could not count every file at the head being landed (an error,
+// more files than a reading lists, a reading at another commit): that refuses too.
+type LandRefusal struct {
+	Unknown  bool
+	Unviewed int
+	Total    int
+	Message  string
+}
+
+func (e *LandRefusal) Error() string { return e.Message }
+
+// LandViewed is the Land gate with "require all files viewed before Land" on. It takes a fresh
+// reading (not the cached one, which can be seconds old), and refuses unless that reading is at
+// head (the commit being landed), lists every file of the committed work, and every one of them
+// is viewed. Every failure to tell refuses, saying why: the gate fails closed. A job with no
+// checkout left to read (landed, gone) passes: Land refuses those for its own reasons.
+func (s *Service) LandViewed(ctx context.Context, jobID, head string) error {
+	target, err := s.resolve(ctx, Ask{Kind: KindJob, Ref: jobID})
+	if err != nil {
+		if e, ok := AsError(err); ok && (e.Kind == "gone" || e.Kind == "not_found") {
+			return nil
+		}
+		return unknownViewed("crowsnest could not find the job's checkout to count its viewed files: " + err.Error())
+	}
+	r, err := s.readFresh(ctx, target)
+	switch {
+	case err != nil:
+		return unknownViewed("crowsnest could not read the diff to count its viewed files: " + err.Error())
+	case head == "" || r.head != head:
+		return unknownViewed(fmt.Sprintf("the diff crowsnest could read is at %s, not at %s, the commit being landed: open the review again", shortCommit(r.head), shortCommit(head)))
+	case r.truncated:
+		return unknownViewed(fmt.Sprintf("the branch changes more than %d files, more than a diff lists, so crowsnest cannot tell that every file was viewed", landing.MaxChangedFiles))
+	}
+	marks, err := s.opts.Store.ListDiffMarks(ctx, target.Subject)
+	if err != nil {
+		return unknownViewed("crowsnest could not read the viewed marks: " + err.Error())
+	}
+	summary := s.summarize(target, r, marks, ScopeCommitted)
+	if unviewed := summary.Total - summary.Viewed; unviewed > 0 {
+		return &LandRefusal{Unviewed: unviewed, Total: summary.Total,
+			Message: fmt.Sprintf("%d of %d files are not marked viewed, and Settings require every file viewed before Land. Mark them on the Review tab, or turn the setting off", unviewed, summary.Total)}
+	}
+	return nil
+}
+
+func unknownViewed(why string) *LandRefusal {
+	return &LandRefusal{Unknown: true, Message: why + "; Settings require every file viewed before Land, so it is refused"}
+}
+
+func shortCommit(commit string) string {
+	if commit == "" {
+		return "no commit"
+	}
+	if len(commit) > 10 {
+		return commit[:10]
+	}
+	return commit
+}
+
+// readFresh takes a reading now, whatever the throttle says (the Land gate), and keeps it as the
+// subject's latest.
+func (s *Service) readFresh(ctx context.Context, target Target) (*reading, error) {
+	e := s.entryFor(target)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	previous := e.lastOf().reading
+	next, err := readCheckout(ctx, target, s.opts.Now())
+	if err != nil {
+		e.last.Store(&taken{reading: previous, err: err, at: s.opts.Now()})
+		return nil, err
+	}
+	e.last.Store(&taken{reading: next, at: s.opts.Now()})
+	if previous != nil && previous.fingerprint != next.fingerprint {
+		s.publish(target.Subject, next.fingerprint)
+	}
+	return next, nil
+}
+
 // ---- Progress and a project's jobs ---------------------------------------------------------
 
 // Progress is a job's viewed count from its last reading (no git is run for it).

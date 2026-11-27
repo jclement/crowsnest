@@ -332,6 +332,22 @@ func (s *Service) LandWith(ctx context.Context, id, action, by string, flags Lan
 			return LandResult{}, &EvidenceError{Code: landing.CodeHeadMoved, Message: why + "; nothing was changed"}
 		}
 	}
+	if gate := s.viewedGate.Load(); gate != nil && *gate != nil {
+		// R7-C07: the Viewed gate is here, in the one path every Land takes (the app's and an
+		// agent's approved request), against the commit that will land: without a head from the
+		// caller, the one read now, which the merge or push is then pinned to.
+		if flags.Head == "" {
+			head, err := landing.Head(ctx, job.WorkDir)
+			if err != nil {
+				return LandResult{}, invalid("the branch's head cannot be read, so its viewed files cannot be counted: %v", err)
+			}
+			flags.Head = head
+		}
+		if err := (*gate)(ctx, job.ID, flags.Head); err != nil {
+			_ = s.Journal(ctx, job.ID, EventLand, "Land ("+action+") refused: "+oneLine(err.Error(), 240), nil)
+			return LandResult{}, err
+		}
+	}
 	if code, why := s.LandEvidence(ctx, job, nil); code != "" {
 		if !override {
 			s.markEvidence(ctx, job.ID, code, why)

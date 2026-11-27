@@ -2,6 +2,8 @@ package changes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/hub"
+	"github.com/jclement/crowsnest/internal/landing"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -335,6 +338,60 @@ func TestWatchedSubjectReadAfterActivity(t *testing.T) {
 		case <-deadline:
 			t.Fatal("no changes event after the job's activity")
 		}
+	}
+}
+
+// TestLandViewedFailsClosed is R7-C07 and R7-S9: with every listed file viewed, the gate still
+// refuses when the commit being landed is not the one it read (the agent committed a new file
+// just as the human tapped Land), when the branch changes more files than a reading lists, and
+// when the checkout cannot be read.
+func TestLandViewedFailsClosed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	summary, err := f.svc.Summary(ctx, job1, ScopeCommitted, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed := summary.Head
+	if _, err := f.svc.Mark(ctx, job1, ScopeAll, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.LandViewed(ctx, "j_1", reviewed); err != nil {
+		t.Fatalf("everything viewed: %v", err)
+	}
+	var refusal *LandRefusal
+
+	// A new commit lands on the branch after the human viewed everything.
+	write(t, f.wt, "late.go", "package app\n\nfunc Late() {}\n")
+	git(t, f.wt, "add", "late.go")
+	git(t, f.wt, "commit", "-q", "-m", "late")
+	if err := f.svc.LandViewed(ctx, "j_1", reviewed); !errors.As(err, &refusal) || !refusal.Unknown {
+		t.Fatalf("landing the reviewed head after a new commit: %v", err)
+	}
+	if err := f.svc.LandViewed(ctx, "j_1", git(t, f.wt, "rev-parse", "HEAD")); !errors.As(err, &refusal) || refusal.Unknown || refusal.Unviewed != 1 {
+		t.Fatalf("the new head with its new file unviewed: %v", err)
+	}
+
+	// More files than a reading lists: every listed one viewed is not every file.
+	for i := 0; i <= landing.MaxChangedFiles; i++ {
+		write(t, f.wt, fmt.Sprintf("gen/f%04d.txt", i), "x\n")
+	}
+	git(t, f.wt, "add", "gen")
+	git(t, f.wt, "commit", "-q", "-m", "many")
+	head := git(t, f.wt, "rev-parse", "HEAD")
+	if _, err := f.svc.Mark(ctx, job1, ScopeAll, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.LandViewed(ctx, "j_1", head); !errors.As(err, &refusal) || !refusal.Unknown || !strings.Contains(refusal.Message, "more than") {
+		t.Fatalf("a truncated listing: %v", err)
+	}
+
+	// The checkout cannot be read.
+	f.res.mu.Lock()
+	f.res.job.Root = filepath.Join(t.TempDir(), "gone")
+	f.res.mu.Unlock()
+	if err := f.svc.LandViewed(ctx, "j_1", head); !errors.As(err, &refusal) || !refusal.Unknown {
+		t.Fatalf("an unreadable checkout: %v", err)
 	}
 }
 

@@ -32,7 +32,7 @@ func (o oneJob) Orchestrator(context.Context) (changes.Target, error) {
 func (o oneJob) ProjectJobs(context.Context, string) ([]changes.Target, error) { return nil, nil }
 func (o oneJob) Retired(context.Context, string) bool                          { return false }
 
-func changesHarness(t *testing.T, requireViewed bool) *harness {
+func changesHarness(t *testing.T) *harness {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -66,11 +66,11 @@ func changesHarness(t *testing.T, requireViewed bool) *harness {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	service := changes.New(changes.Options{Store: db, Resolver: oneJob{root: dir}})
-	return newHarness(t, harnessOptions{changes: service, requireViewed: func() bool { return requireViewed }})
+	return newHarness(t, harnessOptions{changes: service})
 }
 
 func TestChangesRoutesNeedASession(t *testing.T) {
-	h := changesHarness(t, false)
+	h := changesHarness(t)
 	for _, r := range []*http.Request{
 		request(http.MethodGet, "/api/v1/changes/jobs/j_1", ""),
 		request(http.MethodGet, "/api/v1/changes/jobs/j_1/file?path=a.go", ""),
@@ -84,7 +84,7 @@ func TestChangesRoutesNeedASession(t *testing.T) {
 }
 
 func TestChangesSummaryFileAndMarks(t *testing.T) {
-	h := changesHarness(t, false)
+	h := changesHarness(t)
 	cookie := h.login()
 	response := h.do(withCookie(request(http.MethodGet, "/api/v1/changes/jobs/j_1?scope=committed", ""), cookie))
 	if response.Code != http.StatusOK {
@@ -127,28 +127,34 @@ func TestChangesSummaryFileAndMarks(t *testing.T) {
 	}
 }
 
+// TestLandGateOnUnviewedFiles: the Viewed gate (changes.LandViewed, wired into every Land by the
+// jobs service) refuses unviewed files as 409 UNVIEWED, and fails closed as 409 UNVIEWED_UNKNOWN
+// when the reading is not at the commit being landed (R7-C07, R7-S9).
 func TestLandGateOnUnviewedFiles(t *testing.T) {
 	ctx := context.Background()
-	off := changesHarness(t, false)
-	recorder := httptest.NewRecorder()
-	if off.server.landUnviewed(ctx, recorder, "j_1", "merge") {
-		t.Fatal("refused with the setting off")
-	}
-	on := changesHarness(t, true)
-	if on.server.landUnviewed(ctx, httptest.NewRecorder(), "j_1", "discard") {
-		t.Error("a discard was refused for unviewed files")
-	}
-	recorder = httptest.NewRecorder()
-	if !on.server.landUnviewed(ctx, recorder, "j_1", "merge") || recorder.Code != http.StatusConflict {
-		t.Fatalf("not refused: %d %s", recorder.Code, recorder.Body)
-	}
-	if body := decodeError(t, recorder); body.Code != "UNVIEWED" {
-		t.Errorf("code = %q", body.Code)
-	}
-	if _, err := on.server.deps.Changes.Mark(ctx, changes.Ask{Kind: changes.KindJob, Ref: "j_1"}, changes.ScopeAll, nil, true); err != nil {
+	h := changesHarness(t)
+	service := h.server.deps.Changes
+	summary, err := service.Summary(ctx, changes.Ask{Kind: changes.KindJob, Ref: "j_1"}, changes.ScopeCommitted, false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if on.server.landUnviewed(ctx, httptest.NewRecorder(), "j_1", "merge") {
-		t.Error("refused once every file was viewed")
+	refusal := func(err error) (int, string) {
+		recorder := httptest.NewRecorder()
+		if !writeLandRefusal(recorder, err) {
+			return 0, ""
+		}
+		return recorder.Code, decodeError(t, recorder).Code
+	}
+	if status, code := refusal(service.LandViewed(ctx, "j_1", summary.Head)); status != http.StatusConflict || code != "UNVIEWED" {
+		t.Fatalf("unviewed: %d %q", status, code)
+	}
+	if status, code := refusal(service.LandViewed(ctx, "j_1", "0123456789012345678901234567890123456789")); status != http.StatusConflict || code != "UNVIEWED_UNKNOWN" {
+		t.Fatalf("another head: %d %q", status, code)
+	}
+	if _, err := service.Mark(ctx, changes.Ask{Kind: changes.KindJob, Ref: "j_1"}, changes.ScopeAll, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.LandViewed(ctx, "j_1", summary.Head); err != nil {
+		t.Errorf("refused once every file was viewed: %v", err)
 	}
 }

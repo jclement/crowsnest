@@ -1635,7 +1635,12 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
 - **Land, lightly.** The Land card says "N of M files not viewed" (the committed comparison: what
   merges), and the confirmation repeats it. Settings → "Require all files viewed before Land"
   (`--require-viewed-before-land`, off by default, live) makes merge and push answer `409
-  UNVIEWED`; discard never.
+  UNVIEWED`; discard never. The gate is in the jobs service's one Land path (`SetViewedGate`,
+  `changes.LandViewed`), so an agent's approved land request passes it too (R7-C07), and it
+  **fails closed** (R7-S9): it takes a fresh reading, not the cached one, and answers `409
+  UNVIEWED_UNKNOWN` when that reading is not at the commit being landed (a Land without a head
+  from the caller is pinned to the head read then), when the branch changes more files than a
+  reading lists (1,500), or when the checkout or the marks cannot be read.
 - **The viewer** (`DiffViewer`, lazily loaded): highlighting with lowlight (highlight.js as a
   tree, already in the bundle for markdown), the **whole old and new text** highlighted and cut
   into lines, so a comment or string spanning lines is right on both sides; tokens rendered as

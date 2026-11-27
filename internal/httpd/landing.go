@@ -142,12 +142,12 @@ func (s *Server) handleLand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeValidation, "Send expected_head: the commit the Review tab showed (what lands is what you reviewed).")
 		return
 	}
-	if s.landUnviewed(r.Context(), w, r.PathValue("id"), body.Action) {
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), landTimeout)
 	defer cancel()
 	result, err := service.LandWith(ctx, r.PathValue("id"), body.Action, "you", jobs.LandFlags{Override: body.Override, Head: body.ExpectedHead})
+	if writeLandRefusal(w, err) {
+		return
+	}
 	var evidence *jobs.EvidenceError
 	if errors.As(err, &evidence) {
 		writeError(w, http.StatusConflict, "EVIDENCE_"+strings.ToUpper(evidence.Code), evidence.Message)
