@@ -90,7 +90,7 @@ test("pausing shows a banner everywhere until resumed", async ({ page }, testInf
 });
 
 test("the daily digest: a switch and a time in Schedule, and past digests", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await page.getByRole("button", { name: "Schedule", exact: true }).first().click();
   const schedule = page.getByRole("dialog", { name: "Schedule" });
   const digest = schedule.getByRole("switch", { name: "Daily digest" });
@@ -105,7 +105,7 @@ test("the daily digest: a switch and a time in Schedule, and past digests", asyn
 });
 
 test("the worktree sweep lists what is still around and discards after a confirmation", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await page.getByRole("button", { name: /to land/ }).click();
   const sweep = page.getByRole("dialog", { name: "Worktrees still around" });
   await expect(sweep.getByRole("list", { name: "Finished jobs with worktrees" })).toContainText("Retry widget fetches with back-off");

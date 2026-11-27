@@ -158,7 +158,7 @@ test("chat with a project's lead: the target is in the URL and the lead replies"
 });
 
 test("filter the board by project; the choice is remembered", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
   await page.getByRole("radio", { name: /^Website/ }).click();
   await expect(page).toHaveURL(/project=website/);
@@ -166,14 +166,14 @@ test("filter the board by project; the choice is remembered", async ({ page }) =
   await expect(cards.first()).toBeVisible();
   const allCount = await page.evaluate(() => fetch("/api/v1/jobs").then((r) => r.json()).then((body: { data: unknown[] }) => body.data.length));
   expect(await cards.count()).toBeLessThan(allCount);
-  await page.goto("/");
+  await page.goto("/jobs");
   await expect(page.getByRole("radio", { name: /^Website/ })).toHaveAttribute("aria-checked", "true");
   await page.getByRole("radio", { name: /^All/ }).click();
   await expect(page.getByRole("button", { name: /Crowsnest/ }).first()).toBeVisible();
 });
 
 test("edit a role's instructions and see the diff against the built-in", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("menuitem", { name: "Instructions" }).click();
   const sheet = page.getByRole("dialog", { name: "Instructions" });
@@ -194,7 +194,7 @@ test("edit a role's instructions and see the diff against the built-in", async (
 });
 
 test("make a schedule in the app and Run it now", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "Schedule" });
   await expect(sheet.getByText("link-check").locator("visible=true").first()).toBeVisible();

@@ -183,25 +183,30 @@ test("the badge and the tab title count what needs you, and follow new questions
   await page.goto("/");
   // The one attention queue (internal/attention): five open demo questions (the low notice q_6
   // is not counted), the question j_4 waits on, the three demo tool-call approvals (DESIGN.md
-  // 8.7), the Handbook job's dialog, and three jobs: j_6 unresponsive, j_3 at the usage limit and
-  // j_9 failed.
-  await expect(page).toHaveTitle(/^\(13\) crowsnest/);
+  // 8.7), the Handbook job's dialog, and four jobs: j_6 unresponsive, j_3 at the usage limit,
+  // j_9 failed, and the landing demo's j_18 ready to land.
+  await expect(page).toHaveTitle(/^\(14\) crowsnest/);
   const badge = page.getByRole("navigation", { name: "Views" }).getByLabel(/need you/).first();
-  await expect(badge).toHaveAttribute("aria-label", "13 need you");
+  await expect(badge).toHaveAttribute("aria-label", "14 need you");
 
   await askAsAgent(app, { title: "A new question from an agent", kind: "ack" });
-  await expect(page).toHaveTitle(/^\(14\) crowsnest/, { timeout: 10_000 });
-  await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("14 need you").first()).toBeAttached();
+  await expect(page).toHaveTitle(/^\(15\) crowsnest/, { timeout: 10_000 });
+  await expect(page.getByRole("navigation", { name: "Views" }).getByLabel("15 need you").first()).toBeAttached();
 
   // Answering one from another tab brings it down here, without a reload.
   const other = await page.context().newPage();
   await other.goto("/inbox?q=q_5");
   await other.getByRole("button", { name: "Acknowledge", exact: true }).click();
-  await expect(page).toHaveTitle(/^\(13\) crowsnest/, { timeout: 10_000 });
+  await expect(page).toHaveTitle(/^\(14\) crowsnest/, { timeout: 10_000 });
   await other.close();
 });
 
 test("an empty Inbox says nothing needs you", async ({ page }) => {
+  // The Open list is the attention queue: an empty one, and no event stream to refill it.
+  await page.route("**/api/v1/attention", (route) =>
+    route.fulfill({ json: { data: { items: [], counts: { total: 0, blocking: 0, can_wait: 0, snoozed: 0, by_project: {} }, revision: 1, at: new Date().toISOString() } } }),
+  );
+  await page.route("**/api/v1/events", (route) => route.abort());
   await page.route("**/api/v1/questions?status=open", (route) => route.fulfill({ json: { data: [] } }));
   await page.route("**/api/v1/approvals?status=pending", (route) => route.fulfill({ json: { data: [] } }));
   await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: { data: [] } }));

@@ -32,7 +32,11 @@ type scribe struct {
 	mu        sync.Mutex
 	configDir string
 	delay     time.Duration
-	replies   int
+	// replies counts the human's prompts per pane: each conversation walks the canned replies in
+	// its own order, and text crowsnest typed (a brief, a poke, an answer: "[crowsnest …") gets
+	// the first reply without moving the rotation, so a dispatch or a lead's turn never changes
+	// what the human's next prompt is answered with.
+	replies map[string]int
 }
 
 // EnableTranscripts makes the demo keep transcripts under configDir (laid out like
@@ -43,7 +47,7 @@ func (d *Demo) EnableTranscripts(configDir string, delay time.Duration) error {
 	if delay <= 0 {
 		delay = DefaultReplyDelay
 	}
-	d.scribe = &scribe{configDir: configDir, delay: delay}
+	d.scribe = &scribe{configDir: configDir, delay: delay, replies: map[string]int{}}
 	start := time.Now().Add(-40 * time.Minute)
 	for name, seed := range map[string]func(*transcriptWriter){
 		DemoOrchestrator: seedOrchestrator, demostory.WebhookBuilder: seedBuilder, demostory.CacheReviewer: seedReviewer,
@@ -100,8 +104,11 @@ func (d *Demo) orchestratorTurn(paneID, text string) {
 		return
 	}
 	w.user(text)
-	reply := cannedReplies[d.scribe.replies%len(cannedReplies)]
-	d.scribe.replies++
+	reply := cannedReplies[0]
+	if !strings.HasPrefix(strings.TrimSpace(text), "[crowsnest ") || strings.HasPrefix(strings.TrimSpace(text), "[crowsnest voice") {
+		reply = cannedReplies[d.scribe.replies[paneID]%len(cannedReplies)]
+		d.scribe.replies[paneID]++
+	}
 	time.AfterFunc(d.scribe.delay, func() { d.finishTurn(paneID, text, reply) })
 }
 

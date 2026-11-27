@@ -104,7 +104,9 @@ export async function waitForOrchestratorSettled(page: Page) {
           fetch("/api/v1/jobs")
             .then((response) => response.json())
             .then((body: { data: Array<{ dir: string; project_id?: number; state: string; agent_name: string }> }) =>
-              body.data.filter((job) => !job.dir && !job.project_id && job.state === "queued" && !job.agent_name).length,
+              // Queued with or without its agent: a job reserved for the orchestrator but not yet
+              // briefed is still queued, and its brief starts a turn.
+              body.data.filter((job) => !job.dir && !job.project_id && job.state === "queued").length,
             ),
         ),
       { timeout: 15_000 },

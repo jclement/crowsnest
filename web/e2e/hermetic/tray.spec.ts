@@ -15,7 +15,6 @@ import { expect, expectAccessible, isPhone, test } from "../support/fixtures";
 const views = [
   { name: "jobs", path: "/jobs", ready: (page: Page) => page.getByRole("region", { name: "Needs you or stuck" }) },
   { name: "chat", path: "/chat", ready: (page: Page) => page.getByRole("list", { name: "Conversation" }) },
-  { name: "inbox", path: "/inbox", ready: (page: Page) => page.getByRole("list", { name: "Needs you" }) },
   { name: "fleet", path: "/fleet", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
   { name: "terminal", path: "/terminal", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
 ] as const;
@@ -89,6 +88,15 @@ for (const view of views) {
     }
     await page.evaluate(() => document.fonts.ready);
     await page.screenshot({ path: `screenshots/tray-${view.name}-${isPhone(testInfo) ? 375 : 1440}${testInfo.project.name.includes("webkit") ? "-webkit" : ""}.png` });
+  });
+}
+
+// Now and the Inbox draw the whole queue themselves, so the tray stays out of the way there.
+for (const path of ["/", "/inbox"]) {
+  test(`${path}: no tray where the view is the queue`, async ({ page }) => {
+    await page.goto(path);
+    await expect(page.locator("[data-tray-item], [data-attention-item]").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("[data-tray=panel], [data-tray=bar], [data-tray=pill]")).toHaveCount(0);
   });
 }
 

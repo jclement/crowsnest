@@ -51,7 +51,7 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl"
+          className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl"
         >
           <div className="border-b border-border px-3 pb-2 pt-1.5">
             <p className="text-2xs uppercase tracking-wide text-muted">{me.features.auth ? "Signed in as" : "Login"}</p>

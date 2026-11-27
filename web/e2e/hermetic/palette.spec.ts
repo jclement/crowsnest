@@ -82,7 +82,7 @@ test("a plain k, and ? or g while typing, do nothing", async ({ page }) => {
   await box.pressSequentially("kg?gi");
   await expect(box).toHaveValue("kg?gi");
   await expect(palette(page)).toBeHidden();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/jobs$/);
 });
 
 test("the header button opens it (a full-screen sheet on a phone), with the first row active", async ({ page }, testInfo) => {
@@ -124,7 +124,7 @@ test("⌘/Ctrl+Enter on Give job opens the full form with the text in it", async
   await page.keyboard.press(chord("other"));
   await input(page).fill("> Tidy the README");
   await page.keyboard.press("Control+Enter");
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/jobs$/);
   await expect(page.getByLabel("What needs doing?")).toHaveValue("Tidy the README");
   await expect(page.getByLabel(/^Where/)).toBeVisible();
 });
@@ -174,6 +174,9 @@ test("navigating: a view, the shortcuts sheet with ?, and g i / g f", async ({ p
   await expect(page).toHaveURL(/\/inbox$/);
   await page.keyboard.press("g");
   await page.keyboard.press("j");
+  await expect(page).toHaveURL(/\/jobs$/);
+  await page.keyboard.press("g");
+  await page.keyboard.press("h");
   await expect(page).toHaveURL(/\/$/);
   await page.keyboard.press("Shift+?");
   const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });

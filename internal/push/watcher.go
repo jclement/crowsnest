@@ -51,6 +51,11 @@ type Sender interface {
 	Deliver(ctx context.Context, notice Notice, endpoint string) (Result, error)
 }
 
+// deviceLister is implemented by a Sender that can say whether any device is subscribed.
+type deviceLister interface {
+	HasDevices(ctx context.Context) bool
+}
+
 // WatcherOptions configure a Watcher. Sender is required.
 type WatcherOptions struct {
 	Sender Sender
@@ -260,6 +265,12 @@ func (w *Watcher) notify(ctx context.Context, notice Notice) {
 			w.opts.Logger.Info("not pushing a notice: "+why, "kind", notice.Kind, "tag", notice.Tag)
 			return
 		}
+	}
+	// A notice no device would receive must not spend the rate budget: a burst at start-up (the
+	// demo's seeded morning, or a backlog after a restart) would otherwise hold back the first
+	// notice the first device subscribes for.
+	if devices, ok := w.opts.Sender.(deviceLister); ok && !devices.HasDevices(ctx) {
+		return
 	}
 	if ok, why := w.gate.allow(notice.Source); !ok {
 		w.opts.Logger.Info("not pushing a notice: "+why, "kind", notice.Kind, "tag", notice.Tag)

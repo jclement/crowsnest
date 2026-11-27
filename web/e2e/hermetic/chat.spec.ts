@@ -140,7 +140,7 @@ test("Restart and New conversation each ask first; a new conversation starts emp
   await page.getByRole("dialog", { name: "Restart the orchestrator?" }).getByRole("button", { name: "Restart" }).click();
   await expect(page.getByText("Orchestrator restarted")).toBeVisible({ timeout: 30_000 });
   // Same conversation: the seeded messages are still there.
-  await expect(page.getByRole("list", { name: "Conversation" })).toContainText("What's the state of the crowsnest build?");
+  await expect(page.getByRole("list", { name: "Conversation" })).toContainText("What's waiting on me this morning?");
 
   await menu.click();
   await page.getByRole("menuitem", { name: "New conversation" }).click();
@@ -157,12 +157,12 @@ test("Restart and New conversation each ask first; a new conversation starts emp
 test("Show thinking reveals the thinking blocks the reader hides by default", async ({ page }) => {
   await openChat(page);
   const conversation = page.getByRole("list", { name: "Conversation" });
-  await expect(conversation.getByText("Let me look at the fleet before answering")).toHaveCount(0);
+  await expect(conversation.getByText("Let me look at the fleet and the jobs before answering")).toHaveCount(0);
   await page.getByRole("button", { name: "Conversation menu" }).click();
   await page.getByRole("menuitem", { name: "Show thinking" }).click();
   const thinking = conversation.getByRole("button", { name: /Thinking/ }).first();
   await thinking.click();
-  await expect(conversation.getByText("Let me look at the fleet before answering")).toBeVisible();
+  await expect(conversation.getByText("Let me look at the fleet and the jobs before answering")).toBeVisible();
 });
 
 test("a long conversation sticks to the bottom only when the reader is there, with a 'new messages' pill", async ({ app, page }) => {

@@ -287,14 +287,16 @@ export function TrayRow({
           {rowIcon(item)}
           <span className="min-w-0 flex-1">
             <span className="line-clamp-2 break-words text-sm font-medium text-heading">{trayTitle(item)}</span>
-            <span className="block truncate pt-0.5 text-xs text-body" data-where>
-              {whereLine(item.item)}
-            </span>
-            <span className="flex flex-wrap items-center gap-1 pt-0.5 text-2xs text-muted">
-              <Chip tone={item.item.urgency === "blocking" ? "danger" : "neutral"}>{item.item.urgency === "blocking" ? "Blocking" : "Can wait"}</Chip>
-              <span>{kindLabel(item.item)}</span>
-              {who && <Chip mono>{who}</Chip>}
-              {item.at && <span>waiting {relativeTime(item.at)}</span>}
+            <span className="block truncate pt-0.5 text-xs text-muted">
+              <span className="text-body" data-where>
+                {whereLine(item.item)}
+              </span>
+              {" · "}
+              <span className={cn("font-medium", item.item.urgency === "blocking" ? "text-danger" : "text-body")}>{item.item.urgency === "blocking" ? "Blocking" : "Can wait"}</span>
+              {" · "}
+              {kindLabel(item.item)}
+              {who && ` · ${who}`}
+              {item.at && ` · waiting ${relativeTime(item.at)}`}
             </span>
           </span>
         </button>

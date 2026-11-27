@@ -5,6 +5,7 @@ package push
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -232,5 +233,26 @@ func waitFor(t *testing.T, condition func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// deviceless reports no subscribed device.
+type deviceless struct{ recordingSender }
+
+func (d *deviceless) HasDevices(context.Context) bool { return false }
+
+// A notice nobody would receive spends no rate budget: a burst before the first device
+// subscribes must not hold back the first notice that device should get.
+func TestWatcherSpendsNoBudgetWithoutDevices(t *testing.T) {
+	quiet := &deviceless{recordingSender: recordingSender{disabled: map[Kind]bool{}}}
+	watcher := NewWatcher(WatcherOptions{Sender: quiet, Synchronous: true})
+	for i := 0; i < 30; i++ {
+		watcher.notify(context.Background(), Notice{Kind: KindQuestion, Tag: "q:" + strconv.Itoa(i), Source: "pane"})
+	}
+	if got := len(quiet.got()); got != 0 {
+		t.Fatalf("pushed %d notices to no device", got)
+	}
+	if ok, why := watcher.gate.allow("pane"); !ok {
+		t.Fatalf("the budget was spent without a device: %s", why)
 	}
 }
