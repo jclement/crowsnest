@@ -240,7 +240,7 @@ async function main() {
         } else if (scene.kind === "phone") {
           const frames = await recordLive(browser, scene, dir);
           const bg = join(dir, "bg.png"), bezel = join(dir, "bezel.png");
-          await renderPhoneFrame(browser, { title: scene.title ?? "", subtitle: scene.subtitle ?? "" }, bg, bezel);
+          await renderPhoneFrame(browser, { title: scene.title ?? "", subtitle: scene.subtitle ?? "", section: scene.section ?? "" }, bg, bezel);
           framesToClip(frames, scene.duration, clip, {
             inputs: [bg, bezel],
             filter: `scale=${PHONE.w}:${PHONE.h}:flags=lanczos[ph];[1:v][ph]overlay=${PHONE.x}:${PHONE.y}[b];[b][2:v]overlay=0:0`,

@@ -140,13 +140,34 @@ lines = [
 ]
 min = 7.0
 
-# ---- 4. Many projects ------------------------------------------------------------------------
+# ---- 4. Reviewed, then landed -----------------------------------------------------------------
+
+[[scene]]
+id = "s4r"
+kind = "card"
+card = "section"
+section = "4"
+heading = "Reviewed, then landed"
+min = 2.0
+lines = []
+
+[[scene]]
+id = "land"
+kind = "app"
+shows = "Open 'Retry widget fetches with back-off' (reviewed, ready to land): the Review tab, its files and the reviewer's rounds; open a file's diff; press Merge and read the confirmation (nothing is merged on screen)."
+lines = [
+  { text = "When a job is done, a second agent reviews it. The Review tab shows what it produced, file by file, beside the reviewer's verdict.", after = 0.8 },
+  "Then land it: merge, open a pull request, or discard it, and its worktree is cleaned up.",
+]
+min = 17.0
+
+# ---- 5. Many projects ------------------------------------------------------------------------
 
 [[scene]]
 id = "s4"
 kind = "card"
 card = "section"
-section = "4"
+section = "5"
 heading = "Many projects, one front door"
 min = 2.0
 lines = []
@@ -162,13 +183,13 @@ lines = [
 ]
 min = 17.0
 
-# ---- 5. From your phone ----------------------------------------------------------------------
+# ---- 6. From your phone ----------------------------------------------------------------------
 
 [[scene]]
 id = "s5"
 kind = "card"
 card = "section"
-section = "5"
+section = "6"
 heading = "From your phone"
 min = 2.0
 lines = []
@@ -176,6 +197,7 @@ lines = []
 [[scene]]
 id = "phone"
 kind = "phone"
+section = "6"
 title = "The same app, in your pocket"
 subtitle = "Answer, approve and glance from anywhere. Push notifications when something needs you."
 shows = "Phone, 390x844. The board; the Inbox; answer 'Where should the release notes live?'; open the 'go test' approval and Allow once."
@@ -187,6 +209,7 @@ lines = [
 [[scene]]
 id = "talk"
 kind = "phone"
+section = "6"
 title = "Talk to it"
 subtitle = "Hold to talk. Each reply comes back as one spoken line, in each agent's own voice."
 shows = "Phone. Chat with the orchestrator: the spoken one-line summaries above each reply, the mic held down to talk. Then the Voice sheet."
@@ -195,13 +218,13 @@ lines = [
   "And every project's lead shows up in Claude's Remote Control, under its own name.",
 ]
 
-# ---- 6. See and steer everything -------------------------------------------------------------
+# ---- 7. See and steer everything -------------------------------------------------------------
 
 [[scene]]
 id = "s6"
 kind = "card"
 card = "section"
-section = "6"
+section = "7"
 heading = "See and steer everything"
 min = 2.0
 lines = []
@@ -224,13 +247,13 @@ lines = [
   "And the header shows the machine's load at a glance.",
 ]
 
-# ---- 7. Getting started ----------------------------------------------------------------------
+# ---- 8. Getting started ----------------------------------------------------------------------
 
 [[scene]]
 id = "s7"
 kind = "card"
 card = "section"
-section = "7"
+section = "8"
 heading = "Getting started"
 min = 2.0
 lines = []

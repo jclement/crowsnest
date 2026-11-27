@@ -156,6 +156,40 @@ export const SCENES = {
     },
   },
 
+  // ---- 4. Reviewed, then landed ------------------------------------------------------------
+  land: {
+    async setup({ page, base }) {
+      await page.goto(`${base}/`);
+      await page.getByRole("region", { name: "Needs you or stuck" }).waitFor();
+    },
+    async run(ctx) {
+      const { page } = ctx;
+      await ctx.line(1, 0.2);
+      const job = card(page, /Retry widget fetches with back-off/);
+      await ctx.scrollTo(job, 0.5, 700);
+      await ctx.click(job);
+      await ctx.wait(0.8);
+      await ctx.click(page.getByRole("button", { name: "Review and land" }).filter({ visible: true }).first());
+      await ctx.wait(1.0);
+      await ctx.spot(page.getByRole("list", { name: "Changed files" }), { pad: 8 }).catch(() => {});
+      await ctx.wait(1.6);
+      await ctx.unspot();
+      await ctx.click(page.getByRole("list", { name: "Changed files" }).getByRole("button").first());
+      await ctx.wait(1.4);
+      await ctx.spot(page.getByRole("list", { name: "Review rounds" }), { pad: 8 }).catch(() => {});
+      await ctx.line(2, -0.3);
+      await ctx.unspot();
+      const actions = page.getByRole("group", { name: "Land actions" });
+      await ctx.scrollTo(actions, 0.35, 800);
+      await ctx.spot(actions, { pad: 8 });
+      await ctx.wait(1.2);
+      await ctx.unspot();
+      await ctx.click(actions.getByRole("button", { name: /Merge/ }).first());
+      await ctx.wait(0.6);
+      await ctx.spot(page.getByRole("alertdialog").first(), { pad: 8 }).catch(() => {});
+    },
+  },
+
   // ---- 4. Many projects --------------------------------------------------------------------
   projects: {
     async setup({ page, base }) {

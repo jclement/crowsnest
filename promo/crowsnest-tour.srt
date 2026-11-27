@@ -83,70 +83,90 @@ Allow it once, or deny it with a note.
 And the needs-you tray follows you onto every page.
 
 22
-00:01:46,658 --> 00:01:51,881
-Each project gets its own lead agent, with its own jobs, schedules and instructions.
+00:01:46,658 --> 00:01:49,823
+When a job is done, a second agent reviews it.
 
 23
-00:01:52,730 --> 00:01:55,259
-Chat with the orchestrator, or with any lead.
+00:01:49,523 --> 00:01:54,992
+The Review tab shows what it produced, file by file, beside the reviewer's verdict.
 
 24
-00:01:56,709 --> 00:01:59,377
-And Command-K gives a job, or jumps anywhere.
+00:01:56,042 --> 00:01:58,859
+Then land it: merge, open a pull request,
 
 25
-00:02:05,658 --> 00:02:07,758
-On your phone it's the same app.
+00:01:58,559 --> 00:02:01,683
+or discard it, and its worktree is cleaned up.
 
 26
-00:02:07,458 --> 00:02:11,020
-Glance at the board, answer a question, approve a command.
+00:02:05,658 --> 00:02:10,881
+Each project gets its own lead agent, with its own jobs, schedules and instructions.
 
 27
-00:02:16,269 --> 00:02:18,845
-Push notifications tell you when something needs you.
+00:02:11,730 --> 00:02:14,259
+Chat with the orchestrator, or with any lead.
 
 28
-00:02:21,745 --> 00:02:23,746
-Hold to talk to the orchestrator.
+00:02:15,709 --> 00:02:18,377
+And Command-K gives a job, or jumps anywhere.
 
 29
-00:02:23,446 --> 00:02:27,664
-Replies come back as one spoken line, and each agent can have its own voice.
+00:02:24,658 --> 00:02:26,758
+On your phone it's the same app.
 
 30
-00:02:31,114 --> 00:02:35,501
-And every project's lead shows up in Claude's Remote Control, under its own name.
+00:02:26,458 --> 00:02:30,020
+Glance at the board, answer a question, approve a command.
 
 31
-00:02:38,401 --> 00:02:41,940
-The fleet shows every agent in the session and what it's doing,
+00:02:35,269 --> 00:02:37,845
+Push notifications tell you when something needs you.
 
 32
-00:02:41,640 --> 00:02:44,460
-and each one's terminal runs live in the browser.
+00:02:40,745 --> 00:02:42,746
+Hold to talk to the orchestrator.
 
 33
-00:02:48,901 --> 00:02:54,913
-Spend is measured per job and per day. Schedules bring recurring work round on time,
+00:02:42,446 --> 00:02:46,664
+Replies come back as one spoken line, and each agent can have its own voice.
 
 34
-00:02:54,613 --> 00:02:58,721
-and the journal records every nudge, answer and restart.
+00:02:50,114 --> 00:02:54,501
+And every project's lead shows up in Claude's Remote Control, under its own name.
 
 35
-00:02:59,571 --> 00:03:02,611
-And the header shows the machine's load at a glance.
+00:02:57,401 --> 00:03:00,940
+The fleet shows every agent in the session and what it's doing,
 
 36
-00:03:05,511 --> 00:03:08,597
-Getting started is one install, and one command.
+00:03:00,640 --> 00:03:03,460
+and each one's terminal runs live in the browser.
 
 37
-00:03:10,111 --> 00:03:13,383
-Open the link it prints, pick a password, and you're in.
+00:03:09,901 --> 00:03:15,913
+Spend is measured per job and per day. Schedules bring recurring work round on time,
 
 38
-00:03:21,111 --> 00:03:26,009
+00:03:15,613 --> 00:03:19,721
+and the journal records every nudge, answer and restart.
+
+39
+00:03:20,571 --> 00:03:23,611
+And the header shows the machine's load at a glance.
+
+40
+00:03:26,511 --> 00:03:29,597
+Getting started is one install, and one command.
+
+41
+00:03:31,111 --> 00:03:34,069
+Open the link it prints and pick a password.
+
+42
+00:03:33,769 --> 00:03:37,634
+A short checklist confirms your tools, and you press Start.
+
+43
+00:03:44,111 --> 00:03:49,009
 No more checking tabs to see who stopped. Give it a job. Crowsnest keeps it going.
 

@@ -187,13 +187,13 @@ export async function renderCaption(browser, text, file) {
 /** The phone scene's backdrop and bezel: two 1920x1080 PNGs, and where the screen sits. */
 export const PHONE = { x: 1140, y: 58, w: 410, h: 888, radius: 52, bezel: 16 };
 
-export async function renderPhoneFrame(browser, { title, subtitle }, bgFile, bezelFile) {
+export async function renderPhoneFrame(browser, { title, subtitle, section = "" }, bgFile, bezelFile) {
   const { x, y, w, h, radius, bezel } = PHONE;
   const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const p = await ctx.newPage();
   await p.setContent(page(`<div class="grid"></div>
     <div style="position:absolute;left:220px;top:330px;width:760px">
-      <div class="mono" style="font-size:30px;color:${P.sky};letter-spacing:2px">5 · FROM YOUR PHONE</div>
+      <div class="mono" style="font-size:30px;color:${P.sky};letter-spacing:2px">${esc(section)} · FROM YOUR PHONE</div>
       <div style="font-size:76px;font-weight:680;letter-spacing:-2px;margin-top:18px;line-height:1.08">${esc(title)}</div>
       <div style="font-size:34px;color:${P.body};margin-top:26px;line-height:1.4">${esc(subtitle)}</div>
     </div>
