@@ -155,10 +155,17 @@ func (w *Watcher) HandleEvent(ctx context.Context, event hub.Event) {
 }
 
 // QuestionAsked pushes a newly asked question (blocking and normal; low is not pushed). A confirm
-// or choice question carries its first two options as buttons.
+// or choice question carries its first two options as buttons, except one of crowsnest's own
+// gates (a land request, a delegation approval, a task review): that is answered only on its
+// Inbox card, where the human sees the whole question, never by one tap on a lock screen (R5-S2).
 func (w *Watcher) QuestionAsked(question questions.Question) {
 	notice, ok := QuestionNotice(question.ID, question.Title, string(question.Kind), string(question.Urgency), question.SourcePane)
 	if !ok {
+		return
+	}
+	if questions.IsGate(question.Context) {
+		notice.Body += " (open it to answer)"
+		w.notify(context.Background(), notice)
 		return
 	}
 	var options []NoticeAction

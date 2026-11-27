@@ -256,3 +256,27 @@ func TestWatcherSpendsNoBudgetWithoutDevices(t *testing.T) {
 		t.Fatalf("the budget was spent without a device: %s", why)
 	}
 }
+
+// TestGateQuestionsGetNoButtons is R5-S2: crowsnest's own gates are pushed without buttons or an
+// action token; an ordinary confirm keeps its buttons.
+func TestGateQuestionsGetNoButtons(t *testing.T) {
+	watcher, sender, _ := newTestWatcher()
+	options := []questions.Option{{Key: "allow", Label: "Allow"}, {Key: "deny", Label: "Deny"}}
+	for i, key := range []string{questions.ContextLandFor, questions.ContextApprovalFor, questions.ContextTaskReview} {
+		watcher.QuestionAsked(questions.Question{ID: "q_" + string(rune('1'+i)), Title: "Gate", Kind: questions.KindConfirm, Urgency: questions.UrgencyBlocking,
+			SourcePane: "w1:p" + string(rune('1'+i)), Options: options, Context: map[string]string{key: "j_5"}})
+	}
+	watcher.QuestionAsked(questions.Question{ID: "q_9", Title: "Ship?", Kind: questions.KindConfirm, Urgency: questions.UrgencyBlocking, SourcePane: "w1:p9", Options: options})
+	got := sender.got()
+	if len(got) != 4 {
+		t.Fatalf("every question is still pushed: %+v", got)
+	}
+	for _, notice := range got[:3] {
+		if len(notice.Actions) != 0 || notice.ActionItem != "" {
+			t.Fatalf("a gate got buttons: %+v", notice)
+		}
+	}
+	if got[3].ActionItem != "question:q_9" { // the test watcher mints no token, so Actions are dropped at send
+		t.Fatalf("an ordinary confirm lost its buttons: %+v", got[3])
+	}
+}

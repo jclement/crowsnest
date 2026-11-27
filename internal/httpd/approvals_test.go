@@ -213,3 +213,26 @@ func TestPushActionAnswersAQuestion(t *testing.T) {
 		t.Fatalf("answered %+v", answered)
 	}
 }
+
+// TestPushActionNeverAnswersAGate is R5-S2: a land request, a delegation approval or a task
+// review is answered only on its Inbox card, even with a token that names it.
+func TestPushActionNeverAnswersAGate(t *testing.T) {
+	f := newApprovalFixture(t)
+	for _, key := range []string{questions.ContextLandFor, questions.ContextApprovalFor, questions.ContextTaskReview, questions.ContextGate} {
+		question, err := f.questions.Ask(context.Background(), questions.AskInput{
+			Title: "Land job j_5: merge it?", Kind: questions.KindConfirm, Recommend: "deny",
+			Options: []questions.Option{{Key: "allow", Label: "Allow"}, {Key: "deny", Label: "Deny"}},
+			Context: map[string]string{key: "j_5"},
+		}, questions.Caller{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, _ := f.tokens.Mint(context.Background(), "question:"+question.ID, []string{"allow", "deny"})
+		if code := f.action(token, "allow"); code != http.StatusForbidden {
+			t.Fatalf("%s gate answered from a notification: %d", key, code)
+		}
+		if still, _ := f.questions.Get(context.Background(), question.ID); still.Status != questions.StatusOpen {
+			t.Fatalf("%s gate was settled: %+v", key, still)
+		}
+	}
+}

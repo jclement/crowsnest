@@ -183,6 +183,16 @@ func (s *Server) handlePushAction(w http.ResponseWriter, r *http.Request) {
 		if service == nil {
 			return
 		}
+		// A gate is never answered from a notification (R5-S2): no button is offered for one, and
+		// a token that somehow names one is refused here too. A gate's context is fixed when it
+		// is asked, so reading it first cannot race.
+		if asked, err := service.Get(r.Context(), id); err != nil {
+			s.writeQuestionError(w, r, err)
+			return
+		} else if questions.IsGate(asked.Context) {
+			writeError(w, http.StatusForbidden, codeForbidden, "This question is one of crowsnest's own gates; answer it on its card in the Inbox.")
+			return
+		}
 		value, _ := json.Marshal(request.Action)
 		question, err := service.Answer(r.Context(), id, questions.AnswerInput{Value: value})
 		if err != nil {
