@@ -1589,7 +1589,12 @@ changes for each worktree/lead?" Then: "diff viewer probably needs fullscreen mo
 - **Subjects.** A job (`j_N`: its worktree, or its directory when not isolated), a project's main
   checkout (`project:<id>`, the lead's), or the orchestrator's folder. `changes.Resolver`
   (implemented in `cmd`) turns each into a root and a base; the package knows nothing of jobs.
-  A job that was landed or torn down answers `410` ("its review is kept on the job").
+  A job that was landed or torn down answers `410` ("its review is kept on the job"). The
+  repository read is the subject's own (R7-S8): a worktree job's root must be its repository's
+  top (one whose `.git` file is gone is not read through the repository around it), and no
+  subject is read through a repository whose top is the home directory or above it (a dotfiles
+  repository would put every untracked file under home in the diff). A directory job or project
+  inside a larger repository reads that repository.
 - **Three comparisons, all tree to tree.** committed = base → HEAD; uncommitted = HEAD → the work
   tree; all = base → the work tree; plus **since viewed** (below). The base: a worktree job's
   merge base with `refs/heads/<base_branch>`, else its `base_commit`, else HEAD when it started

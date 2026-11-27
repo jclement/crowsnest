@@ -417,6 +417,36 @@ func TestFileServesOnlyTheHashAsked(t *testing.T) {
 	}
 }
 
+// TestRepositoryTopMustBeTheSubjects is R7-S8: a worktree job whose .git file is gone is not read
+// as the repository around it, and no subject is read through a repository whose top holds home.
+func TestRepositoryTopMustBeTheSubjects(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.res.mu.Lock()
+	f.res.job.Worktree = true
+	f.res.mu.Unlock()
+	if _, err := f.svc.Summary(ctx, job1, ScopeAll, false); err != nil {
+		t.Fatalf("a worktree read as itself: %v", err)
+	}
+	// A folder inside the main checkout, given as a worktree job's root: git finds main around it.
+	inner := filepath.Join(f.main, "inner")
+	write(t, inner, "x.txt", "x\n")
+	f.res.mu.Lock()
+	f.res.job.Root = inner
+	f.res.mu.Unlock()
+	f.later()
+	if _, err := f.svc.Summary(ctx, job1, ScopeAll, true); err == nil {
+		t.Fatal("a worktree job was read through the repository around it")
+	}
+	// Home inside a repository (a dotfiles repository): a project in it is not read.
+	home := filepath.Join(f.main, "home")
+	write(t, home, "notes.txt", "n\n")
+	svc := New(Options{Store: f.st, Resolver: f.res, Now: func() time.Time { return f.now }, Home: home})
+	if _, err := svc.Summary(ctx, Ask{Kind: KindProject, Ref: "1"}, ScopeAll, false); err == nil || !strings.Contains(err.Error(), "home") {
+		t.Fatalf("the repository holding home was read: %v", err)
+	}
+}
+
 // TestConcurrentReadsAreRaceFree is R7-C08: a reading being replaced while the progress route and
 // the watch tick look at it. Run with -race (mise run test does): before the fix, the entry's
 // reading and time were written under the entry's lock and read under the service's.

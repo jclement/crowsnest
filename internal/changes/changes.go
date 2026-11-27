@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -104,6 +105,8 @@ type Target struct {
 	Walkthrough string `json:"-"`
 	// BaseRef is the base asked for on a main checkout (BaseUpstream, BaseSession or a ref).
 	BaseRef string `json:"-"`
+	// Worktree is set for a job in a worktree of its own: its root must be its repository's top.
+	Worktree bool `json:"-"`
 }
 
 // Resolver turns subjects into targets. Errors it returns are shown to the human as they are.
@@ -128,6 +131,9 @@ type Options struct {
 	Now      func() time.Time
 	// MinInterval overrides MinInterval (tests shorten it).
 	MinInterval time.Duration
+	// Home is the user's home directory: a repository whose top is home or above it is never
+	// read as a subject's (R7-S8). "" skips that check.
+	Home string
 }
 
 // Service is the live diff and its marks.
@@ -148,7 +154,46 @@ func (s *Service) readCheckoutSlotted(ctx context.Context, target Target, now ti
 		return nil, fmt.Errorf("waiting for a turn to read the diff: %w", ctx.Err())
 	}
 	defer func() { <-s.slots }()
-	return readCheckout(ctx, target, now)
+	root, err := s.repositoryTop(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	return readCheckout(ctx, target, root, now)
+}
+
+// repositoryTop is the top of the repository a subject's root is in, refusing one that is not the
+// subject's own (R7-S8): a worktree job whose top is anywhere but its own root (its .git file was
+// deleted, so git found the repository around it), and any repository whose top is the home
+// directory or above it (a dotfiles repository in ~ would make every untracked file under home
+// part of the diff, and each reading would write blobs into it). A directory job or a project
+// inside a larger repository reads that repository: it is the one the work is in.
+func (s *Service) repositoryTop(ctx context.Context, target Target) (string, error) {
+	top, err := landing.Root(ctx, target.Root)
+	if err != nil {
+		return "", fail("not_found", "%s is not in a git repository", target.Root)
+	}
+	if top == "" {
+		return target.Root, nil
+	}
+	resolvedTop, resolvedRoot := resolvedPath(top), resolvedPath(target.Root)
+	if target.Worktree && resolvedTop != resolvedRoot {
+		return "", fail("not_found", "%s is not a worktree of its own any more (git finds the repository at %s around it); crowsnest does not read that repository as this job's", target.Root, top)
+	}
+	if s.opts.Home != "" {
+		home := resolvedPath(s.opts.Home)
+		if resolvedTop == home || strings.HasPrefix(home, resolvedTop+string(filepath.Separator)) || resolvedTop == "/" {
+			return "", fail("not_found", "%s is inside the repository at %s, which holds your home folder; crowsnest does not read it as this checkout's diff", target.Root, top)
+		}
+	}
+	return top, nil
+}
+
+// resolvedPath is path with its links resolved (path itself when it cannot be).
+func resolvedPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
 }
 
 // evictIdle drops the entries nobody has asked about in evictAfter and that no reading holds.
@@ -343,14 +388,8 @@ func (s *Service) publish(subject, revision string) {
 	}
 }
 
-// readCheckout takes one reading of target's checkout.
-func readCheckout(ctx context.Context, target Target, now time.Time) (*reading, error) {
-	root := target.Root
-	if top, err := landing.Root(ctx, root); err != nil {
-		return nil, fail("not_found", "%s is not in a git repository", root)
-	} else if top != "" {
-		root = top
-	}
+// readCheckout takes one reading of target's checkout, whose repository's top is root.
+func readCheckout(ctx context.Context, target Target, root string, now time.Time) (*reading, error) {
 	r := &reading{head: landing.HeadTree(ctx, root), at: now, scopes: map[string][]landing.DiffFile{}}
 	r.base, r.baseLabel, r.baseChoices = chooseBase(ctx, root, target)
 	work, skipped, err := landing.WorkTree(ctx, root)
@@ -766,9 +805,9 @@ func (s *Service) File(ctx context.Context, ask Ask, fileAsk FileAsk) (FileView,
 	if file.TooLarge {
 		return view, nil
 	}
-	root := target.Root
-	if top, err := landing.Root(ctx, root); err == nil && top != "" {
-		root = top
+	root, err := s.repositoryTop(ctx, target)
+	if err != nil {
+		return FileView{}, err
 	}
 	opts := landing.PatchOptions{Context: fileAsk.Context, IgnoreWhitespace: fileAsk.IgnoreWhitespace}
 	oldBlob, newBlob := file.OldBlob, file.NewBlob
