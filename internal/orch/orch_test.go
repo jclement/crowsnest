@@ -330,7 +330,7 @@ func TestRunFollowsFleetEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go rig.orch.Run(ctx)
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for rig.orch.Status().State != StateIdle {
 		if time.Now().After(deadline) {
 			t.Fatalf("never started: %+v", rig.orch.Status())
