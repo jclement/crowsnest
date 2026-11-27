@@ -107,7 +107,7 @@ test("the palette's New project in…: a pasted path, a refused one, and an Azur
 });
 
 test("the job form's where: Browse picks the folder, a folder that is not a repo is flagged", async ({ page }, testInfo) => {
-  await page.goto("/jobs");
+  await page.goto("/jobs?new=1"); // the board's New job sheet: the same form as Now's job box
   await page.getByRole("button", { name: /To the orchestrator/ }).click();
   await page.getByRole("button", { name: "Browse for a folder" }).click();
   const dialog = page.getByRole("dialog", { name: "Where should the job run?" });

@@ -148,11 +148,11 @@ test("a push that is not JSON still shows a notice", async ({ page, context, bas
   await deliver(page, context, baseURL!, "not json", [{ title: "crowsnest", url: "/" }]);
 });
 
-test("the sheet passes axe and keeps tap targets at 44 px", async ({ page }, testInfo) => {
+test("the notifications section passes axe and keeps tap targets at 44 px", async ({ page }, testInfo) => {
   const sheet = await openNotifications(page);
   await expect(sheet.getByRole("switch", { name: /Questions/ })).toBeVisible();
-  await expectAccessible(page, testInfo, "notifications sheet");
-  if (isPhone(testInfo)) expect(await smallTapTargets(page, "[role=dialog]")).toEqual([]);
+  await expectAccessible(page, testInfo, "notifications section");
+  if (isPhone(testInfo)) expect(await smallTapTargets(page, "#settings-notifications")).toEqual([]);
 });
 
 // Answering from a notification (DESIGN.md 8.7, 23.4): a routine blocking confirm question is
