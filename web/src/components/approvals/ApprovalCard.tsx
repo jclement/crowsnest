@@ -38,6 +38,7 @@ import { Button } from "../ui/Button";
 import { Chip, type ChipTone } from "../ui/Chip";
 import { RememberForJob } from "./RememberForJob";
 import { useToast } from "../ui/toast-context";
+import { HelpButton } from "../help/HelpButton";
 
 interface ApprovalCardProps {
   approval: Approval;
@@ -125,6 +126,7 @@ export const ApprovalCard = forwardRef<HTMLElement, ApprovalCardProps>(function 
               {approval.risk !== "low" && <AlertTriangle className="h-3 w-3" aria-hidden />}
               {riskLabels[approval.risk]}
             </Chip>
+            <HelpButton topic="concepts/questions-approvals-dialogs#risk-levels" what="risk levels" />
             <Chip mono>{approval.tool_name}</Chip>
             {approval.job_id && <Chip mono>{approval.job_id}</Chip>}
             <span>{relativeTime(approval.created_at)}</span>

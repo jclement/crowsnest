@@ -33,6 +33,8 @@ import { boardSections, sectionLabels, type BoardSection, type Job } from "../li
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { filterJobs, filterProjectId, filterToParam, projectsById, type ProjectFilter, type ProjectView } from "../lib/projects";
 import { findProject, useJobs, useProjects, useQueue, useSweep } from "../lib/queries";
+import { HelpButton } from "../components/help/HelpButton";
+import { Hint } from "../components/help/Hint";
 
 export function JobsView() {
   const { job: selected } = useSearch({ strict: false }) as { job?: string };
@@ -78,6 +80,12 @@ export function JobsView() {
           <Button compact variant="ghost" icon={NotebookText} onClick={() => setJournalOpen(true)}>
             Journal
           </Button>
+          <HelpButton topic="concepts/jobs#states" what="job states" inline={false} />
+        </div>
+        <div className="px-3 pt-2 empty:hidden">
+          <Hint id="jobs" topic="concepts/jobs#states">
+            Each card's chip is the job's state; a second chip (Accepted, Unverified…) is crowsnest's own check of a coding job's done.
+          </Hint>
         </div>
         <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
         <LimitsSheet open={limitsOpen} onClose={() => setLimitsOpen(false)} />

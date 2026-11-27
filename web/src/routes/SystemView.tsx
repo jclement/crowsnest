@@ -16,6 +16,7 @@ import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
 import { useToast } from "../components/ui/toast-context";
 import { sourceLabels, systemEndpoints, systemKeys, type Check, type SystemReport } from "../lib/system";
+import { HelpButton } from "../components/help/HelpButton";
 
 const groups: { id: Check["group"]; title: string }[] = [
   { id: "herdr", title: "herdr" },
@@ -51,7 +52,8 @@ export function SystemView() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-3 md:p-5">
       <header className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-auto text-base font-semibold text-heading">System</h1>
+        <h1 className="text-base font-semibold text-heading">System</h1>
+        <HelpButton topic="troubleshooting/doctor" what="the doctor's checks" className="mr-auto" />
         <Button icon={RefreshCw} onClick={() => recheck.mutate()} disabled={recheck.isPending}>
           {recheck.isPending ? "Checking…" : "Re-check"}
         </Button>

@@ -28,6 +28,7 @@ import { useAgentScreen, useApproval, useApprovals, useAttention, useAttentionAc
 import { outcome, requester, riskLabels, type Approval } from "../lib/approvals";
 import { ApprovalCard } from "../components/approvals/ApprovalCard";
 import { answerSummary, kindLabels, type Question } from "../lib/questions";
+import { HelpButton } from "../components/help/HelpButton";
 
 type InboxTab = "open" | "history";
 
@@ -58,6 +59,7 @@ export function InboxView() {
             ]}
           />
           <NotificationToggle className="ml-auto" />
+          <HelpButton topic="concepts/questions-approvals-dialogs" what="questions, approvals and dialogs" inline={false} />
         </header>
         <TabPanel id="inbox-tabs" value={tab} className="min-h-0 flex-1 overflow-y-auto">
           {tab === "open" ? <OpenList selected={selected} onSelect={select} /> : <HistoryList selected={selected} onSelect={select} />}

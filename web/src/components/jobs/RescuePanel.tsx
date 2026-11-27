@@ -40,6 +40,7 @@ function causeAdvice(job: RescueJob): { text: string; push: boolean } | null {
 import { useAgentScreen, useFleet, useJobAction, useJobMessage, useRestartWithInstructions, useSendKeys } from "../../lib/queries";
 import { DialogCard, ScreenText } from "../fleet/DialogCard";
 import { useToast } from "../ui/toast-context";
+import { HelpButton } from "../help/HelpButton";
 
 /** The models "Switch model" offers; Claude Code's /model takes these aliases. */
 const MODELS = ["sonnet", "opus", "haiku"] as const;
@@ -58,16 +59,19 @@ export function RescuePanel({ job, defaultOpen }: RescuePanelProps) {
   const navigate = useNavigate();
   return (
     <section aria-label="Rescue" className="rounded-md border border-border" data-testid="rescue-panel">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm font-medium text-heading hover:bg-hover md:min-h-9"
-      >
-        <LifeBuoy className="h-4 w-4 text-accent" aria-hidden />
-        <span className="flex-1">Rescue: get the agent moving without a terminal</span>
-        {open ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
-      </button>
+      <div className="flex items-center pr-1">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 text-left text-sm font-medium text-heading hover:bg-hover md:min-h-9"
+        >
+          <LifeBuoy className="h-4 w-4 text-accent" aria-hidden />
+          <span className="flex-1">Rescue: get the agent moving without a terminal</span>
+          {open ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
+        </button>
+        <HelpButton topic="how-to/rescue#the-rescue-panel" what="the rescue buttons" inline={false} />
+      </div>
       {open && <RescueBody job={job} openTerminal={() => void navigate({ to: "/fleet", search: { agent: job.pane_id, view: "terminal" } })} />}
     </section>
   );

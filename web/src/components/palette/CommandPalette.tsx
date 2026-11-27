@@ -52,11 +52,14 @@ import {
   BookText,
   Activity,
   SlidersHorizontal,
+  LifeBuoy,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
+import { looksLikeQuestion, searchManual } from "../../lib/manual";
+import { useManual } from "../../lib/manual-queries";
 import { useOrchestrator } from "../../lib/conversation-queries";
 import { highlightRuns } from "../../lib/fuzzy";
 import {
@@ -65,6 +68,8 @@ import {
   flatten,
   keepSelection,
   rankItems,
+  parseQuery,
+  withManual,
   scoreItem,
   type ConfirmSpec,
   type InputSpec,
@@ -112,6 +117,7 @@ const icons: Record<PaletteIcon, LucideIcon> = {
   voice: Mic,
   system: Activity,
   settings: SlidersHorizontal,
+  help: LifeBuoy,
   project: FolderKanban,
   instructions: BookText,
   pause: PauseCircle,
@@ -155,7 +161,15 @@ export function CommandPalette({ inputRef, onClose, run, recents, onRan, mac, sp
   const sources = usePaletteSources(speak, voiceSettings);
   const items = useMemo(() => buildItems(sources), [sources]);
 
-  const groups = useMemo(() => (level.kind === "root" ? rankItems(items, rootQuery, recents) : null), [level, items, rootQuery, recents]);
+  // The manual's sections, searched on the same query (its chunk loads when the palette opens).
+  const manual = useManual();
+  const groups = useMemo(() => {
+    if (level.kind !== "root") return null;
+    const ranked = rankItems(items, rootQuery, recents);
+    const parsed = parseQuery(rootQuery);
+    if (!manual.data || parsed.mode === "job" || parsed.text.trim().length < 2) return ranked;
+    return withManual(ranked, searchManual(manual.data.index, parsed.text, 5), looksLikeQuestion(parsed.text));
+  }, [level, items, rootQuery, recents, manual.data]);
   const rows: RankedItem[] = useMemo(() => {
     if (groups) return flatten(groups);
     if (level.kind === "actions") return actionRows(level.item, levelQuery);

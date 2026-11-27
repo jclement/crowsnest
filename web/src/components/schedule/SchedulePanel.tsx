@@ -28,6 +28,7 @@ import { SkeletonRows } from "../ui/Skeleton";
 import { Switch } from "../ui/Switch";
 import { useToast } from "../ui/toast-context";
 import { ScheduleForm } from "./ScheduleForm";
+import { HelpButton } from "../help/HelpButton";
 
 /** "" every task, "0" the orchestrator's and unfiled ones, else a project id. */
 type Filter = string;
@@ -401,7 +402,7 @@ export function ScheduleSheet({ open, onClose, projectId }: { open: boolean; onC
   };
   return (
     <>
-      <Sheet open={open} onClose={onClose} title="Schedule">
+      <Sheet open={open} onClose={onClose} title="Schedule" headerExtra={<HelpButton topic="concepts/schedules-and-pokes#schedules" what="schedules" inline={false} />}>
         {open && <DigestSwitch onOpenList={() => setDigestsOpen(true)} />}
         {open && <SchedulePanel projectId={projectId} onOpenJob={openJob} />}
       </Sheet>

@@ -13,6 +13,7 @@ import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
 import { backupURL } from "../../lib/ops";
 import { CommandLine } from "./CheckList";
+import { HelpButton } from "../help/HelpButton";
 
 const inputClass = "h-11 w-full min-w-0 rounded border border-border bg-surface px-3 text-sm font-normal text-heading md:h-9 disabled:bg-surface-sunken disabled:text-muted";
 
@@ -26,7 +27,7 @@ interface SettingsSheetProps {
 export function SettingsSheet({ open, onClose, onOpen }: SettingsSheetProps) {
   const page = useQuery({ queryKey: systemKeys.settings, queryFn: systemEndpoints.settings, enabled: open });
   return (
-    <Sheet open={open} onClose={onClose} title="Settings">
+    <Sheet open={open} onClose={onClose} title="Settings" headerExtra={<HelpButton topic="reference/settings" what="every setting and flag" inline={false} />}>
       <div className="flex flex-col gap-5 p-4">
         {page.isPending && <p className="text-xs text-muted">Loading…</p>}
         {page.isError && <p className="text-xs text-danger">Could not load the settings. {(page.error as Error).message}</p>}

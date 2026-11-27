@@ -7,13 +7,14 @@ import { SettingsSheet } from "../system/SettingsSheet";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Sheet } from "../ui/Sheet";
+import { HelpButton } from "../help/HelpButton";
 
 export function LimitsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const throttle = useThrottle(open);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const data = throttle.data;
   return (
-    <Sheet open={open} onClose={onClose} title="Limits" size="md">
+    <Sheet open={open} onClose={onClose} title="Limits" size="md" headerExtra={<HelpButton topic="concepts/budgets-limits-pause#limits-on-running-jobs" what="the running-job limits" inline={false} />}>
       <div className="flex flex-col gap-3 p-4 text-sm">
         {data && (
           <>

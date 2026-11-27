@@ -172,6 +172,11 @@ description = "Jobs view against the built binary in --demo mode (a job in every
 depends = ["build"]
 run = "npm --prefix web run screenshots:jobs"
 
+[tasks."screenshots:manual"]
+description = "The built-in manual's pictures (docs/manual/img) from the built binary in --demo mode, light theme at 1x: Now, the board, a project, a decision and rescue on a phone, the Land tab, the Schedule sheet, Chat"
+depends = ["build"]
+run = "npm --prefix web run screenshots:manual"
+
 [tasks."screenshots:palette"]
 description = "Command palette against the built binary in --demo mode at 375 and 1440 px, light and dark: open, with a query, a job's actions, and the keyboard shortcuts sheet, into web/screenshots"
 depends = ["build"]

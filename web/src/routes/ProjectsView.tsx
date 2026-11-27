@@ -17,6 +17,8 @@ import { cn } from "../lib/cn";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { leadChip, leadRunning, type ProjectView } from "../lib/projects";
 import { useLeadAction, useProjects } from "../lib/queries";
+import { HelpButton } from "../components/help/HelpButton";
+import { Hint } from "../components/help/Hint";
 
 export function ProjectsView({ slug }: { slug?: string }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
@@ -67,6 +69,7 @@ function ProjectList({ selected, onNew }: { selected?: string; onNew: () => void
     <>
       <header className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-3">
         <h1 className="text-sm font-semibold text-heading">Projects</h1>
+        <HelpButton topic="concepts/projects-and-leads" what="projects, leads and the orchestrator" />
         <label className="ml-auto inline-flex min-h-11 items-center gap-1.5 text-xs text-muted md:min-h-7">
           <input type="checkbox" checked={archived} onChange={(event) => setArchived(event.target.checked)} className="h-4 w-4 accent-[var(--color-accent)]" />
           Show archived
@@ -76,6 +79,11 @@ function ProjectList({ selected, onNew }: { selected?: string; onNew: () => void
         </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="px-3 pt-2 empty:hidden">
+          <Hint id="projects" topic="concepts/projects-and-leads">
+            A project is a repository with its own standing lead: give the project a job and its lead plans it and hands it to agents in worktrees.
+          </Hint>
+        </div>
         {projects.isPending ? (
           <SkeletonRows rows={4} label="Loading projects" />
         ) : projects.isError ? (

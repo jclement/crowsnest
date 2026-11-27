@@ -33,7 +33,12 @@ export function Sheet({ open, onClose, title, headerExtra, size = "lg", children
     document.body.style.overflow = "hidden";
     panelRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCloseRef.current();
+      if (event.key !== "Escape") return;
+      // Only the topmost sheet closes: a help sheet opened over the Schedule sheet closes alone.
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      const top = dialogs[dialogs.length - 1];
+      if (top && panelRef.current && top !== panelRef.current && top.compareDocumentPosition(panelRef.current) & Node.DOCUMENT_POSITION_PRECEDING) return;
+      onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => {

@@ -25,10 +25,11 @@ import { Button } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
+import { HelpButton } from "../help/HelpButton";
 
 export function VoiceSettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
-    <Sheet open={open} onClose={onClose} title="Voice" size="md">
+    <Sheet open={open} onClose={onClose} title="Voice" size="md" headerExtra={<HelpButton topic="how-to/voice#speak-mode-vs-the-mic" what="speak mode and the mic" inline={false} />}>
       {open && <VoiceSettingsBody onSaved={onClose} />}
     </Sheet>
   );

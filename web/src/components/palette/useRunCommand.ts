@@ -28,14 +28,14 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
 
   return useCallback(
     (command: PaletteCommand) => {
-      const go = (to: ViewPath | `/projects/${string}`, search: Record<string, string> = {}) =>
-        void router.navigate({ to, search } as unknown as Parameters<typeof router.navigate>[0]);
+      const go = (to: ViewPath | `/projects/${string}` | `/help/${string}`, search: Record<string, string> = {}, hash?: string) =>
+        void router.navigate({ to, search, hash } as unknown as Parameters<typeof router.navigate>[0]);
       const failed = (title: string) => (error: unknown) =>
         toast.show({ tone: "danger", title, description: error instanceof Error ? error.message : String(error) });
 
       switch (command.kind) {
         case "navigate":
-          go(command.to, command.search);
+          go(command.to, command.search, command.hash);
           return;
         case "sheet":
           openSheet(command.sheet);

@@ -18,10 +18,11 @@ import { EmptyState } from "../ui/EmptyState";
 import { Sheet } from "../ui/Sheet";
 import { SkeletonRows } from "../ui/Skeleton";
 import { LayerEditor } from "./LayerEditor";
+import { HelpButton } from "../help/HelpButton";
 
 export function InstructionsSheet({ open, onClose, initial }: { open: boolean; onClose: () => void; initial?: string }) {
   return (
-    <Sheet open={open} onClose={onClose} title="Instructions">
+    <Sheet open={open} onClose={onClose} title="Instructions" headerExtra={<HelpButton topic="concepts/instruction-layers" what="instruction layers" inline={false} />}>
       {open && <InstructionsPanel initial={initial} />}
     </Sheet>
   );

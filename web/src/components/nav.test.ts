@@ -13,13 +13,14 @@ describe("nav", () => {
   });
 
   it("keeps the board and the tools under More, in the same order on every screen", () => {
-    expect(moreNav.map((item) => item.to)).toEqual(["/jobs", "/fleet", "/terminal"]);
+    expect(moreNav.map((item) => item.to)).toEqual(["/jobs", "/fleet", "/terminal", "/help"]);
     expect(navItems).toEqual([...primaryNav, ...moreNav]);
   });
 
   it("knows when a More view is current", () => {
     expect(inMore("/jobs")).toBe(true);
     expect(inMore("/fleet")).toBe(true);
+    expect(inMore("/help/concepts/jobs")).toBe(true);
     expect(inMore("/")).toBe(false);
     expect(inMore("/projects/crowsnest")).toBe(false);
   });

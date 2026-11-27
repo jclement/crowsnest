@@ -3,10 +3,11 @@
 // needs you, every project, since you left), Projects, the Inbox (the badge) and Chat. The rest
 // are one tap further: on a phone under "More" (a sheet), on the desktop rail below a divider
 // in the same order. The Jobs board stays a view of its own; Fleet and the herdr TUI are the
-// recovery and debugging tools, reachable from any agent's "Open terminal" as well.
-import { FolderKanban, Gauge, Inbox, ListTodo, MessageSquare, Ship, SquareTerminal, type LucideIcon } from "lucide-react";
+// recovery and debugging tools, reachable from any agent's "Open terminal" as well. Help (the
+// manual) is last.
+import { FolderKanban, Gauge, Inbox, LifeBuoy, ListTodo, MessageSquare, Ship, SquareTerminal, type LucideIcon } from "lucide-react";
 
-export type NavPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal";
+export type NavPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal" | "/help";
 
 export interface NavItem {
   to: NavPath;
@@ -29,6 +30,8 @@ export const moreNav: NavItem[] = [
   { to: "/jobs", label: "Jobs", icon: ListTodo },
   { to: "/fleet", label: "Fleet", icon: Ship },
   { to: "/terminal", label: "Terminal", icon: SquareTerminal },
+  // The built-in manual (docs/manual): how crowsnest works and how to do things with it.
+  { to: "/help", label: "Help", icon: LifeBuoy },
 ];
 
 /** Every view, in order. */

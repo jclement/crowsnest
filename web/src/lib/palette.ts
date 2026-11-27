@@ -14,18 +14,21 @@ import { cwdTail, cleanTitle } from "./fleet";
 import { cardLine, isFinished, stateChip, stateLabels, type Job } from "./jobs";
 import { kindLabels, type Question } from "./questions";
 import { leadAgentName, leadChip, leadRunning, type ProjectView } from "./projects";
+import type { SearchHit } from "./manual";
 import type { ThemeChoice } from "./theme";
 import type { AgentStatus, Fleet } from "./types";
 import type { ChipTone } from "../components/ui/Chip";
 
 // ---- Commands -------------------------------------------------------------------------------
 
-export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/fleet" | "/terminal" | "/system";
-export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions" | "settings" | "digests" | "worktrees" | "limits" | "pause";
+export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/fleet" | "/terminal" | "/system" | "/help";
+/** The sheets the palette (and the manual's "open" buttons) can open. */
+export const PALETTE_SHEETS = ["journal", "notifications", "shortcuts", "voice", "schedule", "spend", "instructions", "settings", "digests", "worktrees", "limits", "pause"] as const;
+export type PaletteSheet = (typeof PALETTE_SHEETS)[number];
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
 export type PaletteCommand =
-  | { kind: "navigate"; to: ViewPath | `/projects/${string}`; search?: Record<string, string> }
+  | { kind: "navigate"; to: ViewPath | `/projects/${string}` | `/help/${string}`; search?: Record<string, string>; hash?: string }
   /** A job for a project's lead (to: "lead"). */
   | { kind: "projectJob"; projectId: number; name: string; text: string }
   | { kind: "leadAction"; slug: string; name: string; action: "start" | "stop" }
@@ -73,7 +76,7 @@ export function completeInput(input: InputSpec, text: string): PaletteCommand {
 
 // ---- Items ----------------------------------------------------------------------------------
 
-export type PaletteGroupId = "recent" | "do" | "needs" | "jobs" | "projects" | "navigate" | "agents" | "actions";
+export type PaletteGroupId = "recent" | "do" | "needs" | "jobs" | "projects" | "navigate" | "agents" | "actions" | "manual";
 
 export const groupLabels: Record<PaletteGroupId, string> = {
   recent: "Recent",
@@ -84,6 +87,7 @@ export const groupLabels: Record<PaletteGroupId, string> = {
   navigate: "Go to",
   agents: "Agents and panes",
   actions: "Actions",
+  manual: "Manual",
 };
 
 /** Icons by name, so this file stays free of React; the component maps them to lucide icons. */
@@ -122,7 +126,8 @@ export type PaletteIcon =
   | "digest"
   | "worktrees"
   | "system"
-  | "settings";
+  | "settings"
+  | "help";
 
 /** A secondary action of an item: reached with → (or the row's chevron), or ⌘Enter for the first. */
 export interface PaletteAction {
@@ -183,6 +188,7 @@ const views: Array<{ to: ViewPath; label: string; icon: PaletteIcon; keywords: s
   { to: "/inbox", label: "Inbox", icon: "inbox", keywords: ["questions", "dialogs", "answer"], key: "i" },
   { to: "/fleet", label: "Fleet", icon: "fleet", keywords: ["agents", "workspaces", "panes"], key: "f" },
   { to: "/terminal", label: "Terminal", icon: "terminal", keywords: ["herdr", "tui", "shell"], key: "t" },
+  { to: "/help", label: "Help", icon: "help", keywords: ["manual", "docs", "documentation", "guide", "how", "concepts"], key: "m" },
 ];
 
 /** The g-sequence for each view (g j, g c, …), for the shortcuts sheet and lib/hotkeys.ts. */
@@ -692,6 +698,39 @@ export function rankItems(items: PaletteItem[], rawQuery: string, recents: reado
 function liveJob(item: PaletteItem): boolean {
   const label = item.chip?.label;
   return label !== undefined && !["Done", "Failed", "Cancelled"].includes(label);
+}
+
+// ---- The manual ------------------------------------------------------------------------------
+
+const MANUAL_LIMIT = 5;
+
+/** A manual section as a palette row: Enter opens the Help view at that heading. */
+export function manualItem(hit: SearchHit): PaletteItem {
+  const to = hit.pageId === "README" ? "/help" : (`/help/${hit.pageId}` as const);
+  return {
+    id: `manual:${hit.pageId}#${hit.slug}`,
+    group: "manual",
+    title: hit.slug ? hit.heading : hit.pageTitle,
+    subtitle: hit.slug ? `${hit.pageTitle} · ${hit.snippet}` : hit.snippet,
+    icon: "help",
+    command: { kind: "navigate", to, hash: hit.slug || undefined },
+    verb: "Read",
+  };
+}
+
+/**
+ * The palette's groups with the manual's matches added: first when the query reads as a question
+ * ("how do I land", "what is a lead?"), so Enter opens the answer; otherwise last, after
+ * everything the app itself has.
+ */
+export function withManual(groups: PaletteGroup[], hits: SearchHit[], question: boolean): PaletteGroup[] {
+  if (hits.length === 0) return groups;
+  const group: PaletteGroup = {
+    id: "manual",
+    label: groupLabels.manual,
+    items: hits.slice(0, MANUAL_LIMIT).map((hit) => ({ item: manualItem(hit), score: hit.score, titlePositions: [], subtitlePositions: [] })),
+  };
+  return question ? [group, ...groups] : [...groups, group];
 }
 
 /** The rows in display order. */

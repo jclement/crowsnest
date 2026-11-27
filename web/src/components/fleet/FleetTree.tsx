@@ -8,6 +8,7 @@ import { cleanTitle, cwdTail, filterFleet, needsYou, needsYouCount, sortFleet } 
 import type { Fleet, Pane, PaneAgent, Tab, Workspace } from "../../lib/types";
 import { Chip, StatusDot } from "../ui/Chip";
 import { EmptyState } from "../ui/EmptyState";
+import { HelpButton } from "../help/HelpButton";
 
 interface FleetTreeProps {
   fleet: Fleet;
@@ -42,6 +43,7 @@ export function FleetTree({ fleet, selected, onSelect }: FleetTreeProps) {
           </span>
           {urgent > 0 && <span className="font-medium text-danger">{urgent} at a dialog</span>}
           <span className="ml-auto font-mono">herdr {fleet.herdr_version}</span>
+          <HelpButton topic="how-to/terminals" what="the Fleet and the terminals" />
         </p>
       </div>
       {workspaces.length === 0 ? (

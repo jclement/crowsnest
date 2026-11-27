@@ -18,6 +18,7 @@ import { Card } from "../ui/Card";
 import { Chip } from "../ui/Chip";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
+import { HelpButton } from "../help/HelpButton";
 
 const actionIcons = { merge: GitMerge, pr: GitPullRequest, discard: Trash2 } as const;
 
@@ -144,7 +145,11 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
       {options.base_protected && (
         <p className="mb-2 text-xs text-warning">{options.base} is protected: Land never merges into it. Use the pull request.</p>
       )}
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Land actions">
+      <p className="mb-1 flex items-center gap-1 text-2xs text-muted">
+        Merge, push and open a pull request, or discard
+        <HelpButton topic="concepts/worktrees-and-landing#landing" what="landing" />
+      </p>
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Land actions">
         {landActions.map((action) => (
           <Button
             key={action}
@@ -317,7 +322,7 @@ function FileBody({ jobId, file }: { jobId: string; file: FileChange }) {
 
 function Reviews({ view }: { view: ReviewView }) {
   return (
-    <Card title="Review">
+    <Card title="Review" actions={<HelpButton topic="concepts/acceptance#the-review-gate" what="the review gate" />}>
       <ol aria-label="Review rounds" className="flex flex-col gap-3">
         {view.reviews.map((round) => (
           <li key={round.job_id || `round-${round.round}`}>

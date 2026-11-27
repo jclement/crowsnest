@@ -30,6 +30,7 @@ import { chatStateOf, type OrchestratorStatus } from "../lib/conversation";
 import { useOrchestrator } from "../lib/conversation-queries";
 import { CHAT_ORCHESTRATOR as ORCHESTRATOR, defaultChatTarget as defaultTarget, leadAgentName, leadRunning, slugOfLead, type ProjectView } from "../lib/projects";
 import { useLeadAction, useMe, useProjects } from "../lib/queries";
+import { HelpButton } from "../components/help/HelpButton";
 
 export function ChatView() {
   const status = useOrchestrator();
@@ -216,6 +217,7 @@ function ChatHeader({
       <div className="ml-auto flex items-center gap-1.5">
         {remote}
         {speak}
+        {speak && <HelpButton topic="how-to/voice#speak-mode-vs-the-mic" what="speak mode and the mic" inline={false} />}
         {menu}
       </div>
     </header>

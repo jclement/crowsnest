@@ -298,6 +298,27 @@ export function actionFor(job: Pick<Job, "state" | "stuck" | "cause">): JobActio
   }
 }
 
+/** The manual section that explains a job's cause (the "?" on its stuck or needs-you banner). */
+export function causeHelpTopic(cause: string | undefined): string {
+  switch (cause) {
+    case "held":
+      return "concepts/jobs#held";
+    case "budget":
+      return "concepts/budgets-limits-pause#budget-states";
+    case "check":
+      return "concepts/acceptance#what-happens-at-done";
+    case "review":
+      return "concepts/acceptance#the-review-gate";
+    case "questions":
+    case "approval":
+    case "approval-tool":
+    case "dialog":
+      return "concepts/questions-approvals-dialogs";
+    default:
+      return "concepts/supervisor#stuck-causes";
+  }
+}
+
 export const actionLabels: Record<JobAction, string> = {
   terminal: "Open terminal",
   retry: "Retry now",

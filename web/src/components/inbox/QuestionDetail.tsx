@@ -18,6 +18,7 @@ import { useToast } from "../ui/toast-context";
 import { AnswerForm } from "./AnswerForm";
 import { DiffView } from "./DiffView";
 import { ReadAloudButton } from "../voice/VoiceButtons";
+import { HelpButton } from "../help/HelpButton";
 
 interface QuestionDetailProps {
   id: string;
@@ -123,6 +124,7 @@ function Receipt({ question, fallback }: { question: Question; fallback: string 
     <div aria-label="Answer receipt" className="flex flex-col gap-1">
       <p className="flex flex-wrap items-center gap-1.5 text-2xs text-muted">
         <Chip tone={receipt.tone}>{receipt.label}</Chip>
+        <HelpButton topic="concepts/questions-approvals-dialogs#receipts" what="answer receipts" />
         <span>{receipt.detail}</span>
         {question.received_at && <span>· {relativeTime(question.received_at)}</span>}
       </p>

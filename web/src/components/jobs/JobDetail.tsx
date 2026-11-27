@@ -6,7 +6,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Ban, CheckCircle2, CircleSlash, GitCompareArrows, MessageSquare, Play, RefreshCw, SquareTerminal, Zap } from "lucide-react";
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
-import { actionFor, actionLabels, childrenOf, hasReview, isFinished, jobAnswerText, ownershipChain, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
+import { actionFor, actionLabels, causeHelpTopic, childrenOf, hasReview, isFinished, jobAnswerText, ownershipChain, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
 import { useFleet, useJob, useJobAction, useJobGuard, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
 import { ReviewPanel } from "./ReviewPanel";
 import { BudgetCard, EvidenceCard, LastMessage, WaitLine } from "./AcceptPanels";
@@ -28,6 +28,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { SkeletonRows } from "../ui/Skeleton";
 import { TabPanel, Tabs } from "../ui/Tabs";
 import { useToast } from "../ui/toast-context";
+import { HelpButton } from "../help/HelpButton";
 
 type DetailTab = "overview" | "review" | "conversation" | "terminal";
 
@@ -278,6 +279,7 @@ function StuckBanner({ job, openTerminal, openReview }: { job: Detail; openTermi
     >
       <strong className="font-semibold">{job.cause_text}</strong>
       {job.cause_detail && <span>: {job.cause_detail}</span>}
+      <HelpButton topic={causeHelpTopic(job.cause)} what={`why: ${job.cause_text}`} className="ml-1 align-middle" />
       {retry && <span className="block text-xs">{retry} (attempt {job.retry_count + 1})</span>}
     </Banner>
   );

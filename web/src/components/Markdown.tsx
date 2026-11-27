@@ -6,7 +6,7 @@
 // MermaidDiagram, which loads mermaid only when one appears.
 import type { Element, ElementContent } from "hast";
 import { lazy, memo, Suspense, type ComponentProps } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { cn } from "../lib/cn";
@@ -52,12 +52,23 @@ const remarkPlugins = [remarkGfm];
 interface MarkdownProps {
   children: string;
   className?: string;
+  /**
+   * Trusted callers only (the built-in manual): elements to render differently (its links and
+   * images, its headings' anchors) and extra rehype plugins run after the highlighter. Raw HTML
+   * stays dropped whatever is passed.
+   */
+  components?: Components;
+  extraRehypePlugins?: ComponentProps<typeof ReactMarkdown>["rehypePlugins"];
+  /** Replaces the default link check; it should fall back to defaultUrlTransform. */
+  urlTransform?: UrlTransform;
 }
 
-export const Markdown = memo(function Markdown({ children, className }: MarkdownProps) {
+export const Markdown = memo(function Markdown({ children, className, components: extra, extraRehypePlugins, urlTransform }: MarkdownProps) {
+  const merged = extra ? { ...components, ...extra } : components;
+  const plugins = extraRehypePlugins ? [...(rehypePlugins ?? []), ...extraRehypePlugins] : rehypePlugins;
   return (
     <div className={cn("markdown", className)}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components} skipHtml>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={merged} urlTransform={urlTransform ?? defaultUrlTransform} skipHtml>
         {children}
       </ReactMarkdown>
     </div>

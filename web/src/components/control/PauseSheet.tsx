@@ -5,6 +5,7 @@ import { useSetPause } from "../../lib/queries";
 import { Button } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
+import { HelpButton } from "../help/HelpButton";
 
 export function PauseSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [until, setUntil] = useState("");
@@ -26,7 +27,7 @@ export function PauseSheet({ open, onClose }: { open: boolean; onClose: () => vo
     );
   };
   return (
-    <Sheet open={open} onClose={onClose} title="Pause automation" size="md">
+    <Sheet open={open} onClose={onClose} title="Pause automation" size="md" headerExtra={<HelpButton topic="concepts/budgets-limits-pause#the-pause" what="the pause" inline={false} />}>
       <form
         className="flex flex-col gap-3 p-4 text-sm"
         onSubmit={(event) => {

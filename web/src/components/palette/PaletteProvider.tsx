@@ -24,6 +24,7 @@ import { useSpeakMode } from "../../lib/voice/speak";
 import { CommandPalette } from "./CommandPalette";
 import { PaletteContext, type PaletteApi } from "./palette-context";
 import { ShortcutsSheet } from "./ShortcutsSheet";
+import { HelpSheet } from "../help/HelpSheet";
 import { DigestsSheet } from "../control/DigestsSheet";
 import { LimitsSheet } from "../control/LimitsSheet";
 import { PauseSheet } from "../control/PauseSheet";
@@ -72,6 +73,14 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
   }, []);
 
   const openShortcuts = useCallback(() => setSheet("shortcuts"), []);
+  // The contextual help sheet: a manual section over the current view (components/help).
+  const [helpTopic, setHelpTopic] = useState<string | null>(null);
+  // It stacks over whatever sheet is open (Schedule, Settings…), so reading help loses nothing.
+  const openHelp = useCallback((topic: string) => setHelpTopic(topic), []);
+  const openSheet = useCallback((next: PaletteSheet) => {
+    setHelpTopic(null);
+    setSheet(next);
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -114,7 +123,10 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
     });
   }, []);
 
-  const api = useMemo<PaletteApi>(() => ({ openPalette, openShortcuts, chord: chordLabel(mac), mac }), [openPalette, openShortcuts, mac]);
+  const api = useMemo<PaletteApi>(
+    () => ({ openPalette, openShortcuts, openSheet, openHelp, chord: chordLabel(mac), mac }),
+    [openPalette, openShortcuts, openSheet, openHelp, mac],
+  );
 
   return (
     <PaletteContext.Provider value={api}>
@@ -123,6 +135,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
         <CommandPalette inputRef={inputRef} onClose={closePalette} run={run} recents={recents} onRan={onRan} mac={mac} speak={speak} voiceSettings={voice} />
       )}
       <ShortcutsSheet open={sheet === "shortcuts"} onClose={() => setSheet(null)} mac={mac} />
+      <HelpSheet topic={helpTopic} onClose={() => setHelpTopic(null)} />
       <JournalSheet open={sheet === "journal"} onClose={() => setSheet(null)} />
       <ScheduleSheet open={sheet === "schedule"} onClose={() => setSheet(null)} />
       <SpendSheet open={sheet === "spend"} onClose={() => setSheet(null)} />

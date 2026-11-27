@@ -37,11 +37,17 @@ import type { RemoteControlFields } from "../lib/remote";
 import { formatUSD } from "../lib/spend";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../lib/api";
+import { HelpButton } from "../components/help/HelpButton";
+import { Hint } from "../components/help/Hint";
 
 export function NowView() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 p-3 md:p-4">
       <NowHeader />
+      <Hint id="now" topic="start-here">
+        New here? Everything that needs you is under Needs you; every project is beside it. The manual (Help, or{" "}
+        <kbd className="font-mono">g m</kbd>) explains the rest.
+      </Hint>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
         <QueueSection />
         <div className="flex min-w-0 flex-col gap-4">
@@ -63,6 +69,7 @@ function NowHeader() {
         <Gauge className="h-5 w-5 text-muted" aria-hidden />
         Now
       </h1>
+      <HelpButton topic="concepts/attention-and-now" what="Now and the attention queue" className="self-center" />
       {counts && (
         <p className="text-sm text-body" data-now-summary>
           {counts.total === 0 ? "Nothing needs you." : `${counts.total} need you: ${counts.blocking} blocking, ${counts.can_wait} can wait.`}

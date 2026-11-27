@@ -1,57 +1,15 @@
 // The keyboard shortcuts sheet (`?`, or "Keyboard shortcuts" in the palette): every shortcut the
-// app has, in one place. Keep it in step when a view adds one.
-import { viewKeys } from "../../lib/palette";
+// app has (lib/shortcuts.ts), in one place, and the way into the manual.
+import { Link } from "@tanstack/react-router";
+import { BookOpen } from "lucide-react";
+import { shortcutSections } from "../../lib/shortcuts";
 import { Sheet } from "../ui/Sheet";
-
-interface Shortcut {
-  keys: string[];
-  what: string;
-}
-
-function sections(mac: boolean): Array<{ title: string; shortcuts: Shortcut[] }> {
-  const mod = mac ? "⌘" : "Ctrl";
-  const talkChord = mac ? "⌥" : "Ctrl";
-  return [
-    {
-      title: "Anywhere",
-      shortcuts: [
-        { keys: [`${mod} K`], what: mac ? "Command palette (also from inside a terminal)" : "Command palette (not inside a terminal, where Ctrl K is the shell's)" },
-        { keys: ["?"], what: "This sheet" },
-        ...viewKeys.map((view) => ({ keys: ["g", view.key], what: `Go to ${view.label}` })),
-        { keys: ["g", "n"], what: "Focus the needs-you tray (then y or n answers the approval you open)" },
-      ],
-    },
-    {
-      title: "In the palette",
-      shortcuts: [
-        { keys: ["↑", "↓"], what: "Move (also Ctrl N, Ctrl P)" },
-        { keys: ["↵"], what: "Run the highlighted item" },
-        { keys: [`${mod} ↵`], what: "Its second action: the full job form, send and open Chat, the other view; else its actions" },
-        { keys: ["→"], what: "Its actions (also Tab)" },
-        { keys: ["esc"], what: "Back a level, then close (focus returns where it was)" },
-        { keys: [">"], what: "At the start: give what follows as a job (so does “job …”)" },
-      ],
-    },
-    {
-      title: "Views",
-      shortcuts: [
-        { keys: [`${mod} ↵`], what: "Jobs: give the job in the text box" },
-        { keys: ["↵"], what: "Chat: send (Shift ↵ for a new line), from a wide screen" },
-        { keys: ["/"], what: "Fleet: filter the agents" },
-        { keys: ["Space"], what: "Chat: hold to talk, let go to send (outside a text field; a quick tap does nothing)" },
-        { keys: [`${talkChord} Space`], what: "Chat, in the message box: hold to talk" },
-        { keys: ["esc"], what: "Close a sheet or menu; cancel a recording" },
-        { keys: ["←", "→"], what: "Move between tabs" },
-      ],
-    },
-  ];
-}
 
 export function ShortcutsSheet({ open, onClose, mac }: { open: boolean; onClose: () => void; mac: boolean }) {
   return (
     <Sheet open={open} onClose={onClose} title="Keyboard shortcuts" size="md">
       <div className="flex flex-col gap-4 p-3 md:p-4">
-        {sections(mac).map((section) => (
+        {shortcutSections(mac).map((section) => (
           <section key={section.title} aria-label={section.title}>
             <h3 className="mb-1 text-2xs font-semibold uppercase tracking-wide text-muted">{section.title}</h3>
             <dl className="divide-y divide-border rounded border border-border">
@@ -71,6 +29,10 @@ export function ShortcutsSheet({ open, onClose, mac }: { open: boolean; onClose:
           </section>
         ))}
         <p className="text-2xs text-muted">The g shortcuts and ? do nothing while you type in a field or a terminal.</p>
+        <Link to="/help" onClick={onClose} className="inline-flex min-h-11 items-center gap-1.5 self-start text-sm font-medium text-accent hover:underline md:min-h-8">
+          <BookOpen className="h-4 w-4" aria-hidden />
+          Manual: how crowsnest works, step by step
+        </Link>
       </div>
     </Sheet>
   );

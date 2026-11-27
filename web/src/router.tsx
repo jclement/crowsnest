@@ -18,6 +18,7 @@ import { NowView } from "./routes/NowView";
 import { ProjectsView } from "./routes/ProjectsView";
 import { TerminalView } from "./routes/views";
 import { SystemView } from "./routes/SystemView";
+import { HelpView } from "./routes/HelpView";
 import { WelcomePage } from "./routes/WelcomePage";
 
 interface RouterContext {
@@ -177,8 +178,18 @@ const decideRoute = createRoute({
 });
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
+// The built-in manual (DESIGN.md 12.10): /help is its contents, /help/<page>#<heading> a place in it.
+const helpRoute = createRoute({ getParentRoute: () => appRoute, path: "/help", component: () => <HelpView /> });
+const helpPageRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/help/$",
+  component: function HelpPageRoute() {
+    const { _splat } = helpPageRoute.useParams();
+    return <HelpView pageId={_splat} />;
+  },
+});
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, fleetRoute, terminalRoute, systemRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, fleetRoute, terminalRoute, systemRoute, helpRoute, helpPageRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

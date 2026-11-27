@@ -13,6 +13,7 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Chip } from "../ui/Chip";
 import { useToast } from "../ui/toast-context";
+import { HelpButton } from "../help/HelpButton";
 
 function useGuard(id: string) {
   const run = useJobGuard(id);
@@ -42,7 +43,12 @@ export function EvidenceCard({ job }: { job: Detail }) {
         </>
       }
       tone={job.accept_state === "failed" ? "danger" : job.accept_state === "stale" || job.accept_state === "needs_rebase" || job.accept_state === "unverified" ? "warning" : "default"}
-      actions={chip && <Chip tone={chip.tone} title={chip.title}>{chip.label}</Chip>}
+      actions={
+        <span className="flex items-center gap-1">
+          {chip && <Chip tone={chip.tone} title={chip.title}>{chip.label}</Chip>}
+          <HelpButton topic="concepts/acceptance#what-accepted-proves-and-what-it-does-not" what="what accepted proves" />
+        </span>
+      }
     >
       <p className="text-sm text-body">{job.accept_detail}</p>
       {job.no_commits_reason && <p className="mt-1 text-xs text-muted">No commits, because: {job.no_commits_reason}</p>}
@@ -115,6 +121,7 @@ export function BudgetCard({ job }: { job: Detail }) {
   return (
     <Card
       aria-label="Budget"
+      actions={<HelpButton topic="concepts/budgets-limits-pause#budget-states" what="budget states" />}
       tone={over ? "danger" : budget.state === "warned" || budget.state === "grace" ? "warning" : "default"}
       title={
         <>
@@ -207,6 +214,7 @@ export function WaitLine({ job }: { job: Job }) {
       <AlarmClock className="h-3.5 w-3.5 text-muted" aria-hidden />
       <span className="text-muted">Waits on</span> {job.wait_owner}: {job.wake}
       {job.rechecks ? <span className="text-muted">· {job.rechecks} recheck{job.rechecks === 1 ? "" : "s"}</span> : null}
+      <HelpButton topic="concepts/supervisor#waits-always-have-an-owner" what="who a wait belongs to" />
       {job.state === "blocked" && (
         <Button compact variant="ghost" disabled={guard.pending} onClick={() => guard.press("wake", "Woken")}>
           Wake it
