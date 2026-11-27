@@ -806,6 +806,14 @@ func HookOutput(approval Approval) string {
 	return string(body)
 }
 
+// SummaryCut reports whether Summary cuts the call (R6-I2): computed from the call, not by
+// looking at how the summary ends.
+func SummaryCut(input json.RawMessage) bool {
+	var fields map[string]any
+	_ = json.Unmarshal(input, &fields)
+	return len([]rune(termtext.Clean(risk.SummaryText(fields)))) > risk.MaxSummaryRunes
+}
+
 // Summary renders a tool call in one line.
 func Summary(tool string, input json.RawMessage) string {
 	var fields map[string]any

@@ -11,6 +11,7 @@ package questions
 import (
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // The context keys crowsnest sets on its own questions. The gate keys mark a gate; the others
@@ -57,26 +58,50 @@ func IsGate(context map[string]string) bool {
 	return false
 }
 
-// grantingOptionKeys are option keys that grant something. A question offering one is treated
-// as a gate for notification purposes, because an agent can word any question to look like one
-// (R3-I4): one tap on a lock screen must never grant anything.
-var grantingOptionKeys = map[string]bool{"allow": true, "approve": true, "merge": true, "land": true, "push": true, "grant": true}
+// grantingWords are words that grant something. A question whose option keys, option labels or
+// title use one is treated as a gate for notification purposes, because an agent can word any
+// question to look like one (R3-I4, R6-S9): one tap on a lock screen must never look like it
+// grants anything.
+var grantingWords = map[string]bool{
+	"allow": true, "allowed": true, "approve": true, "approved": true, "approval": true, "merge": true, "land": true,
+	"push": true, "deploy": true, "delete": true, "grant": true, "permit": true, "release": true, "publish": true,
+}
 
-// GateShaped reports whether a question must be answered in the app, never from a notification:
-// one of crowsnest's own gates (IsGate), or any question offering an option that allows,
-// approves, merges, lands, pushes or grants. It is the one rule both the push notices (which
-// then carry no buttons and no token) and the push action endpoint (which refuses) apply; the
-// endpoint is the authority.
-func GateShaped(context map[string]string, optionKeys []string) bool {
-	if IsGate(context) {
-		return true
-	}
-	for _, key := range optionKeys {
-		if grantingOptionKeys[strings.ToLower(strings.TrimSpace(key))] {
+// GrantingText reports whether text uses a granting word (whole words, any case).
+func GrantingText(text string) bool {
+	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) }) {
+		if grantingWords[word] {
 			return true
 		}
 	}
 	return false
+}
+
+// GateShaped reports whether a question must be answered in the app, never from a notification:
+// one of crowsnest's own gates (IsGate), or any question whose option keys or labels, or title,
+// allow, approve, merge, land, push, deploy, delete or grant (texts: the keys, labels and title).
+// It is the one rule both the push notices (which then carry no buttons and no token) and the
+// push action endpoint (which refuses) apply; the endpoint is the authority.
+func GateShaped(context map[string]string, texts []string) bool {
+	if IsGate(context) {
+		return true
+	}
+	for _, text := range texts {
+		if GrantingText(text) {
+			return true
+		}
+	}
+	return false
+}
+
+// QuestionTexts are the texts GateShaped reads for a question: each option's key and label, and
+// the title.
+func QuestionTexts(q Question) []string {
+	texts := []string{q.Title}
+	for _, option := range q.Options {
+		texts = append(texts, option.Key, option.Label)
+	}
+	return texts
 }
 
 // CheckAgentContext refuses a question from an agent whose context carries a key crowsnest
@@ -85,7 +110,7 @@ func GateShaped(context map[string]string, optionKeys []string) bool {
 func CheckAgentContext(input AskInput) error {
 	var bad []string
 	for key := range input.Context {
-		if reservedKeys[strings.ToLower(strings.TrimSpace(key))] {
+		if reservedKey(key) {
 			bad = append(bad, key)
 		}
 	}
@@ -94,4 +119,22 @@ func CheckAgentContext(input AskInput) error {
 	}
 	sort.Strings(bad)
 	return invalid("context key %s is reserved for crowsnest's own questions; use another name", strings.Join(bad, ", "))
+}
+
+// reservedPrefixes are whole families of keys crowsnest keeps for its gates (R6-I1): a future
+// land_head or task_owner is reserved without another change here.
+var reservedPrefixes = []string{"land_", "task_", "approval_", "crowsnest_"}
+
+// reservedKey reports whether an agent may not set key (case and surrounding space ignored).
+func reservedKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if reservedKeys[key] {
+		return true
+	}
+	for _, prefix := range reservedPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }

@@ -99,9 +99,10 @@ func DecorateQuestion(notice Notice, id, title string, details QuestionDetails, 
 	notice.Title = where.place() + ": " + what
 	body := where.jobLead() + title
 	recommended := ""
-	keys := make([]string, 0, len(details.Options))
+	keys := make([]string, 0, 2*len(details.Options)+1)
+	keys = append(keys, title)
 	for _, option := range details.Options {
-		keys = append(keys, option.Action)
+		keys = append(keys, option.Action, option.Title)
 		if option.Action == details.Recommend {
 			recommended = option.Title
 		}
