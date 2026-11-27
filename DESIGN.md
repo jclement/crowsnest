@@ -550,7 +550,14 @@ What holds now:
   file are refused on otherwise benign programs: `fd -x/-X/--exec`, `rg --pre`, `sort -o` and
   `--compress-program`, `tree -o`, `uniq` with an output file, `go -exec/-toolexec/-vettool/-o`,
   `cargo --config`, `date -s`, and on read-only git `--output`, `-O`, `--open-files-in-pager`,
-  `--upload-pack`, `--ext-diff`, `--textconv`.
+  `--upload-pack`, `--ext-diff`, `--textconv`. R7-S5 closed the next ones: clustered short options
+  are taken apart for fd, rg, sort, tree, uniq and date (`sort -uo FILE`, `fd -Hx rm`; not for go,
+  whose single-dash words are not clusters); a lone `-` counts as a uniq operand (`uniq - FILE`);
+  `go env -w/-u` is not low (it persists into the human's go environment, every later build);
+  `git -C`, `cd`, `pushd`, `mkdir` and `touch` with a path outside the job's directory (absolute
+  outside it, `~`, or any `..`; with no directory known, any absolute path) are not low, nor is git
+  with `--git-dir`/`--work-tree`; `git fetch`/`pull` is low only from a configured remote's name,
+  never a URL or path; `ping` is off the list.
 - **The guard follows the line** (`internal/guard/guard.go`, R5-C02). A `cd` moves the directory
   the next git command runs in, and `checkout`/`switch` changes the branch the next commit lands
   on. Where that cannot be followed (a cd to a variable or inside a subshell, `--git-dir`,
