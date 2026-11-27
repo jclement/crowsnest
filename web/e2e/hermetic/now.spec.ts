@@ -18,7 +18,7 @@
 // that hold for the first ten minutes: a dangerous approval in Crowsnest, a blocking question in
 // Website, a terminal dialog in a third project, and a job stuck on a usage limit in Mobile.
 import type { Locator, Page, TestInfo } from "@playwright/test";
-import { expect, expectAccessible, isPhone, test } from "../support/fixtures";
+import { dockedTray, expect, expectAccessible, isPhone, test } from "../support/fixtures";
 
 const PROJECTS = ["Crowsnest", "Website", "Infra", "Mobile"];
 
@@ -126,7 +126,7 @@ test("one number: badge, title, Now, Inbox and tray agree with the server", asyn
   if (isPhone(testInfo)) {
     await expect(page.getByRole("button", { name: /need you: open the tray/ })).toContainText(String(total));
   } else {
-    const panel = page.getByRole("complementary", { name: "Needs you" });
+    const panel = await dockedTray(page);
     await expect(panel.locator("header")).toContainText(String(total));
   }
 });

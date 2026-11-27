@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Instance } from "../support/instance";
+import { dockedTray } from "../support/fixtures";
 import { apiGet, cheapJobs, getJob, logSpend, makeScratch, realClaudeOnly, removeScratch, startReal, until, type Scratch } from "./rig";
 
 let scratch: Scratch;
@@ -52,8 +53,7 @@ async function firstApproval(page: Page, jobId: string): Promise<Approval> {
 
 /** The desktop tray, every row shown. */
 async function openTray(page: Page): Promise<Locator> {
-  const panel = page.getByRole("complementary", { name: "Needs you" });
-  await expect(panel).toBeVisible();
+  const panel = await dockedTray(page);
   const showAll = panel.getByRole("button", { name: /^Show all/ });
   if (await showAll.isVisible()) await showAll.click();
   return panel;

@@ -3102,7 +3102,7 @@ the fallback that is always there.
   job". Every row has "Snooze for 10 minutes" (kept on the server since R4, so it holds on every
   device; section 22). Desktop: **docked** (R8), a column at the
   right of the layout beside the view (`w-80`, `22rem` from `xl`) showing the top three ("Show all N"), foldable into
-  a slim strip (folded to begin with below `lg`, where a column would squeeze the view), with a
+  a slim strip (folded to begin with below 1536 px: open at 1440 beside the Jobs board it squeezed a job's diff until the viewer collapsed; `g n` or the strip opens it), with a
   count, an arrival slide and an optional chime (off by default, a switch in its header, remembered in the
   browser). Phone: a 44 px bar in the page's flow between the content and the bottom nav (the top
   item and the count) that opens a sheet; in-flow arrivals flash instead of sliding, since a slide

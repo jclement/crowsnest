@@ -7,8 +7,8 @@
 //
 // Desktop (md and up): docked, a column at the right of the layout beside the view, never floating
 // over it (R8: the old bottom-right stack covered the chips of a project's job cards). It shows the
-// top three ("Show all N" for the rest) and folds into a slim strip (folded to begin with below lg, where a column would
-// squeeze the view). Phone: a slim bar in the page's flow above the bottom nav (so it covers
+// top three ("Show all N" for the rest) and folds into a slim strip. It starts folded below 1536 px:
+// open at 1440 it squeezed the Jobs view's detail until the diff viewer collapsed. Phone: a slim bar in the page's flow above the bottom nav (so it covers
 // nothing) that opens a sheet. It replaces nothing in the Inbox, which stays the full list
 // and the history, and reuses the Inbox's cards.
 //
@@ -21,7 +21,7 @@ import { BellDot, BellOff, Bot, ChevronLeft, ChevronRight, ChevronUp, Clock, Hou
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { DESKTOP_QUERY, LARGE_QUERY } from "../../lib/media";
+import { DESKTOP_QUERY, WIDE_QUERY } from "../../lib/media";
 import { relativeTime } from "../../lib/format";
 import { FOCUS_TRAY_EVENT, trayTitle, type TrayItem } from "../../lib/needsYou";
 import { isBlocking, itemLink, kindLabel, labelOf, labelWords, plainPreview, whereLine } from "../../lib/attention";
@@ -80,7 +80,7 @@ export function TrayPanel() {
   const fresh = useArrivals(items);
   const [folded, setFolded] = useState(() => {
     const saved = sessionStorage.getItem("crowsnest-tray-folded");
-    return saved === null ? !(window.matchMedia?.(LARGE_QUERY).matches ?? true) : saved === "1";
+    return saved === null ? !(window.matchMedia?.(WIDE_QUERY).matches ?? true) : saved === "1";
   });
   const [all, setAll] = useState(false);
   const [sound, setSound] = useState(traySoundOn);
@@ -105,14 +105,24 @@ export function TrayPanel() {
     [],
   );
 
+  // g n: focus the first row; a folded tray unfolds first and the row is focused once the panel has
+  // rendered (folded, it is not there yet).
+  const focusWanted = useRef(false);
+  const focusFirstRow = () => panelRef.current?.querySelector<HTMLElement>("[data-tray-row]")?.focus();
   useEffect(() => {
     const focus = () => {
+      if (panelRef.current) return focusFirstRow();
+      focusWanted.current = true;
       fold(false);
-      window.setTimeout(() => panelRef.current?.querySelector<HTMLElement>("[data-tray-row]")?.focus(), 0);
     };
     window.addEventListener(FOCUS_TRAY_EVENT, focus);
     return () => window.removeEventListener(FOCUS_TRAY_EVENT, focus);
   }, []);
+  useEffect(() => {
+    if (!focusWanted.current || folded) return;
+    focusWanted.current = false;
+    focusFirstRow();
+  }, [folded]);
 
   if (items.length === 0 || onQueueView) return null;
 

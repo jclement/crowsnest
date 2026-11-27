@@ -8,7 +8,7 @@
 // (`npm run test:links`, low: a benign shape since R5). With CROWSNEST_DEMO_PARALLEL, j_14 also asks ap_5 and
 // ap_6 (both low), for the batch.
 import type { Locator, Page, TestInfo } from "@playwright/test";
-import { detailRegion, expect, expectAccessible, expectNoSidewaysScroll, isPhone, smallTapTargets, test } from "../support/fixtures";
+import { detailRegion, dockedTray, expect, expectAccessible, expectNoSidewaysScroll, isPhone, smallTapTargets, test } from "../support/fixtures";
 
 test.use({ appOptions: { demo: true, env: { CROWSNEST_DEMO_PARALLEL: "1" } } });
 
@@ -23,8 +23,7 @@ async function openTray(page: Page, testInfo: TestInfo): Promise<Locator> {
     await page.getByRole("button", { name: /need you: open the tray/ }).click();
     return page.getByRole("dialog");
   }
-  const panel = page.getByRole("complementary", { name: "Needs you" });
-  await expect(panel).toBeVisible();
+  const panel = await dockedTray(page);
   const showAll = panel.getByRole("button", { name: /^Show all/ });
   if (await showAll.isVisible()) await showAll.click();
   return panel;

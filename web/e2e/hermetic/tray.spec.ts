@@ -10,7 +10,7 @@
 // job-13, dangerous). Demo questions: q_1 blocking confirm, q_3 a choice ("Where should the
 // release notes live?").
 import type { Locator, Page, TestInfo } from "@playwright/test";
-import { expect, expectAccessible, isPhone, test } from "../support/fixtures";
+import { dockedTray, expect, expectAccessible, isPhone, test } from "../support/fixtures";
 
 const views = [
   { name: "jobs", path: "/jobs", ready: (page: Page) => page.getByRole("region", { name: "Needs you or stuck" }) },
@@ -43,8 +43,7 @@ async function openTray(page: Page, testInfo: TestInfo): Promise<Locator> {
     await page.getByRole("button", { name: /need you: open the tray/ }).click();
     return page.getByRole("dialog");
   }
-  const panel = page.getByRole("complementary", { name: "Needs you" });
-  await expect(panel).toBeVisible();
+  const panel = await dockedTray(page);
   const showAll = panel.getByRole("button", { name: /^Show all/ });
   if (await showAll.isVisible()) await showAll.click();
   return panel;
@@ -75,8 +74,7 @@ for (const view of views) {
         expect(composer.y + composer.height, "the composer sits above the bar").toBeLessThanOrEqual(barBox.y + 0.5);
       }
     } else {
-      const panel = page.getByRole("complementary", { name: "Needs you" });
-      await expect(panel).toBeVisible();
+      const panel = await dockedTray(page);
       await expect(panel.getByRole("button", { name: /git push --force origin main/, expanded: false })).toBeVisible();
       const panelBox = await box(panel);
       // Docked: the view ends where the tray begins, so nothing in it can be covered.
@@ -161,7 +159,8 @@ test("a question answered from the tray", async ({ page }, testInfo) => {
 test("the keyboard: g n focuses the tray, y and n answer only a focused card", async ({ page }, testInfo) => {
   test.skip(isPhone(testInfo), "a keyboard path on the desktop");
   await page.goto("/jobs");
-  await expect(page.getByRole("complementary", { name: "Needs you" })).toBeVisible();
+  // Folded below 1536 px: g n below unfolds it.
+  await expect(page.getByRole("button", { name: /show the tray/ })).toBeVisible();
   // A stray y or n anywhere answers nothing.
   await page.locator("body").press("y");
   await page.locator("body").press("n");

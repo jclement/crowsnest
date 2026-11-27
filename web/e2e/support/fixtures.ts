@@ -129,3 +129,16 @@ export async function waitForOrchestratorSettled(page: Page) {
   // The turn's reply lands in the transcript just after the state goes idle.
   await page.waitForTimeout(500);
 }
+
+/**
+ * The desktop's docked needs-you tray, opened: below 1536 px it starts folded to a strip (R8), so
+ * the strip is pressed first when it is there.
+ */
+export async function dockedTray(page: Page) {
+  const panel = page.getByRole("complementary", { name: "Needs you" });
+  const strip = page.getByRole("button", { name: /show the tray/ });
+  await expect(panel.or(strip).first()).toBeVisible();
+  if (await strip.isVisible()) await strip.click();
+  await expect(panel).toBeVisible();
+  return panel;
+}

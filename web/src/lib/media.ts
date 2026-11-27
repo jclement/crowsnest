@@ -22,5 +22,8 @@ export function useMediaQuery(query: string): boolean {
 /** Tailwind's lg breakpoint: diffs go side by side from here. */
 export const LARGE_QUERY = "(min-width: 1024px)";
 
+/** Wide enough for the needs-you tray to stay docked open beside a list and its detail (2xl). */
+export const WIDE_QUERY = "(min-width: 1536px)";
+
 /** A touch screen as the main pointer (a phone or tablet): the composer adds a camera button. */
 export const COARSE_POINTER_QUERY = "(pointer: coarse)";
