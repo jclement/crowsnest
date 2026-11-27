@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/landing"
+	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -983,37 +984,63 @@ func (s *Service) SetProjectAccept(ctx context.Context, projectID int64, input P
 	return s.opts.Store.DeleteKV(ctx, store.RestoredCheckKey(projectID))
 }
 
-// deliverFeedback types a check failure's pending message to the agent (R6-C07): not while the
-// automation is paused, not while a hold keeps the job, and cleared only after it was typed. A
-// send that fails is journalled (at most every few minutes) and tried again by the tick.
+// deliverFeedback types a job's pending findings (a check's failure, R6-C07, or a review's
+// changes) to its agent. It is a lifecycle step (opFeedback, lifecycle.go), so exactly one caller
+// owns a delivery: the check's callback, the review's and the tick can all call it, and the claim
+// on the row lets one through (R7-C05). It passes the continuation gate before the claim and again
+// just before typing (R7-C04): not while paused, not under any hold, not while a budget above the
+// job or the fleet's usage limit holds it. The message is cleared only when it was (or may have
+// been) typed, and only if it is still the one typed; a crowsnest that stopped mid-send leaves a
+// stale claim, which is settled as "may have arrived, not typed again" (resolveStaleLocked), never
+// replayed blindly. A send that typed nothing is journalled (at most every few minutes) and tried
+// again by the tick.
 func (s *Service) deliverFeedback(ctx context.Context, id string) {
-	numeric, err := ParseID(id)
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		s.noteHeldContinuation(ctx, id, "the findings for the agent", why)
+		return
+	}
+	var message, paneID, agent string
+	cl, err := s.claimStep(ctx, id, opFeedback, func(r *store.JobRecord, c *change) error {
+		if r.PendingFeedback == "" || r.PaneID == "" || State(r.State) != StateRunning || len(effectiveHolds(*r, c.questions)) > 0 {
+			return errSkip
+		}
+		message, paneID, agent = r.PendingFeedback, r.PaneID, r.AgentName
+		return nil
+	})
 	if err != nil {
 		return
 	}
-	r, err := s.opts.Store.GetJob(ctx, numeric)
-	if err != nil || r.PendingFeedback == "" || State(r.State) != StateRunning || len(holdsOf(r)) > 0 || r.PaneID == "" {
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		s.finishQuietly(ctx, cl, nil)
+		s.noteHeldContinuation(ctx, id, "the findings for the agent", why)
 		return
 	}
-	if s.heldWhilePaused(ctx, "feedback:"+id, "the check's findings for "+id) {
+	var result orch.PromptResult
+	var sendErr error
+	if err := s.effect(ctx, cl, paneID, func(ctx context.Context) {
+		result, sendErr = orch.Prompt(ctx, s.opts.Herdr, paneID, orch.PromptRequest{Text: message, ForceOverDraft: true, ExpectAgent: agent})
+	}); err != nil {
 		return
 	}
-	message := r.PendingFeedback
-	if err := s.sendText(ctx, r.PaneID, r.AgentName, message); err != nil {
-		watch := s.watchOf(id)
-		if now := s.opts.Now(); now.Sub(watch.feedbackAt) > 5*time.Minute {
-			watch.feedbackAt = now
-			_ = s.Journal(ctx, id, EventAccept, "The check's failure could not be typed to the agent yet: "+oneLine(err.Error(), 160)+"; crowsnest tries again", nil)
+	outcome := typedOutcome(result, sendErr)
+	watch := s.watchOf(id)
+	s.finishQuietly(ctx, cl, func(rec *store.JobRecord, c *change) {
+		switch {
+		case outcome == typedNo:
+			if now := s.opts.Now(); now.Sub(watch.feedbackAt) > 5*time.Minute {
+				watch.feedbackAt = now
+				c.event(EventAccept, "The findings could not be typed to the agent yet: "+oneLine(sendErr.Error(), 160)+"; crowsnest tries again", nil)
+			}
+		case rec.PendingFeedback != message:
+			// Replaced while it was typed (a newer check or review): the newer one is still due.
+		default:
+			rec.PendingFeedback = ""
+			if outcome == typedMaybe {
+				c.event(EventAccept, "crowsnest lost track of typing the findings; counted as delivered, not typed again", nil)
+			} else {
+				c.event(EventAccept, "The findings reached the agent", nil)
+			}
 		}
-		return
-	}
-	_, _ = s.mutate(ctx, id, func(rec *store.JobRecord, c *change) error {
-		if rec.PendingFeedback != message {
-			return errSkip
-		}
-		rec.PendingFeedback = ""
-		c.event(EventAccept, "The check's findings reached the agent", nil)
-		return nil
 	})
 }
 

@@ -289,12 +289,17 @@ func (s *Service) wakeWaiters(ctx context.Context, job Job) {
 // wake brings a blocked job back to running and types why. due is the wake-up's time (zero for
 // a dependency). While paused it waits (journalled once); the tick tries again after.
 func (s *Service) wake(ctx context.Context, id string, due time.Time, text string) {
-	if s.heldWhilePaused(ctx, "wake:"+id, "waking "+id+" (its blocked wake-up is due)") {
+	// R7-C04: a held job keeps its wake-up, blocked, until the hold is lifted; nothing is typed.
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		s.noteHeldContinuation(ctx, id, "its wake-up", why)
 		return
 	}
 	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		if State(r.State) != StateBlocked {
 			return errSkip
+		}
+		if len(effectiveHolds(*r, c.questions)) > 0 {
+			return errSkip // a hold placed since the check above: the wake-up stays for later
 		}
 		if !due.IsZero() && (r.WakeKind != WakeTime || !r.WakeAt.Equal(due)) {
 			return errSkip // a newer declaration replaced the wake-up this pass saw
@@ -313,6 +318,12 @@ func (s *Service) wake(ctx context.Context, id string, due time.Time, text strin
 	if err != nil || job.PaneID == "" {
 		return
 	}
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		// Held in the moment since the wake: the job's holds put it in front of whoever lifts
+		// them; the text is not typed into a held job.
+		_ = s.Journal(ctx, id, EventWake, "The wake-up was not typed: the job became "+why, nil)
+		return
+	}
 	if err := s.sendText(ctx, job.PaneID, job.AgentName, text); err != nil {
 		_ = s.Journal(ctx, id, EventWake, "The wake-up could not be typed: "+oneLine(err.Error(), 160)+"; the supervisor keeps it going", nil)
 	}
@@ -326,6 +337,9 @@ func (s *Service) WakeNow(ctx context.Context, id string) (Job, error) {
 	}
 	if detail.State != StateBlocked {
 		return Job{}, invalid("job %s is not blocked", id)
+	}
+	if why := s.continuationRefusal(ctx, id); why != "" {
+		return Job{}, invalid("job %s cannot be woken now: it is %s", id, why)
 	}
 	s.wake(ctx, id, time.Time{}, fmt.Sprintf("[crowsnest recheck] The human asks you to look again at what blocked job %s (%s): check whether it has cleared, and carry on or block again.",
 		id, oneLine(detail.BlockedReason, 200)))

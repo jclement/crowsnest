@@ -348,6 +348,76 @@ func agentGateLocked(r store.JobRecord, q store.JobQuestionSummary, verb AgentVe
 	return nil
 }
 
+// ---- crowsnest's side: automatic prompts (R7-C04) ------------------------------------------
+
+// continuationRefusal is the one gate every automatic prompt that starts a turn passes, checked
+// right before it is typed: a timed wake, a dependency's wake, a review's findings, a check's
+// findings, a retry, a nudge. It returns why the prompt may not start a turn on job id now ("" when
+// it may): the automation is paused, the job is finished, any hold is on it (its own set, the
+// questions it has open, a budget above it), or its engine is under the fleet's usage limit. It
+// reads the row fresh under the lock (s.mu must not be held), so a hold placed after the caller's
+// own read is seen; an unreadable row refuses (fail closed). Not atomic with the keystrokes
+// themselves: a hold placed in the milliseconds between this check and herdr typing is not seen.
+// ignore names hold kinds the caller is itself lifting (a retry lifts the usage-limit hold).
+func (s *Service) continuationRefusal(ctx context.Context, id string, ignore ...HoldKind) string {
+	numeric, err := ParseID(id)
+	if err != nil {
+		return "not a job"
+	}
+	if s.paused() {
+		return pausedText
+	}
+	s.mu.Lock()
+	r, err := s.opts.Store.GetJob(ctx, numeric)
+	var q store.JobQuestionSummary
+	if err == nil {
+		q, err = s.opts.Store.SummarizeJobQuestions(ctx, id)
+	}
+	s.mu.Unlock()
+	if err != nil {
+		return "crowsnest could not read the job's holds: " + oneLine(err.Error(), 120)
+	}
+	if State(r.State).Terminal() {
+		return "the job is " + r.State
+	}
+	for _, hold := range effectiveHolds(r, q) {
+		if containsKind(ignore, hold.Kind) {
+			continue
+		}
+		return fmt.Sprintf("held (%s: %s)", hold.Kind, oneLine(hold.Why, 160))
+	}
+	if why := s.ancestorBudgetHold(ctx, r); why != "" {
+		return "held (" + why + ")"
+	}
+	if held, state := s.limitHeld(ctx, r.Engine); held && !containsKind(ignore, HoldUsageLimit) {
+		return "the fleet is under a usage limit (" + limitText(state) + ")"
+	}
+	return ""
+}
+
+// noteHeldContinuation journals, at most every 30 minutes per job, that an automatic prompt waits.
+// The pause journals its own waits (Pause.Held), so it is not repeated here.
+func (s *Service) noteHeldContinuation(ctx context.Context, id, what, why string) {
+	if why == pausedText {
+		s.heldWhilePaused(ctx, what+":"+id, what+" for "+id)
+		return
+	}
+	watch := s.watchOf(id)
+	if now := s.opts.Now(); now.Sub(watch.heldNoteAt) > 30*time.Minute {
+		watch.heldNoteAt = now
+		_ = s.Journal(ctx, id, EventHold, "Not typed yet: "+what+" waits, because the job is "+why, nil)
+	}
+}
+
+func containsKind(kinds []HoldKind, kind HoldKind) bool {
+	for _, k := range kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
 // agentGateByIDLocked reads job id now and applies the gate to verb (s.mu held).
 func (s *Service) agentGateByIDLocked(ctx context.Context, id int64, verb AgentVerb) error {
 	r, err := s.opts.Store.GetJob(ctx, id)

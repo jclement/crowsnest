@@ -1541,6 +1541,21 @@ the job whose budget ran out.
 | job_create | allowed only under questions, approval_tool and usage_limit (waits crowsnest ends); refused under a human's hold or while checked or reviewed |
 
 - Only the human's actions and crowsnest's own recovery lift holds (`liftHoldLocked`).
+- **Every automatic prompt** that would start a turn passes one gate right before it is typed
+  (`continuationRefusal`, R7-C04): a timed or dependency wake-up, a review's findings, a check's
+  findings, a retry's "continue", the backstop's nudge, the restart note. It reads the row fresh
+  and refuses while paused, on a finished job, under any hold (the job's set, its open blocking
+  questions, a budget above it) and while the fleet is under a usage limit (a retry ignores only
+  the usage-limit hold it lifts itself). A refused wake-up leaves the job blocked with its wake-up
+  for later; a refused retry or nudge gives its attempt back; a refused restart starts the agent
+  but types nothing. The human's own Wake it is refused with the reason. The check is not atomic
+  with herdr's keystrokes: a hold placed in the milliseconds between them is not seen.
+- **Findings have one owner** (R7-C05). A check's failure and a review's changes are both kept as
+  the job's `pending_feedback` and typed by `deliverFeedback`, a lifecycle step (`feedback`): the
+  claim on the row lets exactly one caller through (the check's callback, the review's and the
+  tick may all try), the gate runs before the claim and again before typing, and the message is
+  cleared only if it is still the one typed. A claim left by a crowsnest that stopped mid-send is
+  settled as "may have arrived", cleared and journalled, never typed again.
 
 ### 6.21 A diff at any time, and viewed tracking (built on `wip/diff`)
 

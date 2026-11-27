@@ -140,7 +140,7 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 	if r.PendingFeedback != "" {
 		s.deliverFeedback(ctx, id) // a check's finding held by the pause or a hold (R6-C07)
 	}
-	s.tickBlocked(ctx, r) // a wake-up that is due, or a job waited on that settled (6.18)
+	s.tickBlocked(ctx, r)      // a wake-up that is due, or a job waited on that settled (6.18)
 	s.checkGraceExpiry(ctx, r) // "finish the step" is bounded in time too (R7-C03)
 	s.checkBudget(ctx, r)      // the 80% warning and the limit (6.16)
 	if IsStanding(r.AgentName) {
@@ -458,6 +458,13 @@ func (s *Service) retryStep(ctx context.Context, id string, onlyIfDue bool) {
 	detail, err := s.Get(ctx, id)
 	if err != nil {
 		s.finishQuietly(ctx, cl, spent.refund)
+		return
+	}
+	// R7-C04: the usage-limit hold is the one this retry lifts; any other hold (a budget, a
+	// check, a blocking question …) keeps "continue" from being typed, and the attempt is given back.
+	if why := s.continuationRefusal(ctx, id, HoldUsageLimit); why != "" {
+		s.finishQuietly(ctx, cl, spent.refund)
+		s.noteHeldContinuation(ctx, id, "the retry", why)
 		return
 	}
 	var result orch.PromptResult
