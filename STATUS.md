@@ -4,7 +4,7 @@ Living record kept by the lead agent. Last updated: 2026-11-27 10:55 (CST, read 
 
 ## In one paragraph
 
-Crowsnest is one Go binary that starts a herdr session and a Claude orchestrator and serves a phone-friendly web app for running coding agents across several projects. `v0.1.0` was released on 2026-11-26. `main` is now far beyond it and every builder branch is merged: local gates are green on the tip (677 unit tests; the browser suite passes apart from one load-dependent flake). Two things stand between `main` and a tag: **CI on GitHub is red** (a Linux-only database error I could not reproduce, plus flaky browser tests; a builder is on it), and **the R6 fixes have not been re-reviewed**.
+Crowsnest is one Go binary that starts a herdr session and a Claude orchestrator and serves a phone-friendly web app for running coding agents across several projects. `v0.1.0` was released on 2026-11-26. `main` is now far beyond it and every builder branch is merged: local gates are green on the tip (677 unit tests; the browser suite passes apart from one load-dependent flake). Two things stand between `main` and a tag: **CI on GitHub is red** (a Linux-only database error I could not reproduce, plus flaky browser tests; a builder is on it), and **the R7 review's findings** (below; a builder is on those too).
 
 ## Try it
 
@@ -47,7 +47,7 @@ A narrated tour of the product (3 min 50 s, recorded from the real app in demo m
 Seven rounds are in `reviews/`. R1 to R5 were fixed and verified by a later round.
 
 - **R6 (Codex and Opus security, on `96f6ea6`)** confirmed the R5 gate bypasses closed, and found new ones: an agent could clear a human-only gate by declaring `blocked` first; a passing check was pinned to the commit but not to the files it tested; "Allow and remember" on an elevated call became a wildcard; any agent could put its engine under a usage-limit hold; restore installed auto-allow rules.
-- **The R6 fix builder reports all 28 findings real and fixed, each with a test.** Holds are now kept apart from agent-declared state and every agent call goes through one function, table-tested per hold and verb; the check runs in a clean copy of the pinned commit. **No reviewer has verified these fixes yet.**
+- **The R6 fix builder reports all 28 findings real and fixed, each with a test.** Holds are now kept apart from agent-declared state and every agent call goes through one function, table-tested per hold and verb; the check refuses a dirty tree at the start and voids the run if the tree is dirty or HEAD moved at the end. It still runs in the job's own worktree, not a separate copy (an earlier version of this file said "clean copy"; that was my error, not the builder's).
 - What the builder says an agent can still do: write files as the same user (crowsnest's own risk rules, `.git/config`, role files); fake its own usage limit (two colluding agents can hold an engine for a day at most; the human can clear it); and persuade with an ordinary question. "Accepted" means the project's own check command passed on that commit: the branch can change that command, so it is not independent evidence.
 
 ## Merged this morning (27 Nov), and how it was checked
@@ -70,11 +70,14 @@ Each was merged, then `mise run check` and the hermetic browser suite were run o
 
 | Agent | Branch | Doing |
 |---|---|---|
+| `crow-fix7` | `wip/fix-r7` | The R7 findings |
 | `crow-ci` | `wip/ci` | CI red on every push since about `3f2111b`: `TestServeStartsWithoutHerdrAndRecovers` fails with a SQLite write error on the runner only (passes in a Linux container here), `TestRunFollowsFleetEvents`, a voice test on Linux WebKit, and flaky browser tests. May push its branch and open one draft PR to run CI |
 
 Known flake on this machine under load, passing alone: `projects.spec.ts:135` (chat with a lead), seen three times; `remote.spec.ts:43` and `jobs.spec.ts:31` once or twice each. Once the whole `cmd/crowsnest` Go package timed out at ten minutes in a full gate and passed in 55 s alone; not explained.
 
-Next: an R7 verification review of the R6 fixes and of the new read surfaces (folder browse API, diff API), then the real-Claude suites once more on the final tip.
+- **R7 (Codex and Opus security, on `3456e19`)** verified them. Opus: every R6 security finding fixed or partly fixed, "no way around a human gate" found, safe on a tailnet with a password. Codex: 6 of 13 fixed, 7 partly, and **not fit to tag**. New findings, being fixed on `wip/fix-r7`:
+  - high: the check can still be fooled by changing files during the run and restoring them, because it runs in the live worktree (R7-C01); a crash between saving a parent's budget hold and passing it to queued children loses the children's hold for good (R7-C02);
+  - medium: "Allow and remember" on an elevated non-shell tool remembers the tool name, so every later call to that tool is allowed (R7-S1); opening the diff of a hostile job can fill the disk (R7-S2); bidi and invisible characters are not flagged in the diff or review cards (R7-S3); restore brings back check commands and instruction layers (R7-S4); "require all files viewed" fails open (R7-C07); several continuation and delivery races in budgets, waits and check feedback.
 
 ## Decisions and things only Jeff can do
 
@@ -86,6 +89,8 @@ Next: an R7 verification review of the R6 fixes and of the new read surfaces (fo
 5. **Barreleye**: before pointing crowsnest at it, set `develop` and `staging` as protected branches in Settings and check `nyc1` is in the protected hosts list (I have not set them). Do not use Land's push there: it only knows GitHub pull requests, and a push to Azure DevOps starts paid CI.
 6. **Claude's sign-in on this machine** ends between 2026-11-29 and 2026-12-02 (a builder saw the warning); every real tier needs it.
 7. **A cancelled job's open question**: now cancelled with the job; a failed job's question is left for you. Say if you want it otherwise.
+
+8. **Where the acceptance check runs.** Today: in the job's worktree, so its dependencies and caches are there, but an agent can change files during the run and put them back. The alternative is a fresh checkout of the exact commit, which is real evidence but has no `node_modules` or build cache and would fail or be slow on most projects. I have asked the fix builder for an opt-in per-project "isolated check" and left the default alone; say if you want the default flipped.
 
 ## Things I did that you should know
 
