@@ -10,7 +10,9 @@
 //
 // Demo jobs (internal/jobs/demo.go): j_3 "Migrate the settings page to the new form kit" (stuck on
 // a limit). Demo questions (internal/questions/demo.go) include "Apply the fleet cache refactor?"
-// (confirm, blocking: "Apply it" or "Not yet"). Demo agents (internal/herdr/fake/demo.go): orchestrator, builder, reviewer, docs-writer, linter.
+// (confirm, blocking: "Apply it" or "Not yet"). Demo agents (internal/herdr/fake/demo.go): the
+// orchestrator, the linter, and job-<n> for each job with a pane (job-12 reviews the fleet cache).
+// A job given here is j_23 (the landing demo is j_18 to j_22).
 import type { Page } from "@playwright/test";
 import { askAsAgent } from "../support/agent";
 import { expect, expectAccessible, expectNoSidewaysScroll, isPhone, test } from "../support/fixtures";
@@ -31,7 +33,7 @@ const input = (page: Page) => page.getByRole("combobox", { name: "Search or run 
 const activeOption = (page: Page) => palette(page).locator("[role=option][aria-selected=true]");
 
 async function openBoard(page: Page) {
-  await page.goto("/");
+  await page.goto("/jobs"); // Jobs moved off home (Now) to /jobs
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
 }
 
@@ -80,7 +82,7 @@ test("a plain k, and ? or g while typing, do nothing", async ({ page }) => {
   await box.pressSequentially("kg?gi");
   await expect(box).toHaveValue("kg?gi");
   await expect(palette(page)).toBeHidden();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/jobs$/);
 });
 
 test("the header button opens it (a full-screen sheet on a phone), with the first row active", async ({ page }, testInfo) => {
@@ -108,10 +110,10 @@ test("giving a job from the palette puts it on the board, and the toast opens it
   await expect(activeOption(page)).toContainText("Give job: Rewrite the onboarding emails for new users");
   await page.keyboard.press("Enter");
   await expect(palette(page)).toBeHidden();
-  await expect(page.getByText("Job j_16 given")).toBeVisible();
+  await expect(page.getByText("Job j_23 given")).toBeVisible();
   await expect(page.getByRole("region", { name: "In progress" }).or(page.getByRole("region", { name: "Needs you or stuck" })).getByText("Rewrite the onboarding emails for new users").first()).toBeVisible();
-  await page.getByRole("button", { name: "Open j_16" }).click();
-  await expect(page).toHaveURL(/job=j_16/);
+  await page.getByRole("button", { name: "Open j_23" }).click();
+  await expect(page).toHaveURL(/job=j_23/);
   const detail = isPhone(testInfo) ? page.getByRole("dialog") : page.getByRole("region", { name: "Selected job" });
   await expect(detail.getByRole("heading", { name: "Rewrite the onboarding emails for new users" })).toBeVisible();
 });
@@ -122,7 +124,7 @@ test("⌘/Ctrl+Enter on Give job opens the full form with the text in it", async
   await page.keyboard.press(chord("other"));
   await input(page).fill("> Tidy the README");
   await page.keyboard.press("Control+Enter");
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/jobs$/);
   await expect(page.getByLabel("What needs doing?")).toHaveValue("Tidy the README");
   await expect(page.getByLabel(/^Where/)).toBeVisible();
 });
@@ -172,6 +174,9 @@ test("navigating: a view, the shortcuts sheet with ?, and g i / g f", async ({ p
   await expect(page).toHaveURL(/\/inbox$/);
   await page.keyboard.press("g");
   await page.keyboard.press("j");
+  await expect(page).toHaveURL(/\/jobs$/);
+  await page.keyboard.press("g");
+  await page.keyboard.press("h");
   await expect(page).toHaveURL(/\/$/);
   await page.keyboard.press("Shift+?");
   const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
@@ -189,9 +194,9 @@ test("an agent opens straight to its terminal, and the theme changes from the pa
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByRole("button", { name: /Dark theme/ })).toBeVisible();
   await openWithButton(page);
-  await input(page).fill("reviewer");
+  await input(page).fill("job-12");
   const agent = palette(page).getByRole("group", { name: "Agents and panes" }).getByRole("option").first();
-  await expect(agent).toContainText("reviewer");
+  await expect(agent).toContainText("job-12");
   await agent.hover();
   await page.keyboard.press("ArrowRight");
   await palette(page).getByRole("option", { name: "Open terminal" }).click();

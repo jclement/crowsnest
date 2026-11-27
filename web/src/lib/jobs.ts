@@ -72,7 +72,7 @@ export interface Job {
   open_questions: number;
   isolate: boolean;
   /** Who created it: "" the human, "agent" a job agent, "orchestrator" (R2-H1). Optional in fixtures. */
-  origin?: "" | "agent" | "orchestrator";
+  origin?: string;
   /** What the job's agent has used (7.11); absent on a server that measures nothing. */
   spend?: SpendSummary;
   // Landing and review (DESIGN.md 6.7, 6.11). Optional in fixtures.
@@ -356,6 +356,39 @@ export function cardLine(job: Job): string {
 
 function firstLine(markdown: string): string {
   return markdown.split("\n").find((line) => line.trim())?.replace(/^[#>*\-\s]+/, "") ?? "";
+}
+
+// ---- Ownership (DESIGN.md 22.4) ------------------------------------------------------------
+
+/** One link of a job's chain of ownership. */
+export interface ChainLink {
+  label: string;
+  /** The job this link is, when it is one (it opens on a click). */
+  jobId?: string;
+}
+
+/**
+ * Who a job answers to, from the human down (R4 Fable 1.7: "you → lead Crowsnest → builder j_12"):
+ * the human, then the standing agent that owns the project (its lead) or the orchestrator, then
+ * each ancestor job, then this one. `projectName` names the job's project (none: unfiled work).
+ */
+export function ownershipChain(job: Job, all: Job[], projectName?: string): ChainLink[] {
+  const ancestors: Job[] = [];
+  const byId = new Map(all.map((entry) => [entry.id, entry]));
+  let parent = job.parent_id ? byId.get(job.parent_id) : undefined;
+  while (parent && ancestors.length < 8 && !ancestors.includes(parent)) {
+    ancestors.unshift(parent);
+    parent = parent.parent_id ? byId.get(parent.parent_id) : undefined;
+  }
+  const owner = projectName ? `lead ${projectName}` : "orchestrator";
+  const chain: ChainLink[] = [{ label: "you" }, { label: owner }];
+  for (const ancestor of [...ancestors, job]) chain.push({ label: `${ancestor.role} ${ancestor.id}`, jobId: ancestor.id });
+  return chain;
+}
+
+/** The jobs a job delegated, oldest first. */
+export function childrenOf(job: Job, all: Job[]): Job[] {
+  return all.filter((entry) => entry.parent_id === job.id).sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
 /** A landed job's state in words. */

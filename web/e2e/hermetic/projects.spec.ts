@@ -1,7 +1,8 @@
 // Projects, leads, instruction layers and app schedules (DESIGN.md 21) against `crowsnest --demo`,
-// which seeds three projects (crowsnest and website with their leads running and answering with
-// canned replies, infra with its lead off), jobs filed under them, the schedules evening-review
-// (to the crowsnest lead) and link-check (a job for website), and edited instruction layers.
+// which seeds five projects (crowsnest, website and mobile with their leads running and answering
+// with canned replies, infra and handbook with their leads off), jobs filed under them, the
+// schedules evening-review (to the crowsnest lead) and link-check (a job for website), and edited
+// instruction layers.
 //
 // Journeys, at 1440 and 375 px: create a project from a directory the test makes; start a lead
 // and give it a job "to the lead", held by lead-<slug>; chat with a lead and get its reply;
@@ -44,8 +45,11 @@ test("the projects list shows each lead's state and counts; a project page has i
   await page.goto("/projects");
   const list = page.getByRole("list", { name: "Projects" });
   await expect(list.getByRole("link", { name: /Crowsnest/ })).toBeVisible();
+  await expect(list.getByRole("link")).toHaveCount(5);
   await expect(list.getByRole("link", { name: /Infra/ })).toContainText("Lead off");
+  await expect(list.getByRole("link", { name: /Handbook/ })).toContainText("Lead off");
   await expect(list.getByRole("link", { name: /Website/ })).not.toContainText("Lead off");
+  await expect(list.getByRole("link", { name: /Mobile/ })).not.toContainText("Lead off");
   if (isPhone(testInfo)) await expectNoSidewaysScroll(page);
   await shot(page, testInfo, "list");
 
@@ -154,7 +158,7 @@ test("chat with a project's lead: the target is in the URL and the lead replies"
 });
 
 test("filter the board by project; the choice is remembered", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
   await page.getByRole("radio", { name: /^Website/ }).click();
   await expect(page).toHaveURL(/project=website/);
@@ -162,14 +166,14 @@ test("filter the board by project; the choice is remembered", async ({ page }) =
   await expect(cards.first()).toBeVisible();
   const allCount = await page.evaluate(() => fetch("/api/v1/jobs").then((r) => r.json()).then((body: { data: unknown[] }) => body.data.length));
   expect(await cards.count()).toBeLessThan(allCount);
-  await page.goto("/");
+  await page.goto("/jobs");
   await expect(page.getByRole("radio", { name: /^Website/ })).toHaveAttribute("aria-checked", "true");
   await page.getByRole("radio", { name: /^All/ }).click();
   await expect(page.getByRole("button", { name: /Crowsnest/ }).first()).toBeVisible();
 });
 
 test("edit a role's instructions and see the diff against the built-in", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("menuitem", { name: "Instructions" }).click();
   const sheet = page.getByRole("dialog", { name: "Instructions" });
@@ -190,7 +194,7 @@ test("edit a role's instructions and see the diff against the built-in", async (
 });
 
 test("make a schedule in the app and Run it now", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "Schedule" });
   await expect(sheet.getByText("link-check").locator("visible=true").first()).toBeVisible();

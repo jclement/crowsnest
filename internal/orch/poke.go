@@ -84,6 +84,9 @@ type PrecheckInput struct {
 	Tasks []Reason
 	// RideAlong are `every: poke` tasks: they go only with a poke that has something else due.
 	RideAlong []Reason
+	// Owned are panes whose settling is another standing agent's business (a project lead, or a
+	// job agent holding a job of a project whose lead is up): no agent reason is made for them.
+	Owned map[string]bool
 }
 
 // PrecheckResult is the reasons due now and the agent states they report, to be marked pushed
@@ -135,7 +138,7 @@ func precheckOwn(input PrecheckInput) PrecheckResult {
 
 // agentReason is the reason for one agent, if its state is due.
 func agentReason(input PrecheckInput, agent AgentSeen) (Reason, string, bool) {
-	if agent.PaneID == "" || agent.PaneID == input.OrchestratorPane || agent.Since.IsZero() {
+	if agent.PaneID == "" || agent.PaneID == input.OrchestratorPane || agent.Since.IsZero() || input.Owned[agent.PaneID] {
 		return Reason{}, "", false
 	}
 	var hold time.Duration

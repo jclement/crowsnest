@@ -1,7 +1,9 @@
-// The global needs-you tray (DESIGN.md 8.7): on every view, what needs the human, answerable in
-// place. Pending approvals (Allow once / Deny on the card), open questions (a confirm or choice
-// question's options), terminal dialogs (the digit buttons) and stuck jobs ("open" for the rest),
-// most urgent and newest first (lib/needsYou.ts), each with "Snooze 10 min".
+// The global needs-you tray (DESIGN.md 8.7, 22): what needs the human, answerable in place, on
+// every view but Now and the Inbox (which show the same queue in full). Its rows are the server's
+// attention queue (lib/attention.ts): pending approvals (Allow once / Deny on the card), open
+// questions (a confirm or choice question's options), terminal dialogs (the digit buttons), stuck
+// or failed jobs and standing agents that need the terminal, most urgent and longest waiting
+// first, each labelled with its project and job, each with "Snooze 10 min" (kept on the server).
 //
 // Desktop (md and up): a stack anchored bottom-right, above whatever it must not cover (the Chat
 // composer, the terminal's last rows: lib/trayKeepOut.ts sets --tray-bottom); it shows the top
@@ -11,15 +13,16 @@
 //
 // Keyboard: g then n focuses the tray (expanding it); Tab moves through it; Enter opens an item,
 // and an open approval takes focus so y and n answer it. Nothing else in the app answers to y or n.
-import { useNavigate } from "@tanstack/react-router";
-import { BellDot, BellOff, ChevronDown, ChevronUp, Clock, ListTodo, MessageSquareWarning, MessagesSquare, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { BellDot, BellOff, Bot, ChevronDown, ChevronUp, Clock, Hourglass, ListTodo, MessageSquareWarning, MessagesSquare, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { DESKTOP_QUERY } from "../../lib/media";
 import { relativeTime } from "../../lib/format";
 import { FOCUS_TRAY_EVENT, trayTitle, type TrayItem } from "../../lib/needsYou";
-import { snooze, useTrayItems } from "./useTrayItems";
+import { itemLink, kindLabel, plainPreview, whereLine } from "../../lib/attention";
+import { useSnooze, useTrayItems } from "./useTrayItems";
 import { useAgentScreen, useAnswerQuestion } from "../../lib/queries";
 import type { Question } from "../../lib/questions";
 import { onArrival, setTraySound, traySoundOn } from "../../lib/traySound";
@@ -33,6 +36,14 @@ import { useToast } from "../ui/toast-context";
 
 /** How many items the desktop stack shows before "Show all". */
 const STACK = 3;
+
+/** Views that show the whole queue themselves, so the tray would only repeat it (R4 Fable 1.5). */
+const QUEUE_VIEWS = new Set(["/", "/inbox"]);
+
+/** True on a view that already shows the queue. */
+function useOnQueueView(): boolean {
+  return useRouterState({ select: (state) => QUEUE_VIEWS.has(state.location.pathname) });
+}
 
 /** Ids that arrived since the tray first rendered, for the arrival animation (cleared after it). */
 function useArrivals(items: TrayItem[]): Set<string> {
@@ -58,6 +69,7 @@ function useArrivals(items: TrayItem[]): Set<string> {
 
 export function TrayPanel() {
   const items = useTrayItems();
+  const onQueueView = useOnQueueView();
   const fresh = useArrivals(items);
   const [folded, setFolded] = useState(() => sessionStorage.getItem("crowsnest-tray-folded") === "1");
   const [all, setAll] = useState(false);
@@ -92,7 +104,7 @@ export function TrayPanel() {
     return () => window.removeEventListener(FOCUS_TRAY_EVENT, focus);
   }, []);
 
-  if (items.length === 0) return null;
+  if (items.length === 0 || onQueueView) return null;
   const shown = all ? items : items.slice(0, STACK);
   const style = { bottom: "var(--tray-bottom, 1rem)" };
 
@@ -157,6 +169,7 @@ export function TrayPanel() {
 
 export function TrayBar() {
   const items = useTrayItems();
+  const onQueueView = useOnQueueView();
   const fresh = useArrivals(items);
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -166,7 +179,7 @@ export function TrayBar() {
     window.addEventListener(FOCUS_TRAY_EVENT, focus);
     return () => window.removeEventListener(FOCUS_TRAY_EVENT, focus);
   }, []);
-  if (items.length === 0) return null;
+  if (items.length === 0 || onQueueView) return null;
   const top = items[0];
   return (
     <>
@@ -232,24 +245,15 @@ function rowIcon(item: TrayItem): ReactNode {
     case "dialog":
       return <MessageSquareWarning className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />;
     case "job":
-      return <ListTodo className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />;
+      return <ListTodo className={cn("mt-0.5 h-4 w-4 shrink-0", item.job.state === "failed" ? "text-danger" : "text-warning")} aria-hidden />;
+    case "agent":
+      return <Bot className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />;
+    case "limit":
+      return <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />;
   }
 }
 
-function rowLabel(item: TrayItem): string {
-  switch (item.kind) {
-    case "approval":
-      return item.approval.risk === "dangerous" ? "Dangerous approval" : item.approval.risk === "elevated" ? "Approval (elevated)" : "Approval";
-    case "question":
-      return item.question.urgency === "blocking" ? "Blocking question" : "Question";
-    case "dialog":
-      return "Terminal dialog";
-    case "job":
-      return item.job.stuck ? "Stuck job" : "Job needs you";
-  }
-}
-
-function TrayRow({
+export function TrayRow({
   item,
   open,
   fresh,
@@ -265,11 +269,12 @@ function TrayRow({
   onNavigate?: () => void;
 }) {
   const cardRef = useRef<HTMLElement>(null);
+  const snooze = useSnooze();
   const bodyId = `tray-body-${item.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
   useEffect(() => {
     if (open && item.kind === "approval") cardRef.current?.focus();
   }, [open, item.kind]);
-  const who = item.kind === "approval" ? item.approval.agent_name : item.kind === "dialog" ? item.agent.workspace : item.kind === "question" ? item.question.context.worker : undefined;
+  const who = item.item.agent;
   return (
     <li className={cn(fresh && "animate-tray-pulse")} data-tray-item={item.id}>
       <div className="flex items-start gap-1 pr-1">
@@ -284,10 +289,16 @@ function TrayRow({
           {rowIcon(item)}
           <span className="min-w-0 flex-1">
             <span className="line-clamp-2 break-words text-sm font-medium text-heading">{trayTitle(item)}</span>
-            <span className="flex flex-wrap items-center gap-1 pt-0.5 text-2xs text-muted">
-              <span>{rowLabel(item)}</span>
-              {who && <Chip mono>{who}</Chip>}
-              {item.at && <span>{relativeTime(item.at)}</span>}
+            <span className="block truncate pt-0.5 text-xs text-muted">
+              <span className="text-body" data-where>
+                {whereLine(item.item)}
+              </span>
+              {" · "}
+              <span className={cn("font-medium", item.item.urgency === "blocking" ? "text-danger" : "text-body")}>{item.item.urgency === "blocking" ? "Blocking" : "Can wait"}</span>
+              {" · "}
+              {kindLabel(item.item)}
+              {who && ` · ${who}`}
+              {item.at && ` · waiting ${relativeTime(item.at)}`}
             </span>
           </span>
         </button>
@@ -326,15 +337,35 @@ function RowBody({ item, cardRef, onDone, onNavigate }: { item: TrayItem; cardRe
       return <QuickAnswer question={item.question} onOpen={() => go("/inbox", { q: item.question.id })} />;
     case "dialog":
       return <QuickDialog paneId={item.agent.pane_id} name={item.agent.name || item.agent.pane_id} onOpen={() => go("/fleet", { agent: item.agent.pane_id })} />;
+    case "limit":
+      return (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-body">{item.item.detail}</p>
+          <Button compact onClick={() => go("/jobs", {})}>
+            See the jobs
+          </Button>
+        </div>
+      );
     case "job":
       return (
         <div className="flex flex-col gap-2">
-          <p className="text-xs text-body">{item.job.cause_text || "This job is not moving."}</p>
-          <Button compact onClick={() => go("/", { job: item.job.id })}>
+          <p className="text-xs text-body">{item.item.detail || item.job.cause_text || "This job is not moving."}</p>
+          <Button compact onClick={() => go("/jobs", { job: item.job.id })}>
             Open the job
           </Button>
         </div>
       );
+    case "agent": {
+      const link = itemLink(item.item);
+      return (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-body">{item.standing.detail || item.item.title}</p>
+          <Button compact onClick={() => go(link.to, link.search)}>
+            Open its terminal
+          </Button>
+        </div>
+      );
+    }
   }
 }
 
@@ -345,7 +376,7 @@ function QuickAnswer({ question, onOpen }: { question: Question; onOpen: () => v
   const quick = (question.kind === "confirm" || question.kind === "choice") && !question.multi;
   return (
     <div className="flex flex-col gap-2">
-      {question.body_md && <p className="line-clamp-3 whitespace-pre-wrap break-words text-xs text-body">{question.body_md}</p>}
+      {question.body_md && <p className="line-clamp-3 break-words text-xs text-body">{plainPreview(question.body_md)}</p>}
       {quick && (
         <ul aria-label="Options" className="flex flex-col gap-1.5">
           {question.options.map((option) => (

@@ -9,6 +9,7 @@ import type { Job } from "../../lib/jobs";
 import type { PaletteCommand } from "../../lib/palette";
 import { makeQuestion } from "../../lib/questionFixtures";
 import { renderWithClient, stubApi } from "../../test/render";
+import { fixtureSnapshot } from "../../lib/attentionFixtures";
 import { CommandPalette } from "./CommandPalette";
 
 const jobs: Job[] = [
@@ -16,13 +17,16 @@ const jobs: Job[] = [
   makeJob({ id: "j_2", title: "Migrate the database", state: "running", pane_id: "" }),
 ];
 
+const deployQuestion = makeQuestion({ id: "q_7", title: "Deploy to staging?", kind: "confirm", status: "open", options: [{ key: "y", label: "Yes" }, { key: "n", label: "No" }] });
+
 function stub(jobList: Job[] = jobs) {
   return stubApi((call) => {
     if (call.path === "/jobs") return { body: { data: jobList } };
+    if (call.path === "/attention") return { body: { data: fixtureSnapshot([], [deployQuestion]) } };
     if (call.path.startsWith("/questions")) {
       return {
         body: {
-          data: [makeQuestion({ id: "q_7", title: "Deploy to staging?", kind: "confirm", status: "open", options: [{ key: "y", label: "Yes" }, { key: "n", label: "No" }] })],
+          data: [deployQuestion],
         },
       };
     }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jclement/crowsnest/internal/attention"
 	"github.com/jclement/crowsnest/internal/machines"
 	"github.com/jclement/crowsnest/internal/tsauth"
 	"io"
@@ -141,6 +142,9 @@ type harnessOptions struct {
 	hostNames []string
 	// The System page, Settings and the first run (system_test.go); nil: 503
 	system System
+	// The attention queue and the Now view (attention_test.go); nil: 503
+	attention *attention.Service
+	now       NowSources
 	// Day thirty (ops_test.go): sign in with Tailscale (serveStatus is what `tailscale serve
 	// status --json` answers; "" fails), scoped tokens and machines, and the ops service.
 	tailscale   bool
@@ -244,6 +248,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Approvals:     opts.approvals,
 		Actions:       opts.actions,
 		System:        opts.system,
+		Attention:     opts.attention,
+		Now:           opts.now,
 	})
 	if err != nil {
 		t.Fatal(err)

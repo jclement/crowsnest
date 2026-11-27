@@ -6,13 +6,13 @@
 // the palette's Spend target and job rows. Then photographs at 375 and 1440.
 //
 // Demo ids (internal/jobs/demo.go): j_1 running in a worktree, j_4 held by the orchestrator, j_8
-// done.
+// done. The three running leads (Crowsnest, Website, Mobile) have seeded spend of their own.
 import type { Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { detailRegion, expect, expectNoSidewaysScroll, isPhone, test } from "../support/fixtures";
 
 async function openBoard(page: Page, search = "") {
-  await page.goto(`/${search}`);
+  await page.goto(`/jobs${search}`); // Jobs moved off home (Now) to /jobs
   await expect(page.getByRole("region", { name: "Needs you or stuck" })).toBeVisible();
 }
 
@@ -90,7 +90,9 @@ test("the palette has a Spend target, and job rows show their spend", async ({ p
   await page.getByRole("button", { name: "Search or run…" }).click();
   const input = page.getByRole("combobox", { name: "Search or run a command" });
   await input.fill("retry back-off");
-  await expect(page.getByRole("option", { name: /Add retry back-off/ })).toContainText(money);
+  // The job's row (its question's needs-you row names the job too).
+  const jobs = page.getByRole("dialog", { name: "Command palette" }).getByRole("group", { name: "Jobs" });
+  await expect(jobs.getByRole("option", { name: /Add retry back-off/ })).toContainText(money);
   await input.fill("spend");
   await page.getByRole("option", { name: /^Spend/ }).first().click();
   await expect(page.getByRole("dialog", { name: "Spend (estimated)" })).toBeVisible();

@@ -6,6 +6,7 @@ import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { queryKeys } from "./api";
 import type { ApprovalEvent } from "./approvals";
+import { isSnapshot } from "./attention";
 import { notifyQuestion } from "./notifications";
 import { onTrayArrival } from "./traySound";
 import type { QuestionEvent } from "./questions";
@@ -23,9 +24,9 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   hello: null,
   heartbeat: [],
   fleet: [queryKeys.fleet, queryKeys.agents],
-  job: [queryKeys.jobs, queryKeys.schedule, queryKeys.projects],
+  job: [queryKeys.jobs, queryKeys.schedule, queryKeys.projects, queryKeys.now],
   message: [queryKeys.agents, queryKeys.orchestratorContext],
-  question: [queryKeys.questions, queryKeys.fleet, queryKeys.jobs],
+  question: [queryKeys.questions, queryKeys.fleet, queryKeys.jobs, queryKeys.now],
   orchestrator: [queryKeys.orchestrator, queryKeys.fleet, queryKeys.agents],
   poke: [queryKeys.journal],
   journal: [queryKeys.journal, queryKeys.orchestratorContext, queryKeys.digests],
@@ -36,7 +37,7 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   // Projects (21.1): a project changed (its counts and lead ride along in the list), or a lead's
   // status did (its conversation and pane are in the fleet and agent queries).
   project: [queryKeys.projects, queryKeys.instructions, queryKeys.voiceAgents],
-  lead: [queryKeys.projects, queryKeys.fleet, queryKeys.agents],
+  lead: [queryKeys.projects, queryKeys.fleet, queryKeys.agents, queryKeys.now],
   instructions: [queryKeys.instructions],
   approval: [queryKeys.approvals, queryKeys.jobs],
   // Landing, throttling and the pause (6.11 to 6.14): the switch's banner, the presence chip,
@@ -49,6 +50,8 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
   // sys carries a machine sample, appended to the stats in useLiveQueries; nothing to refetch.
   sys: [],
   system: [systemKeys.system, systemKeys.onboarding],
+  // The attention queue (DESIGN.md 22) arrives whole; the Now rows' waiting counts come from it.
+  attention: [queryKeys.attention, queryKeys.now],
 };
 
 /**
@@ -58,6 +61,7 @@ export const invalidations: Record<EventName, QueryKey[] | null> = {
  */
 export const payloads: Partial<Record<EventName, { key: QueryKey; accept: (data: unknown) => boolean }>> = {
   fleet: { key: queryKeys.fleet, accept: isFleet },
+  attention: { key: queryKeys.attention, accept: isSnapshot },
 };
 
 /**

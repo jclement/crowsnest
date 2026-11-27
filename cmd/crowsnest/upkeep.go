@@ -21,6 +21,7 @@ import (
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/schedule"
 	"github.com/jclement/crowsnest/internal/store"
@@ -175,33 +176,71 @@ func fleetPicture(client herdr.Client, jobService *jobs.Service) func(context.Co
 func newTender(cfg config.Config, client herdr.Client, db *store.Store, journalLog *journal.Journal, orchestrator *orch.Orchestrator, conversations *transcript.Manager, logger *slog.Logger) *orch.Tender {
 	return orch.NewTender(orch.TenderOptions{
 		Client: client, KV: db, Journal: journalLog, Logger: logger,
-		Usage: func(ctx context.Context) (transcript.Usage, error) {
-			return conversations.Usage(ctx, orch.Name)
-		},
+		Usage:     usageOf(conversations, orch.Name),
 		CompactAt: cfg.CompactAt, FreshAt: cfg.FreshAt, HandoffFile: filepath.Join(cfg.StateDir, HandoffFile),
-		HeldJobBusy: func(ctx context.Context) bool {
-			pane := orchestrator.Status().PaneID
-			if pane == "" {
-				return false
-			}
-			records, err := db.ListJobsByPane(ctx, pane, []string{string(jobs.StateQueued), string(jobs.StateRunning), string(jobs.StateNeedsYou), string(jobs.StateBlocked)})
-			if err != nil {
-				return true // unknown: wait rather than interleave
-			}
-			for _, record := range records {
-				if record.LifecycleOp != "" {
-					return true
-				}
-			}
-			return false
-		},
-		NewConversation: orchestrator.NewConversation,
+		HeldJobBusy: heldJobBusy(db, orchestrator), NewConversation: orchestrator.NewConversation,
 	})
 }
 
-// standingContext is what the orchestrator's SessionStart hook prints besides any job it holds
+// newLeadTender builds a lead's upkeep (DESIGN.md 7.9, 21.2): the orchestrator's code, reading
+// the lead's own (pinned) conversation, compacting at two thirds of --compact-at, with the daily
+// new conversation at --fresh-at and its hand-over in <state>/leads/<slug>/handoff.md. Its
+// thresholds follow the orchestrator's live settings.
+func newLeadTender(deps leadDeps, project projects.Project, agent *orch.Orchestrator, upkeep leadUpkeep) *orch.Tender {
+	options := orch.TenderOptions{
+		Client: deps.client, KV: deps.db, Journal: deps.journal, Logger: deps.logger.With("lead", project.Slug),
+		Usage:     usageOf(upkeep.conversations, projects.AgentName(project.Slug)),
+		CompactAt: orch.LeadCompactAt(deps.cfg.CompactAt), FreshAt: deps.cfg.FreshAt,
+		HandoffFile: leadHandoffFile(deps.cfg, project.Slug),
+		HeldJobBusy: heldJobBusy(deps.db, agent), NewConversation: agent.NewConversation,
+		StateKey: "lead." + project.Slug + ".upkeep.state", Label: "the lead of " + project.Name,
+	}
+	if orchestrator := upkeep.tender; orchestrator != nil {
+		options.ThresholdsFrom = func() (int, int) {
+			compactAt, freshAt := orchestrator.Thresholds()
+			return orch.LeadCompactAt(compactAt), freshAt
+		}
+	}
+	return orch.NewTender(options)
+}
+
+// leadHandoffFile is a lead's hand-over, <state>/leads/<slug>/handoff.md.
+func leadHandoffFile(cfg config.Config, slug string) string {
+	return filepath.Join(cfg.StateDir, "leads", slug, HandoffFile)
+}
+
+// usageOf reads a standing agent's context size from its followed conversation.
+func usageOf(conversations *transcript.Manager, agentName string) func(context.Context) (transcript.Usage, error) {
+	return func(ctx context.Context) (transcript.Usage, error) {
+		return conversations.Usage(ctx, agentName)
+	}
+}
+
+// heldJobBusy reports a lifecycle step in flight on a job the standing agent holds (a /compact
+// typed then would interleave with it).
+func heldJobBusy(db *store.Store, agent *orch.Orchestrator) func(context.Context) bool {
+	return func(ctx context.Context) bool {
+		pane := agent.Status().PaneID
+		if pane == "" {
+			return false
+		}
+		records, err := db.ListJobsByPane(ctx, pane, liveStates)
+		if err != nil {
+			return true // unknown: wait rather than interleave
+		}
+		for _, record := range records {
+			if record.LifecycleOp != "" {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// standingContext is what a standing agent's SessionStart hook prints besides any job it holds
 // (DESIGN.md 7.9): its hand-over notes, the questions it asked that are still open, and the jobs
-// it created or holds that are still live. It answers only for the orchestrator's own pane.
+// it created or holds that are still live. It answers for the orchestrator's pane and for a
+// project lead's (whose hand-over is <state>/leads/<slug>/handoff.md).
 func standingContext(cfg config.Config, refs *jobRefs, questionService func() *questions.Service, jobService *jobs.Service) func(context.Context, string, string) string {
 	return func(ctx context.Context, pane, source string) string {
 		origin := "orchestrator"
@@ -212,7 +251,12 @@ func standingContext(cfg config.Config, refs *jobRefs, questionService func() *q
 				parts = append(parts, notes)
 			}
 		case refs.projects != nil && refs.projects.leadInPane(pane) != "":
-			origin = refs.projects.leadInPane(pane) // a project's lead: the same, less the hand-over
+			origin = refs.projects.leadInPane(pane) // a project's lead: the same, with its own hand-over
+			if project, ok := refs.projects.leadProjectInPane(pane); ok {
+				if notes := handoffNotes(leadHandoffFile(cfg, project.Slug)); notes != "" {
+					parts = append(parts, notes)
+				}
+			}
 		default:
 			return ""
 		}

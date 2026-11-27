@@ -53,7 +53,21 @@ type TenderOptions struct {
 	// NewConversation starts the orchestrator on a fresh session (Orchestrator.NewConversation).
 	NewConversation func(ctx context.Context) (Status, error)
 	Now             func() time.Time
+
+	// ---- A tender for a project's lead (DESIGN.md 7.9, 21.2) ----
+
+	// StateKey is the kv key of this tender's bookkeeping (kvUpkeep when empty).
+	StateKey string
+	// Label names the agent in journal lines ("the orchestrator" when empty).
+	Label string
+	// ThresholdsFrom, when set, gives the thresholds in effect (a lead's follow the orchestrator's
+	// live settings); SetThresholds still overrides it.
+	ThresholdsFrom func() (compactAt, freshAt int)
 }
+
+// LeadCompactAt is a lead's compaction threshold for the orchestrator's: two thirds of it (a lead
+// re-reads a narrower picture, so it should stay smaller); 0 stays off.
+func LeadCompactAt(orchestrator int) int { return orchestrator * 2 / 3 }
 
 // Tender keeps the orchestrator compact. Build it with NewTender.
 type Tender struct {
@@ -150,14 +164,14 @@ func (t *Tender) compact(ctx context.Context, now time.Time, status Status, usag
 		return false
 	}
 	t.update(ctx, func(s *upkeepState) { s.Compact = CompactAttempt{At: now, Tokens: usage.Tokens} })
-	summary := fmt.Sprintf("Compacted the orchestrator (%s) at %s tokens", how, formatTokens(usage))
+	summary := fmt.Sprintf("Compacted %s (%s) at %s tokens", t.label(), how, formatTokens(usage))
 	if err != nil {
-		summary = fmt.Sprintf("Tried to compact the orchestrator (%s) at %s tokens; herdr did not confirm it", how, formatTokens(usage))
+		summary = fmt.Sprintf("Tried to compact %s (%s) at %s tokens; herdr did not confirm it", t.label(), how, formatTokens(usage))
 		t.opts.Logger.Warn("typing /compact", "err", err)
 	} else if !result.Started {
 		summary += "; it did not visibly start"
 	}
-	t.opts.Journal.Add(ctx, journal.KindUpkeep, summary, map[string]any{"tokens": usage.Tokens, "threshold": t.compactAt(), "how": how, "started": result.Started})
+	t.opts.Journal.Add(ctx, journal.KindUpkeep, summary, map[string]any{"agent": status.Name, "tokens": usage.Tokens, "threshold": t.compactAt(), "how": how, "started": result.Started})
 	return true
 }
 
@@ -183,7 +197,7 @@ func (t *Tender) fresh(ctx context.Context, now time.Time, status Status, step F
 			return false
 		}
 		t.update(ctx, func(s *upkeepState) { s.HandoffAt = now })
-		t.opts.Journal.Add(ctx, journal.KindUpkeep, "Asked the orchestrator to write its hand-over before the daily new conversation", map[string]any{"file": t.opts.HandoffFile})
+		t.opts.Journal.Add(ctx, journal.KindUpkeep, "Asked "+t.label()+" to write its hand-over before the daily new conversation", map[string]any{"agent": status.Name, "file": t.opts.HandoffFile})
 		return true
 	case FreshRestart:
 		if t.opts.NewConversation == nil {
@@ -191,14 +205,14 @@ func (t *Tender) fresh(ctx context.Context, now time.Time, status Status, step F
 		}
 		t.update(ctx, func(s *upkeepState) { s.FreshDay = today }) // before: a failed restart is not retried all day
 		newStatus, err := t.opts.NewConversation(ctx)
-		summary := "Started the orchestrator on its daily new conversation"
+		summary := "Started " + t.label() + " on its daily new conversation"
 		if t.handoffWritten() {
 			summary += "; the hand-over is in its first context"
 		}
 		if err != nil {
-			summary = "The daily new conversation did not start: " + newStatus.Detail
+			summary = "The daily new conversation of " + t.label() + " did not start: " + newStatus.Detail
 		}
-		t.opts.Journal.Add(ctx, journal.KindUpkeep, summary, map[string]any{"session_id": newStatus.SessionID})
+		t.opts.Journal.Add(ctx, journal.KindUpkeep, summary, map[string]any{"agent": status.Name, "session_id": newStatus.SessionID})
 		return true
 	}
 	return false
@@ -251,7 +265,7 @@ func (t *Tender) load(ctx context.Context) upkeepState {
 	defer t.mu.Unlock()
 	if !t.loaded {
 		t.loaded = true
-		if raw, err := t.opts.KV.GetKV(ctx, kvUpkeep); err == nil {
+		if raw, err := t.opts.KV.GetKV(ctx, t.stateKey()); err == nil {
 			if err := json.Unmarshal([]byte(raw), &t.state); err != nil {
 				t.opts.Logger.Warn("ignoring unreadable upkeep bookkeeping", "err", err)
 			}
@@ -269,7 +283,7 @@ func (t *Tender) update(ctx context.Context, change func(*upkeepState)) {
 	if err != nil {
 		return
 	}
-	if err := t.opts.KV.SetKV(context.WithoutCancel(ctx), kvUpkeep, string(body)); err != nil {
+	if err := t.opts.KV.SetKV(context.WithoutCancel(ctx), t.stateKey(), string(body)); err != nil {
 		t.opts.Logger.Warn("storing upkeep bookkeeping", "err", err)
 	}
 }
@@ -278,16 +292,32 @@ func (t *Tender) update(ctx context.Context, change func(*upkeepState)) {
 // minutes after local midnight, negative for off.
 func (t *Tender) SetThresholds(compactAt, freshAt int) { t.live.Store(&[2]int{compactAt, freshAt}) }
 
-func (t *Tender) compactAt() int {
+// Thresholds are --compact-at and --fresh-at in effect: SetThresholds', else ThresholdsFrom's,
+// else the options'.
+func (t *Tender) Thresholds() (compactAt, freshAt int) {
 	if live := t.live.Load(); live != nil {
-		return live[0]
+		return live[0], live[1]
 	}
-	return t.opts.CompactAt
+	if t.opts.ThresholdsFrom != nil {
+		return t.opts.ThresholdsFrom()
+	}
+	return t.opts.CompactAt, t.opts.FreshAt
 }
 
-func (t *Tender) freshAt() int {
-	if live := t.live.Load(); live != nil {
-		return live[1]
+func (t *Tender) compactAt() int { compactAt, _ := t.Thresholds(); return compactAt }
+
+func (t *Tender) freshAt() int { _, freshAt := t.Thresholds(); return freshAt }
+
+func (t *Tender) stateKey() string {
+	if t.opts.StateKey != "" {
+		return t.opts.StateKey
 	}
-	return t.opts.FreshAt
+	return kvUpkeep
+}
+
+func (t *Tender) label() string {
+	if t.opts.Label != "" {
+		return t.opts.Label
+	}
+	return "the orchestrator"
 }

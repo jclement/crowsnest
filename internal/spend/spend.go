@@ -46,7 +46,13 @@ const (
 	// ReasonOrchestrator: the orchestrator does the job in its own conversation, so its use is on
 	// the orchestrator's line.
 	ReasonOrchestrator = "orchestrator"
+	// ReasonLead: a project's lead does the job in its own conversation, so its use is on the
+	// lead's line (LeadSubjectPrefix).
+	ReasonLead = "lead"
 )
+
+// LeadSubjectPrefix starts a project lead's spend subject, "lead:<slug>" (projects.Subject).
+const LeadSubjectPrefix = "lead:"
 
 // Summary is a subject's spend as the APIs return it.
 type Summary struct {
@@ -135,6 +141,7 @@ type JobInfo struct {
 	ID           string // j_<n>
 	Engine       string // claude or codex
 	Orchestrated bool   // held by the orchestrator: its use is on the orchestrator's line
+	LeadHeld     bool   // held by a project's lead: its use is on the lead's line
 	StartedAt    *time.Time
 	SettledAt    *time.Time
 }
@@ -163,6 +170,8 @@ func (r *Reader) Summaries(ctx context.Context, jobs []JobInfo) (map[string]Summ
 	subjects := make([]string, 0, len(jobs))
 	for _, job := range jobs {
 		switch {
+		case job.LeadHeld:
+			out[job.ID] = Summary{Reason: ReasonLead, Models: []string{}}
 		case job.Orchestrated:
 			out[job.ID] = Summary{Reason: ReasonOrchestrator, Models: []string{}}
 		case job.Engine == "codex":

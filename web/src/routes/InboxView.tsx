@@ -1,15 +1,14 @@
-// The Inbox (DESIGN.md sections 8 and 12): everything that needs the human, in one list. Three
-// sources feed it: tool calls waiting for approval (8.7), questions agents asked through crowsnest,
-// and terminal dialogs (agents blocked on a permission or question prompt, from the fleet; one
-// whose pane has a pending approval is that approval and is not listed twice). Approvals, blocking
-// questions and dialogs come first, then other open questions, notices last; the History tab holds
-// settled questions and approvals.
+// The Inbox (DESIGN.md sections 8, 12 and 22): everything that needs the human, in one list. The
+// Open tab is the server's attention queue (lib/attention.ts): approvals, questions, terminal
+// dialogs, stuck or failed jobs and standing agents at their terminal, de-duplicated and ordered
+// by the server, each labelled with its project and job; snoozed items fold away below, notices
+// follow. The History tab holds settled questions and approvals.
 //
 // The selection lives in the URL (?q=q_7, ?q=approval:ap_3 or ?q=dialog:<pane id>) so a link, a
 // notification or a reload lands on it. From md the list and the selected item sit side by side; on a phone the item opens in a
 // full-screen sheet.
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Bell, BellOff, BellRing, FileDiff, Inbox, ListTodo, MessageSquareWarning, RefreshCw, ShieldAlert } from "lucide-react";
+import { Bell, BellOff, BellRing, Bot, FileDiff, Hourglass, Inbox, ListTodo, MessageSquareWarning, MessagesSquare, RefreshCw, ShieldAlert } from "lucide-react";
 import { useState, type ReactElement } from "react";
 import { DialogCard } from "../components/fleet/DialogCard";
 import { QuestionDetail } from "../components/inbox/QuestionDetail";
@@ -24,12 +23,11 @@ import { cn } from "../lib/cn";
 import { relativeTime } from "../lib/format";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { notificationState, requestNotifications, type NotificationState } from "../lib/notifications";
-import { isFinished, type Job } from "../lib/jobs";
-import { useAgentScreen, useApproval, useApprovals, useFleet, useJobs, useQuestions } from "../lib/queries";
-import { compareApprovals, outcome, requester, riskLabels, type Approval } from "../lib/approvals";
+import { activeItems, itemLink, kindLabel, snoozedItems, whereLine, type AttentionItem } from "../lib/attention";
+import { useAgentScreen, useApproval, useApprovals, useAttention, useAttentionAction, useFleet, useQuestions } from "../lib/queries";
+import { outcome, requester, riskLabels, type Approval } from "../lib/approvals";
 import { ApprovalCard } from "../components/approvals/ApprovalCard";
-import { answerSummary, compareQuestions, kindLabels, type Question } from "../lib/questions";
-import type { Agent } from "../lib/types";
+import { answerSummary, kindLabels, type Question } from "../lib/questions";
 
 type InboxTab = "open" | "history";
 
@@ -85,48 +83,119 @@ export function InboxView() {
 // ---- Lists ---------------------------------------------------------------------------------
 
 function OpenList({ selected, onSelect }: { selected?: string; onSelect: (id: string) => void }) {
+  // The Open list is the attention queue (DESIGN.md 22), in the server's order and with its
+  // count: the same items, the same number, as the badge, the tray and the Now view. Notices
+  // (information, nothing to answer) follow in their own group.
+  const attention = useAttention();
   const questions = useQuestions("open");
-  const approvals = useApprovals("pending");
-  const fleet = useFleet();
-  const jobs = useJobs();
-  const pendingApprovals = [...(approvals.data ?? [])].sort(compareApprovals);
-  const approvalPanes = new Set(pendingApprovals.map((approval) => approval.pane_id));
-  const dialogs = (fleet.data?.agents ?? []).filter((agent) => agent.needs_you && !approvalPanes.has(agent.pane_id));
-  // Stuck jobs appear here too (DESIGN.md 12); a job waiting on questions is already represented
-  // by its questions, and one at a dialog by the dialog row.
-  const stuck = (jobs.data ?? []).filter((job) => job.stuck && !isFinished(job.state));
-
-  if (questions.isPending) return <SkeletonRows rows={5} label="Loading questions" />;
-  if (questions.isError) return <LoadError message={questions.error.message} retry={() => void questions.refetch()} />;
-
-  const sorted = [...questions.data].sort(compareQuestions);
-  const blocking = sorted.filter((question) => question.urgency === "blocking" && question.kind !== "notice");
-  const rest = sorted.filter((question) => !blocking.includes(question));
-  if (sorted.length === 0 && dialogs.length === 0 && stuck.length === 0 && pendingApprovals.length === 0) {
+  const navigate = useNavigate();
+  const unsnooze = useAttentionAction();
+  if (attention.isPending) return <SkeletonRows rows={5} label="Loading what needs you" />;
+  if (attention.isError) return <LoadError message={attention.error.message} retry={() => void attention.refetch()} />;
+  const items = activeItems(attention.data);
+  const snoozed = snoozedItems(attention.data);
+  const notices = (questions.data ?? []).filter((question) => question.kind === "notice");
+  const open = (item: AttentionItem) => {
+    if (item.kind === "approval" || item.kind === "question" || item.kind === "dialog") {
+      onSelect(item.kind === "question" ? (item.question?.id ?? item.id) : item.id);
+      return;
+    }
+    const link = itemLink(item);
+    void navigate({ to: link.to, search: link.search });
+  };
+  if (items.length === 0 && snoozed.length === 0 && notices.length === 0) {
     return (
       <EmptyState icon={Inbox} title="Nothing needs you">
-        When an agent asks a question or stops at a terminal dialog, it lands here.
+        When an agent asks a question, wants a tool call approved or stops at a terminal dialog, it lands here.
       </EmptyState>
     );
   }
   return (
-    <ul aria-label="Needs you" className="divide-y divide-border">
-      {pendingApprovals.map((approval) => (
-        <ApprovalRow key={approval.id} approval={approval} selected={selected === APPROVAL_PREFIX + approval.id} onSelect={onSelect} />
-      ))}
-      {blocking.map((question) => (
-        <QuestionRow key={question.id} question={question} selected={selected === question.id} onSelect={onSelect} />
-      ))}
-      {dialogs.map((agent) => (
-        <DialogRow key={agent.pane_id} agent={agent} selected={selected === DIALOG_PREFIX + agent.pane_id} onSelect={onSelect} />
-      ))}
-      {stuck.map((job) => (
-        <StuckJobRow key={job.id} job={job} />
-      ))}
-      {rest.map((question) => (
-        <QuestionRow key={question.id} question={question} selected={selected === question.id} onSelect={onSelect} />
-      ))}
-    </ul>
+    <>
+      <p className="border-b border-border px-3 py-1.5 text-xs text-muted" data-attention-count={attention.data.counts.total}>
+        {attention.data.counts.total} need you: {attention.data.counts.blocking} blocking, {attention.data.counts.can_wait} can wait
+      </p>
+      <ul aria-label="Needs you" className="divide-y divide-border">
+        {items.map((item) => (
+          <AttentionRow key={item.id} item={item} selected={selected === selectionOf(item)} onOpen={() => open(item)} />
+        ))}
+      </ul>
+      {snoozed.length > 0 && (
+        <details className="border-t border-border">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted hover:bg-hover">Snoozed ({snoozed.length})</summary>
+          <ul aria-label="Snoozed" className="divide-y divide-border">
+            {snoozed.map((item) => (
+              <li key={item.id} className="flex items-center gap-2 px-3 py-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-body">{item.title}</span>
+                  <span className="block truncate text-2xs text-muted">
+                    {whereLine(item)} · back {relativeTime(item.snoozed_until ?? "")}
+                  </span>
+                </span>
+                <Button compact variant="ghost" onClick={() => unsnooze.mutate({ action: "unsnooze", id: item.id })}>
+                  Bring back
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {notices.length > 0 && (
+        <>
+          <h3 className="border-t border-border px-3 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wide text-muted">Notices</h3>
+          <ul aria-label="Notices" className="divide-y divide-border">
+            {notices.map((question) => (
+              <QuestionRow key={question.id} question={question} selected={selected === question.id} onSelect={onSelect} />
+            ))}
+          </ul>
+        </>
+      )}
+    </>
+  );
+}
+
+/** The Inbox selection an item opens as (?q=…). */
+function selectionOf(item: AttentionItem): string {
+  return item.kind === "question" ? (item.question?.id ?? item.id) : item.id;
+}
+
+function attentionIcon(item: AttentionItem): ReactElement {
+  switch (item.kind) {
+    case "approval":
+      return <ShieldAlert className={cn("mt-0.5 h-4 w-4 shrink-0", item.approval?.risk === "dangerous" ? "text-danger" : item.approval?.risk === "elevated" ? "text-warning" : "text-success")} aria-hidden />;
+    case "question":
+      return <MessagesSquare className={cn("mt-0.5 h-4 w-4 shrink-0", item.urgency === "blocking" ? "text-status-blocked" : "text-accent")} aria-hidden />;
+    case "dialog":
+      return <MessageSquareWarning className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />;
+    case "agent":
+      return <Bot className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />;
+    case "job":
+    case "wait":
+      return <ListTodo className={cn("mt-0.5 h-4 w-4 shrink-0", item.job?.state === "failed" ? "text-danger" : "text-warning")} aria-hidden />;
+    case "limit":
+      return <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />;
+  }
+}
+
+/** One attention item: its title, where it belongs (project and job), its kind and how long it has waited. */
+function AttentionRow({ item, selected, onOpen }: { item: AttentionItem; selected: boolean; onOpen: () => void }) {
+  return (
+    <li data-attention-item={item.id}>
+      <button type="button" onClick={onOpen} aria-current={selected || undefined} className={cn(rowClass, selected && "bg-selected")}>
+        <span className="flex w-full items-start gap-2">
+          {attentionIcon(item)}
+          <span className={cn("min-w-0 flex-1 break-words text-sm font-medium text-heading", item.kind === "approval" && "font-mono text-xs")}>{item.title}</span>
+          <span className="shrink-0 text-2xs text-muted">{relativeTime(item.since)}</span>
+        </span>
+        <span className="block w-full truncate text-xs text-body">{whereLine(item)}</span>
+        <span className="flex flex-wrap items-center gap-1">
+          <Chip tone={item.urgency === "blocking" ? "danger" : "neutral"}>{item.urgency === "blocking" ? "Blocking" : "Can wait"}</Chip>
+          <Chip>{kindLabel(item)}</Chip>
+          {item.agent && <Chip mono>{item.agent}</Chip>}
+          {item.detail && <span className="min-w-0 truncate text-xs text-muted">{item.detail}</span>}
+        </span>
+      </button>
+    </li>
   );
 }
 
@@ -216,48 +285,6 @@ function ApprovalRow({ approval, selected, onSelect }: { approval: Approval; sel
           <Chip tone={approval.risk === "dangerous" ? "danger" : approval.risk === "elevated" ? "warning" : "success"}>{riskLabels[approval.risk]}</Chip>
           <Chip>Approval</Chip>
           <span className="min-w-0 truncate text-xs text-muted">{settled ? `→ ${outcome(approval)}` : requester(approval)}</span>
-        </span>
-      </button>
-    </li>
-  );
-}
-
-function DialogRow({ agent, selected, onSelect }: { agent: Agent; selected: boolean; onSelect: (id: string) => void }) {
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={() => onSelect(DIALOG_PREFIX + agent.pane_id)}
-        aria-current={selected || undefined}
-        className={cn(rowClass, selected && "bg-selected")}
-      >
-        <span className="flex w-full items-start gap-2">
-          <MessageSquareWarning className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />
-          <span className="min-w-0 flex-1 break-words text-sm font-medium text-heading">{agent.name || agent.pane_id} is waiting at a dialog</span>
-        </span>
-        <span className="flex flex-wrap items-center gap-1">
-          <Chip tone="danger">Terminal dialog</Chip>
-          <Chip mono>{agent.workspace}</Chip>
-          {agent.title && <span className="min-w-0 truncate text-xs text-muted">{agent.title}</span>}
-        </span>
-      </button>
-    </li>
-  );
-}
-
-function StuckJobRow({ job }: { job: Job }) {
-  const navigate = useNavigate();
-  return (
-    <li>
-      <button type="button" onClick={() => void navigate({ to: "/", search: { job: job.id } })} className={rowClass}>
-        <span className="flex w-full items-start gap-2">
-          <ListTodo className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
-          <span className="min-w-0 flex-1 break-words text-sm font-medium text-heading">{job.title}</span>
-        </span>
-        <span className="flex flex-wrap items-center gap-1">
-          <Chip tone="warning">Stuck job</Chip>
-          <Chip mono>{job.id}</Chip>
-          <span className="min-w-0 truncate text-xs text-muted">{job.cause_text}</span>
         </span>
       </button>
     </li>

@@ -737,9 +737,11 @@ and Claude Code 2.1.332 (haiku) by the stop test (`mise run test:claude`).
 - **Backstop (M8)**: `Service.NudgeIfDue(ctx, jobID)` applies the same rule and budget for an agent
   without hooks that the caller found idle with an empty input box, and types the nudge;
   `Service.BackstopJobs` lists what the backstop watches (7.7).
-- **`--demo`** seeds ten jobs (running in a worktree, nudged, stuck on a limit with a retry
-  countdown, waiting on a question, at a dialog, unresponsive, blocked, done with evidence, failed,
-  queued) and keeps them moving; the supervisor does not run there.
+- **`--demo`** seeds seventeen jobs across its five projects (21.5): one in each state (running in
+  a worktree, nudged, stuck on a limit with a retry countdown, waiting on a question, at a dialog,
+  unresponsive, blocked, done with evidence, failed, queued), a lead's job with a child, and jobs
+  waiting on approvals and blocking questions; it keeps them moving; the supervisor does not run
+  there.
 
 ### 6.9 As fixed in R2: lifecycle steps, and what the supervisor guarantees
 
@@ -1305,6 +1307,24 @@ per reason. Every poke and skip is recorded in the journal table and visible in 
 Scheduled tasks (`tasks/*.md` with `every:` frontmatter, as the front door has, and schedules
 made in the app) are another reason source, for the orchestrator or a project's lead: 7.8.
 
+**Who is poked for what (lead-first routing, decision 88).** A project's lead owns its project's
+jobs; the orchestrator routes and summarises across projects. So a job or question event is
+delivered to exactly one standing agent, except where the orchestrator needs an outcome:
+
+| Event | The project's lead (running, able to take pokes) | The orchestrator |
+|---|---|---|
+| An Unfiled job (project 0) settles or gets stuck; its question settles | (none) | yes, as before |
+| A project job settles or gets stuck; its question settles | yes | no |
+| A job the orchestrator created (`origin: orchestrator`) in a project settles | yes | yes: `project X: job j_N you handed it is done: …` |
+| A project job event while that project has no lead able to take it (off, stopped, `failed`, `needs_terminal`) | (none) | yes, prefixed `project X has no lead running:` |
+| A project job stuck or `needs_you` for `EscalateAfter` (30 min) with no change, its lead up | (it already knew) | one escalation per (job, cause) |
+| A lead goes `failed` or `needs_terminal` | (none) | one reason: `the lead of X has failed …` |
+| Another agent settles (`done`/`blocked`) | (leads get none) | yes, unless its pane is a lead's or holds a live job of a project whose lead is up |
+| The timer | its project's stuck, needs-you and blocked jobs and its jobs' open questions | stuck, needs-you and blocked jobs not owned by an up lead, and the open-question count |
+
+The escalation ladder is therefore job agent → its lead → the orchestrator → the human (through
+the orchestrator's own judgement and Jeff's pushes, which this routing does not change).
+
 **7.5 Upkeep**: if the orchestrator pane is back at a shell, restart with `--resume`. "New
 conversation" in the UI sends `/exit`, waits for the shell, and starts with a fresh session id.
 Compaction past a threshold and a daily new conversation with a hand-over: 7.9.
@@ -1380,6 +1400,17 @@ Claude Code 2.1.332 by `mise run test:claude`):
   (`agent.list` every 2 s, plus at once when an event adds a reason), keeps the bookkeeping, and
   types the poke with `Prompt` (the web app's send path: it re-checks dialog and draft and waits
   for the turn to start).
+- **Routing** (7.4's table, `cmd/crowsnest/pokes.go`): `routeJob(project, origin, settled, lead)`
+  is a pure function, so every row of the table is a test row; `pokeRouter` delivers to the
+  orchestrator's poker and the project lead's poker (`JobInfo.Prefix` and `HandedOver` word the
+  orchestrator's line). A lead is "up" when it is running and `orch.LeadCanTakePokes` (not off,
+  `stopped`, `failed`, `needs_terminal`). The orchestrator's poker has `OwnedElsewhere(pane)`,
+  asked only for settled agents and handed to the pure precheck as `PrecheckInput.Owned`, and
+  `Escalations(now)`, asked at most every 30 s: `orch.Escalations` (pure) over the live project
+  jobs whose lead is up, each measured from its last activity (`last_activity_at`, else its start;
+  the simplest honest "since" a job records), keyed `escalate:<job>:<cause>` so the delivered set
+  sends it once; and a lead's move into `failed` or `needs_terminal` (`orch.LeadDownReason`, keyed
+  by when it got there). The replay after a dropped hub subscription routes the same way.
 - **Triggers.** Another agent (not the orchestrator) settled into `done` (held 45 s) or `blocked`
   (held 10 s), each `(pane, name, state_change_seq)` pushed once, and at most one poke carrying
   agent reasons per 120 s. A question settled (answered, expired, cancelled) whose asker is not the
@@ -1551,6 +1582,16 @@ door's `frontdoor-poke`, with its lessons:
 - **UI**: the Chat menu shows the context ("128k tokens · compacts at 150k") and a bar against the
   threshold (amber past 80 %), with Compact now and New conversation; the command palette has
   "Compact now".
+- **Project leads** get the same Tender (`newLeadTender` in `cmd/crowsnest/upkeep.go`, passed as
+  the lead poker's `Tender`): the size from the lead's own conversation
+  (`transcript.Manager.Usage(lead-<slug>)`; serve pins each lead's conversation when it gets a
+  pane, so the size is there), compaction at **two thirds of `--compact-at`**
+  (`orch.LeadCompactAt`; a lead re-reads a narrower picture; `0` stays off), the daily new
+  conversation at `--fresh-at` with the hand-over in `<state>/leads/<slug>/handoff.md`, which the
+  lead's SessionStart standing context now includes. Its bookkeeping is under
+  `lead.<slug>.upkeep.state`, its thresholds follow the orchestrator's live Settings
+  (`TenderOptions.ThresholdsFrom`), and its journal lines name it ("Compacted the lead of X …",
+  detail `agent`); the orchestrator's lines name the orchestrator.
 - **Job agents** are not compacted by crowsnest: the tailer follows a job's transcript only while
   someone reads it, so the size is not there for free; Claude's own auto-compact and the
   SessionStart re-injection cover them, as before.
@@ -1612,9 +1653,14 @@ visibility per job."
   transaction: totals, the day rollups, the chart's calls and the reader state together, so a
   crash between them cannot double-count. A settled job is read once more two minutes after
   settling and then marked final. Subjects: the board's newest 300 jobs with a Claude session of
-  their own (`jobs.Service.SpendSources`), plus the orchestrator's current session. A job the
-  orchestrator holds is the orchestrator's (its conversation), so it shows "counted on the
-  orchestrator's line"; a Codex job shows "not measured" (Codex keeps usage in its own rollout
+  their own (`jobs.Service.SpendSources`), plus the orchestrator's current session, plus each
+  running project lead's current session as `lead:<slug>` (`projects.Subject`, cwd the project's
+  directory; `leadSpendSources` in `cmd/crowsnest/spend.go`). The meter's remembered session ids
+  per subject keep a lead's earlier conversations (a new conversation, a restart) counted, as
+  for the orchestrator; a stopped lead is not read until it runs again. The report labels a
+  lead's row "Lead of <slug>". A job the orchestrator holds is the orchestrator's (its
+  conversation), so it shows "counted on the orchestrator's line"; a job a lead holds is the
+  lead's (`spend.ReasonLead`, "counted on the lead's line"); a Codex job shows "not measured" (Codex keeps usage in its own rollout
   files, not mapped to jobs; not worth it yet), never zero.
 - **Storage** (`0011_spend.sql`): `spend_totals` (running totals per subject plus the reader's
   state JSON), `spend_daily` (per local day, subject and pricing key), `spend_turns` (the latest
@@ -1647,7 +1693,8 @@ visibility per job."
   day; sortable; CSV with a BOM, formulas defused); the orchestrator's line in the Chat menu;
   "Spend" in the palette, and each job row's spend as secondary text.
 - **`--demo`** seeds plausible spend through `Meter.Record` (the same counting path) for every
-  started job and a week of orchestrator use; the meter does not run there.
+  started job, a week of orchestrator use and a morning for each running lead (`lead:<slug>`); the
+  meter does not run there.
 
 ### 7.12 Codex as the orchestrator (the doctor branch)
 
@@ -1733,7 +1780,8 @@ a rule) below them are an agent's numbered reply, not a dialog, because Claude h
 box while a dialog is up. The options are the last run numbered 1, 2, 3…; the screen hash is
 SHA-256 over the ANSI-stripped visible screen with trailing spaces and blank lines removed.
 
-**8.3 Telling Jeff.** The tab title and nav badge show the open count; the page uses the browser
+**8.3 Telling Jeff.** The tab title and nav badge show the attention queue's count (section 22: one
+number for every surface); the page uses the browser
 Notification API when permitted; `--notify-url` gets a one-line POST for `blocking` items; Web
 Push (8.5) reaches subscribed devices with no tab open.
 
@@ -1835,9 +1883,10 @@ Push (8.5) reaches subscribed devices with no tab open.
   question". The badge and tab title count open questions plus dialogs. "Notify me" asks for
   Notification permission on a press; a notification is shown when a question is newly asked while
   the tab is hidden.
-- **`--demo`** seeds six open questions (every kind, a mermaid body, a diff, a multi-select) and
-  one answered one into an empty inbox, and asks another from a rotation every 90 s, from the demo
-  fleet's panes, so answers are typed into the fake agents.
+- **`--demo`** seeds six open questions (every kind, a mermaid body, a diff, a multi-select), one
+  answered one and the question the orchestrator's job waits on into an empty inbox, and asks
+  another from a rotation every 90 s. Each comes from the pane of the demo job it names (21.5), so
+  answers are typed into the fake agents and the job's card counts them.
 
 **8.5 Web Push** (built on `wip/webpush`; `internal/push`, `internal/httpd/push.go`,
 `cmd/crowsnest/push.go`, `web/public/sw.js`, `web/src/lib/push.ts`,
@@ -2114,14 +2163,14 @@ the fallback that is always there.
   note ("sent with a deny"), and Allow once, Deny, Open terminal. A settled one shows how it
   ended. Keyboard: `y` and `n` answer only while the card itself has focus (a key in the note, on a
   button or anywhere else answers nothing); `y` on a dangerous card opens the confirmation.
-- **The needs-you tray** (`components/tray`), on every view: pending approvals, open questions
-  (not notices), terminal dialogs (not one whose pane has a pending approval: that dialog is the
-  same request) and stuck jobs or jobs needing a login or config fix; most urgent first (dangerous
-  approvals, then elevated approvals and blocking questions, then low approvals and dialogs, then
-  other questions, then jobs), newest first within each. Each row expands in place: an approval's
+- **The needs-you tray** (`components/tray`), on every view but Now and the Inbox (they show the
+  same queue in full, R4 Fable 1.5): since R4 its rows are the attention queue's (section 22), in
+  the server's order, each with its project and job, and nothing in the browser counts or orders
+  them. Each row expands in place: an approval's
   card; a confirm or choice question's options (one tap answers; "Open in the Inbox" to add a
   note); a dialog's card with its digit buttons (8.2's `DialogCard`); a job's cause and "Open the
-  job". Every row has "Snooze for 10 minutes" (kept in `localStorage`). Desktop: a stack anchored
+  job". Every row has "Snooze for 10 minutes" (kept on the server since R4, so it holds on every
+  device; section 22). Desktop: a stack anchored
   bottom-right showing the top three ("Show all N"), foldable into a pill, with a count, an
   arrival slide and an optional chime (off by default, a switch in its header, remembered in the
   browser). Phone: a 44 px bar in the page's flow between the content and the bottom nav (the top
@@ -2171,10 +2220,12 @@ the fallback that is always there.
   `env`, `timeout`): a seatbelt for an agent that means well, not a sandbox (a script, an alias,
   `eval` or `python -c` gets past it). A missing or broken rules file allows (fail open, like
   every hook).
-- **`--demo`** seeds three approvals (a low Bash `go test`, a low Edit with a diff, a dangerous
-  force push) from the builder, linter and reviewer panes, with no hook waiting on them (so they
-  are never superseded), and adds one from a rotation every three minutes while fewer than three
-  are pending.
+- **`--demo`** seeds three approvals (a low Bash link check from Website's `j_14`, a low Edit with
+  a diff from Mobile's `j_16`, a dangerous force push from Crowsnest's reviewer `j_13`), each
+  naming its job, which is needs_you/approval-tool, with no hook waiting on them (so they are never
+  superseded); the job's pane shows the permission dialog until the approval is decided. One more
+  comes from a rotation every three minutes while fewer than three are pending, from a job with
+  nothing pending.
 - **Tests**: `internal/risk` and `internal/guard` tables; `internal/approvals` (allow wakes the
   waiter, deny with the note, the dangerous confirmation, notification only for low, expiry, a
   hook that stops polling, an active waiter kept, demo ones kept, supersession by pane, by the tool
@@ -2232,7 +2283,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /setup/open/{id}` | Setup mode only: the browser opener's one-time handoff (3.3), loopback peers only, `303` to the relative `/setup#token=…` (else to `/setup`) |
 | `GET /setup`, `POST /setup` | First-run setup (4.14), unauthenticated: `{required, default_name?, min_password_length}`; `{token, username, password, name}` → `201` + session cookie, `403 BAD_TOKEN`, `400`, `429` + `Retry-After`, `410` once done. While setup waits every other `/api/` path is `403 SETUP_REQUIRED` (`503 STARTING` between completion and the full server) |
 | `GET /account`, `POST /account/password`, `PUT /account/name` | The Account sheet: `{username, source: database\|config\|none, name, name_managed, min_password_length}`; `{current_password, new_password}` (`403 WRONG_PASSWORD`, `409` for a configured login; signs every other session out and re-issues this one's cookie); `{name}` (`409` under `--name`). The name is live in `/auth/me` at once; push titles and the Remote Control name take it at the next start |
-| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `approval` (`{id, status, risk, tool, job_id, pane_id, change}`, 8.7), `instructions` (`{at}`, a layer changed, 21.3), `project` (`{id, change}`, 21.1), `lead` (a lead's status, 21.2), `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
+| `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `approval` (`{id, status, risk, tool, job_id, pane_id, change}`, 8.7), `instructions` (`{at}`, a layer changed, 21.3), `project` (`{id, change}`, 21.1), `lead` (a lead's status, 21.2), `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend`, `attention` (the attention queue's whole snapshot, 22) events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
 | `GET /fleet` | `{session, herdr_version, revision, updated_at, workspaces:[{id, number, label, focused, agent_status, worktree?, tabs:[{id, number, label, focused, agent_status, panes:[{id, cwd, title, focused, agent_status, agent: null \| {name, target, kind, status, session_id, title, has_dialog, has_transcript, interactive_ready}}]}]}], agents:[…the same agent plus pane_id, tab_id, workspace_id, workspace, cwd, needs_you], counts:{agents, working, blocked, ready, unknown, dialogs, settled, panes, workspaces}, error?}`. `revision` increases on every change; `error` is set (and the rest is the last good picture) while herdr does not answer. `503 UNAVAILABLE` before the first good snapshot |
 | `GET /agents/{target}/messages?after=&limit=` | Normalised conversation (orchestrator is target `orchestrator`): `{source, session_id, cursor, reset, earlier, more, messages}` (7.6) |
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
@@ -2262,7 +2313,9 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /questions?status=`, `GET /questions/{id}`, `POST /questions/{id}/answer`, `DELETE /questions/{id}` | Inbox (shapes in 8.4) |
 | `GET /approvals?status=pending\|all\|<status>`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` | Tool-call approvals (8.7): `{id, job_id, pane_id, agent_name, session_id, cwd, tool_name, tool_input, suggestions, risk, risk_reasons, status, decided_via, note, status_reason, created_at, settled_at, expires_at, summary}`; decide `{decision: allow\|deny, note, confirm}` → the approval, `409 CONFLICT` when no longer pending, `409 CONFIRM_REQUIRED` for an unconfirmed dangerous allow |
 | `POST /push/action` | A notification's button (8.7): `{token, action}` with the single-use action token alone (no session) → `{item, message}`; `403` for an unknown, used, expired or out-of-scope token, or an elevated or dangerous approval |
-| `GET /inbox/summary` | `{open, blocking}`: the Inbox badge (added in M6) |
+| `GET /inbox/summary` | `{open, blocking}`: open questions only (added in M6); the web app's badge is the attention queue's count since R4 |
+| `GET /attention`, `POST /attention/snooze` `{id, until?}`, `/attention/unsnooze` `{id}`, `/attention/dismiss` `{id}` | The one attention queue (22): `{items, counts: {total, blocking, can_wait, snoozed, by_project}, revision, at, partial?}`; snooze (10 minutes, every device), bring back, dismiss a failed job (`409` for anything else, `404` for an item resolved meanwhile). An `attention` SSE event carries the whole snapshot when it changes |
+| `GET /now`, `GET /now/since?browser=`, `POST /now/beat` `{browser}`, `POST /now/seen` `{browser}` | The Now view (22): `{rows, counts}`; what finished, failed, was cancelled or asked since this browser left (`{since, first, events, counts}`); this browser is in use; mark all seen. A browser id is 8 to 64 of `[A-Za-z0-9_-]` |
 | `POST /orchestrator/poke` | "Poke now" (M8) → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}` (7.7) |
 | `GET /journal?kind=&before=&limit=` | Pokes, skips, sends, answers, restarts, alerts, backstop nudges (M8): `{entries:[{id, at, kind, summary, detail}], total, next_before}`, newest first; `kind` comma-separated (`task`, a scheduled job started, 7.8; `upkeep`, compaction and hand-over, 7.9); `limit` 50 by default, at most 200 |
 | `POST /voice/stt` (audio body) → `{text}`; `GET /voice/tts?text_id=` → audio | Talk mode; 404 when disabled |
@@ -2386,7 +2439,7 @@ does not support the revision. Jobs carry `accept_state`, `accept_detail`, `chec
 - `agent_instructions(id, subject, session_id, at, path, memory_type, load_reason, size)` (0013, 21.3): the instruction files Claude reported loading (the `InstructionsLoaded` hook), paths and a stat's size only, at most 200 rows per subject
 - `projects(id, slug, name, dir, root_dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, archived_at, created_at, updated_at)` (migration `0013_projects.sql`, 21.1): archived, never deleted; a partial unique index keeps two live projects off one root; `jobs.project_id` (0 Unfiled) with an index on `(project_id, state)`
 - Migration `0014_landing.sql` (6.7, 6.11, 6.12, 7.13): `jobs` gains `base_branch`, `base_commit`, `workspace_id`, `walkthrough_md`, `reviewer`, `review_of` (indexed), `review_round`, `review_verdict`, `review_md`, `land_state`, `land_detail`, `landed_at`, `torn_down_at`, `land_request`, `land_question_id`, `start_anyway`; new `digests(id, day, at, source, body_md, question_id)`. kv adds `pause.state`, `throttle.settings`, `presence.dnd_until`, `digest.settings`
-- `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
+- `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings; the attention queue's snoozes and dismissals (`attention.snoozed`, `attention.dismissed`: id → unix time) and each browser's "since you left" record (`browser.<id>`: last beat and window start; 22). The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
 - Migration `0015_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
@@ -2406,14 +2459,18 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 
 | View | Mobile | Desktop |
 |---|---|---|
-| **Jobs** (default) | A text box at the top ("What needs doing?", with where/role/done-when behind one tap). Below it the board: needs-you and stuck first, then running, then finished today. Each card: title, state chip, the progress line, time since last activity, open-question count, agent. Tap for the job: timeline, result, questions, message box, and its Conversation and Terminal | Board at left, selected job at right |
+| **Now** (default, `/`; section 22) | What needs you (the attention queue, answerable in place), then a row per project (lead state, what it is doing, running / waiting on you / done today, spend today, last activity, who owns the work), unfiled work and the orchestrator, then "since you left", then the job box with its project | The queue and the projects side by side |
+| **Jobs** (`/jobs`) | A text box at the top ("What needs doing?", with where/role/done-when behind one tap). Below it the board: needs-you and stuck first, then running, then finished today. Each card: title, state chip, the progress line, time since last activity, open-question count, agent. Tap for the job: timeline, result, questions, message box, and its Conversation and Terminal | Board at left, selected job at right |
 | **Chat** | Conversation, sticky composer, push-to-talk button when voice is on, orchestrator status chip (idle/working/blocked), "Poke now" in a menu | Same, centred column, fleet rail at left |
-| **Inbox** (badge) | Cards: questions, dialogs and stuck jobs, newest blocking first; full-screen sheet to answer | List and detail side by side |
+| **Inbox** (badge) | The attention queue in full (approvals, questions, dialogs, stuck, failed or landable jobs, standing agents), the server's order, each with project and job; snoozed ones folded; notices apart; full-screen sheet to answer | List and detail side by side |
 | **Fleet** | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal | Tree at left, selected agent at right with Conversation/Terminal toggle |
 | **Terminal** | Full-screen xterm on the herdr TUI, with a key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Full-height xterm, font size in the status line |
 
-Bottom nav on mobile, left rail from `md`, in the order Jobs, Projects, Chat, Inbox, Fleet, Terminal
-(Projects since wip/projects, `g p`). Jobs is the default route (`/`); the others are `/projects`
+Since R4 (section 22) the nav has four primary destinations, Now, Projects, Inbox and Chat, which
+are the phone's bottom bar, plus **More** (a sheet: Jobs, Fleet, Terminal, System); the desktop
+rail shows the same order with Jobs, Fleet and Terminal under a "More" heading (`components/nav.ts`
+is the one list). Now is the default route (`/`, `g h`); a link made before it (`/?job=j_12`,
+`/?project=<slug>`) is redirected to the board at `/jobs` (`g j`); the others are `/projects`
 (`/projects/<slug>` a project), `/chat` (`?target=lead-<slug>` a project's lead), `/inbox`, `/fleet` (`?agent=<pane id>`
 selects an agent, so links and reloads land on it) and `/terminal`. A web app manifest and icons
 make it installable to a home screen.
@@ -2517,8 +2574,8 @@ key rules in `lib/hotkeys.ts`; all three are pure and unit-tested.
   cwd); every word must match, and a word scoring under half a perfect word-start run there is
   dropped as scattered noise. Matched title and subtitle characters are highlighted.
 - **Order.** With no query: recent items (localStorage `crowsnest-palette-recent`, the last 12,
-  not Give job texts or answers), Needs you (blocking questions, agents at a dialog, then the other
-  open questions, as the Inbox orders them), the five views, live jobs (needs attention first),
+  not Give job texts or answers), Needs you (exactly the attention queue's unsnoozed items in its
+  order, section 22), the views, live jobs (needs attention first),
   actions. With a query: matching items grouped, groups ordered by their best match, at most 8 a
   group (10 jobs). **Give job: <text>** and **Send to orchestrator: <text>** are always offered
   for free text; they come first unless the best match is strong (at least 0.75 of a perfect
@@ -3187,6 +3244,7 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 85. **The MagicDNS name is detected, the proxy header is not trusted** (3.5). Allowing a name only widens which Host is accepted (still loopback-reached, still authenticated); believing `X-Forwarded-For` would let any local client pick its limiter bucket, so that stays an explicit `--trusted-proxy`.
 86. **The folder-trust question is answered on a card, not by crowsnest** (4.14.1). Detecting the arrow-key menu and sending the keys the person picked keeps the rule (crowsnest never answers a start-up dialog itself) and removes the one step that needed the Terminal view.
 87. **Codex can be the orchestrator, with its gaps stated** (7.12) rather than refused: a machine with only Codex still gets a working crowsnest.
+88. **Lead-first routing** (7.4, 21.2; R4 reviews 1.7, 2.9, C3, X1). A project job's events go to its lead alone; the orchestrator hears the outcome of jobs it handed over and escalations (no lead able to take it, a job stuck or waiting on the human for `EscalateAfter`, a lead that failed). Two agents hearing one event cost two turns and invited both to act on it; one owner per job makes "who acts" unambiguous, and the escalation ladder keeps the orchestrator from going blind when a lead cannot cope. The cost is latency on the escalation path (30 minutes before the orchestrator learns of a job its lead is sitting on), which is the point: the lead gets the first chance.
 
 88. **Land is the human's; agents only ask** (6.11). Merging, pushing and deleting a branch are
     the expensive-to-undo steps the absolute rules reserve for Jeff, so an agent's `job_land`
@@ -3209,14 +3267,17 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 97. **The Terminal view's client gets its own state directory** (10, 20): herdr's client reads saved SSH machines from its state directory; a directory of crowsnest's own removes the one-click path from a browser session to the user's other hosts without changing herdr or the user's files. `--terminal-machines` puts it back.
 98. **Tailscale identity only from this machine's serve, for listed logins** (4.20), and a session made from it is re-checked on every request rather than trusted for 30 days.
 99. **One crowsnest per machine, a read-only Machines list** (4.21): the small version that answers "what needs me where" without moving the agent socket, hooks or terminals across machines.
-100. **Acceptance is a field beside the state, not a new state** (6.15): a running check is `in_review` with `accept_state` checking, so every existing rule for a waiting job (the Stop hook lets it rest, the slot count skips it, done is refused) holds without a new state in every query, board and filter.
-101. **crowsnest runs the check itself, under the heavy gate** (6.15): an agent's "tests pass" is a claim; the exit code crowsnest saw at a commit it recorded is evidence. A dirty tree or no commits are refused at done, cheaply, before any check.
-102. **A moved base sends the job to a rebase job, not back to its agent** (6.15): done is terminal and its tokens are revoked; a fresh builder in the same worktree, checked again after, keeps the state machine as it was.
-103. **Budgets roll children up and count turns** (6.16): delegating must not escape a budget, and turns bound what spend cannot measure.
-104. **One usage limit per engine** (6.17): one agent's limit is every agent's on that account; one record, one banner, one ordered resume.
-105. **Spinning is conservative** (6.17): a false alarm costs Jeff a look at a healthy agent; it needs repetition, time, no change in the tree and no change in the failing tests together.
-106. **A prose question is refused with its own words, not converted by crowsnest** (6.18): crowsnest cannot write the options or the recommendation; the agent can, once told.
-107. **Received means seen in the transcript** (6.19): typing an answer twice is worse than late, so reconciliation looks before anything is typed again.
+100. **One attention queue, computed on the server** (22; R4 Fable 1.1, 1.3, 1.5, Codex C2). Four surfaces counted "needs you" four ways in the browser (12 in the tray, 11 on the Inbox, 4 on the board at the same moment). One server-side model, one snapshot, one SSE event and one number make them agree by construction; the browser keeps no rule about what counts. Snoozes moved to the server with it, so a snooze on the phone holds on the desktop.
+101. **Now is home; the board is `/jobs`** (22; Fable 1.2, Codex C1). The first screen answers what needs me, what each project is doing and what happened while I was away; giving a job stays one box down. Four primary destinations plus More on a phone (Fable 1.4, Codex C4); the same order on the desktop rail, so nothing moves between devices.
+102. **"Since you left" is per browser, kept on the server** (22.3). A random id in localStorage names the browser; its last activity and its window start live in kv. Keeping them on the server means a phone and a laptop each have their own "since", and a cleared tab does not replay a day; a ten-minute gap is "leaving", shorter is a tab switch.
+103. **Acceptance is a field beside the state, not a new state** (6.15): a running check is `in_review` with `accept_state` checking, so every existing rule for a waiting job (the Stop hook lets it rest, the slot count skips it, done is refused) holds without a new state in every query, board and filter.
+104. **crowsnest runs the check itself, under the heavy gate** (6.15): an agent's "tests pass" is a claim; the exit code crowsnest saw at a commit it recorded is evidence. A dirty tree or no commits are refused at done, cheaply, before any check.
+105. **A moved base sends the job to a rebase job, not back to its agent** (6.15): done is terminal and its tokens are revoked; a fresh builder in the same worktree, checked again after, keeps the state machine as it was.
+106. **Budgets roll children up and count turns** (6.16): delegating must not escape a budget, and turns bound what spend cannot measure.
+107. **One usage limit per engine** (6.17): one agent's limit is every agent's on that account; one record, one banner, one ordered resume.
+108. **Spinning is conservative** (6.17): a false alarm costs Jeff a look at a healthy agent; it needs repetition, time, no change in the tree and no change in the failing tests together.
+109. **A prose question is refused with its own words, not converted by crowsnest** (6.18): crowsnest cannot write the options or the recommendation; the agent can, once told.
+110. **Received means seen in the transcript** (6.19): typing an answer twice is worse than late, so reconciliation looks before anything is typed again.
 
 ## 18. Milestones
 
@@ -3332,15 +3393,22 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
   - Claude Code 2.1.332's folder-trust prompt is an unnumbered list ("No, exit" preselected), so
     its dialog card offers no buttons, only the terminal. A card that drives a list (arrows,
     Enter) would answer it; crowsnest deliberately never answers trust by itself.
-  - The orchestrator is poked when any agent settles, including job agents for jobs the human
-    gave from the browser, and again for jobs already finished or cancelled; it answers `noop`
-    or worries about jobs it did not start. It costs a turn each time.
+  - For Unfiled work (and projects whose lead is not up) the orchestrator is still poked when
+    any agent settles, including job agents for jobs the human gave from the browser, and again
+    for jobs already finished or cancelled; it answers `noop` or worries about jobs it did not
+    start. Lead-first routing (decision 88) removed this for a project whose lead is up: its
+    jobs, its workers' panes and its lead's pane are the lead's news, not the orchestrator's.
   - The Jobs form has no model field; a job from the browser runs on Claude's default model
     (the API takes `model`). `e2e:claude` adds `haiku` to the browser's request.
-- **Projects and leads (21)**: a lead's own conversation is not metered for spend (jobs it holds
-  count on its conversation, which is not read). A lead has no compaction or daily new
-  conversation of crowsnest's (Claude's own auto-compact applies). Leads' pokers carry only their
-  project's jobs and tasks; there is no timer poke for a lead. Task files are not read from inside
+- **Projects and leads (21)**: a lead's compaction, daily new conversation and timer were
+  exercised against the fake herdr only (as the orchestrator's were); whether a lead's Write of
+  its hand-over into `<state>/leads/<slug>/` asks for permission was not tested. The 30-minute
+  escalation measures a job from its last activity, so a job idle for a while before it was
+  declared stuck escalates sooner after the stuck mark; a lead-down escalation is remembered in
+  memory, so a crowsnest restart while a lead is failed sends it once more. A lead's spend is read
+  only while it runs (a stopped lead's last records are read at its next start). Lead pokers and
+  tenders pick up the orchestrator's live Settings only for leads started after serve wires them
+  (`projectWiring.useUpkeep`). Task files are not read from inside
   project repositories. Archiving a project stops its lead but leaves its running jobs alone. A
   `Run now` of a lead's poke task waits for that lead's next check (2 s), not an immediate kick.
   Files pasted in Chat with a lead go to the lead's own inbox (`<state>/leads/<slug>/
@@ -3420,7 +3488,8 @@ project's main checkout, workers in worktrees under it, and a front door above a
   model, since it is typed into the lead's conversation). A child job stays in its parent's
   project. The orchestrator may hand a job to a project (`job_create(project=…)`), validated as
   the human's; a job agent or a lead cannot choose another project.
-- **Counts** for the board's switcher: per project, needs-you (needs you, or stuck) and running
+- **Counts** for the board's switcher: per project, needs-you (since R4 the attention queue's own
+  count for the project, section 22, so the switcher shows the badge's number) and running
   (running, blocked, in review, queued and not stuck), plus Unfiled's.
 - **Opening a project** in the app asks `GET /projects/{ref}?open=1`, which applies
   `lead_start=open`; a refetch without `open=1` never starts anything.
@@ -3452,8 +3521,18 @@ project's main checkout, workers in worktrees under it, and a front door above a
   `NoAgentReasons`): the lead hears about its own project's jobs settling or getting stuck (not
   ones it holds), questions those jobs asked being settled, and its project's scheduled tasks
   (21.4); "another agent settled" reasons stay the orchestrator's, the front door. The gate is the
-  orchestrator's: idle, empty input box, no dialog. "Poke now" per lead. The orchestrator is still
-  poked for every job, project jobs included, as before.
+  orchestrator's: idle, empty input box, no dialog. "Poke now" per lead. **Routing is
+  lead-first** (7.4's table, decision 88): a project job's events go to its lead alone while the
+  lead can take pokes; the orchestrator hears the outcome of jobs it handed to the project and
+  the escalations (no lead able to take it, `EscalateAfter`, a lead that failed), and no "agent
+  settled" reason for a lead's pane or a pane holding one of an up lead's jobs. A lead's poker
+  has the **timer** too (`--poke-interval`, following the orchestrator's live Settings through
+  `PokerOptions.IntervalFrom`), over its project's stuck, needs-you and blocked jobs and the open
+  questions its jobs asked, and the orchestrator's **Tender** (7.9: compaction at two thirds of
+  `--compact-at`, `--fresh-at` with its own hand-over). Under `--demo` lead pokers are manual
+  only, as the orchestrator's. Each agent's instructions say the division in one paragraph, the
+  job protocol tells a job agent its project's lead owns its job, and `orch.OwnershipSentence`
+  is the one line the web app can show.
 - **Taking jobs**: `jobs.Service.DispatchStanding` gives each standing agent the oldest queued
   job waiting for it (the orchestrator Unfiled ones, a lead its project's), one at a time, with
   the R2 reservation and claim (`dispatchTo` is the old orchestrator dispatch with the agent as a
@@ -3470,12 +3549,10 @@ project's main checkout, workers in worktrees under it, and a front door above a
 - **The front door**: the orchestrator lists projects and leads (`project_list`, `project_get`,
   `crowsnest project list|get`) and hands work to a project. With `--no-orchestrator` everything
   works with leads alone (the real-Claude lead test runs that way).
-- **Standing context** (7.9) is re-sent to a lead at every SessionStart too: its open questions
-  and the live jobs it holds or created (no hand-over file: leads have no daily new
-  conversation).
-- **Spend**: jobs a lead holds are counted on the lead's conversation, as the orchestrator's are;
-  the lead's own conversation is **not metered** in this round (the meter reads the orchestrator
-  and jobs only).
+- **Standing context** (7.9) is re-sent to a lead at every SessionStart too: its hand-over notes
+  (`<state>/leads/<slug>/handoff.md`), its open questions and the live jobs it holds or created.
+- **Spend** (7.11): a lead's own conversation is metered as `lead:<slug>`, and jobs a lead holds
+  are counted on the lead's line, as the orchestrator's are on its line.
 
 ### 21.3 Instruction layers
 
@@ -3564,12 +3641,45 @@ repositories in this round.
 
 ### 21.5 Demo
 
-`--demo` seeds three projects in throwaway directories under its state directory: Crowsnest
-(`lead_start=job`) and Website (`lead_start=open`), whose leads run on the fake herdr and answer
-prompts with the demo orchestrator's canned replies, and Infra (lead off). The demo's jobs are
-filed under them by directory; two app schedules (`evening-review` to the Crowsnest lead,
-`link-check` a job for Website); and edited instruction layers (global, the builder role, the
-Crowsnest project).
+`--demo` tells one morning across five projects, seeded in throwaway directories under its
+state directory: Crowsnest (`lead_start=job`), Website and Mobile (`lead_start=open`), whose
+leads run on the fake herdr and answer prompts with the demo orchestrator's canned replies, and
+Infra (manual) and Handbook (`lead_start=job`), whose leads are off. Two app schedules
+(`evening-review` to the Crowsnest lead, `link-check` a job for Website) and edited instruction
+layers (global, the builder role, the Crowsnest project) come with them.
+
+The story's names live in one package, `internal/demostory`, which the fake fleet, the seeded
+jobs, questions and approvals all read, and its rules are checked end to end by
+`cmd/crowsnest`'s `TestDemoStory` (the R4 product review found a job saying one command while its
+dialog showed another):
+
+- **One workspace per project**, labelled with its slug, every agent in it working in the
+  project's made-up directory (`~/src/<slug>`, which the seeding maps to the real one), plus the
+  orchestrator's workspace and the leads' own (`lead <slug>`, agent `lead-<slug>`, started by the
+  lead manager as real leads are).
+- **A job with a pane is held by the agent of the same name** (`job-<n>` after its id, as a real
+  launch names it), in its project's workspace. The board's seventeen jobs keep one of every
+  state (running in a worktree, nudged, stuck on a limit, waiting on a question, at a dialog,
+  unresponsive, blocked, done with evidence, failed, queued) and add a lead-created job with a
+  child (origin `lead-crowsnest`, then `agent` with `parent_id`), three jobs waiting on tool-call
+  approvals and two on blocking questions. Every project has a live job; Infra has nothing
+  waiting on the human; the orchestrator holds the Unfiled work.
+- **A dialog job's cause is read from its pane** (`Demo.DialogCommand`), and a small loop keeps
+  the job in step with the screen: answered, it runs; the Handbook job's next dialog makes it
+  needs_you again with the new command.
+- **Approvals and questions are seeded after the jobs**, from the panes of the jobs they name
+  (`job_id` set, `context.repo` the job's project, an approval's cwd the job's directory). A job
+  with a pending approval is `needs_you`/`approval-tool` with the approval's summary as its
+  cause detail, and its pane shows the permission dialog until the approval is decided; a job
+  waiting on a blocking question has declared waiting. The rotations ask only from jobs that are
+  running or already waiting, so nothing they add changes what a job waits on, and nothing in
+  the script answers or removes what waits on the human.
+
+A "busy day" walk has four obligations at start-up: the dangerous force push `ap_3` from
+Crowsnest's reviewer `j_13` ("Review the rate-limiter fix on fix/limiter"), the blocking question
+`q_4` ("What should the homepage hero say?") from Website's `j_15`, the terminal dialog of
+Handbook's `j_5` ("Rebuild and publish the handbook site", `rm -rf dist && npm run build`), and
+Mobile's `j_3` ("Migrate the settings page to the new form kit") stuck on the usage limit.
 
 ### 21.6 Tests
 
@@ -3588,3 +3698,99 @@ on a throwaway session; the lead answers with a SAY line, knows a codeword only 
 layer gives, holds and finishes a job given to the project through the MCP tools, reports Remote
 Control active, and has the repository's `CLAUDE.md` recorded by InstructionsLoaded. Vitest and
 Playwright cover the views (section 12).
+
+## 22. One attention queue, and Now
+
+Built on `wip/now` (2026-11-27) from the R4 product reviews (`reviews/R4-fable-product.md` 1.1 to
+1.7, 2.9 and section 6; `reviews/R4-codex-product.md` C1 to C3, X1). Jeff wants crowsnest "to work
+really well for being able to coordinate lots of different projects efficiently from the web
+browser, from my phone".
+
+### 22.1 The attention model
+
+(`internal/attention`: `model.go` pure, `service.go` the snapshot and the watcher;
+`internal/httpd/attention.go`; `cmd/crowsnest/attention_wiring.go`; the web app's
+`lib/attention.ts`.)
+
+- **One definition.** An item is something that will not move until the human acts. `Build`
+  turns the sources into the list, pure and time-injected: pending approvals; open questions
+  (never notices); agents at a terminal dialog; jobs stuck, needing a fix only the human can make
+  (auth, config, launch, a dialog the screen did not show), held for approval to start, failed in
+  the last 72 hours (until dismissed), finished with a worktree waiting to be landed, or put in
+  front of the human by a reviewer that still objects (6.11); and the orchestrator or a lead
+  needing its terminal or having failed.
+- **One item per obligation.** An approval and its pane's dialog are one item (the approval). A job
+  is listed through whatever stands for it: its approval, its question, its dialog; it is listed
+  by itself only when nothing else does. A standing agent's dialog is the dialog item.
+- **Every item says where it belongs**: its project (found through its job, by id or by the pane
+  that holds it, or through a lead's pane), its job's id and title, its agent, how long it has
+  been waiting, the kind and the action that resolves it, and its payload in its own endpoint's
+  shape (the approval, question, fleet agent, job or standing agent), so any surface can answer it
+  in place.
+- **Urgency and order.** Two bands (Fable 1.1): **blocking** (work has stopped: approvals, dialogs,
+  blocking questions or ones the asker waits on or whose job declared it is waiting, jobs that will
+  not recover by themselves, standing agents) and **can wait** (a non-blocking question, a job
+  retrying a limit by itself, a failure to look at, a worktree ready to land). Within a band by
+  rank (dangerous approvals first), then the longest wait first (Fable 1.9).
+- **One number.** `counts.total` is every unsnoozed item; `blocking`, `can_wait`, `snoozed` and
+  `by_project` beside it. The nav badge, the tab title, the tray, the palette's "Needs you", the
+  Inbox's Open list and its count line, the Now view, the project switcher and the project pages
+  (`/projects` reports `needs_you` from `by_project`) all read it; the web app has no other rule.
+  The Fleet tree's own count is relabelled "at a dialog", a fact about the agents it draws.
+- **Live.** The service rebuilds when a `job`, `question`, `approval`, `fleet`, `orchestrator`,
+  `lead` or `project` event arrives (coalesced over 250 ms) and every 30 s, and publishes an
+  `attention` event carrying the whole snapshot only when it changed; the browser writes it into
+  its cache. A source that cannot be read is named in `partial`.
+- **Snooze and dismiss** are the server's (kv `attention.snoozed`, `attention.dismissed`): a snooze
+  hides an item from the count for ten minutes on every device (the Inbox lists snoozed items
+  folded, with "Bring back"); only a failed job can be dismissed, everything else leaves when
+  what it stands for is resolved.
+
+### 22.2 Now
+
+`routes/NowView.tsx`, `GET /now`. The default route. On a phone, top to bottom; from `lg` the
+queue and the projects side by side.
+
+1. **Needs you**: the queue, each row the tray's (expands to an approval's card, a question's
+   options, a dialog's digits, a job's or agent's way in). The tray itself is hidden on Now and
+   the Inbox.
+2. **Projects**: one row per live project with its lead's state, what it is doing in a line (the
+   most recently active moving job's "doing now", "+N more"), running / waiting on you (the
+   queue's count) / done today / failed today, estimated spend today (its jobs and its lead,
+   7.11), last activity, and the sentence saying who owns its work (`orch.OwnershipLead`, or that
+   no lead is running and the orchestrator hears instead); then **Unfiled** and the
+   **Orchestrator** (its held job, its spend, `orch.OwnershipOrchestrator`). A row opens the
+   project, the unfiled board, or Chat.
+3. **Since you left** (22.3), open by default, collapsible, with "Mark all seen".
+4. **Give a job**: the job box with "For: the orchestrator / <project>".
+
+### 22.3 Since you left
+
+Each browser keeps a random id (`crowsnest-browser` in localStorage) and beats (`POST /now/beat`)
+on load, every minute while visible and on becoming visible. kv `browser.<id>` keeps its last beat
+and the start of its window: a beat after more than ten minutes of silence (`AwayAfter`) starts a
+new window at the last beat; a browser never seen gets the last twelve hours. The window lists
+jobs that finished, failed or were cancelled and questions asked after it, newest first, at most
+50, each with its project; "Mark all seen" moves the start to now. Nothing but the id is sent.
+
+### 22.4 Ownership on a job
+
+A job's detail shows its chain from the human down, "you → lead Crowsnest → lead j_11 → builder
+j_12", every job in it a link, and the jobs it started (`lib/jobs.ts` `ownershipChain`,
+`childrenOf`). Who is poked for what is 7.4 (lead-first routing).
+
+### 22.5 The demo and the tests
+
+The demo is the five-project story of 21.5; its four standing obligations (the dangerous force
+push in Crowsnest, the blocking homepage question in Website, Handbook's dialog, Mobile's usage
+limit) are what the busy-day journey finds. `--demo` without `--max-running-jobs` runs 32 slots so
+the story's dozen live jobs do not hold a job given in the demo. Tests: `internal/attention`
+(the de-duplication table, labels, order, counts, the snapshot event on change only, snooze on
+every caller and its expiry, dismissal, since per browser, the Now rows), `internal/httpd`
+(`attention_test.go`: sessions, CSRF, snooze, per-browser since), Vitest (tray rows from the
+snapshot, the server snooze, the Inbox's list and count, the palette's group, the nav, the
+ownership chain), and Playwright `e2e/hermetic/now.spec.ts` at 390x844 (Chromium and WebKit) and
+1440: the busy-day walk without Chat, one number across badge, title, Now, Inbox and tray,
+answering a question and an approval from Now, since-you-left per browser, the phone nav and an
+old `/?job=` link; axe on Now; screenshots `web/screenshots/now-*.png`.
+

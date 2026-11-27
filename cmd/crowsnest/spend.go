@@ -1,6 +1,7 @@
 // Wiring for spend (DESIGN.md 7.11): the price table (embedded, or ~/.config/crowsnest/
-// prices.json on top), the meter that reads every job's and the orchestrator's transcripts into
-// the store, and under --demo a seeded history instead (there are no real transcripts to read).
+// prices.json on top), the meter that reads every job's, the orchestrator's and each running
+// project lead's transcripts into the store, and under --demo a seeded history instead (there
+// are no real transcripts to read).
 
 package main
 
@@ -11,8 +12,10 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/demostory"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -54,9 +57,30 @@ func newSpendMeter(cfg config.Config, db *store.Store, events *hub.Hub, refs *jo
 						Sessions: []spend.Session{{ID: status.SessionID, Cwd: cfg.Dir}}})
 				}
 			}
-			return sources, nil
+			return append(sources, leadSpendSources(refs.projects)...), nil
 		},
 	})
+}
+
+// leadSpendSources are the running leads' conversations, one subject each ("lead:<slug>", in
+// the project's directory). The meter keeps every session id it has seen per subject, so a
+// lead's earlier conversations stay counted across new conversations and restarts.
+func leadSpendSources(wiring *projectWiring) []spend.Source {
+	if wiring == nil {
+		return nil
+	}
+	leads := wiring.leads.Load()
+	if leads == nil {
+		return nil
+	}
+	var out []spend.Source
+	for _, lead := range leads.Running() {
+		if status := lead.Agent.Status(); status.SessionID != "" {
+			out = append(out, spend.Source{Subject: projects.Subject(lead.Project.Slug),
+				Sessions: []spend.Session{{ID: status.SessionID, Cwd: lead.Project.Dir}}})
+		}
+	}
+	return out
 }
 
 // startSpend runs the meter, or under --demo seeds the demo's history once the jobs exist.
@@ -94,7 +118,9 @@ func seedDemoSpend(ctx context.Context, meter *spend.Meter, service *jobs.Servic
 			Calls: min(max(calls, 8), 60), Subagent: i%3 == 0,
 		})
 	}
-	// The orchestrator: a little every day this past week, so the by-day view has a shape.
+	// The orchestrator: a little every day this past week, so the by-day view has a shape. Today's
+	// stretch runs up to now, so some of it is today even just after midnight (the Chat menu's
+	// "today" figure was "cost unknown" for a demo started before 03:00).
 	for day := 6; day >= 0; day-- {
 		start := now.AddDate(0, 0, -day).Add(-3 * time.Hour)
 		end := start.Add(2 * time.Hour)
@@ -106,6 +132,12 @@ func seedDemoSpend(ctx context.Context, meter *spend.Meter, service *jobs.Servic
 		}
 		subjects = append(subjects, spend.DemoSubject{Subject: spend.OrchestratorSubject, Model: "claude-sonnet-5-5",
 			Start: start, End: end, Calls: 6 + day})
+	}
+	// The three running leads (DESIGN.md 21.5): a morning's worth each, on their own lines.
+	for i, slug := range []string{demostory.Crowsnest, demostory.Website, demostory.Mobile} {
+		start := now.Add(-time.Duration(3+i) * time.Hour)
+		subjects = append(subjects, spend.DemoSubject{Subject: spend.LeadSubjectPrefix + slug, Model: "claude-sonnet-5-5",
+			Start: start, End: now, Calls: 10 - 2*i})
 	}
 	return spend.SeedDemo(ctx, meter, subjects)
 }

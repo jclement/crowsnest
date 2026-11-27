@@ -12,6 +12,7 @@ import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types"
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { Approval, DecideRequest } from "./approvals";
+import type { AttentionSnapshot, NowResponse, SinceResponse } from "./attention";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
 import type { BudgetInput, FleetLimit, ProjectAccept, WaitsView } from "./accept";
 import type {
@@ -234,6 +235,17 @@ export const endpoints = {
   decideApproval: (id: string, request: DecideRequest) =>
     api<Approval>(`/approvals/${encodeURIComponent(id)}/decide`, { method: "POST", body: request }),
   inboxSummary: () => api<InboxSummary>("/inbox/summary"),
+  // ---- The one attention queue and the Now view (DESIGN.md 22) ----
+  attention: () => api<AttentionSnapshot>("/attention"),
+  /** Hides an item from the count for 10 minutes, on every device; 404 when it was resolved meanwhile. */
+  snoozeItem: (id: string) => api<AttentionSnapshot>("/attention/snooze", { method: "POST", body: { id } }),
+  unsnoozeItem: (id: string) => api<AttentionSnapshot>("/attention/unsnooze", { method: "POST", body: { id } }),
+  /** A failed job leaves the queue (it stays on the board); 409 for anything else. */
+  dismissItem: (id: string) => api<AttentionSnapshot>("/attention/dismiss", { method: "POST", body: { id } }),
+  now: () => api<NowResponse>("/now"),
+  nowSince: (browser: string) => api<SinceResponse>(`/now/since?browser=${encodeURIComponent(browser)}`),
+  nowBeat: (browser: string) => api<{ ok: boolean }>("/now/beat", { method: "POST", body: { browser } }),
+  nowSeen: (browser: string) => api<{ ok: boolean }>("/now/seen", { method: "POST", body: { browser } }),
   // ---- M7: jobs ----
   jobs: () => api<Job[]>("/jobs"),
   job: (id: string) => api<JobDetail>(`/jobs/${encodeURIComponent(id)}`),
@@ -519,6 +531,11 @@ export const queryKeys = {
   journalPage: (kinds: string) => ["journal", kinds] as const,
   /** Everything about spend sits under ["spend"]; a `spend` event refreshes it (and the jobs). */
   spend: ["spend"] as const,
+  /** The attention queue: written from the `attention` event, never refetched on other events. */
+  attention: ["attention"] as const,
+  /** The Now view's rows and "since you left"; refreshed by job, question, approval and lead events. */
+  now: ["now"] as const,
+  nowSince: (browser: string) => ["now", "since", browser] as const,
   spendSummary: ["spend", "summary"] as const,
   spendReport: (group: string, from: string, to: string) => ["spend", "report", group, from, to] as const,
   /** Everything about attachments sits under ["attachments"]; an `attachment` event refreshes it. */

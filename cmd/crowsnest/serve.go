@@ -228,7 +228,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	approvalLinks.pusher.Store(pusher)
-	runApprovals(ctx, approvalService, fleetCache, client, logger)
+	runApprovals(ctx, approvalService, fleetCache, logger)
 	digests := &digestProxy{}
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
 		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, ctl, digests, logger)
@@ -252,6 +252,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	// herdr, so it runs in the background and the app comes up.
 	go reconcileRestore(ctx, db, fleetCache, journalLog, logger)
 	startJobs(ctx, jobService, client, projectOf, cfg.StateDir, logger)
+	if demo, ok := client.(*fake.Demo); ok {
+		// After the jobs: each demo approval and question names the job whose pane raised it.
+		inbox := demoInbox{demo: demo, jobs: jobService, approvals: approvalService, questions: questionService, files: files, stateDir: cfg.StateDir}
+		if err := startDemoInbox(ctx, inbox, logger); err != nil {
+			return err
+		}
+	}
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
 	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, ctl, logger)
@@ -268,6 +275,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	}
 	refs.projects.taskSource.Store(&tasksFor)
 	refs.projects.useInstructions(refs.instructions, logger)
+	refs.projects.useUpkeep(leadUpkeep{jobs: jobService, questions: questionService, conversations: conversations, poker: poker, tender: tender})
 	leads := refs.projects.startLeads(ctx, leadDeps{
 		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, guard: refs.guard, logger: logger, ctl: ctl,
 		onStatus: func(project projects.Project, status orch.Status) {
@@ -287,6 +295,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		go seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
 	}
 
+	attentionService, nowSources := startAttention(ctx, attentionDeps{
+		db: db, events: events, fleet: fleetCache, approvals: approvalService, questions: questionService, jobs: jobService,
+		projects: refs.projects.service, orchestrator: orchestrator, leads: leads, meter: meter, logger: logger,
+	})
+
 	digestService := startDigest(ctx, digestDeps{cfg: cfg, db: db, journal: journalLog, client: client, orchestrator: orchestrator,
 		questions: questionService, approvals: approvalService, meter: meter, projects: refs.projects.service, ctl: ctl, sys: sys, logger: logger})
 	digests.service.Store(digestService)
@@ -302,7 +315,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
 		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
-		Processes: sysstat.NewProcesses(),
+		Processes: sysstat.NewProcesses(), Attention: attentionService, Now: nowSources,
 	}
 	// The nightly clean-up and the automatic backup are automation: the pause switch holds both
 	// (DESIGN.md 6.13). Clean up now and Download backup are the human's and are not held.

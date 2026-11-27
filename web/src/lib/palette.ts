@@ -5,13 +5,14 @@
 //
 // Sources are the queries the app already keeps live through the event stream (jobs, open
 // questions, the fleet, the orchestrator's status), so the palette never asks the server to search.
-import { compareApprovals, requester, riskLabels, type Approval } from "./approvals";
+import { requester, riskLabels, type Approval } from "./approvals";
+import { itemLink, kindLabel, whereLine, type AttentionItem } from "./attention";
 import { chipText } from "./spend";
 import { fuzzyMatch, PERFECT_CHAR_SCORE, queryTokens } from "./fuzzy";
 import { relaunchConfirmations } from "./conversation";
 import { cwdTail, cleanTitle } from "./fleet";
 import { cardLine, isFinished, stateChip, stateLabels, type Job } from "./jobs";
-import { compareQuestions, kindLabels, type Question } from "./questions";
+import { kindLabels, type Question } from "./questions";
 import { leadAgentName, leadChip, leadRunning, type ProjectView } from "./projects";
 import type { ThemeChoice } from "./theme";
 import type { AgentStatus, Fleet } from "./types";
@@ -19,7 +20,7 @@ import type { ChipTone } from "../components/ui/Chip";
 
 // ---- Commands -------------------------------------------------------------------------------
 
-export type ViewPath = "/" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal" | "/system";
+export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/fleet" | "/terminal" | "/system";
 export type PaletteSheet = "journal" | "notifications" | "shortcuts" | "voice" | "schedule" | "spend" | "instructions" | "settings" | "digests" | "worktrees" | "limits" | "pause";
 
 /** What running an item does. components/palette/run.ts is the one place that does it. */
@@ -87,6 +88,7 @@ export const groupLabels: Record<PaletteGroupId, string> = {
 
 /** Icons by name, so this file stays free of React; the component maps them to lucide icons. */
 export type PaletteIcon =
+  | "now"
   | "jobs"
   | "chat"
   | "inbox"
@@ -152,10 +154,11 @@ export interface PaletteItem {
 
 export interface PaletteSources {
   jobs?: Job[];
-  /** Open questions. */
-  questions?: Question[];
-  /** Pending tool-call approvals (DESIGN.md 8.7). */
-  approvals?: Approval[];
+  /**
+   * The attention queue's unsnoozed items, in the server's order (DESIGN.md 22): the "Needs you"
+   * group is exactly what the badge counts.
+   */
+  attention?: AttentionItem[];
   fleet?: Fleet;
   /** There is an orchestrator to poke, restart or start afresh (it is not disabled). */
   orchestrator: boolean;
@@ -173,7 +176,8 @@ export interface PaletteSources {
 }
 
 const views: Array<{ to: ViewPath; label: string; icon: PaletteIcon; keywords: string[]; key: string }> = [
-  { to: "/", label: "Jobs", icon: "jobs", keywords: ["board", "home"], key: "j" },
+  { to: "/", label: "Now", icon: "now", keywords: ["home", "overview", "projects", "since"], key: "h" },
+  { to: "/jobs", label: "Jobs", icon: "jobs", keywords: ["board"], key: "j" },
   { to: "/projects", label: "Projects", icon: "project", keywords: ["leads", "repos", "directories"], key: "p" },
   { to: "/chat", label: "Chat", icon: "chat", keywords: ["orchestrator", "conversation"], key: "c" },
   { to: "/inbox", label: "Inbox", icon: "inbox", keywords: ["questions", "dialogs", "answer"], key: "i" },
@@ -206,7 +210,7 @@ function relaunch(action: "restart" | "new"): PaletteCommand {
 }
 
 function jobItem(job: Job): PaletteItem {
-  const open: PaletteCommand = { kind: "navigate", to: "/", search: { job: job.id } };
+  const open: PaletteCommand = { kind: "navigate", to: "/jobs", search: { job: job.id } };
   const actions: PaletteAction[] = [{ id: "open", label: "Open job", command: open }];
   if (!isFinished(job.state)) {
     if (job.stuck) actions.push({ id: "resume", label: "Get it moving (retry, restart or nudge)", command: { kind: "jobAction", id: job.id, action: "resume" } });
@@ -234,7 +238,7 @@ function jobItem(job: Job): PaletteItem {
   };
 }
 
-function questionItem(question: Question): PaletteItem {
+function questionItem(question: Question, where?: AttentionItem): PaletteItem {
   const open: PaletteCommand = { kind: "navigate", to: "/inbox", search: { q: question.id } };
   const actions: PaletteAction[] = [{ id: "open", label: "Open in Inbox", command: open }];
   if ((question.kind === "confirm" || question.kind === "choice") && !question.multi) {
@@ -255,7 +259,7 @@ function questionItem(question: Question): PaletteItem {
     id: `q:${question.id}`,
     group: "needs",
     title: question.title,
-    subtitle: [question.id, kindLabels[question.kind], question.job_id ?? question.source_pane ?? ""].filter(Boolean).join(" · "),
+    subtitle: [where ? whereLine(where) : "", question.id, kindLabels[question.kind]].filter(Boolean).join(" · "),
     keywords: [question.id, question.kind, question.urgency, question.job_id ?? "", "question"].filter(Boolean),
     icon: "question",
     chip: question.urgency === "blocking" ? { label: "Blocking", tone: "danger" } : question.multi ? { label: "Pick several", tone: "neutral" } : undefined,
@@ -267,13 +271,13 @@ function questionItem(question: Question): PaletteItem {
 
 /** A pending approval: opened in the Inbox, where its card answers it (the palette allows nothing
  * itself: a dangerous call needs the card's second confirmation). */
-function approvalItem(approval: Approval): PaletteItem {
+function approvalItem(approval: Approval, where?: AttentionItem): PaletteItem {
   const open: PaletteCommand = { kind: "navigate", to: "/inbox", search: { q: `approval:${approval.id}` } };
   return {
     id: `approval:${approval.id}`,
     group: "needs",
     title: approval.summary,
-    subtitle: [approval.id, requester(approval), approval.job_id ?? ""].filter(Boolean).join(" · "),
+    subtitle: [where ? whereLine(where) : "", approval.id, requester(approval)].filter(Boolean).join(" · "),
     keywords: [approval.id, approval.tool_name, approval.risk, approval.job_id ?? "", "approval", "permission", "allow"].filter(Boolean),
     icon: "dialog",
     chip: approval.risk === "low" ? { label: "Approval", tone: "neutral" } : { label: riskLabels[approval.risk], tone: approval.risk === "dangerous" ? "danger" : "warning" },
@@ -291,24 +295,6 @@ function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
     const where = `${agent.workspace} · ${cwdTail(agent.cwd)}`;
     const conversation: PaletteCommand = { kind: "navigate", to: "/fleet", search: { agent: agent.pane_id, view: "conversation" } };
     const terminal: PaletteCommand = { kind: "navigate", to: "/fleet", search: { agent: agent.pane_id, view: "terminal" } };
-    if (agent.needs_you) {
-      items.push({
-        id: `dialog:${agent.pane_id}`,
-        group: "needs",
-        title: `${name} is waiting at a dialog`,
-        subtitle: where,
-        keywords: [agent.pane_id, "dialog", "permission", agent.kind],
-        icon: "dialog",
-        status: agent.status,
-        chip: { label: "Dialog", tone: "danger" },
-        command: { kind: "navigate", to: "/inbox", search: { q: `dialog:${agent.pane_id}` } },
-        verb: "Open",
-        actions: [
-          { id: "open", label: "Answer in Inbox", command: { kind: "navigate", to: "/inbox", search: { q: `dialog:${agent.pane_id}` } } },
-          { id: "terminal", label: "Open its terminal", command: terminal },
-        ],
-      });
-    }
     const actions: PaletteAction[] = [];
     if (agent.has_transcript) actions.push({ id: "conversation", label: "Open conversation", command: conversation });
     actions.push({ id: "terminal", label: "Open terminal", command: terminal });
@@ -361,7 +347,7 @@ export function projectItem(project: ProjectView): PaletteItem {
     running
       ? { id: "stop", label: "Stop its lead", command: { kind: "leadAction", slug: project.slug, name: project.name, action: "stop" } }
       : { id: "start", label: "Start its lead", command: { kind: "leadAction", slug: project.slug, name: project.name, action: "start" } },
-    { id: "board", label: "Its jobs on the board", command: { kind: "navigate", to: "/", search: { project: project.slug } } },
+    { id: "board", label: "Its jobs on the board", command: { kind: "navigate", to: "/jobs", search: { project: project.slug } } },
   ];
   const counts = [project.counts.needs_you ? `${project.counts.needs_you} need you` : "", project.counts.running ? `${project.counts.running} running` : ""].filter(Boolean);
   return {
@@ -379,19 +365,38 @@ export function projectItem(project: ProjectView): PaletteItem {
   };
 }
 
+/** One attention item as a palette row: questions and approvals keep their own actions. */
+function needsItem(entry: AttentionItem): PaletteItem | null {
+  if (entry.kind === "approval" && entry.approval) return approvalItem(entry.approval, entry);
+  if (entry.kind === "question" && entry.question) return questionItem(entry.question, entry);
+  const link = itemLink(entry);
+  const open: PaletteCommand = { kind: "navigate", to: link.to as ViewPath, search: link.search };
+  const actions: PaletteAction[] = [{ id: "open", label: entry.action.label, command: open }];
+  if (entry.kind === "dialog" && entry.pane_id) {
+    actions.push({ id: "terminal", label: "Open its terminal", command: { kind: "navigate", to: "/fleet", search: { agent: entry.pane_id, view: "terminal" } } });
+  }
+  return {
+    id: entry.kind === "dialog" ? entry.id : `need:${entry.id}`,
+    group: "needs",
+    title: entry.title,
+    subtitle: [whereLine(entry), entry.detail ?? ""].filter(Boolean).join(" · "),
+    keywords: [entry.id, entry.kind, entry.job_id ?? "", entry.agent ?? "", entry.project?.slug ?? "", kindLabel(entry)].filter(Boolean),
+    icon: entry.kind === "job" ? "jobs" : "dialog",
+    chip: { label: kindLabel(entry), tone: entry.urgency === "blocking" ? "danger" : "warning" },
+    command: open,
+    verb: "Open",
+    actions,
+  };
+}
+
 /** Everything the palette can offer apart from the query's own Give job and Ask items. */
 export function buildItems(sources: PaletteSources): PaletteItem[] {
   const items: PaletteItem[] = [];
-  // Needs you, in the Inbox's order: approvals, blocking questions, then agents at a dialog (not
-  // one whose pane has a pending approval: that is the approval), then the rest.
-  const approvals = (sources.approvals ?? []).filter((approval) => approval.status === "pending").sort(compareApprovals);
-  items.push(...approvals.map(approvalItem));
-  const approvalPanes = new Set(approvals.map((approval) => `dialog:${approval.pane_id}`));
-  const open = (sources.questions ?? []).filter((question) => question.status === "open").sort(compareQuestions);
-  const blocking = open.filter((question) => question.urgency === "blocking" && question.kind !== "notice");
-  items.push(...blocking.map(questionItem));
-  items.push(...fleetItems(sources.fleet).filter((item) => item.group === "needs" && !approvalPanes.has(item.id)));
-  items.push(...open.filter((question) => !blocking.includes(question)).map(questionItem));
+  // Needs you: the attention queue, in its order, so the group is exactly what the badge counts.
+  for (const entry of sources.attention ?? []) {
+    const item = needsItem(entry);
+    if (item) items.push(item);
+  }
   for (const view of views) {
     items.push({
       id: `nav:${view.to}`,
@@ -715,7 +720,7 @@ const RECENTS_MAX = 12;
 
 /** Items worth remembering: Give job and Ask texts are one-offs, and answers are done once. */
 export function rememberable(itemId: string): boolean {
-  return !itemId.startsWith("do:") && !itemId.startsWith("q:") && !itemId.startsWith("dialog:") && !itemId.startsWith("approval:");
+  return !itemId.startsWith("do:") && !itemId.startsWith("q:") && !itemId.startsWith("dialog:") && !itemId.startsWith("approval:") && !itemId.startsWith("need:");
 }
 
 export function pushRecent(recents: readonly string[], itemId: string): string[] {

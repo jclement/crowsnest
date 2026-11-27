@@ -51,7 +51,7 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
           return;
         case "jobForm":
           offerJobDraft({ brief: command.brief });
-          go("/");
+          go("/jobs");
           return;
         case "giveJob":
           endpoints
@@ -61,9 +61,9 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
                 tone: "success",
                 title: `Job ${job.id} given`,
                 description: "Sent to the orchestrator",
-                action: { label: `Open ${job.id}`, onClick: () => go("/", { job: job.id }) },
+                action: { label: `Open ${job.id}`, onClick: () => go("/jobs", { job: job.id }) },
               });
-              if (command.open) go("/", { job: job.id });
+              if (command.open) go("/jobs", { job: job.id });
             })
             .catch(failed("The job was not created"))
             .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.jobs }));
@@ -97,7 +97,7 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
           const words = { nudge: ["Nudged", "Not nudged"], resume: ["Getting it moving", "Did not work"], cancel: ["Cancelled", "Not cancelled"] }[command.action];
           endpoints
             .jobAction(command.id, command.action)
-            .then(() => toast.show({ tone: "success", title: `${words[0]} ${command.id}`, action: { label: `Open ${command.id}`, onClick: () => go("/", { job: command.id }) } }))
+            .then(() => toast.show({ tone: "success", title: `${words[0]} ${command.id}`, action: { label: `Open ${command.id}`, onClick: () => go("/jobs", { job: command.id }) } }))
             .catch(failed(`${words[1]}: ${command.id}`))
             .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.jobs }));
           return;
@@ -110,7 +110,7 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
                 tone: "success",
                 title: `Job ${job.id} given`,
                 description: `To ${command.name}'s lead`,
-                action: { label: `Open ${job.id}`, onClick: () => go("/", { job: job.id }) },
+                action: { label: `Open ${job.id}`, onClick: () => go("/jobs", { job: job.id }) },
               }),
             )
             .catch(failed("The job was not created"))
@@ -138,7 +138,7 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
                 tone: "danger",
                 title: `Not sent to ${command.id}`,
                 description: error instanceof Error ? error.message : String(error),
-                action: { label: `Open ${command.id}`, onClick: () => go("/", { job: command.id }) },
+                action: { label: `Open ${command.id}`, onClick: () => go("/jobs", { job: command.id }) },
               }),
             )
             .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.jobs }));

@@ -13,6 +13,7 @@ import { FleetView } from "./routes/FleetView";
 import { ChatView } from "./routes/ChatView";
 import { InboxView } from "./routes/InboxView";
 import { JobsView } from "./routes/JobsView";
+import { NowView } from "./routes/NowView";
 import { ProjectsView } from "./routes/ProjectsView";
 import { TerminalView } from "./routes/views";
 import { SystemView } from "./routes/SystemView";
@@ -101,9 +102,23 @@ const welcomeRoute = createRoute({
   component: WelcomePage,
 });
 
-const jobsRoute = createRoute({
+// Now is home (DESIGN.md 22). Links made before it existed opened the board at /?job=j_12 or
+// /?project=<slug> (old notifications, bookmarks): those go on to the board, search and all.
+const nowRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/",
+  validateSearch: (search: Record<string, unknown>): { job?: string; project?: string } => ({
+    job: typeof search.job === "string" && search.job ? search.job : undefined,
+    project: typeof search.project === "string" && search.project ? search.project : undefined,
+  }),
+  beforeLoad: ({ search }) => {
+    if (search.job || search.project) throw redirect({ to: "/jobs", search: { job: search.job, project: search.project } });
+  },
+  component: NowView,
+});
+const jobsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/jobs",
   // ?job=j_12 selects a job, so a link or a reload opens the same one; ?project=<slug> (or
   // "unfiled", or "all") picks the board's project.
   validateSearch: (search: Record<string, unknown>): { job?: string; project?: string } => ({
@@ -153,7 +168,7 @@ const fleetRoute = createRoute({
 const terminalRoute = createRoute({ getParentRoute: () => appRoute, path: "/terminal", component: TerminalView });
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute, systemRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, fleetRoute, terminalRoute, systemRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

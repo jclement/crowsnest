@@ -14,7 +14,7 @@ export function useProjectFilter(list: ProjectList | undefined): [ProjectFilter,
     (next: ProjectFilter) => {
       saveProjectFilter(next);
       setRemembered(next);
-      void navigate({ to: "/", search: (previous: Record<string, unknown>) => ({ ...previous, project: filterToParam(next) || undefined }) } as never);
+      void navigate({ to: "/jobs", search: (previous: Record<string, unknown>) => ({ ...previous, project: filterToParam(next) || undefined }) } as never);
     },
     [navigate],
   );

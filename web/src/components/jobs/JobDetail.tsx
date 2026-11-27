@@ -6,8 +6,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { Ban, CheckCircle2, CircleSlash, GitCompareArrows, MessageSquare, Play, RefreshCw, SquareTerminal, Zap } from "lucide-react";
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
-import { actionFor, actionLabels, hasReview, isFinished, jobAnswerText, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
-import { useFleet, useJob, useJobAction, useJobGuard, useStartAnyway } from "../../lib/queries";
+import { actionFor, actionLabels, childrenOf, hasReview, isFinished, jobAnswerText, ownershipChain, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
+import { useFleet, useJob, useJobAction, useJobGuard, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
 import { ReviewPanel } from "./ReviewPanel";
 import { BudgetCard, EvidenceCard, LastMessage, WaitLine } from "./AcceptPanels";
 import { acceptChip } from "../../lib/accept";
@@ -85,10 +85,10 @@ function JobHeader({ job }: { job: Detail }) {
         {job.engine !== "claude" && <Chip>{job.engine}</Chip>}
         {job.model && <Chip mono>{job.model}</Chip>}
         {job.agent_name && <Chip mono>{job.agent_name}</Chip>}
-        {job.parent_id && <Chip mono title="Delegated by">from {job.parent_id}</Chip>}
         {job.nudges > 0 && <Chip tone="warning">{job.nudges} nudges</Chip>}
         {job.restarts > 0 && <Chip tone="warning">{job.restarts} restarts</Chip>}
       </div>
+      <Ownership job={job} />
       <p className="break-all font-mono text-2xs text-muted">
         {job.work_dir || job.dir || (job.project_id ? "the project's lead" : "orchestrator")}
         {job.worktree_branch && ` · ${job.worktree_branch}`}
@@ -102,6 +102,51 @@ function JobHeader({ job }: { job: Detail }) {
       )}
       <WaitLine job={job} />
     </header>
+  );
+}
+
+/**
+ * Who owns the job and what it delegated (DESIGN.md 22.4): the chain from the human down, each
+ * job in it a link, and the jobs it started below.
+ */
+function Ownership({ job }: { job: Detail }) {
+  const jobs = useJobs();
+  const projects = useProjects();
+  const navigate = useNavigate();
+  const all = jobs.data ?? [];
+  const projectName = job.project_id ? projects.data?.projects.find((project) => project.id === job.project_id)?.name : undefined;
+  const chain = ownershipChain(job, all, projectName);
+  const children = childrenOf(job, all);
+  const open = (id: string) => void navigate({ to: "/jobs", search: (previous: Record<string, unknown>) => ({ ...previous, job: id }) } as never);
+  return (
+    <div className="flex flex-col gap-1 text-xs">
+      <nav aria-label="Owned by" className="flex flex-wrap items-center gap-1 text-muted">
+        {chain.map((link, index) => (
+          <span key={index} className="inline-flex items-center gap-1">
+            {index > 0 && <span aria-hidden>→</span>}
+            {link.jobId && link.jobId !== job.id ? (
+              <button type="button" onClick={() => open(link.jobId!)} className="font-mono text-accent hover:underline">
+                {link.label}
+              </button>
+            ) : (
+              <span className={link.jobId ? "font-mono text-heading" : undefined}>{link.label}</span>
+            )}
+          </span>
+        ))}
+      </nav>
+      {children.length > 0 && (
+        <ul aria-label="Jobs it started" className="flex flex-wrap items-center gap-1">
+          <span className="text-muted">Started:</span>
+          {children.map((child) => (
+            <li key={child.id}>
+              <button type="button" onClick={() => open(child.id)} className="rounded border border-border px-1.5 py-0.5 text-left hover:bg-hover">
+                <span className="font-mono">{child.id}</span> <span className="text-body">{child.title}</span> <span className="text-muted">· {child.state.replace("_", " ")}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

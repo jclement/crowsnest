@@ -104,12 +104,19 @@ export async function waitForOrchestratorSettled(page: Page) {
           fetch("/api/v1/jobs")
             .then((response) => response.json())
             .then((body: { data: Array<{ dir: string; project_id?: number; state: string; agent_name: string }> }) =>
-              body.data.filter((job) => !job.dir && !job.project_id && job.state === "queued" && !job.agent_name).length,
+              // Queued with or without its agent: a job reserved for the orchestrator but not yet
+              // briefed is still queued, and its brief starts a turn.
+              body.data.filter((job) => !job.dir && !job.project_id && job.state === "queued").length,
             ),
         ),
       { timeout: 15_000 },
     )
     .toBe(0);
+  await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
+  // A brief typed a moment ago may not have turned the state to Working yet: wait one demo turn
+  // (2.5 s, fake.DefaultReplyDelay) and require Idle again, so the orchestrator's own job turn is
+  // over before the test sends anything.
+  await page.waitForTimeout(3_000);
   await expect(page.getByTestId("chat-state")).toHaveText("Idle", { timeout: 15_000 });
   // The turn's reply lands in the transcript just after the state goes idle.
   await page.waitForTimeout(500);

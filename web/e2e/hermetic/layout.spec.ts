@@ -9,12 +9,13 @@ import { expect, expectAccessible, expectNoSidewaysScroll, isPhone, smallTapTarg
 
 /** Every view, with something selected where the view has a detail, and what proves it loaded. */
 const views = [
-  { name: "jobs", path: "/", ready: (page: Page) => page.getByRole("region", { name: "Needs you or stuck" }) },
-  { name: "job", path: "/?job=j_3", ready: (page: Page) => page.getByRole("heading", { name: "Migrate the settings page to the new form kit" }) },
+  { name: "now", path: "/", ready: (page: Page) => page.getByRole("list", { name: "Projects" }) },
+  { name: "jobs", path: "/jobs", ready: (page: Page) => page.getByRole("region", { name: "Needs you or stuck" }) },
+  { name: "job", path: "/jobs?job=j_3", ready: (page: Page) => page.getByRole("heading", { name: "Migrate the settings page to the new form kit" }) },
   { name: "chat", path: "/chat", ready: (page: Page) => page.getByRole("list", { name: "Conversation" }) },
   { name: "inbox", path: "/inbox", ready: (page: Page) => page.getByRole("list", { name: "Needs you" }) },
   { name: "question", path: "/inbox?q=q_1", ready: (page: Page) => page.getByRole("region", { name: "Diff of internal/fleet/cache.go" }) },
-  { name: "dialog", path: "/inbox?q=dialog%3Aw3%3Ap1", ready: (page: Page) => page.getByLabel("Dialog from docs-writer") },
+  { name: "dialog", path: "/inbox?q=dialog%3Aw6%3Ap1", ready: (page: Page) => page.getByLabel("Dialog from job-5") },
   { name: "fleet", path: "/fleet", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
   { name: "agent", path: "/fleet?agent=w2%3Ap1", ready: (page: Page) => page.getByRole("tab", { name: "Conversation" }) },
   { name: "terminal", path: "/terminal", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
@@ -37,7 +38,7 @@ test.describe("at 375 px", () => {
     });
   }
 
-  for (const view of [views[0], views[3], views[6]]) {
+  for (const view of views.filter((candidate) => ["now", "jobs", "inbox", "fleet"].includes(candidate.name))) {
     test(`${view.name}: the bottom nav never covers the last row`, async ({ page }) => {
       await open(page, view.path, view.ready);
       const nav = page.getByRole("navigation", { name: "Views" }).last();
@@ -53,7 +54,7 @@ test.describe("at 375 px", () => {
   }
 
   test("chat: the bottom nav never covers the composer", async ({ page }) => {
-    await open(page, "/chat", views[2].ready);
+    await open(page, "/chat", views.find((view) => view.name === "chat")!.ready);
     const nav = page.getByRole("navigation", { name: "Views" }).last();
     const composer = page.getByRole("textbox", { name: "Message to the orchestrator" });
     for (const where of ["top", "bottom"] as const) {
@@ -68,7 +69,7 @@ test.describe("at 375 px", () => {
 
 test("the theme toggle cycles system → light → dark, and a reload never flashes", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
-  await page.goto("/");
+  await page.goto("/jobs");
   const html = page.locator("html");
   const toggle = page.getByRole("button", { name: /theme$/ });
   await expect(toggle).toHaveAccessibleName("System theme");
@@ -106,7 +107,7 @@ test("the theme toggle cycles system → light → dark, and a reload never flas
 
 test("the offline banner shows when the server dies, and goes when it returns", async ({ page, app }) => {
   test.slow();
-  await page.goto("/");
+  await page.goto("/jobs");
   await expect(page.getByRole("status").filter({ hasText: "Live" })).toBeAttached();
   await app.kill();
   const banner = page.getByRole("status").filter({ hasText: /^Connection lost\./ });

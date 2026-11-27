@@ -5,7 +5,8 @@
 //
 // Demo job ids, in seed order: j_1 running (worktree), j_2 nudged, j_3 stuck on a limit, j_4
 // needs you (a question), j_5 needs you (a dialog), j_6 unresponsive, j_7 blocked, j_8 done,
-// j_9 failed (older), j_10 queued for the orchestrator.
+// j_9 failed (older), j_10 queued for the orchestrator, then j_11 to j_17 (internal/jobs/demo.go);
+// a job given here is j_23 (the landing demo is j_18 to j_22).
 import { type Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 
@@ -112,5 +113,5 @@ test("giving a job adds it to the board", async ({ page }) => {
   await page.getByLabel("What needs doing?").fill("Summarise yesterday's merged PRs");
   await page.getByRole("button", { name: "Give job" }).click();
   await expect(page.getByRole("region", { name: "Selected job" }).getByRole("heading", { name: "Summarise yesterday's merged PRs" })).toBeVisible();
-  await expect(page).toHaveURL(/job=j_16/);
+  await expect(page).toHaveURL(/job=j_23/);
 });

@@ -437,3 +437,17 @@ func TestReceiptFromTheTranscript(t *testing.T) {
 		t.Fatalf("receipts %v", byID)
 	}
 }
+
+// TestSetBudgetOnAJobUnderIt: a budget set on a job that was not waiting on one is just
+// recorded (found by the real-Claude test: the change returned "nothing to do").
+func TestSetBudgetOnAJobUnderIt(t *testing.T) {
+	r := newRig(t, nil)
+	job := r.create(CreateInput{Brief: "Do it", Dir: t.TempDir()})
+	minute := 1
+	if _, err := r.svc.SetJobBudget(context.Background(), job.ID, BudgetInput{Minutes: &minute}); err != nil {
+		t.Fatal(err)
+	}
+	if d := r.get(job.ID); d.Budget == nil || d.Budget.Limits.Minutes != 1 {
+		t.Fatalf("budget %+v", d.Budget)
+	}
+}

@@ -95,7 +95,7 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	return jobs.New(jobs.Options{
 		Pause: pauseSwitch, Throttle: startThrottle, Landing: landingOpts,
 		Accept: acceptOptions(cfg, executable), Budgets: budgetOptions(cfg), Limits: fleetLimits(db, events),
-		SpendToday: spendToday(meter), OnViolation: violationJournal(journalLog), OnReceived: questionsReceived,
+		SpendToday: spendDayLimits(meter), OnViolation: violationJournal(journalLog), OnReceived: questionsReceived,
 		Projects: projectSource,
 		Store:    db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
 		Attachments: files, Spend: meter, Instructions: jobInstructions(refs.instructions),
@@ -207,11 +207,7 @@ func rolesDir(cfg config.Config) string {
 // startJobs runs the supervisor (and, under --demo, seeds the board).
 func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, projectOf func(string) (int64, string), stateDir string, logger *slog.Logger) {
 	if demo, ok := client.(*fake.Demo); ok {
-		panes := jobs.DemoPanes{
-			Orchestrator: demo.PaneOf(fake.DemoOrchestrator), Builder: demo.PaneOf(fake.DemoBuilder),
-			Reviewer: demo.PaneOf(fake.DemoReviewer), Docs: demo.PaneOf(fake.DemoDocs), Linter: demo.PaneOf(fake.DemoLinter),
-			ProjectOf: projectOf,
-		}
+		panes := jobs.DemoPanes{PaneOf: demo.PaneOf, DialogOf: demo.DialogCommand, ProjectOf: projectOf}
 		if err := jobs.SeedDemo(ctx, service, panes); err != nil {
 			logger.Warn("seeding the demo jobs", "err", err)
 		}

@@ -1,6 +1,6 @@
 // Acceptance, budgets, wake-ups, the fleet's usage limit and answer receipt as a user sees them
 // (DESIGN.md 6.15 to 6.19), against `crowsnest --demo`. The demo (internal/jobs/demo.go,
-// demo_accept.go): j_11 is accepted (a passing check pinned to its worktree's HEAD), j_16 failed
+// demo_accept.go): j_18 is accepted (a passing check pinned to its worktree's HEAD), j_16 failed
 // its check three rounds and needs you, j_8 is finished but unverified, j_2 is at 84% of its
 // budget, j_7 is blocked with a recheck time, j_6 is stuck with its last words; with
 // CROWSNEST_DEMO_LIMIT=1 the fleet is under claude's usage limit and j_3 is held by it.
@@ -19,17 +19,17 @@ function card(page: Page, title: string) {
 }
 
 test("the board tells accepted, unverified and failed-check apart, and shows waits and last words", async ({ page }, testInfo) => {
-  await page.goto("/?project=all");
+  await page.goto("/jobs?project=all");
   await expect(card(page, "Retry widget fetches with back-off")).toContainText("Accepted");
   await expect(card(page, "Render widgets at three sizes")).toContainText("Check failed");
   await expect(card(page, "Render widgets at three sizes")).toContainText("Should I disable that lint rule?");
   await expect(card(page, "Upgrade the Postgres driver")).toContainText(/rechecks at \d\d:\d\d/);
   await expect(card(page, "Profile the fleet cache")).toContainText("not sure how to proceed");
-  await expect(card(page, "Tidy the README install section")).toContainText(/Budget \d+%/);
+  await expect(card(page, "Tidy the install guide")).toContainText(/Budget \d+%/);
   await expectNoSidewaysScroll(page);
   await shot(page, testInfo, "board");
   // A finished job with no check command is done but unverified (it may sit in "Older").
-  await page.goto("/?job=j_8");
+  await page.goto("/jobs?job=j_8");
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByRole("heading", { name: "Fix the flaky SSE reconnect test" })).toBeVisible();
   await expect(detail.getByText("Unverified", { exact: true }).first()).toBeVisible();
@@ -37,7 +37,7 @@ test("the board tells accepted, unverified and failed-check apart, and shows wai
 });
 
 test("a failed check shows crowsnest's evidence and runs it again", async ({ page }, testInfo) => {
-  await page.goto("/?job=j_16");
+  await page.goto("/jobs?job=j_23");
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByRole("heading", { name: "Render widgets at three sizes" })).toBeVisible();
   const evidence = detail.getByRole("region", { name: "crowsnest's check" });
@@ -53,7 +53,7 @@ test("a failed check shows crowsnest's evidence and runs it again", async ({ pag
 });
 
 test("an accepted job's evidence is pinned to its commit, and Land offers no override", async ({ page }, testInfo) => {
-  await page.goto("/?job=j_11");
+  await page.goto("/jobs?job=j_18");
   const detail = detailRegion(page, testInfo, "Selected job");
   const evidence = detail.getByRole("region", { name: "crowsnest's check" });
   await expect(evidence).toContainText("Accepted");
@@ -65,7 +65,7 @@ test("an accepted job's evidence is pinned to its commit, and Land offers no ove
 });
 
 test("a job near its budget shows the limits, and the budget can be raised", async ({ page }, testInfo) => {
-  await page.goto("/?job=j_2");
+  await page.goto("/jobs?job=j_2");
   const detail = detailRegion(page, testInfo, "Selected job");
   const budget = detail.getByRole("region", { name: "Budget" });
   await expect(budget).toContainText("Dollars");
@@ -79,7 +79,7 @@ test("a job near its budget shows the limits, and the budget can be raised", asy
 });
 
 test("a blocked job says who owns the wait and when it is woken", async ({ page }, testInfo) => {
-  await page.goto("/?job=j_7");
+  await page.goto("/jobs?job=j_7");
   const detail = detailRegion(page, testInfo, "Selected job");
   const wait = detail.getByLabel("Who it waits on");
   await expect(wait).toContainText(/rechecks at \d\d:\d\d/);
@@ -95,7 +95,7 @@ test.describe("under the fleet's usage limit", () => {
   test.use({ appOptions: { demo: true, env: { CROWSNEST_DEMO_LIMIT: "1" } } });
 
   test("one banner with the countdown, and the limited job reads Held", async ({ page }, testInfo) => {
-    await page.goto("/?project=all");
+    await page.goto("/jobs?project=all");
     const banner = page.getByRole("status", { name: "claude usage limit" });
     await expect(banner).toContainText(/resets in (49|50) min/);
     await expect(banner).toContainText("1 job waiting");
@@ -105,4 +105,12 @@ test.describe("under the fleet's usage limit", () => {
     await expectNoSidewaysScroll(page);
     await shot(page, testInfo, "limit");
   });
+});
+
+test("Now lists a failed check as an attention item", async ({ page }, testInfo) => {
+  await page.goto("/");
+  const item = page.locator("[data-tray-item='job:j_23']").first();
+  await expect(item).toContainText("Render widgets at three sizes");
+  await expect(item).toContainText("Check failed");
+  await shot(page, testInfo, "now");
 });

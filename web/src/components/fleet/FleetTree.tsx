@@ -40,7 +40,7 @@ export function FleetTree({ fleet, selected, onSelect }: FleetTreeProps) {
             {agents.length} {agents.length === 1 ? "agent" : "agents"} in {fleet.workspaces.length}{" "}
             {fleet.workspaces.length === 1 ? "workspace" : "workspaces"}
           </span>
-          {urgent > 0 && <span className="font-medium text-danger">{urgent} need you</span>}
+          {urgent > 0 && <span className="font-medium text-danger">{urgent} at a dialog</span>}
           <span className="ml-auto font-mono">herdr {fleet.herdr_version}</span>
         </p>
       </div>
@@ -147,7 +147,7 @@ function WorkspaceGroup({
           {workspace.number}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-heading md:text-xs">{workspace.label}</span>
-        {urgent > 0 && <Chip tone="danger">{urgent} need you</Chip>}
+        {urgent > 0 && <Chip tone="danger">{urgent} at a dialog</Chip>}
         <span className="shrink-0 text-2xs tabular-nums text-muted">
           {agents.length} {agents.length === 1 ? "agent" : "agents"}
         </span>
@@ -227,7 +227,7 @@ export function AgentRow({
         <StatusDot status={agent.status} />
         <span className="min-w-0 truncate text-sm font-medium text-heading md:text-xs">{agent.name}</span>
         <Chip mono>{agent.kind}</Chip>
-        {urgent && <Chip tone="danger">needs you</Chip>}
+        {urgent && <Chip tone="danger">at a dialog</Chip>}
       </span>
       <span className="flex min-w-0 items-center gap-2 pl-[18px] text-2xs text-muted">
         <span className="min-w-0 flex-1 truncate" title={agent.title}>

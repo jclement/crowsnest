@@ -4,17 +4,17 @@
 // confirmation; a question answered from the tray; the keyboard path (g n, Enter, y/n only on a
 // focused card); axe. Screenshots of each view with the tray into web/screenshots.
 //
-// Demo approvals (internal/approvals/demo.go): ap_1 Bash `go test ./internal/fleet/...` (builder,
-// low), ap_2 Edit of screen.go (linter, low), ap_3 `git push --force origin main` (reviewer,
-// dangerous). Demo questions: q_1 blocking confirm, q_3 a choice ("Where should the release notes
-// live?").
+// Demo approvals (internal/approvals/demo.go), each from a demo job's pane: ap_1 Bash `npx
+// linkinator ./dist --recurse` (Website's j_14, job-14, low), ap_2 Edit of InboxScreen.tsx
+// (Mobile's j_16, job-16, low), ap_3 `git push --force origin main` (Crowsnest's reviewer j_13,
+// job-13, dangerous). Demo questions: q_1 blocking confirm, q_3 a choice ("Where should the
+// release notes live?").
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, expectAccessible, isPhone, test } from "../support/fixtures";
 
 const views = [
-  { name: "jobs", path: "/", ready: (page: Page) => page.getByRole("region", { name: "Needs you or stuck" }) },
+  { name: "jobs", path: "/jobs", ready: (page: Page) => page.getByRole("region", { name: "Needs you or stuck" }) },
   { name: "chat", path: "/chat", ready: (page: Page) => page.getByRole("list", { name: "Conversation" }) },
-  { name: "inbox", path: "/inbox", ready: (page: Page) => page.getByRole("list", { name: "Needs you" }) },
   { name: "fleet", path: "/fleet", ready: (page: Page) => page.getByRole("list", { name: "Workspaces" }) },
   { name: "terminal", path: "/terminal", ready: (page: Page) => page.getByRole("status").filter({ hasText: "Connected" }) },
 ] as const;
@@ -91,29 +91,38 @@ for (const view of views) {
   });
 }
 
+// Now and the Inbox draw the whole queue themselves, so the tray stays out of the way there.
+for (const path of ["/", "/inbox"]) {
+  test(`${path}: no tray where the view is the queue`, async ({ page }) => {
+    await page.goto(path);
+    await expect(page.locator("[data-tray-item], [data-attention-item]").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("[data-tray=panel], [data-tray=bar], [data-tray=pill]")).toHaveCount(0);
+  });
+}
+
 test("an approval allowed and one denied with a note, from the tray", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   let tray = await openTray(page, testInfo);
-  await row(tray, /go test \.\/internal\/fleet/).click();
+  await row(tray, /npx linkinator/).click();
   const card = tray.locator("[data-approval=ap_1]");
-  await expect(card.getByLabel("Command")).toHaveText("go test ./internal/fleet/...");
+  await expect(card.getByLabel("Command")).toHaveText("npx linkinator ./dist --recurse");
   await expect(card.getByTestId("risk-line")).toContainText("No risky pattern");
   await card.getByRole("button", { name: "Allow once" }).click();
   await expect.poll(async () => (await approvalStatus(page, "ap_1")).status).toBe("allowed");
-  await expect(tray.getByRole("button", { name: /go test \.\/internal\/fleet/, expanded: false })).toHaveCount(0);
+  await expect(tray.getByRole("button", { name: /npx linkinator/, expanded: false })).toHaveCount(0);
 
   if (isPhone(testInfo) && !(await tray.isVisible())) tray = await openTray(page, testInfo);
-  await row(tray, /screen\.go/).click();
+  await row(tray, /InboxScreen\.tsx/).click();
   const edit = tray.locator("[data-approval=ap_2]");
   await expect(edit.getByRole("region", { name: /Diff of/ })).toBeVisible();
-  await edit.getByLabel(/Note to the agent/).fill("leave the 4 as it is; it is documented");
+  await edit.getByLabel(/Note to the agent/).fill("use the shared RefreshList instead");
   await edit.getByRole("button", { name: "Deny" }).click();
   await expect.poll(async () => (await approvalStatus(page, "ap_2")).status).toBe("denied");
-  expect((await approvalStatus(page, "ap_2")).note).toBe("leave the 4 as it is; it is documented");
+  expect((await approvalStatus(page, "ap_2")).note).toBe("use the shared RefreshList instead");
 });
 
 test("a dangerous approval needs a second confirmation", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   const tray = await openTray(page, testInfo);
   await row(tray, /git push --force origin main/).click();
   const card = tray.locator("[data-approval=ap_3]");
@@ -147,7 +156,7 @@ test("a question answered from the tray", async ({ page }, testInfo) => {
 
 test("the keyboard: g n focuses the tray, y and n answer only a focused card", async ({ page }, testInfo) => {
   test.skip(isPhone(testInfo), "a keyboard path on the desktop");
-  await page.goto("/");
+  await page.goto("/jobs");
   await expect(page.getByRole("complementary", { name: "Needs you" })).toBeVisible();
   // A stray y or n anywhere answers nothing.
   await page.locator("body").press("y");
@@ -166,8 +175,12 @@ test("the keyboard: g n focuses the tray, y and n answer only a focused card", a
   await page.keyboard.press("y");
   await expect(dangerous.getByRole("alertdialog")).toBeVisible();
   expect((await approvalStatus(page, "ap_3")).status).toBe("pending");
-  // Another approval, opened from the keyboard, denied with n.
-  await page.getByRole("complementary", { name: "Needs you" }).getByRole("button", { name: /screen\.go/, expanded: false }).focus();
+  // Another approval, opened from the keyboard, denied with n. The stack shows three items, and
+  // two blocking questions rank above this low approval, so it is behind "Show all".
+  const panel = page.getByRole("complementary", { name: "Needs you" });
+  const showAll = panel.getByRole("button", { name: /^Show all/ });
+  if (await showAll.isVisible()) await showAll.click();
+  await panel.getByRole("button", { name: /InboxScreen\.tsx/, expanded: false }).focus();
   await page.keyboard.press("Enter");
   const edit = page.locator("[data-approval=ap_2]");
   await expect(edit).toBeFocused();
@@ -176,14 +189,14 @@ test("the keyboard: g n focuses the tray, y and n answer only a focused card", a
 });
 
 test("snooze hides an item for ten minutes", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   const tray = await openTray(page, testInfo);
-  await tray.getByRole("button", { name: /Snooze for 10 minutes: Bash: go test/ }).click();
-  await expect(tray.getByRole("button", { name: /Snooze for 10 minutes: Bash: go test/ })).toHaveCount(0);
+  await tray.getByRole("button", { name: /Snooze for 10 minutes: Bash: npx linkinator/ }).click();
+  await expect(tray.getByRole("button", { name: /Snooze for 10 minutes: Bash: npx linkinator/ })).toHaveCount(0);
   await page.reload();
   const again = await openTray(page, testInfo);
   await expect(again.getByRole("button", { name: /git push --force/, expanded: false })).toBeVisible();
-  await expect(again.getByRole("button", { name: /Snooze for 10 minutes: Bash: go test/ })).toHaveCount(0);
+  await expect(again.getByRole("button", { name: /Snooze for 10 minutes: Bash: npx linkinator/ })).toHaveCount(0);
 });
 
 test("the Inbox lists approvals and opens one by its link", async ({ page }, testInfo) => {
@@ -195,9 +208,9 @@ test("the Inbox lists approvals and opens one by its link", async ({ page }, tes
 });
 
 test("axe: the tray open with an approval card", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   const tray = await openTray(page, testInfo);
-  await row(tray, /go test \.\/internal\/fleet/).click();
+  await row(tray, /npx linkinator/).click();
   await expect(tray.locator("[data-approval=ap_1]")).toBeVisible();
   await expectAccessible(page, testInfo, "tray");
 });

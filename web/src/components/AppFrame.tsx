@@ -1,18 +1,19 @@
 // The signed-in frame: a dark header (session, connection state, speak mode when voice is on,
 // theme, user menu) with the now-playing strip under it, the five
 // views as a left rail from md and a bottom nav on mobile, the reconnect banner, and the
-// footer, the command palette (⌘K; components/palette) and the needs-you tray (components/tray). It owns the one event stream (lib/live.ts), which keeps every query fresh. The Inbox
-// badge and the tab title count what needs Jeff: open questions, pending tool-call approvals, and agents
-// at a terminal dialog (one whose pane has a pending approval counts once, as the approval).
+// footer, the command palette (⌘K; components/palette) and the needs-you tray (components/tray). It owns the one event stream (lib/live.ts), which keeps every query fresh. The nav
+// badge and the tab title show the attention queue's one number (counts.total from the server,
+// DESIGN.md 22), the same number the tray, the palette, the Inbox and the Now view show.
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Activity, MoreHorizontal } from "lucide-react";
 import { endpoints, fixturesEnabled } from "../lib/api";
 import { cn } from "../lib/cn";
-import { inboxCount, needsYouCount, pageTitle } from "../lib/fleet";
+import { pageTitle } from "../lib/fleet";
 import { listenForNavigation, registerServiceWorker } from "../lib/push";
 import { useLiveQueries } from "../lib/live";
-import { useApprovals, useFleet, useInboxSummary, useMe } from "../lib/queries";
+import { useAttention, useMe } from "../lib/queries";
 import type { StreamStatus } from "../lib/sse";
 import { useNoStrayFileDrops } from "./attach/useAttachments";
 import { ConnectionBanner } from "./ConnectionBanner";
@@ -20,7 +21,9 @@ import { LimitBanner } from "./control/LimitBanner";
 import { PauseBanner } from "./control/PauseBanner";
 import { usePresenceHeartbeat } from "./control/usePresenceHeartbeat";
 import { Footer } from "./Footer";
-import { navItems } from "./nav";
+import { inMore, moreNav, primaryNav, type NavItem } from "./nav";
+import { Sheet } from "./ui/Sheet";
+import { useBrowserBeat } from "../lib/browserBeat";
 import { PaletteButton } from "./palette/PaletteButton";
 import { MachineStrip } from "./system/MachineStats";
 import { HeavyChip } from "./control/HeavySlots";
@@ -39,10 +42,10 @@ export function AppFrame() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const me = useMe();
   const stream = useLiveQueries();
-  const fleet = useFleet();
-  const summary = useInboxSummary();
-  const approvals = useApprovals("pending");
-  const needsYou = inboxCount(summary.data?.open, needsYouCount(fleet.data, approvals.data)) + (approvals.data?.length ?? 0);
+  const attention = useAttention();
+  const needsYou = attention.data?.counts.total ?? 0;
+  const [moreOpen, setMoreOpen] = useState(false);
+  useBrowserBeat();
   const voice = me.data?.features.voice ?? false;
   useSyncPlaybackRate(voice);
 
@@ -109,17 +112,12 @@ export function AppFrame() {
       {voice && <NowPlaying />}
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Views" className="hidden w-44 shrink-0 flex-col gap-0.5 border-r border-border bg-surface-raised p-2 md:flex">
-          {navItems.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              activeOptions={{ exact: item.to === "/", includeSearch: false }}
-              className="flex h-8 items-center gap-2 rounded px-2 text-sm text-body hover:bg-hover data-[status=active]:bg-selected data-[status=active]:font-medium data-[status=active]:text-heading"
-            >
-              <item.icon className="h-4 w-4" aria-hidden />
-              {item.label}
-              {item.badge && <Badge count={needsYou} className="ml-auto" />}
-            </Link>
+          {primaryNav.map((item) => (
+            <RailLink key={item.to} item={item} count={needsYou} />
+          ))}
+          <p className="mt-3 px-2 pb-0.5 text-2xs font-semibold uppercase tracking-wide text-muted">More</p>
+          {moreNav.map((item) => (
+            <RailLink key={item.to} item={item} count={needsYou} />
           ))}
           <Footer stacked className="mt-auto px-2 pt-2" />
         </nav>
@@ -140,12 +138,12 @@ export function AppFrame() {
         aria-label="Views"
         className="flex shrink-0 border-t border-border bg-surface-raised pb-[env(safe-area-inset-bottom)] md:hidden"
       >
-        {navItems.map((item) => (
+        {primaryNav.map((item) => (
           <Link
             key={item.to}
             to={item.to}
             activeOptions={{ exact: item.to === "/", includeSearch: false }}
-            className="relative flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 text-2xs text-muted data-[status=active]:font-medium data-[status=active]:text-accent"
+            className={bottomItemClass}
           >
             <span className="relative">
               <item.icon className="h-5 w-5" aria-hidden />
@@ -154,9 +152,53 @@ export function AppFrame() {
             {item.label}
           </Link>
         ))}
+        <button
+          type="button"
+          onClick={() => setMoreOpen(true)}
+          aria-haspopup="dialog"
+          data-status={inMore(pathname) ? "active" : undefined}
+          className={bottomItemClass}
+        >
+          <MoreHorizontal className="h-5 w-5" aria-hidden />
+          More
+        </button>
       </nav>
+      <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title="More">
+        <ul aria-label="More views" className="divide-y divide-border">
+          {[...moreNav, { to: "/system" as const, label: "System", icon: Activity }].map((item) => (
+            <li key={item.to}>
+              <Link
+                to={item.to}
+                onClick={() => setMoreOpen(false)}
+                className="flex min-h-12 items-center gap-3 px-3 text-sm text-heading hover:bg-hover data-[status=active]:font-medium data-[status=active]:text-accent"
+              >
+                <item.icon className="h-5 w-5 text-muted" aria-hidden />
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </Sheet>
     </div>
     </PaletteProvider>
+  );
+}
+
+const bottomItemClass =
+  "relative flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 text-2xs text-muted data-[status=active]:font-medium data-[status=active]:text-accent";
+
+/** One view on the desktop rail. */
+function RailLink({ item, count }: { item: NavItem; count: number }) {
+  return (
+    <Link
+      to={item.to}
+      activeOptions={{ exact: item.to === "/", includeSearch: false }}
+      className="flex h-8 items-center gap-2 rounded px-2 text-sm text-body hover:bg-hover data-[status=active]:bg-selected data-[status=active]:font-medium data-[status=active]:text-heading"
+    >
+      <item.icon className="h-4 w-4" aria-hidden />
+      {item.label}
+      {item.badge && <Badge count={count} className="ml-auto" />}
+    </Link>
   );
 }
 

@@ -58,7 +58,7 @@ func newControls(cfg config.Config, db *store.Store, events *hub.Hub, journalLog
 	c := &controls{logger: logger, heavyDir: filepath.Join(cfg.StateDir, "heavy")}
 	c.pause = pause.New(pause.Options{KV: db, File: file, Hub: events, Journal: journalLog, Logger: logger})
 	c.throttle = throttle.New(throttle.Options{KV: db, Logger: logger,
-		Defaults: throttle.Settings{MaxRunning: cfg.MaxRunningJobs, LoadPerCore: cfg.LoadHold}})
+		Defaults: throttle.Settings{MaxRunning: maxRunning(cfg), LoadPerCore: cfg.LoadHold}})
 	c.presence = presence.New(presence.Options{KV: db, Hub: events, Logger: logger})
 	if err := throttle.WriteHeavyConfig(c.heavyDir, cfg.HeavySlots); err != nil {
 		logger.Warn("writing the heavy-command configuration", "err", err)
@@ -86,7 +86,7 @@ func (c *controls) run(ctx context.Context, demo bool) {
 // applyConfig pushes a Settings change of the limit, the load hold, the heavy slots, the review
 // gate and the merge mode into the running services (DESIGN.md 3.2: these apply live).
 func (c *controls) applyConfig(cfg config.Config, jobService *jobs.Service) {
-	c.throttle.SetDefaults(throttle.Settings{MaxRunning: cfg.MaxRunningJobs, LoadPerCore: cfg.LoadHold})
+	c.throttle.SetDefaults(throttle.Settings{MaxRunning: maxRunning(cfg), LoadPerCore: cfg.LoadHold})
 	if err := throttle.WriteHeavyConfig(c.heavyDir, cfg.HeavySlots); err != nil {
 		c.logger.Warn("writing the heavy-command configuration", "err", err)
 	}
@@ -298,4 +298,19 @@ func startDigest(ctx context.Context, d digestDeps) *digest.Service {
 		}
 	}
 	return service
+}
+
+// demoMaxRunning is --demo's slot count when none is given: the demo's story (DESIGN.md 21.5)
+// keeps a dozen jobs live across five projects, more than a quarter of most machines' cores, and
+// a job given in the demo should start rather than queue behind scripted agents. The landing
+// demo's held job is seeded held and stays so (the demo runs no supervisor tick).
+const demoMaxRunning = 32
+
+// maxRunning is the slot count in effect: --max-running-jobs, or under --demo with none given,
+// demoMaxRunning.
+func maxRunning(cfg config.Config) int {
+	if cfg.Demo && cfg.MaxRunningJobs == 0 {
+		return demoMaxRunning
+	}
+	return cfg.MaxRunningJobs
 }

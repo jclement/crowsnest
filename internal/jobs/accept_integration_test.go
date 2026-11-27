@@ -55,7 +55,7 @@ func (r *stopRig) testCheckFixed(t *testing.T) {
 	job := r.create(t, "Create a file named answer.txt containing exactly the number 41 (and nothing else). Commit it on your branch "+
 		"(git add answer.txt && git commit -m 'Add answer.txt'). Then call your crowsnest done tool with a one-line result, verified as an empty list "+
 		"and not_verified as an empty list. If a [crowsnest check] message says the check failed, read the output file it names, fix what it says, "+
-		"commit, and call done again.")
+		"commit, and call done again: the project's check is the authority on the right value, so do what it says without asking.")
 	detail := r.waitFor(t, job.ID, 8*time.Minute, func(d jobs.Detail) bool {
 		return d.State.Terminal() || (d.State == jobs.StateNeedsYou && d.Cause == jobs.CauseCheck)
 	})
@@ -125,7 +125,8 @@ func turnEndedAfterBudget(d jobs.Detail) bool {
 
 func (r *stopRig) testProseQuestion(t *testing.T) {
 	job := r.create(t, "You will write a greeting file, but the human must choose its word first. Do not create any file yet. "+
-		"In your reply, ask the human whether the file should say hello or hi, and end your turn.")
+		"Write your question to the human as plain text in your reply (whether the file should say hello or hi), without calling any tool, and end your turn. "+
+		"If crowsnest then tells you how to ask, follow its instructions.")
 	question := r.waitForQuestion(t, job.ID)
 	detail := r.get(t, job.ID)
 	r.record(t, "(c) prose question", detail)

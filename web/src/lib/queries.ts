@@ -73,8 +73,33 @@ export function useQuestion(id: string | undefined) {
 }
 
 /** The open count for the badge and the tab title. */
-export function useInboxSummary() {
-  return useQuery({ queryKey: queryKeys.inboxSummary, queryFn: endpoints.inboxSummary, refetchInterval: QUESTIONS_SAFETY_POLL_MS });
+/**
+ * The one attention queue (DESIGN.md 22): every count and list of what needs the human reads
+ * this. The `attention` event writes it; the poll is only a safety net for a dropped stream.
+ */
+export function useAttention() {
+  return useQuery({ queryKey: queryKeys.attention, queryFn: endpoints.attention, refetchInterval: QUESTIONS_SAFETY_POLL_MS });
+}
+
+/** Snooze, unsnooze or dismiss an attention item; the answer is the new snapshot. */
+export function useAttentionAction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, id }: { action: "snooze" | "unsnooze" | "dismiss"; id: string }) =>
+      action === "snooze" ? endpoints.snoozeItem(id) : action === "unsnooze" ? endpoints.unsnoozeItem(id) : endpoints.dismissItem(id),
+    onSuccess: (snapshot) => queryClient.setQueryData(queryKeys.attention, snapshot),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.attention }),
+  });
+}
+
+/** The Now view's rows. */
+export function useNow() {
+  return useQuery({ queryKey: queryKeys.now, queryFn: endpoints.now, refetchInterval: 60_000 });
+}
+
+/** What happened since this browser was last in use. */
+export function useNowSince(browser: string) {
+  return useQuery({ queryKey: queryKeys.nowSince(browser), queryFn: () => endpoints.nowSince(browser), refetchInterval: 60_000 });
 }
 
 /** Answers a question; every question query is refreshed afterwards, whatever happened. */

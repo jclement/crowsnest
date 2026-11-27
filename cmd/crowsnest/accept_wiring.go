@@ -28,9 +28,9 @@ func budgetOptions(cfg config.Config) jobs.BudgetOptions {
 		DailyUSD: cfg.DailyCeilingUSD, OrchestratorUSD: cfg.OrchestratorCeilingUSD, LeadUSD: cfg.LeadCeilingUSD}
 }
 
-// spendToday reads today's spend from the meter's reader, cached for 30 seconds: the supervisor
+// spendDayLimits reads today's spend from the meter's reader, cached for 30 seconds: the supervisor
 // asks every tick and the board on every read.
-func spendToday(reader jobs.SpendReader) func(ctx context.Context) (jobs.DaySpend, error) {
+func spendDayLimits(reader jobs.SpendReader) func(ctx context.Context) (jobs.DaySpend, error) {
 	meter, ok := reader.(*spend.Meter)
 	if !ok || meter == nil {
 		return nil

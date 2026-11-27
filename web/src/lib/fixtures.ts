@@ -6,6 +6,7 @@
 // whose dialog is a multi-question form, agents in every state, plain shell panes, a long cwd
 // and a long terminal title. fixtureApi() answers API calls from it in memory, so pressing a
 // dialog option in fixtures mode behaves like the real thing (the dialog goes away).
+import { fixtureNow, fixtureSince, fixtureSnapshot } from "./attentionFixtures";
 import { approvalFixtureApi, fixtureApprovals } from "./approvalFixtures";
 import type { Approval } from "./approvals";
 import { spendFixtureApi } from "./spendFixtures";
@@ -424,6 +425,8 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
   if (path === "/fleet") return structuredClone(fleetState);
   const approvalsAnswer = approvalFixtureApi(approvalState, path, method, body);
   if (approvalsAnswer !== undefined) return approvalsAnswer;
+  const attentionAnswer = attentionFixtureApi(path);
+  if (attentionAnswer !== undefined) return attentionAnswer;
   const questionsAnswer = questionFixtureApi(path, method, body);
   if (questionsAnswer !== undefined) return questionsAnswer;
   const jobsAnswer = jobFixtureApi(path);
@@ -443,6 +446,18 @@ export async function fixtureApi(path: string, method: string, body: unknown): P
     return structuredClone(state.screen);
   }
   throw new ApiError(404, "NOT_FOUND", `No fixture for ${method} ${path}.`);
+}
+
+// ---- The attention queue and the Now view (22) ---------------------------------------
+
+/** Answers /attention and /now from the fixture approvals and questions; undefined otherwise. */
+function attentionFixtureApi(path: string): unknown {
+  if (path === "/attention") return fixtureSnapshot(approvalState, questionState);
+  if (path.startsWith("/attention/")) return fixtureSnapshot(approvalState, questionState);
+  if (path === "/now") return fixtureNow(fixtureSnapshot(approvalState, questionState));
+  if (path.startsWith("/now/since")) return fixtureSince();
+  if (path === "/now/beat" || path === "/now/seen") return { ok: true };
+  return undefined;
 }
 
 // ---- Questions (M6) ----------------------------------------------------------------

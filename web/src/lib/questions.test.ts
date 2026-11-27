@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { inboxCount } from "./fleet";
 import { fixtureQuestions, makeQuestion } from "./questionFixtures";
 import { answerSummary, buildAnswer, canSubmit, compareQuestions } from "./questions";
 
@@ -37,12 +36,5 @@ describe("answers", () => {
     expect(canSubmit(byId("q_4"), [], "  ")).toBe(false);
     expect(canSubmit(byId("q_4"), [], "x")).toBe(true);
     expect(canSubmit(makeQuestion({ kind: "ack" }), [], "")).toBe(true);
-  });
-});
-
-describe("badge", () => {
-  it("counts open questions plus dialogs", () => {
-    expect(inboxCount(3, 2)).toBe(5);
-    expect(inboxCount(undefined, 1)).toBe(1);
   });
 });

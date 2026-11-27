@@ -144,7 +144,7 @@ test("a long paste becomes a file by default, and goes back to text on request",
 });
 
 test("a file dropped on the job box is given with the job and listed in its brief", async ({ page, app }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   const form = page.getByRole("form", { name: "New job" });
   await expect(form.getByRole("button", { name: "Attach files" })).toBeVisible();
   const notes: FakeFile = { name: "repro steps.md", type: "text/markdown", content: "# Repro\n\n1. Open the board\n2. It is blank\n" };
@@ -158,14 +158,14 @@ test("a file dropped on the job box is given with the job and listed in its brie
   await page.getByRole("button", { name: /To the orchestrator/ }).click();
   await page.getByLabel(/^Where/).fill(app.root);
   await page.getByRole("button", { name: "Give job" }).click();
-  await expect(page.getByText("Job j_16 given")).toBeVisible();
+  await expect(page.getByText("Job j_23 given")).toBeVisible();
   const detail = detailRegion(page, testInfo, "Selected job");
   const files = detail.getByRole("list", { name: "Given with the brief" });
   await expect(files.getByRole("link", { name: /repro steps\.md/ })).toBeVisible({ timeout: 15_000 });
-  await expect(detail.getByRole("list", { name: "Timeline" })).toContainText("Brief sent to job-16", { timeout: 15_000 });
+  await expect(detail.getByRole("list", { name: "Timeline" })).toContainText("Brief sent to job-23", { timeout: 15_000 });
   // The agent reads it from its inbox: the brief file names the copy.
-  const brief = readFileSync(join(demoDir(app), "state", "jobs", "j_16", "brief.md"), "utf8");
-  expect(brief).toMatch(/Attached: \S+\/jobs\/j_16\/attachments\/a_[0-9a-f]{24}-repro-steps\.md \(text\/markdown, \d+ B\)/);
+  const brief = readFileSync(join(demoDir(app), "state", "jobs", "j_23", "brief.md"), "utf8");
+  expect(brief).toMatch(/Attached: \S+\/jobs\/j_23\/attachments\/a_[0-9a-f]{24}-repro-steps\.md \(text\/markdown, \d+ B\)/);
 });
 
 test("a question with an image attachment shows a thumbnail that opens full size, and a report to download", async ({ page }, testInfo) => {

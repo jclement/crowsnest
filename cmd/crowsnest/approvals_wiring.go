@@ -15,8 +15,6 @@ import (
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/guard"
-	"github.com/jclement/crowsnest/internal/herdr"
-	"github.com/jclement/crowsnest/internal/herdr/fake"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/push"
@@ -90,17 +88,10 @@ func newApprovals(cfg config.Config, db *store.Store, events *hub.Hub, rules *gu
 }
 
 // runApprovals recovers what a previous process left pending, then sweeps (expiry, hooks that
-// stopped polling) and reconciles against the screens (a dialog answered in the terminal). Under
-// --demo it seeds the scripted approvals first.
-func runApprovals(ctx context.Context, service *approvals.Service, cache *fleet.Cache, client herdr.Client, logger *slog.Logger) {
+// stopped polling) and reconciles against the screens (a dialog answered in the terminal). The
+// --demo approvals are seeded later, once the jobs they name exist (startDemoInbox).
+func runApprovals(ctx context.Context, service *approvals.Service, cache *fleet.Cache, logger *slog.Logger) {
 	service.RecoverAtStart(ctx)
-	if demo, ok := client.(*fake.Demo); ok {
-		panes := approvals.DemoPanes{Builder: demo.PaneOf(fake.DemoBuilder), Reviewer: demo.PaneOf(fake.DemoReviewer), Linter: demo.PaneOf(fake.DemoLinter)}
-		if err := approvals.SeedDemo(ctx, service, panes); err != nil {
-			logger.Warn("seeding the demo approvals", "err", err)
-		}
-		go approvals.RunDemo(ctx, service, panes, 0, logger)
-	}
 	go service.Run(ctx, func(ctx context.Context, paneID string) approvals.Screen {
 		snapshot, err := cache.Fleet(ctx)
 		if err != nil {

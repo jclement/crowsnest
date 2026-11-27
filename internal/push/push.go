@@ -236,6 +236,13 @@ func (s *Service) Remove(ctx context.Context, id int64) (bool, error) {
 	return s.opts.Store.DeletePushSubscription(ctx, id)
 }
 
+// HasDevices reports whether any device is subscribed; a failed read says yes (the send then
+// finds out), so an error never silences a notice.
+func (s *Service) HasDevices(ctx context.Context) bool {
+	devices, err := s.Devices(ctx)
+	return err != nil || len(devices) > 0
+}
+
 // Devices lists every subscription as a Device, oldest first.
 func (s *Service) Devices(ctx context.Context) ([]Device, error) {
 	subs, err := s.opts.Store.ListPushSubscriptions(ctx)

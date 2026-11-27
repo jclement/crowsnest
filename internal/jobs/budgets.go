@@ -18,6 +18,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -528,6 +529,9 @@ func (s *Service) SetJobBudget(ctx context.Context, id string, input BudgetInput
 		}
 		return nil
 	})
+	if errors.Is(err, errSkip) {
+		err = nil // nothing waited on the budget: the change itself is recorded
+	}
 	if err == nil && resumed && job.PaneID != "" {
 		_ = s.sendText(ctx, job.PaneID, job.AgentName, fmt.Sprintf("[crowsnest budget] The human raised job %s's budget. Carry on with the work.", job.ID))
 	}

@@ -1,7 +1,7 @@
 // Landing, throttling, the pause and the digest as a user drives them (DESIGN.md 6.11 to 6.13,
 // 7.13), against `crowsnest --demo`. The landing demo (internal/jobs/demo_landing.go) is a real,
-// throwaway git repository in the instance's temporary directory: j_11 is done and ready to land,
-// j_12 is in review round 2 with round 1's findings, j_15 waits for a slot.
+// throwaway git repository in the instance's temporary directory: j_18 is done and ready to land,
+// j_19 is in review round 2 with round 1's findings, j_22 waits for a slot.
 //
 // Screenshots at 375 and 1440 px (Chromium) go to web/screenshots/landing-*.png, as the tray's do,
 // and are committed after being looked at.
@@ -18,7 +18,7 @@ async function openJob(page: Page, id: string) {
 }
 
 test("the review tab shows what the job produced, and Merge lands it after a confirmation", async ({ page }, testInfo) => {
-  await openJob(page, "j_11");
+  await openJob(page, "j_18");
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByRole("heading", { name: "Retry widget fetches with back-off" })).toBeVisible();
   await expect(detail.getByText(/Finished in its worktree, review approved/)).toBeVisible();
@@ -47,7 +47,7 @@ test("the review tab shows what the job produced, and Merge lands it after a con
 });
 
 test("a job in review shows the reviewer's findings round by round", async ({ page }, testInfo) => {
-  await openJob(page, "j_12");
+  await openJob(page, "j_19");
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByText(/In review, round 2 of 2/)).toBeVisible();
   await detail.getByRole("button", { name: "Open the review" }).click();
@@ -60,7 +60,7 @@ test("a job in review shows the reviewer's findings round by round", async ({ pa
 });
 
 test("a job waiting for a slot says why, and Start anyway starts it", async ({ page }, testInfo) => {
-  await openJob(page, "j_15");
+  await openJob(page, "j_22");
   const detail = detailRegion(page, testInfo, "Selected job");
   const banner = detail.getByRole("alert");
   await expect(banner).toContainText("Waiting to start");
@@ -90,7 +90,7 @@ test("pausing shows a banner everywhere until resumed", async ({ page }, testInf
 });
 
 test("the daily digest: a switch and a time in Schedule, and past digests", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await page.getByRole("button", { name: "Schedule", exact: true }).first().click();
   const schedule = page.getByRole("dialog", { name: "Schedule" });
   const digest = schedule.getByRole("switch", { name: "Daily digest" });
@@ -105,12 +105,12 @@ test("the daily digest: a switch and a time in Schedule, and past digests", asyn
 });
 
 test("the worktree sweep lists what is still around and discards after a confirmation", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/jobs");
   await page.getByRole("button", { name: /to land/ }).click();
   const sweep = page.getByRole("dialog", { name: "Worktrees still around" });
   await expect(sweep.getByRole("list", { name: "Finished jobs with worktrees" })).toContainText("Retry widget fetches with back-off");
   await shot(page, testInfo, "sweep");
-  await sweep.getByLabel("Choose j_11").check();
+  await sweep.getByLabel("Choose j_18").check();
   await sweep.getByRole("button", { name: /Discard 1 chosen/ }).click();
   const confirm = sweep.getByRole("alertdialog", { name: "Confirm discard" });
   await expect(confirm).toContainText("cannot be undone");

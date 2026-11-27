@@ -115,7 +115,7 @@ export function ChatMenu({ model, showThinking, onToggleThinking, canRelaunch, l
     <div ref={rootRef} className="relative">
       <IconButton icon={MoreVertical} label="Conversation menu" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} />
       {open && (
-        <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl">
+        <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-64 overflow-hidden rounded-md border border-border bg-surface py-1 text-body shadow-xl">
           <div className="flex items-center gap-2 border-b border-border px-3 pb-1.5 pt-1 text-xs" data-testid="orchestrator-model" title={lead ? "The project's default model, else Claude's" : "Set with --model or CROWSNEST_MODEL"}>
             <Cpu className="h-4 w-4 text-muted" aria-hidden />
             <span className="text-muted">Model</span>

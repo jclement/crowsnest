@@ -1,7 +1,7 @@
 // The Jobs view (DESIGN.md 12), the default route: the text box at the top, the board below it
 // (needs-you and stuck first, then running, then finished today; older finished jobs behind a
 // toggle), and the selected job: beside the board from md, a full-screen sheet on a phone. The
-// selection is in the URL (/?job=j_12) so a link or a reload lands on it. The Journal (pokes,
+// selection is in the URL (/jobs?job=j_12) so a link or a reload lands on it. The Journal (pokes,
 // sends, answers, restarts, alerts), the Schedule (scheduled tasks) and Spend (today's and this
 // week's estimated cost, with the breakdown sheet) open from the row above the board.
 //
@@ -42,7 +42,7 @@ export function JobsView() {
   const [filter, setFilter] = useProjectFilter(projects.data);
   const project = filter.kind === "project" ? findProject(projects.data?.projects, filter.slug) : undefined;
   const projectParam = filterToParam(filter) || undefined;
-  const select = (id: string | undefined) => void navigate({ to: "/", search: { job: id, project: projectParam } });
+  const select = (id: string | undefined) => void navigate({ to: "/jobs", search: { job: id, project: projectParam } });
   const [journalOpen, setJournalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [spendOpen, setSpendOpen] = useState(false);
@@ -181,7 +181,7 @@ function Section({
   return (
     <section aria-label={sectionLabels[section]}>
       <h2 className="sticky top-0 z-10 border-b border-border bg-surface-raised px-3 py-1 text-2xs font-semibold uppercase tracking-wide text-muted">
-        {sectionLabels[section]} <span className="font-normal">({jobs.length})</span>
+        {sectionLabels[section]} <span className="font-normal">({jobs.length} {jobs.length === 1 ? "job" : "jobs"})</span>
       </h2>
       <ul className="divide-y divide-border">
         {jobs.map((job) => (

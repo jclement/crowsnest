@@ -15,16 +15,13 @@ export function allAgents(fleet: Fleet | undefined): Agent[] {
   return fleet?.agents ?? [];
 }
 
-/** How many agents are waiting on Jeff: the Inbox badge until questions arrive in M6. */
-export function needsYouCount(fleet: Fleet | undefined, approvals?: { pane_id?: string; status: string }[]): number {
-  // An agent whose pane has a pending approval is that approval (the same request), counted once.
-  const approvalPanes = new Set((approvals ?? []).filter((approval) => approval.status === "pending").map((approval) => approval.pane_id));
-  return allAgents(fleet).filter((agent) => agent.needs_you && !approvalPanes.has(agent.pane_id)).length;
-}
-
-/** The Inbox badge: open questions plus agents waiting at a terminal dialog. */
-export function inboxCount(openQuestions: number | undefined, dialogs: number): number {
-  return (openQuestions ?? 0) + dialogs;
+/**
+ * How many agents in the fleet sit at a dialog: a fact about the tree the Fleet view draws, worded
+ * "at a dialog" there. It is not the "needs you" number: that is the attention queue's
+ * (lib/attention.ts), which also folds an approval and its dialog into one item.
+ */
+export function needsYouCount(fleet: Fleet | undefined): number {
+  return allAgents(fleet).filter((agent) => agent.needs_you).length;
 }
 
 /** Finds the agent in a pane, with the workspace and tab it sits in. */
