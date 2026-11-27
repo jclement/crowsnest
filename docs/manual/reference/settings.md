@@ -93,6 +93,12 @@ These appear in the **Settings** sheet (account menu → Settings), grouped as t
 | Archive settled jobs after (days) | `--archive-after-days` | at once | hidden from the boards, still searchable; 0 never |
 | Delete settled history after (days) | `--delete-after-days` | at once | jobs and their timelines, settled questions and approvals, journal and spend detail; 0 never. Unlanded work is never deleted without asking |
 
+### Agents
+
+| Setting | Flag | Applies | What it does |
+|---|---|---|---|
+| Trust the folders of projects you create | `--trust-project-folders` | at once | creating a project records Claude Code's and Codex's "trust this folder" for it (only folders you chose in the app, never one an agent chose); off, every new project's first agent asks in its terminal and the question comes to you as a card |
+
 ### Tailnet
 
 | Setting | Flag | Applies | What it does |
@@ -166,6 +172,7 @@ All of them, in `crowsnest --help` order. The config-file key is the flag's name
 | `--engine` | `CROWSNEST_ENGINE` | `auto` | Agents → Default engine | agent engine for the orchestrator and for jobs that name none: auto, claude or codex |
 | `--open` | `CROWSNEST_OPEN` | `auto` | no | open a browser at start (the setup link, else the app): auto (only from a desktop terminal), always or never |
 | `--no-tailscale-detect` | `CROWSNEST_NO_TAILSCALE_DETECT` | `false` | no | do not add this machine's Tailscale MagicDNS name to the allowed hosts at start |
+| `--trust-project-folders` | `CROWSNEST_TRUST_PROJECT_FOLDERS` | `true` | Agents → Trust the folders of projects you create | when you create a project in the app (and leave its box ticked), record Claude Code's and Codex's folder-trust answer for its folder, so its agents start without the trust prompt (false: never write either agent's state) |
 | `--tailscale-serve` | `CROWSNEST_TAILSCALE_SERVE` | `false` | Tailnet → Publish to your tailnet | publish crowsnest to your tailnet while it runs, with a foreground `tailscale serve` (needs a login; never Funnel) |
 | `--tailscale-serve-port` | `CROWSNEST_TAILSCALE_SERVE_PORT` | `0` | no | the tailnet HTTPS port --tailscale-serve publishes on; 0 picks the first free of 443, 8443 and 10000 |
 | `--name` | `CROWSNEST_NAME` | none | no | this instance's name, shown in the header, the page title, notices and Remote Control (default: the short hostname) |

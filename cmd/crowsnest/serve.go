@@ -373,7 +373,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(), Attention: attentionService, Now: nowSources,
-		Changes: changeService,
+		Changes: changeService, FolderTrust: newFolderTrust(cfg, live.config.get),
 	}
 	if cfg.Demo {
 		deps.DemoTouch = func(ctx context.Context, id string) error { return jobs.DemoDiffTouch(ctx, jobService, id) }

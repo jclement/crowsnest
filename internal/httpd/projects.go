@@ -4,6 +4,7 @@
 //	POST /projects                       create {name, dir, slug?, description?, default_role?, …}
 //	GET  /projects/{ref}                 one project (id, p_<id> or slug); opening it applies lead_start=open
 //	PUT  /projects/{ref}                 edit, archive ({archived: true}) or unarchive
+//	POST /projects/{ref}/trust           record the agents' folder trust for its folder (8.2.1)
 //	GET  /leads                          every running lead's status
 //	POST /projects/{ref}/lead/start      Start lead
 //	POST /projects/{ref}/lead/stop       Stop lead (its conversation is kept)
@@ -20,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/agenttrust"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/projects"
 )
@@ -32,6 +34,30 @@ type projectView struct {
 	projects.Project
 	Lead   projects.LeadStatus `json:"lead"`
 	Counts projects.Counts     `json:"counts"`
+	// FolderTrusted says whether Claude Code trusts the project's folder (or a parent), so its
+	// agents start without the trust prompt; nil when it is not known (8.2.1).
+	FolderTrusted *bool `json:"folder_trusted,omitempty"`
+	// Trust is what recording the folder's trust did, on a create or POST …/trust that asked.
+	Trust []agenttrust.Result `json:"trust,omitempty"`
+}
+
+// FolderTrust is the agents' folder trust, as the server uses it (8.2.1).
+type FolderTrust interface {
+	// Enabled is the trust-project-folders setting: false and nothing is ever written.
+	Enabled() bool
+	// Trust records trust for dirs, which the human chose.
+	Trust(dirs []string) []agenttrust.Result
+	// Trusted reports whether Claude Code trusts dir (or a parent).
+	Trusted(dir string) bool
+}
+
+// projectCreateRequest is POST /projects: a project, and whether to trust its folder.
+type projectCreateRequest struct {
+	projects.Input
+	// TrustFolder asks for the agents' folder trust to be recorded for the new project's folder
+	// ("Claude may work in this folder without asking"; the form's box, ticked by default). Left
+	// out it is false: an API client that does not ask gets no write.
+	TrustFolder *bool `json:"trust_folder"`
 }
 
 // projectsView is GET /projects.
@@ -45,6 +71,7 @@ func (s *Server) registerProjectRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/projects", s.requireAuth(http.HandlerFunc(s.handleProjectCreate)))
 	mux.Handle("GET /api/v1/projects/{ref}", s.requireAuth(http.HandlerFunc(s.handleProject)))
 	mux.Handle("PUT /api/v1/projects/{ref}", s.requireAuth(http.HandlerFunc(s.handleProjectUpdate)))
+	mux.Handle("POST /api/v1/projects/{ref}/trust", s.requireAuth(http.HandlerFunc(s.handleProjectTrust)))
 	mux.Handle("GET /api/v1/leads", s.requireAuth(http.HandlerFunc(s.handleLeads)))
 	mux.Handle("POST /api/v1/projects/{ref}/lead/{action}", s.requireAuth(http.HandlerFunc(s.handleLeadAction)))
 }
@@ -76,6 +103,10 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) viewOf(ctx context.Context, project projects.Project, counts map[int64]projects.Counts) projectView {
 	view := projectView{Project: project, Counts: counts[project.ID]}
+	if s.deps.FolderTrust != nil {
+		trusted := s.deps.FolderTrust.Trusted(project.RootDir) || s.deps.FolderTrust.Trusted(project.Dir)
+		view.FolderTrusted = &trusted
+	}
 	if s.deps.Leads != nil {
 		view.Lead, _ = s.deps.Leads.Status(ctx, project.ID)
 	} else {
@@ -132,16 +163,63 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	if service == nil {
 		return
 	}
-	input, ok := s.decodeProject(w, r)
-	if !ok {
+	var request projectCreateRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxProjectBody))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, codeValidation, "Send the project as JSON: {name, dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, trust_folder}.")
 		return
 	}
-	project, err := service.Create(r.Context(), input)
+	project, err := service.Create(r.Context(), request.Input)
 	if err != nil {
 		s.projectError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusCreated, s.viewOf(r.Context(), project, nil))
+	var trust []agenttrust.Result
+	if request.TrustFolder != nil && *request.TrustFolder {
+		trust = s.trustProjectFolder(r, project)
+	}
+	view := s.viewOf(r.Context(), project, nil)
+	view.Trust = trust
+	writeData(w, http.StatusCreated, view)
+}
+
+// handleProjectTrust records the agents' folder trust for an existing project's folder: the
+// human pressing "Trust this folder" on the project (8.2.1). Refused while the setting is off.
+func (s *Server) handleProjectTrust(w http.ResponseWriter, r *http.Request) {
+	if s.projectService(w) == nil {
+		return
+	}
+	project, ok := s.findProject(w, r)
+	if !ok {
+		return
+	}
+	if s.deps.FolderTrust == nil || !s.deps.FolderTrust.Enabled() {
+		writeError(w, http.StatusConflict, codeConflict, "Recording folder trust is turned off (Settings, Agents: \"Trust the folders of projects you create\"). Answer the trust question on the agent's card instead.")
+		return
+	}
+	trust := s.trustProjectFolder(r, project)
+	view := s.viewOf(r.Context(), project, nil)
+	view.Trust = trust
+	writeData(w, http.StatusOK, view)
+}
+
+// trustProjectFolder records trust for a project's folder, as given and resolved. Only ever
+// reached from a signed-in human's request naming a project (create or POST …/trust): never
+// for a job's worktree (it inherits its checkout's trust) and never for a folder an agent chose.
+func (s *Server) trustProjectFolder(r *http.Request, project projects.Project) []agenttrust.Result {
+	if s.deps.FolderTrust == nil || !s.deps.FolderTrust.Enabled() {
+		return []agenttrust.Result{{Agent: "claude", Status: agenttrust.StatusSkipped, Detail: "recording folder trust is turned off in Settings"}}
+	}
+	dirs := []string{project.Dir}
+	if project.RootDir != "" && project.RootDir != project.Dir {
+		dirs = append(dirs, project.RootDir)
+	}
+	results := s.deps.FolderTrust.Trust(dirs)
+	for _, result := range results {
+		s.deps.Logger.Info("project folder trust", "project", project.Slug, "agent", result.Agent, "status", result.Status, "detail", result.Detail)
+	}
+	return results
 }
 
 func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {

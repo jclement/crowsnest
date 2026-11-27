@@ -31,6 +31,11 @@ const (
 	// sequence, too little to type a command.
 	maxKeys      = 16
 	maxKeyLength = 32
+	// dialogSettle is how long an answer to a dialog watches the screen for the dialog to go,
+	// and dialogPoll how often it looks. An agent clears its dialog within a frame or two; a
+	// trust answer that leaves the prompt up means the keys did not do what the card promised.
+	dialogSettle = 4 * time.Second
+	dialogPoll   = 250 * time.Millisecond
 )
 
 // targetPattern accepts herdr agent names ([a-z][a-z0-9_-]{0,31}) and pane ids ("w1:p2").
@@ -177,6 +182,10 @@ type KeysResponse struct {
 	Sent       []string `json:"sent"`
 	PaneID     string   `json:"pane_id"`
 	ScreenHash string   `json:"screen_hash"` // the hash the keys were checked against
+	// DialogGone is set when the keys answered a dialog: true once the screen no longer shows
+	// that dialog, false when it was still up after a few seconds (the answer did not take, or
+	// the agent asked again). Absent for keys sent to a screen with no dialog.
+	DialogGone *bool `json:"dialog_gone,omitempty"`
 }
 
 func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +220,49 @@ func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Fleet != nil {
 		s.deps.Fleet.Invalidate()
 	}
-	writeData(w, http.StatusOK, KeysResponse{Sent: body.Keys, PaneID: target.paneID, ScreenHash: screen.Hash})
+	response := KeysResponse{Sent: body.Keys, PaneID: target.paneID, ScreenHash: screen.Hash}
+	if screen.Dialog.Present && body.ScreenHash != "" {
+		gone := s.dialogGone(r.Context(), name, target, screen)
+		response.DialogGone = &gone
+		if !gone {
+			s.deps.Logger.Warn("a dialog answer left the dialog up", "target", name, "pane", target.paneID, "keys", body.Keys)
+		}
+	}
+	writeData(w, http.StatusOK, response)
+}
+
+// dialogGone watches the screen after an answer until the dialog it answered is no longer
+// there: no dialog at all, or a different one (a follow-up question is a new dialog with its own
+// card). It reports false when the same dialog is still up after dialogSettle.
+func (s *Server) dialogGone(ctx context.Context, name string, target screenTarget, before ScreenResponse) bool {
+	deadline := time.Now().Add(s.dialogSettle)
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(dialogPoll):
+		}
+		now, err := s.readScreen(ctx, name, target)
+		if err == nil && (!now.Dialog.Present || !sameDialog(before.Dialog, now.Dialog)) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+	}
+}
+
+// sameDialog reports whether two dialogs offer the same options (a cursor move is not a change).
+func sameDialog(a, b fleet.Dialog) bool {
+	if len(a.Options) != len(b.Options) {
+		return false
+	}
+	for i := range a.Options {
+		if a.Options[i].Label != b.Options[i].Label {
+			return false
+		}
+	}
+	return true
 }
 
 // validateKeys returns a message for the user, or "" when the request is acceptable.

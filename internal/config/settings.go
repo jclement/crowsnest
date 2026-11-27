@@ -264,6 +264,8 @@ func (c Config) SettingValue(name string) string {
 		return itoa(c.DeleteAfterDays)
 	case optRequireViewed:
 		return boolText(c.RequireViewedBeforeLand)
+	case optTrustProjectFolders:
+		return boolText(c.TrustProjectFolders)
 	}
 	return ""
 }

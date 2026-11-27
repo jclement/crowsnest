@@ -142,6 +142,9 @@ type Config struct {
 	JobBudgetTokens  int64         // default budget per job, tokens; 0 none
 	// RequireViewedBeforeLand refuses a merge or push until every file is marked viewed (6.20).
 	RequireViewedBeforeLand bool
+	// TrustProjectFolders lets a project created in the app record the agents' folder-trust
+	// answer for its folder (8.2.1). On by default.
+	TrustProjectFolders bool
 	DailyCeilingUSD         float64 // the fleet's ceiling per day; 0 none
 	OrchestratorCeilingUSD  float64 // the orchestrator's ceiling per day; 0 none
 	LeadCeilingUSD          float64 // each lead's ceiling per day; 0 none

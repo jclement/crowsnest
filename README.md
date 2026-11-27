@@ -964,6 +964,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--theme` | `CROWSNEST_THEME` | `crowsnest` | the theme a browser gets until it chooses its own: `crowsnest`, `phosphor`, `deep-sea`, `ember` or `contrast` (Settings → Appearance sets it; each browser's own choice wins) |
 | `--check-timeout` | `CROWSNEST_CHECK_TIMEOUT` | `30m` | Longest crowsnest's own check of a finished coding job may run (DESIGN 6.15) |
 | `--require-viewed-before-land` | `CROWSNEST_REQUIRE_VIEWED_BEFORE_LAND` | `false` | Merge and push refuse a job until every file of its diff is marked viewed (off: Land warns); also in Settings (DESIGN 6.21) |
+| `--trust-project-folders` | `CROWSNEST_TRUST_PROJECT_FOLDERS` | `true` | Creating a project in the app (its box left ticked) records Claude Code's and Codex's folder-trust answer for its folder, so its lead and jobs start without the trust prompt; `false` never writes either agent's state; also in Settings (DESIGN 8.2.1) |
 | `--check-rounds` | `CROWSNEST_CHECK_ROUNDS` | `3` | Failed checks sent back to the agent before the job needs you |
 | `--job-budget-usd` | `CROWSNEST_JOB_BUDGET_USD` | `0` (none) | Default budget per job in estimated dollars, its delegated jobs included (DESIGN 6.16) |
 | `--job-budget-minutes` | `CROWSNEST_JOB_BUDGET_MINUTES` | `0` (none) | Default budget per job in minutes since its agent started |
