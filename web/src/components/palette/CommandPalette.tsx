@@ -52,6 +52,7 @@ import {
   BookText,
   Activity,
   SlidersHorizontal,
+  Palette,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
@@ -78,7 +79,8 @@ import {
 import { queryTokens } from "../../lib/fuzzy";
 import { useAttention, useFleet, useJobs, useMe, usePause, useProjects } from "../../lib/queries";
 import { activeItems } from "../../lib/attention";
-import { readTheme, THEME_EVENT, type ThemeChoice } from "../../lib/theme";
+import { readTheme, readThemeName, THEME_EVENT, THEME_NAME_EVENT, type ThemeChoice } from "../../lib/theme";
+import { themes } from "../../themes";
 import { Chip, StatusDot } from "../ui/Chip";
 
 const icons: Record<PaletteIcon, LucideIcon> = {
@@ -107,6 +109,7 @@ const icons: Record<PaletteIcon, LucideIcon> = {
   "theme-system": Monitor,
   "theme-light": Sun,
   "theme-dark": Moon,
+  "palette-theme": Palette,
   signout: LogOut,
   speak: Volume2,
   voice: Mic,
@@ -446,6 +449,12 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
     window.addEventListener(THEME_EVENT, follow);
     return () => window.removeEventListener(THEME_EVENT, follow);
   }, []);
+  const [themeName, setThemeName] = useState(readThemeName);
+  useEffect(() => {
+    const follow = (event: Event) => setThemeName((event as CustomEvent<string>).detail);
+    window.addEventListener(THEME_NAME_EVENT, follow);
+    return () => window.removeEventListener(THEME_NAME_EVENT, follow);
+  }, []);
   return useMemo(
     () => ({
       jobs: jobs.data,
@@ -454,12 +463,14 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
       orchestrator: !!orchestrator.data && orchestrator.data.state !== "disabled",
       auth: !!me.data?.features.auth,
       theme,
+      themeName,
+      themes,
       speak,
       voiceSettings,
       projects: projects.data?.projects,
       paused: pause.data?.paused ?? false,
     }),
-    [jobs.data, attention.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings, projects.data, pause.data],
+    [jobs.data, attention.data, fleet.data, orchestrator.data, me.data, theme, themeName, speak, voiceSettings, projects.data, pause.data],
   );
 }
 

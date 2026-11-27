@@ -46,6 +46,13 @@ describe("hotkeyFor", () => {
     expect(hotkeyFor(key("?", { shiftKey: true }), { ...page, terminal: true, typing: true }, initialSequence, 0).action).toBeNull();
   });
 
+  it("moves to the next theme with T, but not t, nor while typing or in a terminal", () => {
+    expect(hotkeyFor(key("T", { shiftKey: true }), page, initialSequence, 0).action).toEqual({ kind: "cycleTheme" });
+    expect(hotkeyFor(key("t"), page, initialSequence, 0).action).toBeNull();
+    expect(hotkeyFor(key("T", { shiftKey: true }), { ...page, typing: true }, initialSequence, 0).action).toBeNull();
+    expect(hotkeyFor(key("T", { shiftKey: true }), { ...page, terminal: true }, initialSequence, 0).action).toBeNull();
+  });
+
   it("focuses the needs-you tray with g then n, and never answers on a bare y or n", () => {
     const first = hotkeyFor(key("g"), page, initialSequence, 1000);
     expect(hotkeyFor(key("n"), page, first.state, 1200).action).toEqual({ kind: "tray" });

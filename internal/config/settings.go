@@ -145,6 +145,8 @@ var editable = []Setting{
 		Help: "production hosts no agent may reach unattended (added to the protected-hosts file's)"},
 	{Name: optProtectedBranch, Label: "Protected branches", Section: "Guard", Kind: "list", Apply: ApplyRestart,
 		Help: "branches agents may not commit or push onto, nor force-push"},
+	{Name: optTheme, Label: "Default theme", Section: "Appearance", Kind: "text", Apply: ApplyLive,
+		Help: "the theme a browser gets until it chooses its own (Appearance sets it); empty: the house theme"},
 }
 
 // EditableSettings returns the table of settings the app may change.
@@ -243,6 +245,8 @@ func (c Config) SettingValue(name string) string {
 		return c.MergeMode
 	case optDigestAt:
 		return c.DigestAt
+	case optTheme:
+		return c.Theme
 	case optProtectedHost:
 		return strings.Join(c.ProtectedHosts, ",")
 	case optProtectedBranch:
@@ -332,6 +336,7 @@ func (c Config) WithSettings(from Config) Config {
 	c.ProtectedHosts, c.ProtectedBranches = from.ProtectedHosts, from.ProtectedBranches
 	c.MaxRunningJobs, c.LoadHold, c.HeavySlots = from.MaxRunningJobs, from.LoadHold, from.HeavySlots
 	c.Review, c.MergeMode, c.DigestAt = from.Review, from.MergeMode, from.DigestAt
+	c.Theme = from.Theme
 	c = c.withAcceptSettings(from)
 	c.RequireViewedBeforeLand = from.RequireViewedBeforeLand
 	c.BackupEvery, c.BackupKeep = from.BackupEvery, from.BackupKeep

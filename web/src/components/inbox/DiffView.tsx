@@ -83,8 +83,8 @@ function FileDiffCard({ file, mode }: { file: QuestionFile; mode: "unified" | "s
 type Indexed = DiffItem & { gapIndex?: number };
 
 const rowTone: Record<DiffLine["kind"], string> = {
-  add: "bg-success/10",
-  del: "bg-danger/10",
+  add: "bg-diff-add",
+  del: "bg-diff-del",
   same: "",
 };
 const marker: Record<DiffLine["kind"], string> = { add: "+", del: "−", same: " " };

@@ -7,6 +7,7 @@
 //   kill-line in every text field there).
 // - In a terminal only ⌘K opens it: Ctrl+K is the shell's kill-line and must reach the pane. The
 //   terminal is told to ignore ⌘K (XTerm.tsx) so xterm never swallows it.
+// - `T` (shift t) moves to the next theme (src/themes), under the same conditions as `?`.
 // - `?` opens the shortcuts sheet, and `g` then j, c, i, f or t goes to Jobs, Chat, Inbox, Fleet or
 //   Terminal, and `g` then n focuses the needs-you tray; none of these fire while typing in a field
 //   or in a terminal, or with a modifier.
@@ -29,7 +30,7 @@ export interface FocusContext {
   mac: boolean;
 }
 
-export type HotkeyAction = { kind: "palette" } | { kind: "help" } | { kind: "go"; to: ViewPath } | { kind: "tray" };
+export type HotkeyAction = { kind: "palette" } | { kind: "help" } | { kind: "cycleTheme" } | { kind: "go"; to: ViewPath } | { kind: "tray" };
 
 /** The key after `g` that focuses the needs-you tray (DESIGN.md 8.7). */
 export const TRAY_KEY = "n";
@@ -64,6 +65,7 @@ export function hotkeyFor(input: KeyInput, focus: FocusContext, state: SequenceS
     return { action: null, state: initialSequence };
   }
   if (input.key === "?") return { action: { kind: "help" }, state: initialSequence };
+  if (input.key === "T" && input.shiftKey) return { action: { kind: "cycleTheme" }, state: initialSequence };
   const pending = state.gAt !== null && now - state.gAt <= SEQUENCE_MS;
   if (pending) {
     const view = viewKeys.find((entry) => entry.key === input.key.toLowerCase());

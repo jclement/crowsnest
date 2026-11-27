@@ -9,7 +9,7 @@ const inner = svg.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "").
 // "any": the icon as drawn (rounded square). "maskable": a full-bleed square with the drawing
 // shrunk into the central 80 % safe zone, so any mask shape (circle, squircle) keeps it whole.
 const any = (size) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64">${svg.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "")}</svg>`;
-const full = (size, scale) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64"><rect width="64" height="64" fill="#0b1220"/><g transform="translate(${32 - 32 * scale} ${32 - 32 * scale}) scale(${scale})">${inner}</g></svg>`;
+const full = (size, scale) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64"><rect width="64" height="64" fill="#08111b"/><g transform="translate(${32 - 32 * scale} ${32 - 32 * scale}) scale(${scale})">${inner}</g></svg>`;
 const outputs = [
   ["public/icons/icon-192.png", any(192), 192],
   ["public/icons/icon-512.png", any(512), 512],

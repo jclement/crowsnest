@@ -181,7 +181,7 @@ function openTerminal(container: HTMLElement, path: string, fontSize: number, la
   const themeWatcher = new MutationObserver(() => {
     terminal.options.theme = themeFromCSS();
   });
-  themeWatcher.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  themeWatcher.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
 
   latest.current.handleRef?.({
     send: (data) => socket.send(data),
@@ -207,60 +207,38 @@ function openTerminal(container: HTMLElement, path: string, fontSize: number, la
   return { terminal, refit, dispose };
 }
 
-/** Builds the xterm theme from the app's CSS tokens, so it follows light and dark. */
+/**
+ * Builds the xterm theme from the applied theme's terminal tokens (--term-*, src/themes/), so the
+ * terminals match the app in every theme and mode. Each theme tunes its 16 colours for its own
+ * background: xterm's defaults assume black, which leaves yellow and white unreadable on light.
+ */
 function themeFromCSS(): ITheme {
   const style = getComputedStyle(document.documentElement);
-  const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
-  const dark = document.documentElement.classList.contains("dark");
+  const token = (name: string) => style.getPropertyValue(`--term-${name}`).trim() || undefined;
   return {
-    background: token("--color-surface-sunken", dark ? "#090d12" : "#f1f3f6"),
-    foreground: token("--color-heading", dark ? "#e8edf3" : "#0f172a"),
-    cursor: token("--color-accent", "#0b63c1"),
-    cursorAccent: token("--color-surface-sunken", "#000000"),
-    selectionBackground: dark ? "#2a4b6e" : "#b6d4f2",
-    ...(dark ? darkPalette : lightPalette),
+    background: token("background"),
+    foreground: token("foreground"),
+    cursor: token("cursor"),
+    cursorAccent: token("background"),
+    selectionBackground: token("selection"),
+    black: token("black"),
+    red: token("red"),
+    green: token("green"),
+    yellow: token("yellow"),
+    blue: token("blue"),
+    magenta: token("magenta"),
+    cyan: token("cyan"),
+    white: token("white"),
+    brightBlack: token("bright-black"),
+    brightRed: token("bright-red"),
+    brightGreen: token("bright-green"),
+    brightYellow: token("bright-yellow"),
+    brightBlue: token("bright-blue"),
+    brightMagenta: token("bright-magenta"),
+    brightCyan: token("bright-cyan"),
+    brightWhite: token("bright-white"),
   };
 }
-
-// ANSI colours tuned for each background: xterm's defaults assume a black one, which leaves
-// yellow and white unreadable on the light theme.
-const lightPalette: ITheme = {
-  black: "#1f2328",
-  red: "#c22a2a",
-  green: "#1a7f37",
-  yellow: "#9a6700",
-  blue: "#0b63c1",
-  magenta: "#8b3fd1",
-  cyan: "#1b7c83",
-  white: "#6e7781",
-  brightBlack: "#57606a",
-  brightRed: "#d1242f",
-  brightGreen: "#2da44e",
-  brightYellow: "#bf8700",
-  brightBlue: "#218bff",
-  brightMagenta: "#a475f9",
-  brightCyan: "#3192aa",
-  brightWhite: "#8c959f",
-};
-
-const darkPalette: ITheme = {
-  black: "#484f58",
-  red: "#ff7b72",
-  green: "#3fb950",
-  yellow: "#d29922",
-  blue: "#58a6ff",
-  magenta: "#bc8cff",
-  cyan: "#39c5cf",
-  white: "#b1bac4",
-  brightBlack: "#6e7681",
-  brightRed: "#ffa198",
-  brightGreen: "#56d364",
-  brightYellow: "#e3b341",
-  brightBlue: "#79c0ff",
-  brightMagenta: "#d2a8ff",
-  brightCyan: "#56d4dd",
-  brightWhite: "#f0f6fc",
-};
 
 /** The lines on screen now, trailing spaces trimmed: what a long-press would struggle to select. */
 function visibleText(terminal: Terminal): string {

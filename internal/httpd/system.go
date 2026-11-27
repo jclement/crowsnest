@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/doctor"
 	"github.com/jclement/crowsnest/internal/system"
 )
@@ -37,6 +38,8 @@ type System interface {
 	StartOnboarding(ctx context.Context, engine string) error
 	SetEnv(env doctor.Env)
 	OnboardingPending(ctx context.Context) bool
+	// Config is the configuration in force now, settings saved in the app included.
+	Config() config.Config
 }
 
 // ShellOpener opens a plain shell pane and types command into it, returning the pane.

@@ -31,5 +31,8 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     restoreMocks: true,
     unstubGlobals: true,
+    // The theme files are data the registry reads (src/themes/index.ts): without this, Vitest
+    // hands every CSS import, ?raw included, over as an empty string.
+    css: { include: [/src\/themes\/[^/]+\.css/] },
   },
 });

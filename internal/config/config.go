@@ -115,6 +115,7 @@ type Config struct {
 	Review         string  // the review gate's default for isolated builder jobs: auto | off | claude | codex | same
 	MergeMode      string  // Land's merge: merge (a merge commit) | ff (fast-forward only)
 	DigestAt       string  // HH:MM: the daily digest's time; "" off
+	Theme          string  // the default theme's id for browsers that chose none; "" the house theme
 	// ---- Day thirty: terminal reach, Tailscale sign-in, backups, retention (ops.go) ----
 
 	// TerminalMachines lets the Terminal view's herdr client show the user's saved SSH machines

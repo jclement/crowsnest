@@ -1,7 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0b1220"/>
-  <path d="M32 6v40" stroke="#94a3b8" stroke-width="3" stroke-linecap="round"/>
-  <path d="M20 22h24l-3 10H23z" fill="#38bdf8"/>
-  <path d="M10 48c6 5 38 5 44 0" stroke="#38bdf8" stroke-width="3" fill="none" stroke-linecap="round"/>
-  <path d="M28 14c2-3 6-3 8 0-2-1-6-1-8 0z" fill="#e2e8f0"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- The crowsnest mark (components/brand/Brand.tsx) in the house theme's colours: a lookout's
+       nest on a mast above the horizon, with two arcs of sweep. PNGs: scripts/make-icons.mjs. -->
+  <rect width="64" height="64" rx="14" fill="#08111b"/>
+  <g transform="translate(6 6) scale(0.8125)" stroke-linecap="round">
+    <path d="M29 15v40" stroke="#e6edf5" stroke-width="4"/>
+    <path d="M7 56h44" stroke="#e6edf5" stroke-opacity="0.55" stroke-width="4"/>
+    <path d="M16 22h26l-4 11H20z" fill="#3ad3e6"/>
+    <path d="M41.5 13.5a14 14 0 0 1 6 9.5" stroke="#3ad3e6" stroke-width="3.5"/>
+    <path d="M47.5 7.5a22 22 0 0 1 9 15" stroke="#3ad3e6" stroke-opacity="0.55" stroke-width="3.5"/>
+  </g>
 </svg>

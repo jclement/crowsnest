@@ -2,6 +2,10 @@
 // back to index.html. Vite fingerprints everything under /assets/, so those files are cached
 // forever; index.html and the other root files are revalidated on every load so a new build
 // is picked up immediately.
+//
+// index.html carries one per-server value: the default theme (the "theme" setting) as
+// data-theme-default on <html>, so public/theme-init.js applies it before first paint in a
+// browser that has not chosen a theme of its own.
 
 package httpd
 
@@ -24,7 +28,15 @@ func (s *Server) spaHandler() http.Handler {
 	if s.deps.Web == nil {
 		return http.HandlerFunc(devPlaceholder)
 	}
-	return &spa{files: s.deps.Web}
+	return &spa{files: s.deps.Web, themeDefault: s.themeDefault}
+}
+
+// themeDefault is the "theme" setting now, or "" (the house theme) without a System.
+func (s *Server) themeDefault() string {
+	if s.deps.System == nil {
+		return ""
+	}
+	return s.deps.System.Config().Theme
 }
 
 // devPlaceholder answers / when --web-dev is on: the UI comes from Vite, not from here.
@@ -34,8 +46,12 @@ func devPlaceholder(w http.ResponseWriter, _ *http.Request) {
 }
 
 type spa struct {
-	files fs.FS
+	files        fs.FS
+	themeDefault func() string
 }
+
+// htmlOpen is the <html> tag of web/index.html, where the default theme goes.
+const htmlOpen = `<html lang="en">`
 
 func (h *spa) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -44,6 +60,10 @@ func (h *spa) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+	if name == "index.html" {
+		h.serveIndex(w, r)
+		return
+	}
 	if name != "" && h.serveFile(w, r, name) {
 		return
 	}
@@ -53,9 +73,23 @@ func (h *spa) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !h.serveFile(w, r, "index.html") {
+	h.serveIndex(w, r)
+}
+
+// serveIndex serves index.html with the default theme written into its <html> tag.
+func (h *spa) serveIndex(w http.ResponseWriter, r *http.Request) {
+	data, err := fs.ReadFile(h.files, "index.html")
+	if err != nil {
 		http.Error(w, "web app missing from this build", http.StatusInternalServerError)
+		return
 	}
+	if theme := h.themeDefault(); theme != "" {
+		// The setting is checked against config's theme-id pattern ([a-z0-9-]) when it is loaded,
+		// so it needs no escaping here.
+		data = bytes.Replace(data, []byte(htmlOpen), []byte(`<html lang="en" data-theme-default="`+theme+`">`), 1)
+	}
+	w.Header().Set("Cache-Control", cacheRevalidate)
+	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(data))
 }
 
 // serveFile serves name if it is a regular file, returning false when it is absent.

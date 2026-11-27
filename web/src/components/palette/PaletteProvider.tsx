@@ -12,6 +12,10 @@ import { flushSync } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { chordLabel, focusContext, hotkeyFor, initialSequence, isMacPlatform, type SequenceState } from "../../lib/hotkeys";
 import { SettingsSheet } from "../system/SettingsSheet";
+import { AppearanceSheet } from "../appearance/AppearanceSheet";
+import { cycleThemeName } from "../../lib/theme";
+import { findTheme } from "../../themes";
+import { useToast } from "../ui/toast-context";
 import { loadRecents, pushRecent, saveRecents, type PaletteSheet } from "../../lib/palette";
 import { JournalSheet } from "../journal/JournalPanel";
 import { InstructionsSheet } from "../instructions/InstructionsSheet";
@@ -43,6 +47,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
     openRef.current = open;
   }, [open]);
   const navigate = useNavigate();
+  const toast = useToast();
   const voice = useMe().data?.features.voice ?? false;
   const [speakOn, setSpeak] = useSpeakMode();
   const speak = useMemo(() => (voice ? { on: speakOn } : null), [voice, speakOn]);
@@ -88,12 +93,16 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
       if (openRef.current) return;
       event.preventDefault();
       if (action.kind === "help") setSheet("shortcuts");
+      else if (action.kind === "cycleTheme") {
+        const id = cycleThemeName();
+        toast.show({ title: `Theme: ${findTheme(id)?.name ?? id}` });
+      }
       else if (action.kind === "tray") window.dispatchEvent(new Event(FOCUS_TRAY_EVENT));
       else void navigate({ to: action.to, search: {} } as unknown as Parameters<typeof navigate>[0]);
     };
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, [mac, navigate, openPalette, closePalette]);
+  }, [mac, navigate, openPalette, closePalette, toast]);
 
   // The page behind does not scroll while the palette is up (it is full screen on a phone).
   useEffect(() => {
@@ -126,6 +135,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
       <JournalSheet open={sheet === "journal"} onClose={() => setSheet(null)} />
       <ScheduleSheet open={sheet === "schedule"} onClose={() => setSheet(null)} />
       <SpendSheet open={sheet === "spend"} onClose={() => setSheet(null)} />
+      <AppearanceSheet open={sheet === "appearance"} onClose={() => setSheet(null)} />
       <SettingsSheet
         open={sheet === "settings"}
         onClose={() => setSheet(null)}

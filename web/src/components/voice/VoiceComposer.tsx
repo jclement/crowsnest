@@ -140,7 +140,7 @@ function MicButton({ ptt }: { ptt: PushToTalk }) {
       data-testid="mic-button"
       className={cn(
         "inline-flex h-11 w-11 shrink-0 touch-none select-none items-center justify-center rounded border transition-colors [-webkit-touch-callout:none] disabled:opacity-50 md:h-9 md:w-9",
-        recording || starting ? "border-danger bg-danger text-white" : "border-accent/60 bg-accent/10 text-accent hover:bg-accent/20",
+        recording || starting ? "border-danger bg-danger text-status-fg" : "border-accent/60 bg-accent/10 text-accent hover:bg-accent/20",
       )}
     >
       {busy || starting ? (

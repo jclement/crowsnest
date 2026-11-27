@@ -4,7 +4,7 @@
 // starts, DESIGN.md 21.3), Voice (the
 // voice, speed and model of spoken replies, when voice is on) and "Sign out". With --no-auth there is no one to sign out, so the menu says so instead.
 import { useNavigate } from "@tanstack/react-router";
-import { Activity, AudioLines, Bell, BellOff, BookText, CircleUser, KeyRound, LogOut, PauseCircle, PlayCircle, SlidersHorizontal } from "lucide-react";
+import { Activity, AudioLines, Bell, BellOff, BookText, CircleUser, KeyRound, LogOut, Palette, PauseCircle, PlayCircle, SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Me } from "../lib/api";
 import { AccountSheet } from "./account/AccountSheet";
@@ -12,6 +12,7 @@ import { DndSheet } from "./control/DndSheet";
 import { PauseSheet } from "./control/PauseSheet";
 import { usePause, useSetPause } from "../lib/queries";
 import { SettingsSheet } from "./system/SettingsSheet";
+import { AppearanceSheet } from "./appearance/AppearanceSheet";
 import { InstructionsSheet } from "./instructions/InstructionsSheet";
 import { NotificationSettings } from "./push/NotificationSettings";
 import { VoiceSettingsSheet } from "./voice/VoiceSettings";
@@ -23,6 +24,7 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const navigate = useNavigate();
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
@@ -83,6 +85,18 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           >
             <SlidersHorizontal className="h-4 w-4 text-muted" aria-hidden />
             Settings
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setAppearanceOpen(true);
+            }}
+            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
+          >
+            <Palette className="h-4 w-4 text-muted" aria-hidden />
+            Appearance
           </button>
           <button
             type="button"
@@ -184,8 +198,10 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           if (sheet === "account") setAccountOpen(true);
           if (sheet === "notifications") setNotificationsOpen(true);
           if (sheet === "voice") setVoiceOpen(true);
+          if (sheet === "appearance") setAppearanceOpen(true);
         }}
       />
+      <AppearanceSheet open={appearanceOpen} onClose={() => setAppearanceOpen(false)} />
       <NotificationSettings open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
       <InstructionsSheet open={instructionsOpen} onClose={() => setInstructionsOpen(false)} />
       <PauseSheet open={pauseOpen} onClose={() => setPauseOpen(false)} />

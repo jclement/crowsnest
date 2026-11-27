@@ -10,7 +10,7 @@ const variants: Record<ButtonVariant, string> = {
   primary: "bg-accent text-accent-fg hover:brightness-110 border border-transparent",
   secondary: "bg-surface text-heading border border-border-strong hover:bg-hover",
   ghost: "bg-transparent text-body border border-transparent hover:bg-hover hover:text-heading",
-  danger: "bg-danger text-white border border-transparent hover:brightness-110",
+  danger: "bg-danger text-status-fg border border-transparent hover:brightness-110",
   warning: "bg-surface text-heading border border-warning/70 hover:bg-warning/10",
 };
 

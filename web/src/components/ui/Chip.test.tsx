@@ -53,3 +53,23 @@ describe("StatusChip", () => {
     expect(screen.getByText("Blocked")).toBeInTheDocument();
   });
 });
+
+describe("StateMark", () => {
+  it("names and shapes every work state differently", async () => {
+    const { StateMark, workStates, workStateLabels } = await import("./Chip");
+    const { container } = render(
+      <>
+        {workStates.map((state) => (
+          <StateMark key={state} state={state} />
+        ))}
+      </>,
+    );
+    for (const state of workStates) expect(screen.getByRole("img", { name: workStateLabels[state] })).toBeInTheDocument();
+    const shapes = workStates.map((state) =>
+      Array.from(container.querySelector(`[data-state="${state}"]`)!.querySelectorAll("span"))
+        .map((span) => span.className.replace(/\b(bg|border)-status-\w+/g, ""))
+        .join("|"),
+    );
+    expect(new Set(shapes).size).toBe(workStates.length);
+  });
+});

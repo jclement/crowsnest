@@ -1,0 +1,152 @@
+/* @name Crowsnest
+   @order 1
+   @description The house theme. Night watch: ink-navy instruments with a sonar-cyan pulse; by day, chart paper.
+
+   A theme is one file (DESIGN.md "Design language"): every token in index.css's @theme, once for
+   light under [data-theme="<file name>"] and once for dark under the same selector with .dark.
+   src/themes/themes.test.ts checks that every theme defines every token in both modes, and that
+   text meets its contrast floor on every surface it sits on. */
+
+[data-theme="crowsnest"] {
+  --color-surface: #ffffff;
+  --color-surface-raised: #f5f7f9;
+  --color-surface-sunken: #eef1f4;
+  --color-heading: #0b1520;
+  --color-body: #2e3b4a;
+  --color-muted: #536170;
+  --color-border: #dde3ea;
+  --color-border-strong: #c2ccd7;
+  --color-hover: #eef2f6;
+  --color-selected: #e0f1f5;
+  --color-accent: #0b6a7d;
+  --color-accent-fg: #ffffff;
+  --color-focus: #0b6a7d;
+  --color-danger: #b01e35;
+  --color-warning: #8a4a00;
+  --color-success: #12703c;
+  --color-overlay: rgb(11 21 32 / 0.45);
+
+  --color-status-working: #0b6a7d;
+  --color-status-blocked: #c41f3a;
+  --color-status-stuck: #b56a00;
+  --color-status-done: #1c7f46;
+  --color-status-held: #6a46c9;
+  --color-status-idle: #7d8896;
+  --color-status-unknown: #a1abb7;
+  --color-status-fg: #ffffff;
+
+  --color-chrome: #08111b;
+  --color-chrome-fg: #e6edf5;
+  --color-chrome-muted: #93a1b3;
+  --color-chrome-hover: #142030;
+  --color-chrome-border: #1a2636;
+  --color-chrome-warning: #f2b441;
+  --color-chrome-accent: #3ad3e6;
+
+  --color-code-keyword: #7b36d0;
+  --color-code-string: #0f7a3a;
+  --color-code-number: #a14f00;
+  --color-code-comment: #5d6976;
+  --color-code-title: #0b6a7d;
+  --color-code-attr: #b4235a;
+  --color-diff-add: rgb(28 127 70 / 0.12);
+  --color-diff-del: rgb(196 31 58 / 0.1);
+
+  --color-chart-1: #0b6a7d;
+  --color-chart-2: #6a46c9;
+  --color-chart-3: #b56a00;
+  --color-chart-4: #1c7f46;
+
+  --term-background: #eef1f4;
+  --term-foreground: #0b1520;
+  --term-cursor: #0b6a7d;
+  --term-selection: #b9e3ec;
+  --term-black: #1f2328;
+  --term-red: #c22a2a;
+  --term-green: #1a7f37;
+  --term-yellow: #8a5a00;
+  --term-blue: #0b5cc1;
+  --term-magenta: #8b3fd1;
+  --term-cyan: #0b6a7d;
+  --term-white: #6e7781;
+  --term-bright-black: #57606a;
+  --term-bright-red: #d1242f;
+  --term-bright-green: #2a8a45;
+  --term-bright-yellow: #a87400;
+  --term-bright-blue: #2478e0;
+  --term-bright-magenta: #9a5ce8;
+  --term-bright-cyan: #1a8296;
+  --term-bright-white: #8c959f;
+}
+
+[data-theme="crowsnest"].dark {
+  --color-surface: #0b1018;
+  --color-surface-raised: #10171f;
+  --color-surface-sunken: #070b11;
+  --color-heading: #e9eef5;
+  --color-body: #c2cbd6;
+  --color-muted: #8b98a9;
+  --color-border: #1c2531;
+  --color-border-strong: #2c3846;
+  --color-hover: #151e29;
+  --color-selected: #0e2a33;
+  --color-accent: #3ad3e6;
+  --color-accent-fg: #04161b;
+  --color-focus: #3ad3e6;
+  --color-danger: #ff6f80;
+  --color-warning: #f2b441;
+  --color-success: #4fd18b;
+  --color-overlay: rgb(0 0 0 / 0.6);
+
+  --color-status-working: #3ad3e6;
+  --color-status-blocked: #ff5d73;
+  --color-status-stuck: #f2b441;
+  --color-status-done: #4fd18b;
+  --color-status-held: #b392ff;
+  --color-status-idle: #7d8a9b;
+  --color-status-unknown: #5c6878;
+  --color-status-fg: #05090e;
+
+  --color-chrome: #05080d;
+  --color-chrome-fg: #e6edf5;
+  --color-chrome-muted: #8b98aa;
+  --color-chrome-hover: #111a25;
+  --color-chrome-border: #18212d;
+  --color-chrome-warning: #f2b441;
+  --color-chrome-accent: #3ad3e6;
+
+  --color-code-keyword: #c49bff;
+  --color-code-string: #7ee0a1;
+  --color-code-number: #f5b96a;
+  --color-code-comment: #77869a;
+  --color-code-title: #6edcf0;
+  --color-code-attr: #ff8fb1;
+  --color-diff-add: rgb(79 209 139 / 0.12);
+  --color-diff-del: rgb(255 93 115 / 0.12);
+
+  --color-chart-1: #3ad3e6;
+  --color-chart-2: #b392ff;
+  --color-chart-3: #f2b441;
+  --color-chart-4: #4fd18b;
+
+  --term-background: #070b11;
+  --term-foreground: #d6dee8;
+  --term-cursor: #3ad3e6;
+  --term-selection: #1d3a48;
+  --term-black: #1b2430;
+  --term-red: #ff6f80;
+  --term-green: #4fd18b;
+  --term-yellow: #f2c14e;
+  --term-blue: #5aa8ff;
+  --term-magenta: #c49bff;
+  --term-cyan: #3ad3e6;
+  --term-white: #c2cbd6;
+  --term-bright-black: #55616f;
+  --term-bright-red: #ff95a1;
+  --term-bright-green: #7ee0a1;
+  --term-bright-yellow: #ffd77a;
+  --term-bright-blue: #8cc4ff;
+  --term-bright-magenta: #dbc2ff;
+  --term-bright-cyan: #7fe6f2;
+  --term-bright-white: #f2f6fa;
+}

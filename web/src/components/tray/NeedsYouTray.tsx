@@ -211,7 +211,7 @@ export function TrayBar() {
 
 function TrayCount({ count }: { count: number }) {
   return (
-    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-blocked px-1.5 text-2xs font-semibold tabular-nums text-white dark:text-surface">
+    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-blocked px-1.5 text-2xs font-semibold tabular-nums text-status-fg">
       {count > 99 ? "99+" : count}
     </span>
   );
@@ -279,7 +279,9 @@ export function TrayRow({
   }, [open, item.kind]);
   const who = item.item.agent;
   return (
-    <li className={cn(fresh && "animate-tray-pulse")} data-tray-item={item.id}>
+    // Blocking rows carry an edge in the needs-you colour (the word says it too): the eye finds
+    // what stops an agent before what can wait.
+    <li className={cn(fresh && "animate-tray-pulse", item.item.urgency === "blocking" && "shadow-[inset_2px_0_0_var(--color-status-blocked)]")} data-tray-item={item.id}>
       <div className="flex items-start gap-1 pr-1">
         <button
           type="button"

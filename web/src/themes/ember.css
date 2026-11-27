@@ -1,0 +1,149 @@
+/* @name Ember
+   @order 4
+   @description Warm charcoal and a forge-orange glow after dark; parchment and burnt sienna by day. Stuck turns yellow here, away from the orange.
+
+   See crowsnest.css for what a theme file must hold. */
+
+[data-theme="ember"] {
+  --color-surface: #fdf7ee;
+  --color-surface-raised: #f6ecdd;
+  --color-surface-sunken: #efe2cf;
+  --color-heading: #2a1a0e;
+  --color-body: #4a3626;
+  --color-muted: #6b5544;
+  --color-border: #e3d4bd;
+  --color-border-strong: #cdb89a;
+  --color-hover: #f3e7d4;
+  --color-selected: #f9e6d3;
+  --color-accent: #963a0b;
+  --color-accent-fg: #ffffff;
+  --color-focus: #963a0b;
+  --color-danger: #a51b2a;
+  --color-warning: #6b4f00;
+  --color-success: #356311;
+  --color-overlay: rgb(42 26 14 / 0.45);
+
+  --color-status-working: #a3400d;
+  --color-status-blocked: #c2283a;
+  --color-status-stuck: #8a6500;
+  --color-status-done: #3f7a16;
+  --color-status-held: #7b3fb0;
+  --color-status-idle: #8f7f70;
+  --color-status-unknown: #b8ab9c;
+  --color-status-fg: #ffffff;
+
+  --color-chrome: #2a170b;
+  --color-chrome-fg: #f6e9dc;
+  --color-chrome-muted: #b8a28d;
+  --color-chrome-hover: #3a2314;
+  --color-chrome-border: #40291a;
+  --color-chrome-warning: #f2d14b;
+  --color-chrome-accent: #ffa45e;
+
+  --color-code-keyword: #8a2fa0;
+  --color-code-string: #3d6e14;
+  --color-code-number: #a3400d;
+  --color-code-comment: #6c584a;
+  --color-code-title: #1f5f8a;
+  --color-code-attr: #b0245e;
+  --color-diff-add: rgb(63 122 22 / 0.12);
+  --color-diff-del: rgb(194 40 58 / 0.1);
+
+  --color-chart-1: #a3400d;
+  --color-chart-2: #7b3fb0;
+  --color-chart-3: #8a6500;
+  --color-chart-4: #3f7a16;
+
+  --term-background: #efe2cf;
+  --term-foreground: #2a1a0e;
+  --term-cursor: #a3400d;
+  --term-selection: #f2cfae;
+  --term-black: #2a1a0e;
+  --term-red: #b01e2e;
+  --term-green: #3d6e14;
+  --term-yellow: #735500;
+  --term-blue: #1f5f8a;
+  --term-magenta: #8a2fa0;
+  --term-cyan: #136b6b;
+  --term-white: #7a6656;
+  --term-bright-black: #6b5544;
+  --term-bright-red: #c8303f;
+  --term-bright-green: #4f821f;
+  --term-bright-yellow: #8a6500;
+  --term-bright-blue: #2c74a6;
+  --term-bright-magenta: #a145b8;
+  --term-bright-cyan: #1d8080;
+  --term-bright-white: #96826f;
+}
+
+[data-theme="ember"].dark {
+  --color-surface: #17100b;
+  --color-surface-raised: #1f1610;
+  --color-surface-sunken: #100b07;
+  --color-heading: #f6ebe0;
+  --color-body: #d7c6b5;
+  --color-muted: #a6917e;
+  --color-border: #30251b;
+  --color-border-strong: #45362a;
+  --color-hover: #271d15;
+  --color-selected: #3b2410;
+  --color-accent: #ff9a4d;
+  --color-accent-fg: #1a0d03;
+  --color-focus: #ff9a4d;
+  --color-danger: #ff7070;
+  --color-warning: #f2d14b;
+  --color-success: #95d672;
+  --color-overlay: rgb(0 0 0 / 0.6);
+
+  --color-status-working: #ff9a4d;
+  --color-status-blocked: #ff5f6a;
+  --color-status-stuck: #f2d14b;
+  --color-status-done: #95d672;
+  --color-status-held: #d6a2ff;
+  --color-status-idle: #8c7a69;
+  --color-status-unknown: #5e5045;
+  --color-status-fg: #120b06;
+
+  --color-chrome: #0c0907;
+  --color-chrome-fg: #f3e6d8;
+  --color-chrome-muted: #a8927e;
+  --color-chrome-hover: #1e1813;
+  --color-chrome-border: #261e17;
+  --color-chrome-warning: #f2d14b;
+  --color-chrome-accent: #ff9a4d;
+
+  --color-code-keyword: #e7a4ff;
+  --color-code-string: #b9df7e;
+  --color-code-number: #ffc46b;
+  --color-code-comment: #917c69;
+  --color-code-title: #7cc4ff;
+  --color-code-attr: #ff8fa3;
+  --color-diff-add: rgb(149 214 114 / 0.12);
+  --color-diff-del: rgb(255 95 106 / 0.12);
+
+  --color-chart-1: #ff9a4d;
+  --color-chart-2: #d6a2ff;
+  --color-chart-3: #f2d14b;
+  --color-chart-4: #95d672;
+
+  --term-background: #0e0b09;
+  --term-foreground: #ecdccb;
+  --term-cursor: #ff9a4d;
+  --term-selection: #4a2c16;
+  --term-black: #2b231c;
+  --term-red: #ff7070;
+  --term-green: #95d672;
+  --term-yellow: #f2d14b;
+  --term-blue: #7cc4ff;
+  --term-magenta: #e7a4ff;
+  --term-cyan: #6fd8c8;
+  --term-white: #d7c6b5;
+  --term-bright-black: #5e5045;
+  --term-bright-red: #ff9b9b;
+  --term-bright-green: #b6e89b;
+  --term-bright-yellow: #ffe27f;
+  --term-bright-blue: #a8d8ff;
+  --term-bright-magenta: #f0c6ff;
+  --term-bright-cyan: #9ce8dc;
+  --term-bright-white: #fff5ea;
+}

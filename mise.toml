@@ -177,6 +177,11 @@ description = "Command palette against the built binary in --demo mode at 375 an
 depends = ["build"]
 run = "npm --prefix web run screenshots:palette"
 
+[tasks."screenshots:themes"]
+description = "The theme contact sheets against the built binary in --demo mode: Now in every theme, light and dark, at 1440 and 390 px, one sheet per theme (web/screenshots/themes-<id>.png) and one of them all (themes-all.png), plus the Appearance gallery"
+depends = ["build"]
+run = "npm --prefix web run screenshots:themes"
+
 [tasks."screenshots:chat"]
 description = "Chat view against the built binary in --demo mode (a real prompt round trip) at 375 and 1440 px, light and dark, into web/screenshots"
 depends = ["build"]

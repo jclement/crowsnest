@@ -98,6 +98,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--review` | `CROWSNEST_REVIEW` | `auto` | The review gate for builder jobs in a worktree: `auto`, `same`, `claude`, `codex`, `off` (6.7) |
 | `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges: `merge` (a merge commit) or `ff` (fast-forward only) (6.11) |
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | off | `HH:MM`: the daily digest (7.13); the Schedule switch writes this setting |
+| `--theme` | `CROWSNEST_THEME` | `crowsnest` | the default theme for browsers that chose none ("Design language"); written into index.html so the first paint is in it |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Largest attachment, pasted, dropped or attached by an agent (8.6) |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Disk all attachments may take; past it the oldest unneeded files are deleted, else an upload is refused (8.6) |
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host: the guard hook refuses commands that would reach it, and an approval naming it is dangerous (8.7). Repeatable; added to the file's hosts |
@@ -3111,10 +3112,11 @@ make it installable to a home screen.
 
 **Web app structure (M3).** `web/src/components/ui/` is the design system: Button, IconButton,
 Chip, StatusDot/StatusChip, Card, Sheet (full-screen on mobile, modal from `md`), Tabs, Toast,
-EmptyState, Skeleton, Banner. Colours are semantic tokens in `index.css` (`@theme` for light,
-`.dark` overrides), including one token per agent state; each state also has its own marker
-shape (working pulses, blocked is a diamond, done a dot, idle a ring, unknown a dash) so colour is
-never the only cue. Inter and JetBrains Mono are self-hosted through `@fontsource` (the CSP allows
+EmptyState, Skeleton, Banner, StateMark. Colours are semantic tokens: `index.css` names them in
+`@theme`, and each theme file in `src/themes/` gives their values for light and dark (12.10,
+"Design language"), including one token per state; each state also has its own marker shape
+(running pulses, needs you is a diamond, stuck a triangle, done a dot, held a square, idle a
+ring, unknown a dash) so colour is never the only cue. Inter and JetBrains Mono are self-hosted through `@fontsource` (the CSP allows
 no font CDN); the terminals add their own fallback chain ("Terminal font", below). Data comes only through `lib/queries.ts` hooks (`useFleet`, `useAgentScreen`,
 `useSendKeys`, …) over `lib/api.ts`; `lib/live.ts` maps each SSE event name to the query keys it
 invalidates (`fleet` refetches the fleet and every agent's queries; `hello` refetches everything).
@@ -3349,13 +3351,96 @@ figures. Fixed widths and tabular numerals, so values change without layout shif
 the detail (cores, 5 and 15-minute load, the container's limit). Thresholds turn a figure to the
 warning ink with a triangle (never colour alone): CPU 90 %, memory 95 %, load two per core (load 63
 on 16 cores is saturated; one per core is "busy" and stays plain). The sparkline is one series in
-the chrome's muted ink, 2 px, no axes, on a fixed 0 to 100 scale (an honest flat line on a quiet
+the chrome's accent, a 1.5 px line over a faint fill, no axes, on a fixed 0 to 100 scale (an honest flat line on a quiet
 machine). The server (`internal/sysstat`) samples every two seconds only while a browser's event
 stream is open, with gopsutil (pure Go on Linux, purego on macOS, so `CGO_ENABLED=0` holds on
 both; checked by building darwin and linux, amd64 and arm64), and in a container whose cgroup v2
 limits memory or CPU it reports the cgroup's usage and limits instead (`scope: container`, memory
 less inactive page cache as `docker stats` does). Each sample is a `sys` event; the client appends
 it to the last minute.
+
+### 12.10 Design language (wip/design)
+
+**The direction.** Crowsnest is a lookout's instrument panel for a fleet of agents: confident,
+technical, a little bit hacker, and never at the cost of legibility or density. The chrome is
+a dark instrument cluster in every theme (wordmark, the machine strip, a heartbeat); data, ids,
+figures and states are set in JetBrains Mono, prose in Inter; edges are hairlines and 4 px
+radii, never shadows and pills. Colour is spent on meaning: one signature accent per theme
+(links, primary buttons, selection, focus and the running state, the live pulse of a working
+agent) and five state colours that mean the same thing everywhere, each with its own shape.
+
+**The states.** `needs` (needs you; `--color-status-blocked`, a diamond), `stuck`
+(`--color-status-stuck`, a triangle), `running` (`--color-status-working`, the accent, a pulsing
+dot), `done` (`--color-status-done`, a filled dot), `held` (`--color-status-held`, a square), plus
+`idle` (a ring) and `unknown` (a dash). `components/ui/Chip.tsx` draws them (`StateMark`, and
+`StatusDot` for the agent states); `status-fg` is the text on a solid state fill (count badges).
+In Phosphor the accent is the phosphor green, so done is ice-cyan there; in Ember the accent is
+orange, so stuck is yellow: hues shift per theme, meanings and shapes never do.
+
+**The tokens** (`web/src/index.css` names them; every theme sets every one):
+
+| Token | Meaning |
+|---|---|
+| `surface`, `surface-raised`, `surface-sunken` | the page; panels and headers above it; wells below it (code, inputs, the terminal) |
+| `heading`, `body`, `muted` | the text hierarchy: titles, reading text, metadata |
+| `border`, `border-strong` | hairlines; control outlines |
+| `hover`, `selected` | a row under the pointer; the current row or view |
+| `accent`, `accent-fg` | the signature colour, and text on it |
+| `focus` | the keyboard focus ring (2 px, offset 2 px; the chrome's accent on the header) |
+| `danger`, `warning`, `success`, `overlay` | inks for messages and their 10 % chip tints; the backdrop behind a sheet |
+| `status-*` | the states above, and `status-fg` |
+| `chrome`, `chrome-fg`, `chrome-muted`, `chrome-hover`, `chrome-border`, `chrome-warning`, `chrome-accent` | the header: always dark; `chrome-accent` lights the wordmark's "nest", the heartbeat and the sparkline |
+| `code-*`, `diff-add`, `diff-del` | syntax highlighting (hljs) and the diff viewer's row tints |
+| `chart-1` … `chart-4` | chart series, in order |
+| `--term-*` | the xterm palette: background, foreground, cursor, selection and the 16 ANSI colours |
+
+Derived, not tokens: mermaid's `themeVariables` are built from the tokens when a diagram is drawn
+(and redrawn when the theme or mode changes); `<meta name="theme-color">` follows `--color-chrome`
+(`lib/theme.ts syncThemeColor`). `--font-sans` is the one optional token (Phosphor sets it to the
+mono face).
+
+**Themes.** A theme is one named light/dark pair sharing a personality, chosen apart from the
+mode (System / Light / Dark, the header's three-state toggle). Five ship: **Crowsnest** (the
+house theme: ink-navy night watch with a sonar-cyan pulse, chart paper by day), **Phosphor**
+(green phosphor on black, a greenbar printout by day, the whole UI in mono), **Deep sea** (abyssal
+indigo with a bioluminescent periwinkle, sea ice by day), **Ember** (warm charcoal and forge
+orange, parchment by day) and **High contrast** (black and white with signal colours; every text
+token at WCAG AAA, 7:1, on every surface).
+
+The choice is per browser: `localStorage` `crowsnest-theme-name` (the theme) and
+`crowsnest-theme` (the mode, unchanged from before themes). A browser that never chose gets the
+server's default, the `theme` setting (`--theme`, `CROWSNEST_THEME`, Settings → Appearance "Use
+for new browsers"), which the server writes into `index.html` as `data-theme-default` on
+`<html>`; `public/theme-init.js` runs blocking in `<head>` and puts `data-theme` and `.dark` on
+`<html>` before first paint, so neither a reload nor a new browser flashes. A saved theme that
+has since been removed falls back to the house theme as the app boots (`applyStartupTheme`).
+Where to choose: **Settings → Appearance** (account menu, the Settings sheet's links, the palette)
+is the gallery and the picker: every theme in both modes drawn with real components, each preview
+its own `[data-theme]` box; the palette has `Theme: <name>`, `Next theme` and `Mode: <mode>`;
+**T** cycles themes from anywhere but a text field or a terminal.
+
+**Adding a theme is one file**: copy `web/src/themes/crowsnest.css` to `<id>.css`, set its
+header (`@name`, `@description`, `@order`; `@aaa` to hold it to 7:1) and every value under
+`[data-theme="<id>"]` and `[data-theme="<id>"].dark`. The registry (`src/themes/index.ts`) globs
+the folder; the picker, the palette, the T key and the server setting pick it up. `mise run
+check` then holds it to the rules: `src/themes/themes.test.ts` (every token in both modes; text
+at 4.5:1, or 7:1 for `@aaa`, on every surface and in its own chip; state marks and the focus
+ring at 3:1) and `src/themes/no-raw-colour.test.ts` (no hex, `rgb()`, palette utility or `dark:`
+variant outside the token files). Add it to the lists in `e2e/hermetic/themes.spec.ts` (axe on
+every view in both modes, no flash) and `e2e/screenshots/themes.spec.ts` (`mise run
+screenshots:themes`, the contact sheets `web/screenshots/themes-*.png`).
+
+**Motion** is small and means something: the working pulse; the heartbeat, one beat per event
+on the stream (machine samples keep a live session beating every two seconds; a stalled stream
+goes still, reconnecting draws a broken line); arrivals in the needs-you tray; a loading block's
+scan; a sheet sliding in. `prefers-reduced-motion` stops all of it (index.css).
+
+**The mark** is a lookout's nest on a mast above the horizon with two arcs of sweep, drawn inline
+(`components/brand/Brand.tsx`) so it takes the theme; `public/icons/crowsnest.svg` is the same
+drawing in the house colours, and `web/scripts/make-icons.mjs` renders the PNG and maskable icons
+from it. The wordmark sets "crows" in the chrome ink and "nest" in the chrome's accent, in mono.
+The sign-in and setup pages share `components/brand/FirstLight.tsx`: the mark in its rings above
+the form, a tagline below. Empty states sit in the same rings.
 
 ## 13. Talk mode
 

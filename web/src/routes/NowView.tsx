@@ -23,7 +23,7 @@ import { TrayList } from "../components/tray/NeedsYouTray";
 import { useTrayItems } from "../components/tray/useTrayItems";
 import { Banner } from "../components/ui/Banner";
 import { Button } from "../components/ui/Button";
-import { Chip } from "../components/ui/Chip";
+import { Chip, StateMark, type WorkState } from "../components/ui/Chip";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SkeletonRows } from "../components/ui/Skeleton";
 import { browserId, type NowRow, type SinceEvent } from "../lib/attention";
@@ -65,7 +65,18 @@ function NowHeader() {
       </h1>
       {counts && (
         <p className="text-sm text-body" data-now-summary>
-          {counts.total === 0 ? "Nothing needs you." : `${counts.total} need you: ${counts.blocking} blocking, ${counts.can_wait} can wait.`}
+          {counts.total === 0 ? (
+            "Nothing needs you."
+          ) : (
+            <>
+              <span className="font-mono font-semibold tabular-nums text-heading">{counts.total}</span> need you:{" "}
+              <span aria-hidden>
+                <StateMark state="needs" className="mx-0.5 align-[-1px]" />
+              </span>
+              <span className="font-mono tabular-nums text-heading">{counts.blocking}</span> blocking,{" "}
+              <span className="font-mono tabular-nums text-heading">{counts.can_wait}</span> can wait.
+            </>
+          )}
           {counts.snoozed > 0 && <span className="text-muted"> {counts.snoozed} snoozed.</span>}
         </p>
       )}
@@ -79,7 +90,7 @@ function QueueSection() {
   const attention = useAttention();
   const items = useTrayItems();
   return (
-    <section aria-labelledby="now-queue" className="min-w-0 rounded-lg border border-border bg-surface">
+    <section aria-labelledby="now-queue" className="min-w-0 overflow-hidden rounded-md border border-border bg-surface">
       <SectionHeader id="now-queue" icon={Inbox} title="Needs you" count={attention.data?.counts.total}>
         <Link to="/inbox" className="inline-flex min-h-11 min-w-11 items-center justify-end text-xs text-accent hover:underline md:min-h-0 md:min-w-0">
           Inbox
@@ -107,7 +118,7 @@ function QueueSection() {
 function ProjectsSection() {
   const now = useNow();
   return (
-    <section aria-labelledby="now-projects" className="min-w-0 rounded-lg border border-border bg-surface">
+    <section aria-labelledby="now-projects" className="min-w-0 overflow-hidden rounded-md border border-border bg-surface">
       <SectionHeader id="now-projects" icon={FolderKanban} title="Projects">
         <Link to="/projects" className="inline-flex min-h-11 min-w-11 items-center justify-end text-xs text-accent hover:underline md:min-h-0 md:min-w-0">
           All projects
@@ -193,15 +204,24 @@ function ProjectRow({ row }: { row: NowRow }) {
           <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 pt-1 text-2xs text-muted">
             {row.kind !== "orchestrator" && (
               <>
-                <span>{row.counts.running} running</span>
-                <span>{row.counts.done_today} done today</span>
-                {row.counts.failed_today > 0 && <span className="text-danger">{row.counts.failed_today} failed today</span>}
+                <Figure state={row.counts.running > 0 ? "running" : "idle"} value={row.counts.running} unit="running" />
+                <Figure state="done" value={row.counts.done_today} unit="done today" />
+                {row.counts.failed_today > 0 && <Figure state="needs" value={row.counts.failed_today} unit="failed today" danger />}
               </>
             )}
-            <span>{row.spend_today_usd === null ? "no spend today" : `${formatUSD(row.spend_today_usd)} est. today`}</span>
+            <span>
+              {row.spend_today_usd === null ? (
+                "no spend today"
+              ) : (
+                <>
+                  <span className="font-mono tabular-nums text-body">{formatUSD(row.spend_today_usd)}</span> est. today
+                </>
+              )}
+            </span>
             {row.last_activity_at && <span>active {relativeTime(row.last_activity_at)}</span>}
           </span>
-          <span className="block pt-1 text-2xs leading-snug text-muted" data-owner>
+          {/* One line: the same ownership sentence repeats on most rows; the whole of it is the tooltip. */}
+          <span className="block truncate pt-1 text-2xs leading-snug text-muted" data-owner title={row.owner}>
             {row.owner}
           </span>
         </span>
@@ -333,15 +353,28 @@ function GiveJobSection() {
 
 // ---- Shared -----------------------------------------------------------------------------------
 
+/** A count on a project row: its state's mark, the number in mono, the word. */
+function Figure({ state, value, unit, danger }: { state: WorkState; value: number; unit: string; danger?: boolean }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1", danger && "text-danger")}>
+      <span aria-hidden className="inline-flex">
+        <StateMark state={state} className="scale-75" />
+      </span>
+      <span className={cn("font-mono tabular-nums", danger ? "text-danger" : "text-body")}>{value}</span>
+      {unit}
+    </span>
+  );
+}
+
 function SectionHeader({ id, icon: Icon, title, count, children }: { id: string; icon: typeof Inbox; title: string; count?: number; children?: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+    <div className="flex min-h-10 items-center gap-2 border-b border-border bg-surface-raised px-3 py-1.5">
       <Icon className="h-4 w-4 text-muted" aria-hidden />
-      <h2 id={id} className="text-sm font-semibold text-heading">
+      <h2 id={id} className="font-mono text-xs font-semibold uppercase tracking-wider text-heading">
         {title}
       </h2>
       {count !== undefined && count > 0 && (
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-blocked px-1.5 text-2xs font-semibold tabular-nums text-white dark:text-surface">
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-blocked px-1.5 text-2xs font-semibold tabular-nums text-status-fg">
           {count}
         </span>
       )}
