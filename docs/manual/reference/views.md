@@ -62,6 +62,15 @@ One question, approval or dialog on one screen, with the answer bar at the botto
 tray, the Inbox on a phone, the palette and notifications. See [The decision
 packet](../how-to/answer.md#the-decision-packet).
 
+## Changes (the diff viewer)
+
+`/diff?job=j_12` or `/diff?project=<slug>` · from a job's Review, Land or Changes tab, a project's
+Changes card, the lead's **Changes** button, or the palette's **Changes: …**
+
+A job's or project's changes, live and syntax-highlighted, with **Viewed** marks. Full screen
+here: no header, nav or tray; **Back** or Esc returns. See [Review changes with the diff
+viewer](../how-to/review-changes.md).
+
 ## Fleet
 
 `/fleet` · `g` then `f` · [Open Fleet](app:/fleet)

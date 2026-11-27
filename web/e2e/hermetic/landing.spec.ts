@@ -25,12 +25,21 @@ test("the review tab shows what the job produced, and Merge lands it after a con
   await detail.getByRole("button", { name: "Review and land" }).click();
 
   await expect(detail.getByText("1 commit ahead of main")).toBeVisible();
-  const files = detail.getByRole("list", { name: "Changed files" });
-  // Reading order: the walkthrough names retry.go first, then the test, then the docs.
-  await expect(files.getByRole("button").nth(0)).toContainText("retry.go");
-  await expect(files.getByRole("button").nth(1)).toContainText("retry_test.go");
-  await files.getByRole("button", { name: /retry\.go/ }).first().click();
-  await expect(detail.getByText("for attempt := 0; attempt < 4; attempt++ {")).toBeVisible();
+  // The diff is the live viewer (DESIGN.md 6.21), in reading order: the walkthrough names retry.go
+  // first, then the test, then the docs.
+  const viewer = detail.getByRole("region", { name: /^Changes: / });
+  const sections = viewer.locator("[data-file-section]");
+  await expect(sections.nth(0)).toHaveAttribute("data-file-section", "retry.go");
+  if (isPhone(testInfo)) {
+    // One file at a time on a phone: Next is the second in the reading order.
+    await viewer.getByRole("navigation", { name: "Files" }).getByRole("button", { name: "Next" }).click();
+    await expect(sections.nth(0)).toHaveAttribute("data-file-section", "retry_test.go");
+    await viewer.getByRole("navigation", { name: "Files" }).getByRole("button", { name: "Previous" }).click();
+  } else {
+    await expect(sections.nth(1)).toHaveAttribute("data-file-section", "retry_test.go");
+  }
+  await expect(viewer.getByRole("table", { name: "Diff of retry.go" }).first()).toContainText("for attempt := 0; attempt < 4; attempt++ {");
+  await expect(detail.getByText("3 of 3 files not viewed")).toBeVisible();
   await expect(detail.getByRole("list", { name: "Review rounds" })).toContainText("Approved");
   await expectNoSidewaysScroll(page);
   await shot(page, testInfo, "review");

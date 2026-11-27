@@ -3,12 +3,13 @@
 // (answerable right here with the Inbox's components), a message box to its agent, the
 // timeline, its estimated spend, and the agent's Conversation and Terminal (the Fleet view's slots).
 import { useNavigate } from "@tanstack/react-router";
-import { Ban, CheckCircle2, CircleSlash, GitCompareArrows, MessageSquare, Play, RefreshCw, SquareTerminal, Zap } from "lucide-react";
+import { Ban, CheckCircle2, FileDiff, CircleSlash, GitCompareArrows, MessageSquare, Play, RefreshCw, SquareTerminal, Zap } from "lucide-react";
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
 import { actionFor, actionLabels, causeHelpTopic, childrenOf, hasReview, isFinished, jobAnswerText, ownershipChain, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
 import { useFleet, useJob, useJobAction, useJobGuard, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
 import { ReviewPanel } from "./ReviewPanel";
+import { EmbeddedDiff } from "../changes/JobChanges";
 import { BudgetCard, EvidenceCard, LastMessage, WaitLine } from "./AcceptPanels";
 import { acceptChip } from "../../lib/accept";
 import { AgentConversation } from "../agent/AgentConversation";
@@ -30,7 +31,7 @@ import { TabPanel, Tabs } from "../ui/Tabs";
 import { useToast } from "../ui/toast-context";
 import { HelpButton } from "../help/HelpButton";
 
-type DetailTab = "overview" | "review" | "conversation" | "terminal";
+type DetailTab = "overview" | "review" | "changes" | "conversation" | "terminal";
 
 export function JobDetail({ id }: { id: string }) {
   const query = useJob(id);
@@ -56,6 +57,7 @@ export function JobDetail({ id }: { id: string }) {
         items={[
           { value: "overview", label: "Overview" },
           ...(hasReview(job) ? [{ value: "review" as const, label: readyToLand(job) ? "Land" : "Review", icon: GitCompareArrows }] : []),
+          ...(hasChanges(job) ? [{ value: "changes" as const, label: "Changes", icon: FileDiff }] : []),
           { value: "conversation", label: "Conversation", icon: MessageSquare },
           { value: "terminal", label: "Terminal", icon: SquareTerminal },
         ]}
@@ -63,11 +65,18 @@ export function JobDetail({ id }: { id: string }) {
       <TabPanel id={`job-${job.id}`} value={tab} className="flex min-h-0 flex-1 flex-col gap-3">
         {tab === "overview" && <Overview job={job} openTerminal={() => setTab("terminal")} openReview={() => setTab("review")} />}
         {tab === "review" && hasReview(job) && <ReviewPanel job={job} />}
+        {tab === "changes" && hasChanges(job) && <EmbeddedDiff who={{ kind: "job", id: job.id }} />}
         {tab === "conversation" && <AgentPanel job={job} kind="conversation" />}
         {tab === "terminal" && <AgentPanel job={job} kind="terminal" />}
       </TabPanel>
     </article>
   );
+}
+
+/** A job in a folder of its own that is not a worktree (those have the Review tab): its diff is the
+ * folder's changes since it started (DESIGN.md 6.21). Reviewers read, they do not change. */
+function hasChanges(job: Detail): boolean {
+  return !hasReview(job) && !!(job.work_dir || job.dir) && !job.review_of && job.role !== "reviewer";
 }
 
 function JobHeader({ job }: { job: Detail }) {

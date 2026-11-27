@@ -89,8 +89,8 @@ test("the folder picker at 1440", async ({ page }) => {
   const dialog = page.getByRole("dialog", { name: "Choose the project's folder" });
   await expect(dialog.getByRole("navigation", { name: "Places" }).filter({ visible: true })).toBeVisible();
   await expect(dialog.getByPlaceholder("Filter, or paste a path (/… or ~/…)")).toBeVisible();
-  await expect(dialog.getByText("Hidden")).toBeVisible();
-  await expect(dialog.getByText("Files", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Hidden", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Files", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Open Developer" }).click();
   await dialog.getByRole("button", { name: /^acme-api/ }).click();
   await expect(dialog.getByText("GitHub: Land can open pull requests here.")).toBeVisible();
@@ -99,4 +99,29 @@ test("the folder picker at 1440", async ({ page }) => {
   await shot(page, "picker-1440");
   await dialog.getByRole("button", { name: "Select this folder" }).click();
   await expect(form.getByLabel(/Check command/)).toHaveValue("mise run check");
+});
+
+// The diff viewer on a running worktree job (the demo's j_24, Website), with the labels the manual
+// quotes asserted, then its full-screen route.
+test("the diff viewer at 1440", async ({ page }) => {
+  await open(page, "/jobs?job=j_24", 1440, 900);
+  const detail = page.getByRole("region", { name: "Selected job" });
+  await detail.getByRole("tab", { name: "Review" }).click();
+  const viewer = detail.getByRole("region", { name: /^Changes: / });
+  await expect(viewer.getByText("Hide viewed")).toBeVisible();
+  const scopes = viewer.getByRole("radiogroup", { name: "Which changes" });
+  for (const scope of ["All changes", "Commits on this branch", "Uncommitted", "Since you viewed"]) await expect(scopes.getByRole("radio", { name: new RegExp(`^${scope} \\d+$`) })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Hide whitespace" })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Full screen (f)" })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Open in a new tab" })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Refresh" })).toBeVisible();
+  await page.goto("/diff?job=j_24&file=web/src/cart.ts");
+  const full = page.getByRole("region", { name: /^Changes: / });
+  await expect(full.getByRole("table", { name: "Diff of web/src/cart.ts" })).toBeVisible({ timeout: 20_000 });
+  await expect(full.getByRole("checkbox", { name: "Viewed: web/src/cart.ts" }).first()).toBeVisible();
+  await expect(full.getByRole("button", { name: "Leave full screen (Esc)" })).toBeVisible();
+  await expect(full.getByText(/\d+ of \d+ viewed/).first()).toBeVisible();
+  await expect(full.getByRole("button", { name: "Split view" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Views" })).toHaveCount(0);
+  await shot(page, "diff-1440");
 });

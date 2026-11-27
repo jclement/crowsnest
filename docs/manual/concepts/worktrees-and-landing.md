@@ -71,13 +71,12 @@ Finished worktree jobs that were never landed pile up. The board's **N to land**
 worktree, oldest first, with its age. Choose some (or **Choose all**) and **Discard chosen**; a
 worktree with uncommitted work is refused and reported, never forced.
 
-<!-- STUB(wip/diff): the live, syntax-highlighted diff viewer with "Viewed" marks and full
-screen is being built on wip/diff. Describe it here, and in how-to/review-and-land.md, once it
-is on main. -->
+## Seeing the changes
 
-> **Coming soon (not on main yet):** a live, syntax-highlighted diff view with per-file
-> **Viewed** marks and a full-screen mode is being built. This page describes the Land tab as it
-> is today.
+The diff viewer shows a job's changes live while it works and before you land it: syntax
+highlighted, split or unified, with **Viewed** marks tied to each file's content, so a file the
+agent changes after you read it comes back. It also shows a lead's uncommitted edits in a
+project's main checkout. See [Review changes with the diff viewer](../how-to/review-changes.md).
 
 ## What can go wrong
 

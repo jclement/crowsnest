@@ -44,3 +44,7 @@ The `g` sequences and `?` do nothing while you type in a field or a terminal, so
 | `⌥ Space` | `Ctrl Space` | Chat, in the message box: hold to talk |
 | `esc` | `esc` | Close a sheet or menu; cancel a recording |
 | `←` / `→` | `←` / `→` | Move between tabs |
+| `j` / `k` | `j` / `k` | Changes: next and previous file |
+| `n` / `p` | `n` / `p` | Changes: next and previous change |
+| `v` | `v` | Changes: mark the current file viewed (again to unmark) |
+| `f` | `f` | Changes: full screen (esc leaves it) |

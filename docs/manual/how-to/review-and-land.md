@@ -23,18 +23,16 @@ Before you look at the diff, check two things on the card and the Overview:
 2. **What it produced**: the branch and base ("job/91-retry-with-back-off → main"), commits ahead,
    files and lines changed, whether the tree is clean and whether it is pushed; then the
    **Commits**.
-3. **Changes, in reading order**: the files the agent's walkthrough names come first, in its order;
-   then by kind (schema, server, API, client, UI, tests, docs, config), with lockfiles and generated
-   files last and marked. Each file opens to its diff when you press it.
+3. **The changes**, in the [diff viewer](review-changes.md): every changed file, highlighted, with
+   a **Viewed** box each. Read them and tick them off; **Full screen (f)** gives the diff the whole
+   window.
 4. Beside it, **The agent's account**: the **Review** rounds (each reviewer's verdict and
    findings), the **Walkthrough** (chunk by chunk: why each exists, what was tested, the risk), and
    the **Result** with Verified and Not verified.
 
-<!-- STUB(wip/diff): describe the syntax-highlighted live diff view, its per-file "Viewed"
-marks and full screen here once wip/diff is on main. -->
-
-> **Coming soon (not on main yet):** a syntax-highlighted diff with per-file **Viewed** marks and
-> full screen. Today the diff is plain, with added and removed lines coloured.
+The diff is the [diff viewer](review-changes.md): syntax-highlighted, split or unified, live as
+the agent works, with a **Viewed** box per file. Tick files as you read them; the Land
+confirmation then says how many of the files it would merge you have not viewed.
 
 ## Land it
 
@@ -51,7 +49,7 @@ marks and full screen here once wip/diff is on main. -->
 4. crowsnest merges (or pushes), then tears down: stops the agent, removes the worktree, closes the
    workspace, deletes the branch (kept for a pull request). Each step lands on the timeline.
 
-![The Land tab: what it produced, changes in reading order, the agent's account](../img/land-1440.jpg)
+![The Land tab: what it produced, the changes, the agent's account](../img/land-1440.jpg)
 
 ## When not to push or merge
 

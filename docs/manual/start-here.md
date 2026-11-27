@@ -80,8 +80,7 @@ everything away when it exits. On a real install, run `crowsnest` and follow its
    marked), add a note if you like, and answer. The agent did not stop to wait: it carried on with
    whatever the answer does not block, and your answer is typed into its pane.
 5. **Land it.** When a builder says done, crowsnest runs the project's check command itself. If it
-   passes, the card reads **Accepted** and a **Land** tab appears on the job. Read the diff in
-   reading order, then press **Merge** (or **Push and open PR**, or **Discard**). Crowsnest merges,
+   passes, the card reads **Accepted** and a **Land** tab appears on the job. Read the diff, then press **Merge** (or **Push and open PR**, or **Discard**). Crowsnest merges,
    removes the worktree and deletes the branch.
 
 ![Now on a desktop: what needs you on the left, every project on the right](img/now-1440.jpg)

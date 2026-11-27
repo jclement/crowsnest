@@ -12,8 +12,8 @@
 // lead's routes. With --no-orchestrator (status "disabled") Chat defaults to the first running
 // lead. A lead that is off offers Start lead instead of a conversation. When the agent's Remote
 // Control link is known the header has "Open in Claude" (DESIGN.md 7.10).
-import { useNavigate, useSearch } from "@tanstack/react-router";
-import { MessageSquare, Play, SquareTerminal } from "lucide-react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { FileDiff, MessageSquare, Play, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ChatMenu } from "../components/chat/ChatMenu";
 import { ChatStatusChip } from "../components/chat/ChatStatusChip";
@@ -147,6 +147,7 @@ function LeadChat({ slug, project, pending, switcher, voice, showThinking, onTog
     <section aria-label={`Chat with ${name}`} className="flex min-w-0 flex-col md:h-full md:min-h-0">
       <ChatHeader
         switcher={switcher}
+        changes={<ChangesLink search={{ project: project.slug }} />}
         state={<ChatStatusChip state={state} hint={running ? undefined : "The lead is not running; start it to talk to it"} />}
         sessionId={running ? lead.session_id : ""}
         remote={running ? <OpenInClaude status={lead} noFallback /> : null}
@@ -197,7 +198,9 @@ function ChatHeader({
   remote,
   speak,
   menu,
+  changes,
 }: {
+  changes?: ReactNode;
   switcher: ReactNode;
   state?: ReactNode;
   sessionId?: string;
@@ -215,12 +218,23 @@ function ChatHeader({
         </span>
       )}
       <div className="ml-auto flex items-center gap-1.5">
+        {changes}
         {remote}
         {speak}
         {speak && <HelpButton topic="how-to/voice#speak-mode-vs-the-mic" what="speak mode and the mic" inline={false} />}
         {menu}
       </div>
     </header>
+  );
+}
+
+/** The lead's diff (its main checkout: uncommitted work and commits since its base), full screen. */
+function ChangesLink({ search }: { search: { project: string } }) {
+  return (
+    <Link to="/diff" search={search} className="inline-flex min-h-11 items-center gap-1 rounded px-2 text-xs text-body hover:bg-hover hover:text-heading md:min-h-8">
+      <FileDiff className="h-4 w-4" aria-hidden />
+      Changes
+    </Link>
   );
 }
 

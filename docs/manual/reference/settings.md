@@ -75,6 +75,7 @@ These appear in the **Settings** sheet (account menu → Settings), grouped as t
 | Lead ceiling per day ($) | `--lead-ceiling-usd` | at once | each project lead's, where its spend is measured; 0 none |
 | Check timeout | `--check-timeout` | at once | longest crowsnest's check of a finished job may run (such as 30m) |
 | Check rounds | `--check-rounds` | at once | failed checks sent back to the agent before the job needs you |
+| Require all files viewed before Land | `--require-viewed-before-land` | at once | merge and push refuse a job whose diff has files not marked viewed; off, Land only warns |
 
 ### Backups and storage
 
@@ -132,6 +133,7 @@ All of them, in `crowsnest --help` order. The config-file key is the flag's name
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Attachments → Largest attachment (MB) | largest attachment (pasted, dropped or attached by an agent) in MB |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Attachments → Attachment quota (MB) | disk all attachments may take, in MB; past it the oldest files nobody needs are deleted |
 | `--browse-root` | `CROWSNEST_BROWSE_ROOTS` | none | no | a directory the folder picker may browse besides your home, projects' and remembered directories, e.g. /srv or /Volumes; `/` only when named here (repeatable) |
+| `--require-viewed-before-land` | `CROWSNEST_REQUIRE_VIEWED_BEFORE_LAND` | `false` | Budgets and acceptance → Require all files viewed before Land | refuse to merge or push a job until every file of its diff is marked viewed (off: Land only warns) |
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | Guard → Protected hosts | a production host no agent may reach unattended: the guard refuses commands that would, and approvals naming it are dangerous (repeatable) |
 | `--protected-hosts-file` | `CROWSNEST_PROTECTED_HOSTS_FILE` | `~/Developer/claude-agent/config/protected-hosts` | no | file of protected hosts, one per line, # comments; read when it exists ('' for none) |
 | `--protected-branch` | `CROWSNEST_PROTECTED_BRANCHES` | none | Guard → Protected branches | a branch agents may not commit or push onto, nor force-push (repeatable; default none) |

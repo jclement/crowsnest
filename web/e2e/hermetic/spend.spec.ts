@@ -92,7 +92,7 @@ test("the palette has a Spend target, and job rows show their spend", async ({ p
   await input.fill("retry back-off");
   // The job's row (its question's needs-you row names the job too).
   const jobs = page.getByRole("dialog", { name: "Command palette" }).getByRole("group", { name: "Jobs" });
-  await expect(jobs.getByRole("option", { name: /Add retry back-off/ })).toContainText(money);
+  await expect(jobs.getByRole("option", { name: /^Add retry back-off/ })).toContainText(money); // not its "Changes: …" row
   await input.fill("spend");
   await page.getByRole("option", { name: /^Spend/ }).first().click();
   await expect(page.getByRole("dialog", { name: "Spend (estimated)" })).toBeVisible();

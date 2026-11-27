@@ -26,6 +26,7 @@ import (
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/browse"
+	"github.com/jclement/crowsnest/internal/changes"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/herdr"
@@ -152,6 +153,9 @@ type harnessOptions struct {
 	serveStatus string
 	machines    bool
 	ops         Ops
+	// The live diff (changes_test.go); nil: 503
+	changes       *changes.Service
+	requireViewed func() bool
 	// The folder picker (browse_test.go); nil: the /browse routes answer 503
 	browse *browse.Service
 }
@@ -253,6 +257,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		System:        opts.system,
 		Attention:     opts.attention,
 		Now:           opts.now,
+		Changes:       opts.changes,
+		RequireViewed: opts.requireViewed,
 	})
 	if err != nil {
 		t.Fatal(err)

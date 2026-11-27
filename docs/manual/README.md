@@ -36,6 +36,7 @@ first session.
 - [Create a project and tune its lead](how-to/projects.md)
 - [Give a job and write a good brief](how-to/give-a-job.md)
 - [Answer questions and approvals](how-to/answer.md)
+- [Review changes with the diff viewer](how-to/review-changes.md)
 - [Review and land a job](how-to/review-and-land.md)
 - [Rescue a stuck agent](how-to/rescue.md)
 - [Use the terminal views](how-to/terminals.md)
