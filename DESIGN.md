@@ -1407,8 +1407,10 @@ not measured (Codex) shows "not measured", never zero, and is bounded by minutes
   point (finish the step, commit what is safe, job_update, end the turn); nothing is killed and
   no tool is interrupted. The human: **Raise the budget** (back to running, the agent told),
   **Let it finish this step** (`grace`: running, and its next observed end of turn puts it back in
-  front of the human: the Stop hook, or for an agent without hooks the backstop, R6-C06), or
-  **Stop the job** (cancel).
+  front of the human: the Stop hook, or for an agent without hooks the backstop, R6-C06; whatever
+  state the agent declared before that end of turn, blocked included, so a short recheck cannot
+  carry grace across turns; and in any case after 30 minutes, R7-C03, the start kept in kv
+  `budget.grace_at.<id>`), or **Stop the job** (cancel).
 - The limit is a `budget` hold (6.20). A parent's exhausted budget puts a hold from that parent
   on every live job below it, queued ones included, so a child waiting for a slot does not start
   past it, Start anyway included (R6-C05); a held job cannot delegate. Raising the parent's

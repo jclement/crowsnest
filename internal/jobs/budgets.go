@@ -663,6 +663,7 @@ func (s *Service) BudgetFinishStep(ctx context.Context, id string) (Job, error) 
 	if err != nil {
 		return Job{}, err
 	}
+	_ = s.opts.Store.SetKV(ctx, graceKey(job.ID), s.opts.Now().UTC().Format(time.RFC3339Nano)) // R7-C03: bounded in time too
 	if job.PaneID != "" {
 		_ = s.sendText(ctx, job.PaneID, job.AgentName, fmt.Sprintf("[crowsnest budget] The human lets you finish the step you are in on job %s. "+
 			"Finish it, commit what is safe to keep, call job_update with where you got to, then end your turn.", job.ID))
@@ -673,14 +674,56 @@ func (s *Service) BudgetFinishStep(ctx context.Context, id string) (Job, error) 
 // budgetStopLocked applies a grace stop at an observed end of turn (s.mu held): the Stop hook,
 // or the backstop for an agent without hooks (R6-C06). The step is over, so the job is held for
 // the human again. It reports whether it did.
+//
+// Grace ends at the first end of turn whatever state the agent declared (R7-C03): an agent that
+// declares blocked with a short recheck before ending its turn would otherwise keep grace across
+// the wake and every turn after it. The hold then keeps the job (and its wake) for the human.
 func (s *Service) budgetStopLocked(r *store.JobRecord, c *change) bool {
-	if r.BudgetState != BudgetGrace || State(r.State) != StateRunning {
+	if r.BudgetState != BudgetGrace || State(r.State).Terminal() {
 		return false
 	}
 	r.BudgetState = BudgetExceeded
 	s.placeHoldLocked(r, c, HoldBudget, firstNonEmptyDir(r.BudgetDetail, "Reached its budget")+"; it finished the step it was in", "")
 	c.event(EventBudget, "Finished the step it was in; back to you for the budget", nil)
 	return true
+}
+
+// budgetGraceMax bounds "finish the step you are in" in time as well (R7-C03): an agent that
+// never ends its turn, or one whose end of turn crowsnest cannot see, is back in front of the
+// human after this long all the same.
+const budgetGraceMax = 30 * time.Minute
+
+// graceKey is the kv row holding when a job's grace began (kv, not a column: nothing else needs it).
+func graceKey(id string) string { return "budget.grace_at." + id }
+
+// checkGraceExpiry ends a grace that has run past budgetGraceMax. A grace with no recorded start
+// (granted before this was built, or the row lost) starts its clock now.
+func (s *Service) checkGraceExpiry(ctx context.Context, r store.JobRecord) {
+	id := FormatID(r.ID)
+	if r.BudgetState != BudgetGrace {
+		return
+	}
+	now := s.opts.Now()
+	since, err := s.opts.Store.GetKV(ctx, graceKey(id))
+	began, parseErr := time.Parse(time.RFC3339Nano, since)
+	if err != nil || parseErr != nil {
+		_ = s.opts.Store.SetKV(ctx, graceKey(id), now.UTC().Format(time.RFC3339Nano))
+		return
+	}
+	if now.Sub(began) < budgetGraceMax {
+		return
+	}
+	_, _ = s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+		if r.BudgetState != BudgetGrace || State(r.State).Terminal() {
+			return errSkip
+		}
+		r.BudgetState = BudgetExceeded
+		s.placeHoldLocked(r, c, HoldBudget, firstNonEmptyDir(r.BudgetDetail, "Reached its budget")+
+			fmt.Sprintf("; the step it was let finish ran past %d minutes", int(budgetGraceMax/time.Minute)), "")
+		c.event(EventBudget, fmt.Sprintf("The step it was let finish ran past %d minutes; back to you for the budget", int(budgetGraceMax/time.Minute)), nil)
+		return nil
+	})
+	_ = s.opts.Store.DeleteKV(ctx, graceKey(id))
 }
 
 func derefOr(value *float64) float64 {
