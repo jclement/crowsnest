@@ -37,8 +37,33 @@ terminal, and anything that goes wrong falls back to Claude's own dialog, never 
 protected host, pushing onto a protected branch, `herdr server stop`, another herdr session).
 
 A web terminal is remote code execution, so crowsnest fails closed: it binds to localhost by
-default, refuses to start without a login (or an explicit `--no-auth`), and checks Host and
-Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the security model.
+default, serves nothing but a token-gated setup page until a login exists (or an explicit
+`--no-auth`), and checks Host and Origin on every request. [DESIGN.md](DESIGN.md) section 4 is the
+security model.
+
+## Getting started
+
+```sh
+brew install jclement/tap/crowsnest   # brings herdr; have Claude Code (or Codex) installed and signed in
+crowsnest                             # prints a one-time setup link and opens it in your browser
+#   choose a password → a short checklist, already mostly green → Start → Chat, with a hello
+crowsnest doctor                      # anything not green: what is missing, and the command that fixes it
+```
+
+That is all: no flags, no config file. Everything below is for when you want more.
+
+**What happens on that first start.** crowsnest comes up even when herdr or every agent is
+missing, and says so in one line (`herdr 0.9.5 ✓  claude 2.1.332 ✓ signed in  codex not found`).
+The setup page asks for a username and password; then a checklist shows what it found (herdr,
+Claude Code and whether it is signed in, Codex, the orchestrator's folder) with the exact install
+or sign-in command for anything missing, and notices by itself when you have fixed it. Claude's
+sign-in needs a terminal, so the checklist opens one in the page with `claude` typed in. With both
+Claude Code and Codex it asks which runs the orchestrator. Start starts the orchestrator; Claude's
+one-time "do you trust this folder?" question appears right there as a card with its buttons;
+then you are in Chat and the orchestrator says hello. Later, the account menu has **System** (the
+same checks live, versions, uptime, recent errors, a redacted "Copy diagnostics" for an issue)
+and **Settings** (models, engine, permission mode, pokes, compaction, Remote Control, attachments,
+notify URL, protected hosts and branches).
 
 ## Install
 
@@ -65,7 +90,9 @@ shasum -a 256 --ignore-missing -c checksums.txt
 tar xzf "crowsnest_${VERSION}_${OS}_${ARCH}.tar.gz" crowsnest && mv crowsnest ~/.local/bin/
 ```
 
-crowsnest needs [herdr](https://herdr.dev) on `PATH` (`brew install herdr`).
+crowsnest needs [herdr](https://herdr.dev) on `PATH` to do anything useful (`brew install
+herdr`, or `curl -fsSL https://herdr.dev/install.sh | sh`), and Claude Code or Codex; it starts
+without them and tells you what is missing.
 
 **Updating.** A release build checks GitHub for a newer release once at start and then daily
 (in the background, 10 s timeout, never blocking; not for a development build, `--demo` or a
@@ -79,7 +106,7 @@ crowsnest under something that restarts it (launchd `KeepAlive`, systemd `Restar
 start it again; herdr and every agent keep running across the restart. Installed with Homebrew:
 `brew upgrade crowsnest`. In a container: pull a new image.
 
-## Quick start
+## From source
 
 ```sh
 git clone git@github.com:jclement/crowsnest.git && cd crowsnest
@@ -115,9 +142,10 @@ For an unattended install, give the login instead and nothing is stored or asked
 login given that way always wins over a stored one, and the Account sheet shows it read-only.
 `--no-auth` turns the login off entirely, with the rules under Startup refusals.
 
-crowsnest needs [herdr](https://herdr.dev) on `PATH`. On start it connects to the herdr session
-named by `--session` (default `crowsnest`) and, if nothing answers, starts
-`herdr --session <name> server` detached, logging to
+crowsnest needs [herdr](https://herdr.dev) on `PATH`, but starts without it: the app explains,
+and crowsnest connects as soon as herdr appears (it looks every five seconds), with no restart.
+It connects to the herdr session named by `--session` (default `crowsnest`) and, if nothing
+answers, starts `herdr --session <name> server` detached, logging to
 `~/.local/state/crowsnest/<session>/herdr-server.log`. It never stops that server: herdr and its
 agents outlive crowsnest. `--demo` needs no herdr at all; it serves an in-memory fake fleet that
 changes every few seconds; its terminals are a built-in toy that echoes what you type (no
@@ -129,8 +157,10 @@ database, state directory or `~/.claude`, and a login it hands out is no good an
 Unless `--no-orchestrator` is given, crowsnest then makes sure a Claude agent named
 `orchestrator` runs in the session: it adopts a live one, or starts `claude` in a workspace
 labelled `orchestrator` (cwd `--dir`), resuming the stored conversation when its transcript
-exists. The first start in a new directory usually stops at Claude's folder-trust prompt; Chat
-then shows "Needs terminal" until it is answered in the pane. Conversations are read from
+exists. It waits (state `waiting`, with the reason) while the first-run checklist is unfinished,
+herdr is not connected or no agent is installed, and starts by itself when that changes. The
+first start in a new directory stops at Claude's folder-trust question; the checklist, the Inbox
+and Chat show it as a card with its buttons. Conversations are read from
 Claude's JSONL transcripts in `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
 
 The instance has a name (`--name`, else the short hostname, such as `quark`): it is in the
@@ -263,6 +293,68 @@ secure context (`https://` or `localhost`); over plain HTTP on a tailnet address
 that when pressed, and spoken replies still work. Without a key every `/voice` route is a 404 and
 nothing changes.
 
+## Doctor, System and Settings
+
+`crowsnest doctor` checks, read-only and in a few seconds, everything crowsnest depends on and
+prints one line per check with the fix for anything that is not fine: herdr (installed, at least
+0.9.5, the session reachable: it never starts one, it says "crowsnest will start it"; herdr's
+first-run screen), the agents (Claude Code and Codex: where, which version, signed in, from their
+own `auth status` / `login status`, never a model call), what the orchestrator and jobs would run
+on, the Claude Code flags and hooks crowsnest uses, the orchestrator folder's trust, the
+directories, the database (opened read-only), the agent socket's path length, the port (free, or
+already a running crowsnest), what the bind resolves to, the secure context voice and push need,
+git, disk, the clock, Tailscale, optional features, where each setting came from, and
+`CROWSNEST_*` variables that look like typos. Against a running instance it also asks the
+instance, over its agent socket, for its orchestrator state, the hooks it has seen fire and its
+last errors. `--json` for scripts; `--deep` also makes one tiny real call per agent ("reply OK",
+a few tokens, labelled as such) and checks the ElevenLabs key. Exit 0 when nothing failed
+(warnings included), 1 when something did, 2 for a usage error.
+
+The app's **System** page (account menu → System, or the palette) is the same report from the
+running server, with Re-check, versions, the agents and which runs what, uptime, recent warnings
+and errors, paths, the machine (CPU, memory, load, disk, each agent's process tree), and **Copy
+diagnostics**: the report as text with no secrets or tokens and your home directory as `~`, for
+pasting into an issue. The header carries a live machine strip (CPU with a one-minute sparkline,
+memory, load against the cores, and from wide screens free disk and working agents), sampled every
+two seconds only while a browser is connected; in a container with cgroup limits the figures are
+the container's.
+
+**Settings** (account menu → Settings) changes what makes sense to change while crowsnest runs:
+the orchestrator's model, the job model, the default engine, the permission mode, Remote Control
+(the orchestrator's and jobs'), the poke interval, compaction and the daily fresh start,
+attachment limits, the notify URL (write-only), protected hosts and branches. Each says where its
+value comes from and when a change applies (at once, when the orchestrator restarts, or when
+crowsnest restarts); every change is journalled. A setting given by a flag or an environment
+variable is read-only there ("set by the environment: change it there"): precedence is flag,
+then environment, then a value saved in the app, then the config file, then the default. The
+login, the bind, the session and the data directory are never changed from a browser.
+
+## On your tailnet with Tailscale
+
+Two ways to reach crowsnest from your phone:
+
+- **`tailscale serve` (recommended).** crowsnest stays on localhost and Tailscale gives it an
+  HTTPS address on your tailnet, which the microphone (talk mode), Web Push and the installable
+  app all need:
+
+  ```sh
+  tailscale serve --bg 2769                 # once; crowsnest prints this, it never runs it
+  export CROWSNEST_TRUSTED_PROXY=loopback   # so the login limiter sees each client, not one proxy
+  crowsnest
+  ```
+
+  Open `https://<machine>.<tailnet>.ts.net` on the phone (`crowsnest doctor` and the checklist
+  print the exact URL). crowsnest finds that MagicDNS name at start (`tailscale status --json`, two
+  seconds at most) and allows it as a host, so nothing else is needed (`--no-tailscale-detect`
+  turns that off). HTTPS certificates must be enabled for the tailnet (admin console, DNS). For
+  notifications on an iPhone, open the page in Safari, Share → **Add to Home Screen**, open it
+  from there, then turn notifications on in the account menu.
+- **`--bind tailnet`.** crowsnest listens on its Tailscale address directly, plain HTTP over
+  WireGuard: simpler, but without the secure context, so no microphone or Web Push.
+
+Tailscale serve also sends who is asking (`Tailscale-User-Login` and friends); crowsnest does not
+use those headers for anything yet.
+
 ## Container (devbox)
 
 `ghcr.io/jclement/crowsnest` is a ready-made devbox: crowsnest, herdr and mise in one container
@@ -369,6 +461,8 @@ workflow does the same on every `v*` tag.
 | `crowsnest health [--json]` | GET `/api/v1/health` on the configured address; exit 0 healthy, 1 not (Docker `HEALTHCHECK`). A server waiting for first-run setup is healthy and says "setup required" |
 | `crowsnest reset-password [--password-file F]` | Set a new password for the login chosen at setup, and sign every browser out (at once, even while crowsnest runs). The password comes from `--password-file` (first line, mode 600), else a piped stdin, else it is asked for twice. Use the same `--session`/`--data-dir` as serve |
 | `crowsnest reset-setup [--yes] [--force]` | Remove the stored login and every session, so the next start is first-run setup again (the instance name is kept). Asks for confirmation (or `--yes`); refused while crowsnest is running unless `--force`, after which nobody can sign in until it is restarted |
+| `crowsnest doctor [--json] [--deep]` | Check this machine can run crowsnest and print the fix for anything missing (Doctor, System and Settings). Read-only; `--deep` makes one tiny real call per agent. Exit 0 nothing failed, 1 something did |
+| `crowsnest open` | Open the running crowsnest in your browser (the same opener rule as `--open`); prints the URL either way |
 | `crowsnest update [--check]` | Install the latest release over this binary after verifying its signature and checksum (see Install, Updating); `--check` only reports. Refused for a development build, in a container and for a Homebrew install |
 
 Exit codes: `0` success, `1` runtime error, `2` usage error.
@@ -550,9 +644,12 @@ Days are the server's local calendar days; weeks start on Monday.
 
 ## Configuration
 
-Precedence: flag, then environment, then `~/.config/crowsnest/config.yaml` (keys are the flag
-names without the leading `--`, e.g. `username: jeff`, `bind: [localhost, tailnet]`), then the
-default. List values (`--bind`, `--allowed-host`) repeat as flags, are comma-separated in the
+Precedence: flag, then environment, then a value saved in the app's Settings (only for the
+settings listed there), then `~/.config/crowsnest/config.yaml` (keys are the flag names without
+the leading `--`, e.g. `username: jeff`, `bind: [localhost, tailnet]`), then the default. A flag or
+variable wins because whoever starts the process is being explicit; the app's value wins over the
+file because a change made in the app should take. This table stays the way to configure an
+unattended install. List values (`--bind`, `--allowed-host`) repeat as flags, are comma-separated in the
 environment, and are a YAML list or string in the file. An unknown key in the file is an error.
 
 | Flag | Environment | Default | Meaning |
@@ -648,14 +745,24 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /admin/update` | session | Verify and install the newer release (as `crowsnest update`), answer `{updated, version, restarting}`, then exit for a supervisor to restart. `409 REFUSED` with the reason (container, development build, Homebrew install, already current), `409 UNSUPPORTED` when self-update is off (development build, `--demo`, container), `502 UPDATE_FAILED` when a download or check failed (nothing changed; the log says why) |
 | `POST /auth/login` | none | `{username, password}` → session cookie; `429` with `Retry-After` after 5 failures a minute per IP or 20 overall |
 | `POST /auth/logout` | none | Deletes the session and clears the cookie |
-| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version, name, attachments}}`; `name` is this instance's (`--name`, else the one chosen at setup or in the Account sheet, else the short hostname); `attachments` is `{max_bytes, max_files}` |
-| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `approval` (`{id, status, risk, tool, job_id, pane_id, change}`) when a tool-call approval is requested or settled, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (voice on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`, played by browsers with speak mode on; voice off: `{text, pane_id, at}`, which nothing plays); `job` (`{id, state, stuck, cause, title, change}`) when a job changes; `poke` (a poke's result, as `POST /orchestrator/poke` returns it) when a poke is sent or held; `journal` (`{id, kind, summary}`) for each new journal entry; `schedule` (`{at}`) when a scheduled task's stamp or switch changed; `attachment` (`{owner}`, such as `job:j_3`) when an owner's files changed; `spend` (`{at}`) when measured spend changed |
+| `GET /auth/me` | session | `{username, features: {auth, voice, demo, session, herdr_version, name, attachments, onboarding}}` (`onboarding` true while the first-run checklist is unfinished: the app opens `/welcome`); `name` is this instance's (`--name`, else the one chosen at setup or in the Account sheet, else the short hostname); `attachments` is `{max_bytes, max_files}` |
+| `GET /events` | session | Server-sent events: `hello` on connect, `heartbeat` every 20 s, `fleet` (data: the new fleet) whenever it changes, `message` (`{pane_id, cursor}`) when a followed conversation changes, `orchestrator` (its status) on every state change, `approval` (`{id, status, risk, tool, job_id, pane_id, change}`) when a tool-call approval is requested or settled, `question` (`{id, status, title, kind, urgency, change}`) when a question is asked, settled or delivered, `say` (voice on: `{kind: speak\|chime, source: say\|reply, text_id, text, pane_id, at}`, played by browsers with speak mode on; voice off: `{text, pane_id, at}`, which nothing plays); `job` (`{id, state, stuck, cause, title, change}`) when a job changes; `poke` (a poke's result, as `POST /orchestrator/poke` returns it) when a poke is sent or held; `journal` (`{id, kind, summary}`) for each new journal entry; `schedule` (`{at}`) when a scheduled task's stamp or switch changed; `attachment` (`{owner}`, such as `job:j_3`) when an owner's files changed; `spend` (`{at}`) when measured spend changed; `sys` (a machine sample, every 2 s while a browser is connected); `system` (`{verdict, summary}`) after a doctor run |
+| `GET /system[?recheck=1]` | session | The doctor report as the running server sees it (`checks`, `verdict`, `summary`, `versions`, `agents`, `selection`, `paths`, `settings`, `live`: uptime, orchestrator, hooks seen, last errors); cached 30 s unless `recheck=1` |
+| `GET /system/diagnostics` | session | The same as redacted `text/plain` for an issue |
+| `GET /system/stats` | session | The machine: `{latest, history}` (CPU %, cores, memory, load, disk, scope `host`/`container`, working agents); `sys` events carry each new sample |
+| `GET /system/agents` | session | Each agent's process tree: `[{pane_id, name, kind, cpu, rss, processes}]` |
+| `POST /system/demo-state` | session, `--demo` only | `{state}`: switch the scripted machine the demo's doctor sees (`ok`, `herdr-missing`, `claude-signed-out`, `codex-only`, `no-agent`, `both`) |
+| `GET /settings` | session | Every setting the app may change: `{settings: [{name, label, section, kind, value, source, where, locked, apply, …}], bind, bind_command}` |
+| `PUT /settings/{name}` | session | `{value}` or `{clear: true}` → validated by the config loader, saved, journalled, applied; `409` for a setting the app may not change or one a flag or variable sets, `400` with the loader's message |
+| `GET /onboarding[?recheck=1]` | session | The first-run checklist: `{pending, report, choose_engine, engine, dir, orchestrator, codex_gaps}` |
+| `POST /onboarding/start` | session | `{engine?}` → finishes the checklist and lets the orchestrator start; `409` with no agent installed |
+| `POST /onboarding/shell` | session | `{command}` (only a fix command the report offers, such as `claude`) → `{pane_id}` of a new shell pane in the orchestrator's folder with the command typed in |
 | `GET /fleet` | session | The herdr session: workspaces → tabs → panes with their agents, a flat `agents` list, `counts`, `revision`; `503 UNAVAILABLE` when herdr does not answer |
 | `GET /agents/{target}/screen` | session | One agent's (or pane's) visible screen: `text`, `ansi`, `screen_hash`, `dialog` (options, form, warnings), `draft`. `{target}` is an agent name or pane id |
 | `POST /agents/{target}/keys` | session | `{keys: ["1"], screen_hash}` → sends the keys if the screen still has that hash, else `409 CONFLICT` and nothing is sent. Only `esc`/`ctrl+c` may omit the hash |
 | `GET /agents/{target}/messages?after=&limit=` | session | A page of the agent's conversation from its Claude transcript: `{source, session_id, cursor, reset, earlier, more, messages}`. Without `after` (or with a stale cursor) the newest `limit` (200) messages and `reset: true`; with it, only what changed since. No transcript: one `pane` message with the pane's recent text |
 | `POST /agents/{target}/prompt` | session | `{text, force_over_draft, voice, attachments}` (`attachments`: upload ids, copied into the agent's inbox and named on `Attached:` lines after the text) (`voice: true` adds the voice header; 404 when talk mode is off) → `{pane_id, status, queued, started, note}`. `409 BLOCKED` (with the dialog in `error.detail`) when a dialog is up, `409 DRAFT` (with the draft) when text was typed at the terminal; nothing is typed in either case |
-| `GET /orchestrator` | session | `{state, pane_id, session_id, dir, model, detail, restarts, remote_control, remote_control_note}`; `model` is the one Claude was started with (empty: Claude's default); `remote_control` is the Remote Control name Claude was started with, `remote_control_note` `active` once Claude said so, or a sentence when it did not within 45 s; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed` or `disabled` |
+| `GET /orchestrator` | session | `{state, pane_id, session_id, dir, model, detail, restarts, remote_control, remote_control_note}`; `model` is the one Claude was started with (empty: Claude's default); `remote_control` is the Remote Control name Claude was started with, `remote_control_note` `active` once Claude said so, or a sentence when it did not within 45 s; state is `idle`, `working`, `blocked`, `needs_terminal`, `starting`, `restarting`, `failed`, `disabled` or `waiting` (the start gate: the first-run checklist unfinished, herdr not connected, or no agent; `detail` says which); `engine` is `claude` or `codex` |
 | `POST /orchestrator/restart`, `POST /orchestrator/new` | session | Restart Claude on the same conversation (`--resume`), or with a fresh one |
 | `POST /orchestrator/poke` | session | "Poke now" → `{outcome: sent\|skipped, reason, reasons, manual, started, note, at}`. Skips the two-minute limit between agent pokes; `skipped` with `reason` "nothing is due" when there is nothing to say, or why the orchestrator cannot take one (working, a dialog, a draft) |
 | `GET /orchestrator/context` | session | The orchestrator's context: `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}` (`known` is false before the first reading and right after a compaction that recorded no size) |

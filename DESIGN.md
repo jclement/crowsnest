@@ -64,7 +64,8 @@ or restarting crowsnest never stops the herdr server or any agent.
 
 ## 3. Configuration
 
-Precedence: flag, then environment (`CROWSNEST_*`), then `~/.config/crowsnest/config.yaml`, then default.
+Precedence: flag, then environment (`CROWSNEST_*`), then a value saved in the app's Settings (only
+the options 3.2 lists), then `~/.config/crowsnest/config.yaml`, then default (3.2 says why).
 Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 
 | Flag | Env | Default | Meaning |
@@ -138,6 +139,140 @@ interface name binds every address on it except IPv6 link-local.
 
 Other subcommands: `version`, `health` (exit code for Docker; a server waiting for setup is healthy and says "setup required"), `update` (self-update, 16.1), `reset-password` and `reset-setup` (4.14), and the agent-side `job`, `ask`, `say`, `notify`, `hook`, `mcp` (section 9).
 
+### 3.1 Zero-config start (the doctor branch)
+
+Jeff, 2026-11-26: "Put on a machine with Claude or Codex and herdr. Start up. Setup steps happen.
+Voila!" So bare `crowsnest` (= `serve`) needs no flag and no file: it binds localhost, picks the
+short hostname as its name, finds herdr and the agents on `PATH`, prints one setup link and opens
+it (3.3), and the rest happens in the browser (4.14.1). The first lines it logs are few: the
+listen URL, the setup link, the doctor's one-line summary (`herdr 0.9.5 ✓  claude 2.1.332 ✓
+signed in  codex not found`) and the hint to run `crowsnest doctor`; on a terminal they are also
+printed plainly. A port already in use is refused with the fix (`crowsnest --port N`, or another
+crowsnest is already there, which `doctor` tells apart). The environment-variable table above
+stays the way to set up an unattended install.
+
+### 3.2 Settings in the app: precedence, sources, what applies when
+
+The settings that make sense to change while crowsnest runs are editable in the app's Settings
+sheet (12.9): `model`, `job-model`, `engine`, `permission-mode`, `no-remote-control` (shown as
+"Remote Control" on/off), `job-remote-control`, `poke-interval`, `compact-at`, `fresh-at`,
+`attachment-max-mb`, `attachment-quota-mb`, `notify-url` (write-only), `protected-host`,
+`protected-branch`; the instance name stays in the Account sheet, voice and notifications in
+theirs. They are kept in `kv` as `settings.<option>` in the text form a flag would take.
+
+**Precedence, decided deliberately: flag, then environment, then the app (database), then the
+config file, then the default.** Whoever starts the process with a flag or a variable is being
+explicit about this run, so that wins, and the app shows the setting read-only with "set by the
+environment (`CROWSNEST_MODEL`): change it there". The app's value beats the file because the
+file is the quiet, rarely-read layer: someone who changes a setting in the app expects it to take,
+and a forgotten file must not silently undo it. `internal/config` applies the order (the loader's
+`Options.Stored`), records where every value came from (`Config.Sources`: `--model`,
+`CROWSNEST_MODEL`, `database`, `config.yaml`, `default`), and is the validator: a change is checked
+by loading the whole config again with it, so the app accepts exactly what a flag would and
+reports the loader's own message. serve reads the saved settings read-only before the config is
+final (the database path never comes from the database) and loads once more with them.
+
+**Never editable from a browser**, whatever the database holds: the login (username, password,
+`--no-auth`), the bind, the port, TLS, allowed hosts and trusted proxies, the herdr session, the
+data directory and the orchestrator's directory. Only the options in the editable table are ever
+read from `settings.*`, so a planted row for `no-auth` does nothing. The Settings sheet shows the
+bind read-only with the command that changes it.
+
+**When a change applies**, shown beside each setting: at once (poke interval, compaction and the
+fresh-start time: the poker's and tender's setters; job model and default engine: the job
+service's defaults), when the orchestrator restarts (its model, engine, permission mode, Remote
+Control: they are read at each start, `orch.Options.Launch`), or when crowsnest restarts
+(attachment limits, the notify URL, protected hosts and branches, jobs' Remote Control: wired into
+services at start; cheap to make live later). Every change is a `settings` journal entry
+("Settings: Poke interval 15m → 5m; applies at once"); the notify URL is journalled as set or not
+set, never its value.
+
+### 3.3 Opening a browser (`--open`)
+
+`--open auto` (the default) opens the setup link at a first start, best effort, never fatal,
+never blocking, and always as well as printing it. The rule is "attempt whenever an opener is
+plausibly present and working" (`internal/opener`): `$BROWSER` when set; else devtun's opener
+(devtun, Jeff's remote-development tunnel, installs an `xdg-open`/`open` shim in `~/.devtun/bin`
+on the remote box that opens URLs on the laptop with the port rewritten to the tunnel; it counts
+when that shim is the one on `PATH` and devtun's socket exists, over SSH too); else macOS `open`
+or Linux `xdg-open` with a `DISPLAY` or `WAYLAND_DISPLAY`. Over SSH with none of the first two, in
+a container with no opener, as root, or from a start without a terminal (a service, the devbox),
+it does not try. `--open always` drops those guards, `never` turns it off. A normal start does not
+open anything (a restart under `mise run dev` would open a tab every time); `crowsnest open` opens
+the running instance on request.
+
+The opener's argv is visible to the machine's other processes while it runs, so it never gets
+the setup token. It gets `http://127.0.0.1:<port>/setup/open/<id>`: a random id that works once,
+only from a loopback peer, for two minutes. The locked setup server answers it with `303` to the
+relative `/setup#token=…`, so the token travels only in that one loopback response, stays in the
+fragment as with the printed link, and the relative Location keeps working through a
+port-rewriting tunnel. Anything wrong with the id lands on the plain setup page.
+
+### 3.4 Doctor, and starting on a machine that is not ready
+
+`crowsnest doctor` (`internal/doctor`, `cmd/crowsnest/doctor.go`) is one list of read-only checks,
+each with a status (ok, info, warn, fail, skip), what was found, and a fix line (with a command
+when there is one). The same `Report` is the CLI's output (coloured on a terminal, plain when
+piped, `--json`), the System page (12.9) and the first-run checklist (4.14.1), so they cannot
+disagree. Nothing in it writes: no directory is created, no herdr server started (a session that
+is not running is "crowsnest will start it"), the database is opened with SQLite's read-only mode
+(`store.Inspect`), and no model is called unless `--deep`, which makes one "reply OK" call per
+agent and says it costs a few tokens. Exit 0 when nothing failed (warnings included), 1 when
+something did, 2 for a usage error. Every outside call goes through `doctor.Env`, so every check
+is tested with fakes; `--demo` uses a scripted machine (`doctor.DemoEnv`, picked by
+`CROWSNEST_DEMO_DOCTOR` and switchable through `POST /system/demo-state`) for the hermetic suite.
+
+What it checks: herdr installed and at least 0.9.5 (the first release with socket protocol 22,
+which crowsnest speaks), the session reachable (and its protocol), herdr's first-run screen
+(`onboarding = false` in its `config.toml`); Claude Code and Codex: path, version, signed in (from
+`claude auth status --json` and `codex login status`, never a model call; the account's email in
+that output is never kept), and what the orchestrator and jobs would run on (`--engine`); for
+Claude, the flags crowsnest passes (`--settings`, `--mcp-config`, `--append-system-prompt-file`,
+which `--help` lists only as `--append-system-prompt[-file]`, `--session-id`, `--remote-control`,
+`--permission-mode`), a version whose hooks it relies on (2.1 or newer), whether the orchestrator's
+folder is trusted (`~/.claude.json` projects, the folder or a parent), the transcript directory;
+the data, state and config directories (writable, private), the database (opens, schema version
+against this binary's), the agent socket's path length (103 bytes on macOS, 107 on Linux), the
+port (free, or already a running crowsnest, from its health endpoint), the bind and a tailnet
+address, the secure context voice and push need, git, disk (warn under 2 GiB, fail under 200 MiB),
+the clock; Tailscale (3.5); talk mode, Web Push keys, the notify URL, updates; the configuration:
+that it loads, the startup refusals, where every non-default setting came from, and `CROWSNEST_*`
+variables no option reads, with the nearest real name ("did you mean…"). Against a running
+instance it also asks the instance over the agent socket (`GET /api/v1/doctor`: the socket is the
+user's alone) for its orchestrator state, the hooks it has seen fire and its last warnings and
+errors (a ring of 20 kept by `system.LogRing`, redacted).
+
+**serve starts without herdr or any agent.** It used to refuse without herdr. Now every service
+gets a `herdr.Lazy` client: until a background connector reaches the session (it looks for the
+binary every five seconds, then `EnsureSession`), every call answers `herdr_unavailable`, which the
+services already treat as an outage. The orchestrator has a **start gate** (`orch.Options.Gate`,
+`system.Service.Gate`): while the first-run checklist is unfinished, herdr is not connected, or no
+agent is installed, it shows `waiting` with that sentence and starts nothing; it asks again every
+three seconds and on `Kick` (the checklist's Start, an engine change), so it starts by itself when
+herdr or an agent appears, without a restart. A gate that closes again later (herdr went away)
+holds automatic restarts too, and a start after waiting does not spend the restart budget.
+
+### 3.5 Tailscale
+
+Behind `tailscale serve` the peer is loopback, `Host` is the machine's MagicDNS name and
+`X-Forwarded-Proto` is `https`. crowsnest refused those requests until the name was passed with
+`--allowed-host`; now serve and doctor ask `tailscale status --json` at start (two seconds at most;
+absent, slow or logged out changes nothing) and add `Self.DNSName` to the host allowlist
+(`Config.TailnetName`; `--no-tailscale-detect` turns it off). The rest already worked and is now
+tested with proxy-shaped requests: `X-Forwarded-Proto: https` from loopback gives the Secure
+`__Host-` cookie, the Origin check accepts `https://<name>` against `Host: <name>`, WebSockets and
+SSE pass, and the same headers from a non-loopback peer are plain HTTP. The client address for the
+login limiter is taken from a forwarding header only with `--trusted-proxy`; crowsnest does not
+silently trust headers, so doctor (and the README) say to set `CROWSNEST_TRUSTED_PROXY=loopback`
+when a serve config points at crowsnest's port. Doctor's Tailscale section: installed and
+connected, the MagicDNS name and whether it is allowed, HTTPS certificates enabled, and whether
+`tailscale serve status --json` already proxies to the port; if not, the command
+(`tailscale serve --bg <port>`, the syntax of `tailscale serve --help` in 1.104). crowsnest never
+runs a state-changing Tailscale command; it prints them. Tailscale serve also sends identity
+headers (`Tailscale-User-Login`, `-Name`, `-Profile-Pic`); they are not used for anything yet, and
+are the obvious way to a later "sign in with Tailscale" (only from a loopback peer, only with a
+serve config, and only for a login the owner named).
+
 ## 4. Security model
 
 The asset is a shell as the user. Threats that matter: someone on the network reaching the port;
@@ -167,6 +302,30 @@ rebinding against `--no-auth` on localhost); secrets leaking into logs; agent ou
 15. **Attachments** (8.6): types are sniffed from the bytes; only raster images, PDF and plain text are served inline, and never under an active name; SVG, HTML and everything else are `Content-Disposition: attachment`; every file carries `nosniff` and (but an inline PDF) a sandboxing CSP. Blobs are named by hash under the 0700 data directory, never by a client's name. An agent can have crowsnest read a file only with a token and only inside its own directories (`os.Root`).
 
 16. **Approvals and the guard** (8.7). A browser allow is once: no endpoint can grant an agent a standing permission ("always allow" stays in the terminal), and the hook's decision never carries `updatedPermissions` or `updatedInput`. A dangerous call needs an explicit confirmation the server checks (`409 CONFIRM_REQUIRED`), not only the UI. An approval's hook fails open to Claude's own dialog, never to an allow: crowsnest down, a refusal, an expiry or a supersession all print nothing. Requesting and polling an approval need an agent token, and only the pane that asked may poll it; as for every hook, a same-uid process that reads another agent's token can post or poll as it (4.6), but cannot decide anything: deciding is a browser (session, Origin, `X-Crowsnest`) or notification-token action. **Notification actions** are authorised by a single-use, item-scoped, 15-minute token in the push payload, kept only as a hash, sent by the service worker with `credentials: "omit"`; `/push/action` takes no cookie but keeps the host, origin and `X-Crowsnest` checks, so a cross-site page cannot replay one, and the token can answer only its one item, once, with an action it was minted for. Anyone who sees the push payload (the device, its push service: the payload is end-to-end encrypted to the device, RFC 8291) could use the token within its minutes; that is why only low-risk approvals and question options carry one. The **guard** is a seatbelt, not a boundary: it stops an agent that means well from reaching a protected host, a protected branch or the herdr server by accident, and a hostile process that writes its own script gets past it, as it could get past anything else of one uid (4.6).
+
+**4.14.1 The guided first run** (`routes/WelcomePage.tsx`, `internal/system/onboarding.go`). The
+setup page's password step does not change: token, lock and argon2 are as above. What follows it
+is new: setup stores `kv` `onboarding.state = pending` with the owner, and while that row says
+pending `/auth/me` carries `features.onboarding` and the app opens `/welcome` instead of the views.
+An instance set up before this existed, or started with a login from flags or the environment,
+has no row and never sees the checklist. The checklist is the doctor's report (3.4), re-checked
+every eight seconds while something is missing: herdr installed and its session, Claude Code
+(installed, signed in), Codex, and the orchestrator's folder with a note on the one-time trust
+question. A missing piece shows the exact command for this OS (herdr: `brew install herdr` on
+macOS, the official `curl -fsSL https://herdr.dev/install.sh | sh` elsewhere, `mise use -g herdr`
+for either, from herdr.dev's install page on 2026-11-26; Claude Code: its install script). Claude's
+sign-in needs a terminal, so "Open a terminal to sign in" makes a herdr workspace `setup` in the
+orchestrator's folder, types the command (`POST /onboarding/shell` accepts only a command the
+report offers) and shows that pane's terminal in a sheet; closing it re-checks. With both agents
+usable it asks which runs the orchestrator (saved as the `engine` setting). Optional steps are
+folded away (name, voice key, notifications on this device, reaching it from a phone with the
+`tailscale serve` command when there is one). Start (`POST /onboarding/start`) records done,
+journals it and kicks the orchestrator's gate. The page then follows the orchestrator: if Claude
+stops at its folder-trust question, the question is shown right there as a dialog card with its
+buttons (since this branch the arrow-key menu Claude 2.1.332 draws is detected, each option
+carrying the keys that pick it, `down` then `Enter`; crowsnest still never answers it itself),
+and once the orchestrator is idle the browser goes to Chat, where a greeting typed by crowsnest as
+a poke (`[crowsnest poke …]` with one reason: greet the person) brings its first message.
 
 Residual risk, stated plainly: anyone with the password has a shell as the user. Basic password
 login over plain HTTP on a tailnet relies on WireGuard for confidentiality.
@@ -638,10 +797,10 @@ MCP server as any job agent (section 6.2), so the supervisor covers it whenever 
 2. Otherwise find or create a workspace labelled `orchestrator` with cwd `--dir`, passing pane env `CROWSNEST=1`, `CROWSNEST_SOCKET=<agent socket>`, `CROWSNEST_SESSION=<name>`. The directory holding the `crowsnest` binary is prepended to `PATH` in that env so `crowsnest ask` resolves.
 3. Write `<state>/CROWSNEST.md` from the embedded template (section 7.1) and a `<state>/claude-settings.json`.
 4. `agent.start orchestrator --kind claude` with args `--session-id <uuid>` (or `--resume <uuid>` when the stored conversation's transcript exists), `--permission-mode <mode>`, `--model <m>` if set, `--append-system-prompt-file <state>/CROWSNEST.md` (verified to work interactively), `--settings` and `--mcp-config` as in section 6.2. Args stay short on purpose: macOS rejects a start command longer than the terminal's line-input limit, so content goes in files, never in argv.
-5. If start returns `agent_not_ready` (a trust or login prompt), surface it as a "needs you" item that opens the pane's terminal. Crowsnest does not answer start-up dialogs itself.
+5. If start returns `agent_not_ready` (a trust or login prompt), surface it as a "needs you" item that opens the pane's terminal, and (since the doctor branch) as a dialog card with its buttons on the first-run checklist and in the Inbox. Crowsnest does not answer start-up dialogs itself.
 
-The folder-trust dialog is the expected first-run obstacle in a fresh directory; the UI's
-terminal is how the user clears it. (On Jeff's machines `new-project` records trust.)
+The folder-trust dialog is the expected first-run obstacle in a fresh directory; the first-run
+checklist shows it as a card (4.14.1), and the UI's terminal still works. (On Jeff's machines `new-project` records trust.)
 
 **7.1 Instructions linked in** (`CROWSNEST.md`, embedded in the binary, versioned with it). It tells the orchestrator:
 
@@ -1034,6 +1193,21 @@ visibility per job."
   "Spend" in the palette, and each job row's spend as secondary text.
 - **`--demo`** seeds plausible spend through `Meter.Record` (the same counting path) for every
   started job and a week of orchestrator use; the meter does not run there.
+
+### 7.12 Codex as the orchestrator (the doctor branch)
+
+With `--engine codex`, or `auto` on a machine where Codex is the only usable agent, the
+orchestrator is Codex: `agent.start` with kind `codex` and `--ask-for-approval never --sandbox
+workspace-write [--model]` (the job launcher's flags), and, since Codex has no flag for an extra
+system prompt, a first prompt that points it at `CROWSNEST.md`. Its pane carries the same env
+(`CROWSNEST_SOCKET`, `CROWSNEST_TOKEN`, crowsnest on `PATH`), so it asks, notifies and gives jobs
+with the `crowsnest` CLI. What it honestly lacks, listed on the checklist and in REPORT: no hooks,
+so no stop-hook guarantee (the herdr-side backstop nudges it after a minute idle instead), no
+SessionStart re-injection and no structured approvals; no MCP tools; no SAY lines or spoken
+replies (talk mode reads Claude's transcript); Chat shows the pane's text rather than a formatted
+conversation, and no spend is metered; no resume (a restart is a new Codex session); jobs given
+to "the orchestrator" are still recorded with engine `claude`. A job with a directory and no
+engine takes the `engine` setting's resolution (`jobs.Service.SetDefaults`).
 
 ## 8. Needs-you: questions and dialogs
 
@@ -1571,6 +1745,7 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /health` | Unauthenticated: `{status, version, setup_required, update_available, latest_version?, release_url?}` (16.1; `setup_required`, 4.14) |
 | `POST /admin/update` | Self-update from the browser (16.1): verify, install, answer, exit for a supervisor to restart |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session; `me` also returns feature flags (`auth`, `voice`, `demo`, session name, `herdr_version`, and the instance's `name`, 7.10) |
+| `GET /setup/open/{id}` | Setup mode only: the browser opener's one-time handoff (3.3), loopback peers only, `303` to the relative `/setup#token=…` (else to `/setup`) |
 | `GET /setup`, `POST /setup` | First-run setup (4.14), unauthenticated: `{required, default_name?, min_password_length}`; `{token, username, password, name}` → `201` + session cookie, `403 BAD_TOKEN`, `400`, `429` + `Retry-After`, `410` once done. While setup waits every other `/api/` path is `403 SETUP_REQUIRED` (`503 STARTING` between completion and the full server) |
 | `GET /account`, `POST /account/password`, `PUT /account/name` | The Account sheet: `{username, source: database\|config\|none, name, name_managed, min_password_length}`; `{current_password, new_password}` (`403 WRONG_PASSWORD`, `409` for a configured login; signs every other session out and re-issues this one's cookie); `{name}` (`409` under `--name`). The name is live in `/auth/me` at once; push titles and the Remote Control name take it at the next start |
 | `GET /events` | SSE: `job`, `fleet`, `message`, `question`, `approval` (`{id, status, risk, tool, job_id, pane_id, change}`, 8.7), `instructions` (`{at}`, a layer changed, 21.3), `project` (`{id, change}`, 21.1), `lead` (a lead's status, 21.2), `orchestrator`, `poke`, `journal`, `say`, `attachment`, `spend` events (`poke`: a poke's result as `POST /orchestrator/poke` returns it; `journal`: `{id, kind, summary}`; `spend`: `{at}` when measured spend changed, 7.11). On connect the client refetches state, so no replay. A `fleet` event's data is the whole new fleet (same shape as `GET /fleet`), published only when it changed. A `message` event is `{pane_id, cursor}` (a followed conversation changed); an `orchestrator` event is the orchestrator's status (7.6) |
@@ -1579,6 +1754,11 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /agents/{target}/prompt` | `{text, force_over_draft, voice}` (`voice: true`, talk mode only, adds the voice header and talk flag, 13.1) → `{pane_id, status, queued, started, note}`; `409 BLOCKED` / `409 DRAFT` with `error.detail` (7.6) |
 | `POST /agents/{target}/keys` | `{keys:[…], screen_hash}` for dialogs and Esc/Ctrl+C. The screen is re-read and the keys are sent only if its hash still matches, else `409 CONFLICT` and nothing is sent. Only `esc`/`escape`/`ctrl+c` may omit the hash (an interrupt is for a screen that is changing). 1–16 keys, each a single letter or digit or one of `enter`, `esc`, `escape`, `tab`, `space`, `backspace`, `up`, `down`, `left`, `right`, `ctrl+c` (case-insensitive; R1 I3) |
 | `GET /agents/{target}/screen` | `{target, pane_id, name, kind, status, text, ansi, screen_hash, revision, dialog:{present, options:[{key, label, selected, warning?}], form, warnings}, draft:{input_found, present, text}}` from one ANSI read. `{target}` is an agent name or a pane id; a plain pane (no agent) works too |
+| `GET /system[?recheck=1]`, `GET /system/diagnostics` | The doctor report as the running server sees it, with its live view (3.4); cached 30 s unless `recheck=1`. Diagnostics is the same as redacted `text/plain` (no secrets or tokens, emails removed, home as `~`) |
+| `GET /system/stats`, `GET /system/agents` | The machine (12.9): the newest sample and the last minute; each agent's process tree (herdr's `pane.process_info` foreground pids and their descendants, CPU % and RSS) |
+| `POST /system/demo-state` | `--demo` only: switch the scripted machine the doctor sees (`doctor.DemoStates`) |
+| `GET /settings`, `PUT /settings/{name}` | Settings (3.2): every editable setting with value, default, source, `locked` and `apply`; a change is `{value}` or `{clear: true}`, `409` for a setting the app may not change or one a flag or variable sets, `400` with the loader's message |
+| `GET /onboarding`, `POST /onboarding/start`, `POST /onboarding/shell` | The first-run checklist (4.14.1): its state; finish it (`{engine?}`); a shell pane in the orchestrator's folder with an offered fix command typed in |
 | `GET /jobs?state=`, `POST /jobs`, `GET /jobs/{id}` | The board; create from the text box (`{brief, dir?, role?, done_when?, engine?, model?, isolate?}`; `budget?` with M12) → `201` and the queued job; detail with `timeline` and `questions` (6.8) |
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
@@ -1691,6 +1871,8 @@ The client sends a resize first; the server starts the process on that first res
 - `agent_instructions(id, subject, session_id, at, path, memory_type, load_reason, size)` (0013, 21.3): the instruction files Claude reported loading (the `InstructionsLoaded` hook), paths and a stat's size only, at most 200 rows per subject
 - `projects(id, slug, name, dir, root_dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, archived_at, created_at, updated_at)` (migration `0013_projects.sql`, 21.1): archived, never deleted; a partial unique index keeps two live projects off one root; `jobs.project_id` (0 Unfiled) with an index on `(project_id, state)`
 - `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
+
+- `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
 Paths are XDG: config `~/.config/crowsnest`, data `~/.local/share/crowsnest`, state and logs `~/.local/state/crowsnest/<session>/`, agent socket in `$XDG_RUNTIME_DIR/crowsnest/` or the state dir.
@@ -1916,6 +2098,37 @@ an expired session goes to the login page. The banner counts down to the next at
 "Retry now". Footer: `(C) 2026 Jeff Clement, v<version>` and a tagline from the embedded set.
 Connection loss shows a banner and reconnects with backoff; terminals reconnect and redraw.
 
+### 12.9 System, Settings and the machine strip (the doctor branch)
+
+**System** (`routes/SystemView.tsx`, `/system`, account menu → System, palette "System"): the
+doctor's verdict and summary, Re-check (`?recheck=1`), Copy diagnostics, versions, the agents with
+which one runs the orchestrator and jobs, the running instance (uptime, orchestrator state, herdr
+connected, hooks seen firing), paths, the machine card, recent warnings and errors, every check by
+group (`components/system/CheckList.tsx`: a shape per status, not colour alone; a fix line and a
+copyable command for anything not fine), and the settings not at their default with their source.
+
+**Settings** (`components/system/SettingsSheet.tsx`, account menu → Settings, palette "Settings"):
+one sheet, sections from the server (Agents, Orchestrator upkeep, Attachments, Notices, Guard),
+links to the Account, Notifications and Voice sheets rather than duplicating them, then the bind
+read-only with its command. Each row: the control (text, switch, choice, write-only password
+field), its source chip (default, config file, set here, environment, command line), when it
+applies, and a Reset for a value set here; a locked row is disabled and says where to change it.
+
+**The machine strip** (`components/system/MachineStats.tsx`, in the header on every view): CPU %
+with a one-minute sparkline, memory used of total, the 1-minute load, and from `lg` free disk on
+the data volume and the number of working agents; on a phone one chip (CPU %) that opens the same
+figures. Fixed widths and tabular numerals, so values change without layout shift; tooltips with
+the detail (cores, 5 and 15-minute load, the container's limit). Thresholds turn a figure to the
+warning ink with a triangle (never colour alone): CPU 90 %, memory 95 %, load two per core (load 63
+on 16 cores is saturated; one per core is "busy" and stays plain). The sparkline is one series in
+the chrome's muted ink, 2 px, no axes, on a fixed 0 to 100 scale (an honest flat line on a quiet
+machine). The server (`internal/sysstat`) samples every two seconds only while a browser's event
+stream is open, with gopsutil (pure Go on Linux, purego on macOS, so `CGO_ENABLED=0` holds on
+both; checked by building darwin and linux, amd64 and arm64), and in a container whose cgroup v2
+limits memory or CPU it reports the cgroup's usage and limits instead (`scope: container`, memory
+less inactive page cache as `docker stats` does). Each sample is a `sys` event; the client appends
+it to the last minute.
+
 ## 13. Talk mode
 
 Enabled only when an ElevenLabs key is configured; the key stays on the server.
@@ -2133,7 +2346,7 @@ mise tasks: `setup`, `dev` (the real binary on its own herdr session `crowsnest-
 | Web unit | Vitest + Testing Library for the composer, question cards (single, multi, note), dialog card, markdown/mermaid safety | `mise run test`, CI |
 | E2E hermetic | Playwright against `crowsnest --demo` (M9): user journeys for auth (login, wrong password, lockout and Retry-After, deep link, reload, sign-out ending other tabs' stream and terminal, cross-origin POST and WebSocket, Host check), Jobs, Chat, Inbox (every kind, XSS payloads, the dialog 409 path, live badge and title), Fleet, terminals (resize, reconnect after a server restart, key bar bytes, the 8-terminal cap), talk mode; and on every view no sideways scroll and 44 px targets at 375 px, the bottom nav clear of the composer and last row, theme without a flash, the offline banner, axe with no serious or critical violation. As built: each test starts its own demo instance (about 0.35 s) through the fixture in `web/e2e/support/fixtures.ts`, so tests run in parallel and never share state; projects desktop Chromium 1440×900 and 375×812 Chromium and WebKit; specs in `web/e2e/hermetic`, photographs in `web/e2e/screenshots` (the `screenshots:*` tasks). Tests act as agents too: a question asked over the demo's agent socket, turns appended to the demo orchestrator's transcript (`web/e2e/support/agent.ts`). Detail and the uncovered list: `docs/TESTING.md` | `mise run e2e`, CI (job `e2e`, report uploaded on failure) |
 | E2E real herdr | Playwright against a real instance on a throwaway session, no Claude: terminal WebSocket types a command and sees its output, pane view, fleet reflects a created tab, cross-origin WebSocket and POST are rejected, unauthenticated WebSocket is rejected. Built in M5 (`web/e2e/real`, `playwright.real.config.ts`): each spec starts the built binary on a random port and stops it; the `--demo` Fleet with no fixtures; both terminals on `--demo`; on real herdr the Terminal view and the pane view each run a computed `echo` and find its output in the xterm buffer, a second browser takes a pane over, and screenshots go to `web/screenshots/terminal-*.png`. The real-herdr instance gets a throwaway `HOME` under `/tmp` (herdr's TUI would otherwise show the user's own machines; `/tmp` because a unix socket path is limited to 104 bytes on macOS) seeded with `onboarding = false` so herdr skips its first-run screen. M9 adds `herdr.spec.ts`: a tab made with `herdr tab create` appears in Fleet without a reload; a pane runs a script that prints a Claude-shaped permission dialog, reports itself blocked with `herdr pane report-agent`, and waits for one key; the Inbox lists it and a press delivers the digit to the script; and with the login on, the real server refuses terminal WebSockets without a session or from another Origin. The fleet cache has its own Go integration test (`internal/fleet/integration_test.go`: changes seen by events with the poll set to a minute) | `mise run e2e:real`, local |
-| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. M8 adds `poke_integration_test.go`: a manual poke with one synthetic reason through `POST /orchestrator/poke` is delivered (outcome sent, turn started), appears in the transcript tagged `poke`, and is answered. M6 adds `ask_integration_test.go`: the orchestrator, started with crowsnest's `--mcp-config` and `--settings`, calls the `ask` MCP tool; the question appears through the browser API with the orchestrator's pane as its source and no permission dialog; it is answered through the API and the answer line arrives in the transcript. `CROWSNEST_E2E_PERMISSION_MODE` runs it under another mode. **The stop test** (M7, `internal/jobs/stop_integration_test.go`): a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent. Three haiku agents launched by the real launcher into worktrees of a scratch git repo under the package directory; the test plays the human for Claude's folder-trust prompt (trust is per folder, and crowsnest never answers it), which also exercises the "brief sent after the dialog" path. **Through the browser** (M9, `mise run e2e:claude`, `web/e2e/claude`): a real orchestrator on haiku in a throwaway session with the real HOME (Claude's login); a chat reply; a job given from the Jobs box (tester role, a scratch repo under the worktree) runs to done with its evidence; a job's question answered in the Inbox and applied; a nudge on a timeline; `crowsnest ask --wait` run by the orchestrator in its pane blocks until the Inbox answers; a draft typed through herdr is detected and refuses a send. Claude 2.1.332's folder-trust prompt is an unnumbered list with "No, exit" preselected, so the suite answers it in the browser terminal (Down, Enter). Real screens it captured are fixtures in `internal/fleet/testdata/screens/real_claude_2.1.332_*` | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
+| E2E real Claude (smoke) | Same, with a real orchestrator on a cheap model: starts, answers a prompt, the conversation renders, `crowsnest ask` round-trips, a poke is delivered. M4's part is `mise run test:claude` (`internal/orch/integration_test.go`, `-tags integration` and `CROWSNEST_E2E_CLAUDE=1`): Ensure, one prompt through the HTTP API, the reply through the messages API, then Restart and New conversation. M8 adds `poke_integration_test.go`: a manual poke with one synthetic reason through `POST /orchestrator/poke` is delivered (outcome sent, turn started), appears in the transcript tagged `poke`, and is answered. M6 adds `ask_integration_test.go`: the orchestrator, started with crowsnest's `--mcp-config` and `--settings`, calls the `ask` MCP tool; the question appears through the browser API with the orchestrator's pane as its source and no permission dialog; it is answered through the API and the answer line arrives in the transcript. `CROWSNEST_E2E_PERMISSION_MODE` runs it under another mode. **The stop test** (M7, `internal/jobs/stop_integration_test.go`): a job whose agent is told to stop early is refused by the Stop hook and continues; a job that calls `done` stops cleanly; a non-blocking `ask` is answered from the UI and the answer reaches the agent. Three haiku agents launched by the real launcher into worktrees of a scratch git repo under the package directory; the test plays the human for Claude's folder-trust prompt (trust is per folder, and crowsnest never answers it), which also exercises the "brief sent after the dialog" path. **Through the browser** (M9, `mise run e2e:claude`, `web/e2e/claude`): a real orchestrator on haiku in a throwaway session with the real HOME (Claude's login); a chat reply; a job given from the Jobs box (tester role, a scratch repo under the worktree) runs to done with its evidence; a job's question answered in the Inbox and applied; a nudge on a timeline; `crowsnest ask --wait` run by the orchestrator in its pane blocks until the Inbox answers; a draft typed through herdr is detected and refuses a send. Claude 2.1.332's folder-trust prompt is an unnumbered list with "No, exit" preselected; the suite answers it in the browser terminal (Down, Enter), and since the doctor branch the dialog detector reads it as an arrow-key menu, so `firstrun.spec.ts` answers it on the first-run checklist's card instead. `firstrun.spec.ts` is the whole first run against real herdr and haiku: setup link → password → checklist → Start → trust on the card → Chat with the greeting Real screens it captured are fixtures in `internal/fleet/testdata/screens/real_claude_2.1.332_*` | Local, opt-in (`CROWSNEST_E2E_CLAUDE=1`); costs tokens |
 
 Test-safety rules, enforced in the helpers rather than by convention: a test session name must
 match `^crowsnest-test-`; helpers scrub `HERDR_*` from the environment; teardown stops and deletes
@@ -2445,6 +2658,14 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
     words). A name prefix costs a second of every line and is noise once voices differ; a queue
     in the browser (the only place that plays audio) is the one place overlap can be prevented;
     a stale line is worse than none.
+80. **Settings precedence: flag, environment, app, file, default** (doctor branch, 3.2). Whoever starts the process is explicit for this run; a change in the app should take over a forgotten file. The alternative (the app above the environment) would make a container's `CROWSNEST_*` lie silently.
+81. **The config loader is the settings validator.** A change in the app is checked by loading the whole config with it, so the app and a flag accept exactly the same values and the same messages, and no second copy of the rules exists.
+82. **serve comes up without herdr or an agent, and waits** (3.4). A refusal at start is the worst first impression for "voila"; a lazy client and a start gate make the app the place that explains, and make installing herdr later enough.
+83. **One report for the CLI, the System page and the checklist** (`internal/doctor`). Three views of one list cannot disagree, and the checks are tested once, with fakes.
+84. **The opener gets a one-time handoff, never the token** (3.3). An opener's argv is readable by other local processes for as long as it runs; an id that is spent on first use, loopback-only and short-lived exposes nothing that outlives the redirect, and a relative redirect survives devtun's port rewriting.
+85. **The MagicDNS name is detected, the proxy header is not trusted** (3.5). Allowing a name only widens which Host is accepted (still loopback-reached, still authenticated); believing `X-Forwarded-For` would let any local client pick its limiter bucket, so that stays an explicit `--trusted-proxy`.
+86. **The folder-trust question is answered on a card, not by crowsnest** (4.14.1). Detecting the arrow-key menu and sending the keys the person picked keeps the rule (crowsnest never answers a start-up dialog itself) and removes the one step that needed the Terminal view.
+87. **Codex can be the orchestrator, with its gaps stated** (7.12) rather than refused: a machine with only Codex still gets a working crowsnest.
 
 ## 18. Milestones
 
@@ -2484,6 +2705,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 
 ## 20. Known limitations (kept honest as the build proceeds)
 
+- **The doctor branch.** Settings that apply "when crowsnest restarts" (attachment limits, the notify URL, protected hosts and branches, jobs' Remote Control) could be made live; they are saved and shown as pending until then. The checklist's sign-in terminal needs herdr: with herdr missing, Claude's sign-in is the printed command only. Codex as the orchestrator has the gaps in 7.12. Per-agent CPU counts only the processes under a pane's foreground process (an agent's detached daemons are not attributed). `--open auto` does not open the app on a normal start (only the setup link), by choice. The greeting is a poke-shaped turn on the orchestrator's model (a few hundred tokens once).
 - After "New conversation", and before the first prompt in a fresh directory, the conversation shows the pane text: Claude has not written a transcript yet (7.6).
 - The transcript format and herdr's screen heuristics are not stable contracts; an upgrade of either can degrade the conversation view or dialog cards (never the terminal).
 - The agent API is local-socket only, so agents on other machines cannot ask through crowsnest yet.
