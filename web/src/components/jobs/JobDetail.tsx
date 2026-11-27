@@ -10,6 +10,7 @@ import { actionFor, actionLabels, childrenOf, hasReview, isFinished, jobAnswerTe
 import { useFleet, useJob, useJobAction, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
 import { ReviewPanel } from "./ReviewPanel";
 import { AgentConversation } from "../agent/AgentConversation";
+import { JobRulesCard } from "../approvals/JobRulesCard";
 import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
 import { AgentTerminal } from "../agent/AgentTerminal";
 import { QuestionDetail } from "../inbox/QuestionDetail";
@@ -203,6 +204,7 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
           </ul>
         </Card>
       )}
+      <JobRulesCard jobId={job.id} finished={isFinished(job.state)} />
       <Timeline events={job.timeline} />
       {!isFinished(job.state) && <CancelJob id={job.id} />}
     </>
