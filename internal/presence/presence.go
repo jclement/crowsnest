@@ -94,13 +94,13 @@ type beat struct {
 type Service struct {
 	opts Options
 
-	mu        sync.Mutex
-	browsers  map[string]beat
-	delivered map[string]delivery // item → where and when it reached the human
-	dndUntil  time.Time
-	dndLoaded bool
+	mu            sync.Mutex
+	browsers      map[string]beat
+	delivered     map[string]delivery // item → where and when it reached the human
+	dndUntil      time.Time
+	dndLoaded     bool
 	heldDuringDND int
-	lastState string
+	lastState     string
 }
 
 type delivery struct {
