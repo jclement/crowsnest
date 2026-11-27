@@ -20,6 +20,7 @@ package push
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -72,6 +73,9 @@ type WatcherOptions struct {
 	// while the human is here (it is on screen), not twice for one item, held by do not disturb
 	// unless urgent. Nil: every notice that passes the kind switch and the rate gate is pushed.
 	Route func(ctx context.Context, item, channel string, blocking bool) (bool, string)
+	// Describe finds the project and job a question, approval or dialog belongs to, for the
+	// decision-grade text (decision.go). Nil: every item reads as unfiled, with no job.
+	Describe Describer
 }
 
 // Minter mints an action token for one item (internal/actions).
@@ -165,10 +169,12 @@ func (w *Watcher) QuestionAsked(question questions.Question) {
 	for _, option := range question.Options {
 		options = append(options, NoticeAction{Action: option.Key, Title: option.Label})
 	}
-	if notice.Actions = QuestionActions(string(question.Kind), question.Multi, options); notice.Actions != nil {
-		notice.ActionItem = "question:" + question.ID
-	}
-	w.notify(context.Background(), notice)
+	ctx := context.Background()
+	notice = DecorateQuestion(notice, question.ID, question.Title, QuestionDetails{
+		Kind: string(question.Kind), Multi: question.Multi, Urgency: string(question.Urgency), Recommend: question.Recommend,
+		Options: options, Context: question.Context, HasFiles: len(question.Files) > 0 || question.FileCount > 0, BodyChars: len(question.BodyMD),
+	}, w.where(ctx, question.JobID, question.SourcePane))
+	w.notify(ctx, notice)
 }
 
 // ApprovalRequested pushes a tool call waiting for approval (DESIGN.md 8.7); its pane's terminal
@@ -180,7 +186,19 @@ func (w *Watcher) ApprovalRequested(approval approvals.Approval) {
 		mark.pushed = true
 	}
 	w.mu.Unlock()
-	w.notify(context.Background(), ApprovalNotice(approval.ID, string(approval.Risk), approval.AgentName, approval.Summary, approval.PaneID))
+	ctx := context.Background()
+	notice := ApprovalNotice(approval.ID, string(approval.Risk), approval.AgentName, approval.Summary, approval.PaneID)
+	truncated := strings.HasSuffix(approval.Summary, "…")
+	notice = DecorateApproval(notice, approval.ID, string(approval.Risk), approval.AgentName, approval.Summary, truncated, w.where(ctx, approval.JobID, approval.PaneID))
+	w.notify(ctx, notice)
+}
+
+// where asks the describer, if there is one, where an item belongs.
+func (w *Watcher) where(ctx context.Context, jobID, paneID string) Where {
+	if w.opts.Describe == nil {
+		return Where{}
+	}
+	return w.opts.Describe(ctx, jobID, paneID)
 }
 
 func (w *Watcher) jobChanged(ctx context.Context, event jobs.HubEvent) {
@@ -228,17 +246,22 @@ func (w *Watcher) fleetChanged(current fleet.Fleet) {
 // CheckDialogs pushes every dialog that has been up for dialogHold and not pushed yet.
 func (w *Watcher) CheckDialogs(ctx context.Context) {
 	now := w.opts.Now()
-	var due []Notice
+	type dueDialog struct {
+		pane   string
+		notice Notice
+	}
+	var due []dueDialog
 	w.mu.Lock()
 	for pane, mark := range w.dialogs {
 		if !mark.pushed && now.Sub(mark.since) >= dialogHold {
 			mark.pushed = true
-			due = append(due, DialogNotice(pane, mark.name, mark.workspace))
+			due = append(due, dueDialog{pane: pane, notice: DialogNotice(pane, mark.name, mark.workspace)})
 		}
 	}
 	w.mu.Unlock()
-	for _, notice := range due {
-		w.notify(ctx, notice)
+	// Where it belongs is looked up outside the lock: the describer reads the database.
+	for _, dialog := range due {
+		w.notify(ctx, DecorateDialog(dialog.notice, dialog.pane, w.where(ctx, "", dialog.pane)))
 	}
 }
 

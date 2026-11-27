@@ -176,6 +176,19 @@ func TestPushActionNeverAnswersAnElevatedApproval(t *testing.T) {
 	}
 }
 
+func TestPushActionSnoozeDecidesNothing(t *testing.T) {
+	f := newApprovalFixture(t)
+	token, _ := f.tokens.Mint(context.Background(), "approval:"+f.low, []string{"snooze"})
+	// This fixture has no attention service, so the snooze itself is unavailable; what matters
+	// is that a Snooze press can never become a decision.
+	if code := f.action(token, "snooze"); code == http.StatusOK && f.status(t, f.low) != approvals.StatusPending {
+		t.Fatal("a snooze decided the approval")
+	}
+	if f.status(t, f.low) != approvals.StatusPending {
+		t.Fatal("a snooze must leave the approval pending")
+	}
+}
+
 func TestPushActionIsGuardedAgainstCrossSiteRequests(t *testing.T) {
 	f := newApprovalFixture(t)
 	token, _ := f.tokens.Mint(context.Background(), "approval:"+f.low, []string{"allow"})
