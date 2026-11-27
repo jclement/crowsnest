@@ -78,7 +78,7 @@ func (r *stopRig) testLanding(t *testing.T) {
 		"not_verified as an empty list, and walkthrough_md: one short paragraph naming land.txt and why it exists. If a [crowsnest review …] message "+
 		"asks for changes, make them, commit, and call done again.")
 	review := r.waitFor(t, job.ID, 5*time.Minute, func(d jobs.Detail) bool {
-		return d.State == jobs.StateInReview || d.State.Terminal() || d.State == jobs.StateNeedsYou
+		return d.State == jobs.StateInReview || d.State.Terminal() || (d.State == jobs.StateNeedsYou && d.Cause == jobs.CauseReview)
 	})
 	r.record(t, "(a) after the builder's done", review)
 	if review.State != jobs.StateInReview || review.ReviewRound != 1 || review.WalkthroughMD == "" {

@@ -139,7 +139,8 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 			s.restart(ctx, r, false)
 		}
 	case !r.BriefSent:
-		if s.heldWhilePaused(ctx, "brief:"+id, "typing the brief of "+id) {
+		// A job the human started anyway gets its brief even while paused: that start was theirs.
+		if !r.StartAnyway && s.heldWhilePaused(ctx, "brief:"+id, "typing the brief of "+id) {
 			return
 		}
 		if agent.InteractiveReady && agent.AgentStatus != herdr.StatusBlocked && !s.hasDialog(ctx, r.PaneID) {

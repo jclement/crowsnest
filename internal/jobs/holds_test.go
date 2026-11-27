@@ -298,3 +298,26 @@ func TestPauseSuppressesEveryAutomation(t *testing.T) {
 		}
 	})
 }
+
+// TestStartAnywayWhilePausedGetsItsBriefAfterADialog: the human's Start anyway is theirs, so the
+// brief held back by a start-up dialog is typed once the dialog is answered, paused or not (found
+// by the real-Claude landing test).
+func TestStartAnywayWhilePausedGetsItsBriefAfterADialog(t *testing.T) {
+	pause := &fakePause{paused: true}
+	r := newRig(t, func(o *Options) { o.Pause = pause })
+	ctx := context.Background()
+	job := r.create(CreateInput{Brief: "New", Dir: t.TempDir()})
+	r.fake.StartNotReadyNext()
+	if _, err := r.svc.StartAnyway(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	d := r.get(job.ID)
+	if d.State != StateNeedsYou || d.Cause != CauseDialog {
+		t.Fatalf("expected the trust dialog: %s %s", d.State, d.Cause)
+	}
+	_ = r.fake.ClearDialog(d.PaneID)
+	r.svc.Tick(ctx)
+	if d = r.get(job.ID); d.State != StateRunning || !hasEvent(d, EventLaunch, "Brief sent") {
+		t.Fatalf("the brief was held while paused after Start anyway: %s %s", d.State, d.Cause)
+	}
+}
