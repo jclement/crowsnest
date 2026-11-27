@@ -1,6 +1,6 @@
 # The crowsnest walkthrough film
 
-A narrated, captioned product tour (about three and a half minutes), recorded from the real app
+A narrated, captioned product tour (just under four minutes), recorded from the real app
 running in `--demo`, and rebuilt from this folder.
 
 ```sh
