@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/jclement/crowsnest/internal/attention"
 	"io"
 	"log/slog"
 	"net/http"
@@ -138,6 +139,9 @@ type harnessOptions struct {
 	hostNames []string
 	// The System page, Settings and the first run (system_test.go); nil: 503
 	system System
+	// The attention queue and the Now view (attention_test.go); nil: 503
+	attention *attention.Service
+	now       NowSources
 }
 
 var testWeb = fstest.MapFS{
@@ -221,6 +225,8 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Approvals:     opts.approvals,
 		Actions:       opts.actions,
 		System:        opts.system,
+		Attention:     opts.attention,
+		Now:           opts.now,
 	})
 	if err != nil {
 		t.Fatal(err)

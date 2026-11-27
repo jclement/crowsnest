@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/orch"
@@ -65,7 +66,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, "reading or writing projects", err)
 		return
 	}
-	counts, _ := service.JobCounts(r.Context())
+	counts := s.projectCounts(r.Context(), service)
 	view := projectsView{Projects: []projectView{}, Unfiled: counts[0]}
 	for _, project := range list {
 		view.Projects = append(view.Projects, s.viewOf(r.Context(), project, counts))
@@ -97,7 +98,7 @@ func (s *Server) handleProject(w http.ResponseWriter, r *http.Request) {
 		// ?open=1 when the human opens the project, not on every refetch.
 		s.deps.Leads.Opened(context.WithoutCancel(r.Context()), project.ID)
 	}
-	counts, _ := service.JobCounts(r.Context())
+	counts := s.projectCounts(r.Context(), service)
 	writeData(w, http.StatusOK, s.viewOf(r.Context(), project, counts))
 }
 
@@ -167,7 +168,7 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		_, _ = s.deps.Leads.Stop(ctx, project.ID)
 	}
-	counts, _ := service.JobCounts(r.Context())
+	counts := s.projectCounts(r.Context(), service)
 	writeData(w, http.StatusOK, s.viewOf(r.Context(), project, counts))
 }
 
@@ -271,4 +272,29 @@ func (s *Server) leadResult(w http.ResponseWriter, r *http.Request, status proje
 		return
 	}
 	writeData(w, http.StatusOK, status)
+}
+
+// projectCounts are the job counts per project (0 is Unfiled), with needs_you replaced by the
+// attention queue's own count for that project (DESIGN.md 22), so the switcher, the project
+// pages and the palette show the badge's number and not a second definition of it.
+func (s *Server) projectCounts(ctx context.Context, service *projects.Service) map[int64]projects.Counts {
+	counts, _ := service.JobCounts(ctx)
+	if counts == nil {
+		counts = map[int64]projects.Counts{}
+	}
+	if s.deps.Attention == nil {
+		return counts
+	}
+	waiting := s.deps.Attention.Snapshot(ctx).Counts.ByProject
+	for id, entry := range counts {
+		entry.NeedsYou = waiting[strconv.FormatInt(id, 10)]
+		counts[id] = entry
+	}
+	for key, n := range waiting {
+		id, err := strconv.ParseInt(key, 10, 64)
+		if _, ok := counts[id]; err == nil && !ok {
+			counts[id] = projects.Counts{NeedsYou: n}
+		}
+	}
+	return counts
 }
