@@ -558,6 +558,7 @@ protocol through the CLI and their prompt; they have no hooks, so they rely on t
 | `fail(reason)` | Declares it cannot be finished |
 | `job_create(brief, role, dir, …)` | Delegates a child job: inside the caller's own directory it starts at once; anything wider waits for the human's approval (6.10) |
 | `job_get()` | The agent's own job, its open questions and their answers: what it reads after a compaction or restart |
+| `job_adopt(title, brief)` | Standing agents only: records work the human gave in conversation (Chat or the Claude app) as a job the caller holds itself, and returns its id (7.10.1) |
 
 ### 6.3 The supervisor: declared state, enforced
 
@@ -1441,7 +1442,85 @@ door's `frontdoor-poke`, with its lessons:
   up and why it may not have. The name is not shown on the screen; it is the title in
   claude.ai/code and the app.
 - **Job agents**: off by default; `--job-remote-control` adds `--remote-control "<name> <job id>
-  <title, cleaned, 40 characters>"` to Claude job agents (Codex has no such flag).
+  <title, cleaned, 40 characters>"` to Claude job agents (Codex has no such flag). Their session
+  links are not captured (a gap, kept so on purpose: it would need the job launcher's own watch in
+  `internal/jobs`, and ten jobs would flood the Claude app's session list anyway).
+
+**7.10.1 The session link, "Open in Claude", and work given in conversation** (built on
+`wip/phone`; `internal/orch/remote_url.go`, `remote_control.go`, `internal/jobs/adopt.go`,
+`internal/agentapi/mcp_job_adopt.go`, `web/src/components/remote/OpenInClaude.tsx`).
+
+- **What a Remote Control session exposes** (Claude Code docs read 2026-11-27, and an experiment
+  with Claude Code 2.1.332 and herdr 0.9.5 in a throwaway `crowsnest-test-*` session, haiku, panes
+  at 44 and 80 columns; the recorded pane texts, with made-up ids of the same shape, are
+  `internal/orch/testdata/remote_control`):
+  - The banner `/remote-control is active · Continue here, on your phone, or at
+    https://claude.ai/code/session_<id>` (the id is `01` and 22 more letters and digits). Claude
+    wraps it to the pane's width and breaks the URL anywhere: at 44 columns it was `…or at
+    https://claude.ai/co` then `de/session_…` on the next line, indented two spaces.
+  - `/remote-control` opens a panel repeating the URL (ending in a full stop). The footer's `/rc`
+    indicator links to the session but is hidden when the terminal is narrow.
+  - The **transcript** records it: a line `{"type":"system","subtype":"bridge_status","url":
+    "https://claude.ai/code/session_…"}` each time Remote Control connects, and
+    `{"type":"bridge-session","bridgeSessionId":"cse_…"}` lines. No file outside the transcript,
+    no hook input and no status-line field carries it.
+  - `--resume` of the same conversation reconnects to the **same** session URL (the docs say so;
+    seen). A new conversation (a new `--session-id`) gets a **new** URL.
+- **Capture**: after every start (Restart and New conversation included) the status's
+  `remote_control_url` is cleared and the watch looks again: for 45 s on every tick it reads the
+  pane (`recent`, 200 lines) from the last `Claude Code v` header on, so a previous conversation's
+  banner left above it is never taken; then, while it is still unknown, once every two minutes
+  for an hour, also scanning the transcript's `bridge_status` lines (skipped without decoding when
+  they do not mention it; at most 64 MB read). A URL is taken only when it is exactly
+  `https://claude.ai/code/session_[A-Za-z0-9]{20,64}` (a query string is dropped, a look-alike
+  host or path refused); a URL that runs to the end of a line while still shorter than that shape
+  is continued with the first word of the next line. The newest one wins. Nothing is ever built
+  from a display name. The banner without a readable URL still sets the note `active`.
+- **Persistence**: kv `orchestrator.remote_control` (a lead's `lead.<slug>.remote_control`) holds
+  `{session, name, url}`. A crowsnest restart that adopts the running agent restores the name and
+  link when the record's session is the adopted agent's (else it assumes the name the launch
+  settings would give now and looks again); when the conversation changes under a running agent
+  (a `/clear`) the link is dropped and looked for again.
+- **Fields**: `remote_control` (the name started with), `remote_control_note` (`active`, or the
+  sentence after 45 s without it) and `remote_control_url` on the orchestrator's and every lead's
+  status (`GET /orchestrator`, `GET /leads`, `GET /projects`, the `orchestrator` and `lead` events).
+- **Open in Claude** (the web app): a link button (`target=_blank`, `rel="noopener noreferrer"`,
+  44 px on touch, the session name in its title) on Chat's header for the agent it talks to, a
+  lead's card on its project page, and beside Now's orchestrator and running leads' rows (beside
+  the row's button, never inside it). It is shown only with a current link. When Remote Control
+  was asked for but no link is known, a muted line instead (on the lead's card and under Chat's
+  header): `Remote Control: find "quark crowsnest" in the Claude app.` plus the note's reason when
+  it did not come up. Off: nothing. The browser re-checks the same strict shape before drawing a
+  link. A "?" beside the button opens **Crowsnest or the Claude app?**, the table below in short.
+- **When to use which**: crowsnest for the overview, decisions, approvals, many projects and
+  landing; Remote Control (the Claude app) for a long conversation with one agent.
+
+  | | Claude app (Remote Control) | Crowsnest |
+  |---|---|---|
+  | Sees | One agent's conversation | Every project, job, question, approval, spend |
+  | Good at | A long back-and-forth with one agent; native app and notifications | The queue across projects; supervision; approvals; landing |
+  | Blind to | Jobs, other projects, the supervisor | Nothing in the session, but its chat is a plainer client |
+  | Reach | Anywhere | The tailnet |
+- **Work given in conversation is a job** (`job_adopt`, R4 Codex P5): the MCP tool `job_adopt(title,
+  brief)` (socket `POST /api/v1/jobs/adopt`) records work a standing agent was given in Chat or in
+  the Claude app as a crowsnest job it holds itself: no agent is started and nothing is typed; the
+  job is born exactly as `dispatchTo` leaves a job it gave a standing agent (its pane and name,
+  `running`, brief sent), so the supervisor, `job_update`, `done` and `fail` treat it like any held
+  job. The orchestrator's is Unfiled, a lead's is in its project. It returns the id. Refused for a
+  job agent (it has its job), for a caller that is not a standing agent, and while the agent
+  already holds a live job (one at a time, 6.1: finish it, or hand the new work out with
+  `job_create`). It shares `job_create`'s per-caller rate limit. Its launch event says "Recorded
+  from conversation" (detail `from: conversation`); the board card does not say so yet (a gap: it
+  would need a column). CROWSNEST.md (the orchestrator's and every lead's) tells the agent to
+  record such work first with `job_adopt` or `job_create` and say the job id in its reply, and the
+  rule above.
+- **Demo**: `--demo` never starts Remote Control. The orchestrator and each lead show a made-up
+  name (`<instance> crowsnest`, `<instance> <project>`) and a made-up link of the real shape,
+  `https://claude.ai/code/session_demo…`, which leads nowhere: it exists so the UI and the hermetic
+  tests (`web/e2e/hermetic/remote.spec.ts`) can show the button.
+- **Not verified**: a permission answered in the Claude app superseding crowsnest's card, crowsnest
+  typing a poke while the human types in the app, and a link after Remote Control is disconnected
+  with `/remote-control` (the status keeps the last link until the next start).
 
 **7.11 Spend** (built on `wip/spend`; `internal/transcript/usage_meter.go`, `internal/spend`,
 `internal/store/spend.go`, migration `0011_spend.sql`, `internal/httpd/spend.go`,
@@ -2081,7 +2160,7 @@ The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identif
 | `crowsnest heavy [--status] [--timeout 1h] -- <command…>` | Run a build, suite or typecheck through the heavy-command gate (6.12); defers to an outside `heavy`; exit 75 when no slot came free |
 | `crowsnest pause [--until HH:MM] [--reason] \| pause --status \| resume` | The pause switch (6.13), from an agent's pane or the human's shell (the socket of `--session`); `resume` refused to an agent; with the server down `pause` writes `~/.config/crowsnest/paused` |
 | `crowsnest digest submit --file f.md [--day]` | The orchestrator delivers the digest it was asked for (7.13) |
-| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done` (with `walkthrough_md`), `fail`, `job_land` (a request, 6.11), `job_create` (with `project` and `to` for the orchestrator, 21.2), `job_get`, `project_list`, `project_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
+| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done` (with `walkthrough_md`), `fail`, `job_land` (a request, 6.11), `job_create` (with `project` and `to` for the orchestrator, 21.2), `job_get`, `job_adopt` (standing agents: work given in conversation becomes a job they hold, 7.10.1), `project_list`, `project_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
 
 ## 10. HTTP API
 
@@ -2120,14 +2199,14 @@ browser reconnects, gets `hello`, and refetches.
 | `POST /jobs/{id}/message`, `/cancel`, `/nudge`, `/resume`, `/budget` | Talk to the job's agent (`{text, force_over_draft}`, errors like a Chat send), stop it (Esc, then `cancelled`; the pane is kept), push it, get a stuck job moving (retry now, restart a gone agent, else nudge), raise a cap (M12) |
 | `GET /roles`, `GET /dirs` | Role names and remembered directories for the new-job form |
 | `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}[?open=1]`, `PUT /projects/{ref}` | Projects (21.1): `{projects: [Project + {lead, counts: {needs_you, running, total}}], unfiled: counts}`; create `{name, dir, slug?, description?, default_role?, default_engine?, default_model?, default_isolate?: -1\|0\|1, permission_mode?, lead_start?}` (`400` with the reason: not a directory, too wide, overlapping); `{ref}` is the id or slug; `?open=1` applies `lead_start=open`; `PUT` edits or `{archived}` (archiving stops the lead). A `project` event `{id, change}` |
-| `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | Project leads (21.2): the running leads' statuses (the orchestrator's status shape plus `project_id`, `slug`, `running`; state `off` when not running, `stopped` after Stop); the lead's controls (`poke` answers as `POST /orchestrator/poke`). A `lead` event carries a lead's status |
+| `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | Project leads (21.2): the running leads' statuses (the orchestrator's status shape plus `project_id`, `slug`, `running`; state `off` when not running, `stopped` after Stop; Remote Control's `remote_control`, `remote_control_note` and `remote_control_url` as the orchestrator's, 7.10.1); the lead's controls (`poke` answers as `POST /orchestrator/poke`). A `lead` event carries a lead's status |
 | `POST /jobs/{id}/restart-agent` | Restart the job's agent on the same conversation with its start-up files and instruction layers written afresh (21.3); refused for a job a standing agent holds (restart that agent) |
 | `GET /voice/agents`, `PUT /voice/agents/{agent}` | Each standing agent's voice (13.5): `{agents: [{agent, label, voice_id}], default_voice}`; `{voice_id}` (`""`: the instance's). 404 when talk mode is off |
 | `GET /instructions` | Instruction layers (21.3): `{global: Layer, roles: [Layer], projects: [Layer], max_bytes}`; a `Layer` is `{scope, key, name, source: none\|builtin\|db\|file, effective_md, saved_md, builtin_md, file_path, editable, revision, updated_at, size}` |
 | `GET /instructions/{scope}/{key}`, `PUT` the same `{body_md}`, `DELETE /instructions/role/{name}`, `POST /instructions/{scope}/{key}/restore` `{revision}` | One layer with its revisions `{layer: Layer, revisions: [{revision, body_md, deleted, created_at, size}]}` (newest first), which every write also answers. Key `-` is the global layer. `400` bad scope, key, body (over 32 KB, an empty role), `404` unknown role, project or revision, `409` a role that comes from a file. An `instructions` event (`{at}`) says a layer changed |
 | `GET /agents-instructions/{subject}` | `{subject, started_at, hash, layers: [{layer, scope, key, revision, source, size, hash}], changed, changes: [{layer, scope, key, was_source, now_source, was_revision, now_revision}], loaded: [{path, memory_type, load_reason, size, at}], skills_note}` for `j_<n>`, `orchestrator` or `lead:<slug>` (21.3) |
 | `GET /spend?from=&to=&group=job\|model\|day`, `GET /spend/summary` | Spend for a range of local days, grouped; today, this week and the orchestrator's line (7.11). Jobs carry `spend` on `/jobs` and `/jobs/{id}` (with `spend_turns` there) |
-| `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control` and `remote_control_note` (7.10) |
+| `GET /orchestrator` | The orchestrator's status (added in M4; 7.6), with `remote_control`, `remote_control_note` and `remote_control_url` (the session's `https://claude.ai/code/session_…` link once captured, else absent; 7.10.1) |
 | `GET /orchestrator/context`, `POST /orchestrator/compact` | The orchestrator's context size and upkeep `{tokens, known, at, compacted_at, human_at, threshold, last_compact_at, fresh_at, fresh_day}`; Compact now (409 when it cannot take it) (7.9) |
 | `GET /schedule?project=`, `POST /schedule/{name}/run`, `PUT /schedule/{name}` | Scheduled tasks `{tasks:[{name, title, path, origin: app\|dir\|user, editable, every, after, schedule, as, target: orchestrator\|lead\|job, project_id, project, dir, role, engine, body_md (app only), shadowed, enabled, last_run_at, next_due_at, last_outcome, job_id, job_state, run_now, runs:[{at, outcome, job_id}]}], problems:[{path, name, error}], dirs}`, `project=<id>` keeping one project's tasks (0: the orchestrator's and unfiled); Run now; `{enabled}` for any task and/or every field of an app schedule (a full replacement; a task file's edit is `409` "read-only: edit the file") (7.8). A `schedule` event (`{at}`) says a stamp, switch or app schedule changed |
 | `POST /schedule`, `DELETE /schedule/{name}` | An app schedule `{name, every, after, as: poke\|job, project_id, body_md, dir, role, engine}` → `201` and the list (`400` invalid, `409` a taken name); delete one (`409` for a task file, `404` unknown) → the list (7.8) |
@@ -3080,6 +3159,7 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 100. **One attention queue, computed on the server** (22; R4 Fable 1.1, 1.3, 1.5, Codex C2). Four surfaces counted "needs you" four ways in the browser (12 in the tray, 11 on the Inbox, 4 on the board at the same moment). One server-side model, one snapshot, one SSE event and one number make them agree by construction; the browser keeps no rule about what counts. Snoozes moved to the server with it, so a snooze on the phone holds on the desktop.
 101. **Now is home; the board is `/jobs`** (22; Fable 1.2, Codex C1). The first screen answers what needs me, what each project is doing and what happened while I was away; giving a job stays one box down. Four primary destinations plus More on a phone (Fable 1.4, Codex C4); the same order on the desktop rail, so nothing moves between devices.
 102. **"Since you left" is per browser, kept on the server** (22.3). A random id in localStorage names the browser; its last activity and its window start live in kv. Keeping them on the server means a phone and a laptop each have their own "since", and a cleared tab does not replay a day; a ten-minute gap is "leaving", shorter is a tab switch.
+103. **Link to Remote Control, do not compete with it; work given there becomes a job** (7.10.1; R4 Fable 3.7, Codex P5). The Claude app is the better client for a long conversation with one agent, and crowsnest the only place that sees every project, question and approval. So crowsnest links to the agent's real session (captured from Claude's own banner or transcript, never built from a name, shown only while current) rather than growing its chat, and the agents are told to record conversational work with `job_adopt` so nothing given in the app escapes supervision or the board. `job_adopt` reuses the held-job lifecycle of a dispatched job instead of a new one, and keeps one live job per standing agent, so the supervisor's rules need no exception.
 
 ## 18. Milestones
 
