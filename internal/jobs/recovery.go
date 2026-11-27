@@ -130,7 +130,7 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 	}
 	s.renotifyQuestions(ctx, r)
 	s.tickBlocked(ctx, r) // a wake-up that is due, or a job waited on that settled (6.18)
-	s.checkBudget(ctx, r)  // the 80% warning and the limit (6.16)
+	s.checkBudget(ctx, r) // the 80% warning and the limit (6.16)
 	if IsStanding(r.AgentName) {
 		s.checkActivity(ctx, r, now) // a standing agent's own lifecycle is internal/orch's
 		return

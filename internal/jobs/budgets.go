@@ -372,7 +372,7 @@ func (s *Service) checkBudget(ctx context.Context, r store.JobRecord) {
 
 // applyBudget moves a job across the warning and the limit, telling the agent each time.
 func (s *Service) applyBudget(ctx context.Context, id string, view BudgetView) {
-	message := ""
+	message, exceeded := "", false
 	job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		state := State(r.State)
 		if state.Terminal() {
@@ -388,6 +388,7 @@ func (s *Service) applyBudget(ctx context.Context, id string, view BudgetView) {
 				r.Stuck = false
 			}
 			c.notify = fmt.Sprintf("crowsnest: job %s reached its budget (%s): %s", FormatID(r.ID), what, oneLine(r.Title, 80))
+			exceeded = true
 			message = fmt.Sprintf("[crowsnest budget] Job %s has used %s. Stop at a safe point: finish the step you are in, commit what is safe to keep, "+
 				"call job_update with where you got to, and end your turn. Do not start anything new; the human decides whether to raise the budget.", FormatID(r.ID), what)
 		case view.Share >= budgetWarnAt && view.Share < 1 && r.BudgetState == BudgetOK:
@@ -403,14 +404,59 @@ func (s *Service) applyBudget(ctx context.Context, id string, view BudgetView) {
 		}
 		return nil
 	})
-	if err != nil || message == "" || job.PaneID == "" {
+	if err != nil {
 		return
 	}
-	if s.paused() {
-		return // the human paused automation: the card says it, nothing is typed
+	if exceeded {
+		// The budget covers the jobs below it: they stop at a safe point too.
+		s.exceedBelow(ctx, id, describeBudget(view), 0)
+	}
+	s.tellBudget(ctx, job, message)
+}
+
+// tellBudget types a budget notice to a job's agent (not while paused: the card says it).
+func (s *Service) tellBudget(ctx context.Context, job Job, message string) {
+	if message == "" || job.PaneID == "" || s.paused() {
+		return
 	}
 	if err := s.sendText(ctx, job.PaneID, job.AgentName, message); err != nil {
-		_ = s.Journal(ctx, id, EventBudget, "The budget notice could not be typed to the agent: "+oneLine(err.Error(), 160), nil)
+		_ = s.Journal(ctx, job.ID, EventBudget, "The budget notice could not be typed to the agent: "+oneLine(err.Error(), 160), nil)
+	}
+}
+
+// exceedBelow puts the live jobs below parent in front of the human with it: their spend is
+// part of the budget that ran out.
+func (s *Service) exceedBelow(ctx context.Context, parent, what string, depth int) {
+	numeric, err := ParseID(parent)
+	if err != nil || depth >= maxBudgetDepth {
+		return
+	}
+	children, err := s.opts.Store.ListChildJobs(ctx, numeric)
+	if err != nil {
+		return
+	}
+	for _, child := range children {
+		if child.ReviewOf != 0 || child.FixOf != 0 || State(child.State).Terminal() {
+			continue
+		}
+		id := FormatID(child.ID)
+		job, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+			if State(r.State).Terminal() || r.BudgetState == BudgetExceeded {
+				return errSkip
+			}
+			r.BudgetState, r.BudgetDetail = BudgetExceeded, "Its parent "+parent+" used "+what
+			c.event(EventBudget, "Its parent "+parent+" reached its budget; told to stop at a safe point", nil)
+			if state := State(r.State); state == StateRunning || state == StateBlocked {
+				r.State, r.Cause, r.CauseDetail, r.Stuck = string(StateNeedsYou), string(CauseBudget), r.BudgetDetail, false
+			}
+			return nil
+		})
+		if err != nil {
+			continue
+		}
+		s.tellBudget(ctx, job, fmt.Sprintf("[crowsnest budget] Job %s's parent %s reached its budget (it counts yours). Stop at a safe point: finish the step you are in, "+
+			"commit what is safe, call job_update with where you got to, and end your turn.", id, parent))
+		s.exceedBelow(ctx, id, what, depth+1)
 	}
 }
 
@@ -455,7 +501,7 @@ func (s *Service) SetJobBudget(ctx context.Context, id string, input BudgetInput
 	}
 	record, err := s.opts.Store.GetJob(ctx, mustParse(id))
 	if err != nil {
-		return job, nil
+		return job, err
 	}
 	view := s.BudgetOf(ctx, record)
 	share := 0.0

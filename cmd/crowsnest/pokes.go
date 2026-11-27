@@ -7,9 +7,9 @@
 package main
 
 import (
-	"github.com/jclement/crowsnest/internal/spend"
 	"context"
 	"fmt"
+	"github.com/jclement/crowsnest/internal/spend"
 	"log/slog"
 	"time"
 

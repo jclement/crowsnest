@@ -80,7 +80,7 @@ const (
 		"waiting=true: you asked questions and truly nothing is left that they do not block; you may then end your turn and the answer will wake you."
 	doneDescription = "Declare your job finished. Call it once, when the work is complete and checked. result_md says what was done. " +
 		"verified lists what you checked and saw pass, with commands. not_verified lists what you skipped or could not run. Both lists are required (use [] for none). " +
-		"Never call done over failing tests; say so in not_verified or call fail. In a git checkout crowsnest checks before it accepts: the tree must be clean (commit first), "+
+		"Never call done over failing tests; say so in not_verified or call fail. In a git checkout crowsnest checks before it accepts: the tree must be clean (commit first), " +
 		"a worktree branch needs commits (or no_commits_reason), and crowsnest runs the project's check itself; a failure comes back to you as a [crowsnest check] message."
 	failDescription      = "Declare that your job cannot be finished, with the reason and what you tried. Use it only when no path forward is left; if you need a decision, call ask instead."
 	jobCreateDescription = "Delegate a unit of work as a child job (leads). crowsnest starts a new agent for it with the role's instructions; a builder given a git repo works in its own worktree. " +

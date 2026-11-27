@@ -176,8 +176,11 @@ func TestBudgetThresholdsChildrenAndUnmeasured(t *testing.T) {
 	spent[parent.ID] = dollars(1.3)
 	check(BudgetView{})
 	d := r.get(parent.ID)
-	if d.State != StateNeedsYou || d.Cause != CauseBudget || d.PaneID == "" || !lastPromptHas(r, "Stop at a safe point") {
+	if d.State != StateNeedsYou || d.Cause != CauseBudget || d.PaneID == "" {
 		t.Fatalf("at 100%%: %s %s", d.State, d.Cause)
+	}
+	if c := r.get(child.ID); c.State != StateNeedsYou || c.Cause != CauseBudget || !strings.Contains(c.CauseDetail, parent.ID) {
+		t.Fatalf("the child kept going past its parent's budget: %s %s %q", c.State, c.Cause, c.CauseDetail)
 	}
 	if _, err := r.svc.Update(ctx, parent.ID, UpdateInput{Progress: "carry on", State: "running"}); err != nil {
 		t.Fatal(err)

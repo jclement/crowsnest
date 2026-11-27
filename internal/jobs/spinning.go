@@ -70,8 +70,8 @@ type Step struct {
 type jobWatch struct {
 	budgetAt  time.Time
 	receiptAt time.Time
-	spinAt   time.Time
-	spinSize int64
+	spinAt    time.Time
+	spinSize  int64
 }
 
 func (s *Service) watchOf(id string) *jobWatch {
@@ -345,7 +345,7 @@ func treeFingerprint(ctx context.Context, dir string) string {
 		sum.Write([]byte(line))
 		if len(line) > 3 {
 			if info, err := os.Stat(dir + "/" + strings.TrimSpace(line[3:])); err == nil {
-				fmt.Fprintf(sum, "%d%d", info.Size(), info.ModTime().UnixNano())
+				_, _ = fmt.Fprintf(sum, "%d%d", info.Size(), info.ModTime().UnixNano())
 			}
 		}
 	}
@@ -382,7 +382,7 @@ func (s *Service) tickSpinning(ctx context.Context, r store.JobRecord) {
 		return
 	}
 	info, err := os.Stat(path)
-	if err != nil || (info.Size() == watch.spinSize && !(r.Stuck && Cause(r.Cause) == CauseSpinning)) {
+	if err != nil || (info.Size() == watch.spinSize && (!r.Stuck || Cause(r.Cause) != CauseSpinning)) {
 		return
 	}
 	watch.spinSize = info.Size()

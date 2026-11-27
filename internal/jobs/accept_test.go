@@ -259,7 +259,9 @@ func TestAcceptOffKeepsThePlainDone(t *testing.T) {
 	r := newAcceptRig(t, "false", LandingOptions{})
 	ctx := context.Background()
 	job := r.create(CreateInput{Brief: "Write the release notes"})
-	r.edit(job.ID, func(rec *store.JobRecord) { rec.State, rec.PaneID, rec.AgentName = string(StateRunning), "w9:p9", "job-1" })
+	r.edit(job.ID, func(rec *store.JobRecord) {
+		rec.State, rec.PaneID, rec.AgentName = string(StateRunning), "w9:p9", "job-1"
+	})
 	if _, err := r.svc.Done(ctx, job.ID, done); err != nil {
 		t.Fatal(err)
 	}
