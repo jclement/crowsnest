@@ -92,6 +92,12 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--job-remote-control` | `CROWSNEST_JOB_REMOTE_CONTROL` | false | Start Claude job agents with Remote Control too (7.10) |
 | `--compact-at` | `CROWSNEST_COMPACT_AT` | `150000` | Compact the orchestrator past this many tokens; `0` off (7.9) |
 | `--fresh-at` | `CROWSNEST_FRESH_AT` | off | `HH:MM`: the daily hand-over and new conversation (7.9) |
+| `--max-running-jobs` | `CROWSNEST_MAX_RUNNING_JOBS` | `0` (a quarter of the cores, at least 2) | Job agents running at once; more wait queued and start in order (6.12) |
+| `--load-hold` | `CROWSNEST_LOAD_HOLD` | `2` | Hold new job starts while the load per core stays above this for a minute; `0` off (6.12) |
+| `--heavy-slots` | `CROWSNEST_HEAVY_SLOTS` | `2` | Heavy commands at once through `crowsnest heavy` (6.12) |
+| `--review` | `CROWSNEST_REVIEW` | `auto` | The review gate for builder jobs in a worktree: `auto`, `same`, `claude`, `codex`, `off` (6.7) |
+| `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges: `merge` (a merge commit) or `ff` (fast-forward only) (6.11) |
+| `--digest-at` | `CROWSNEST_DIGEST_AT` | off | `HH:MM`: the daily digest (7.13); the Schedule switch writes this setting |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Largest attachment, pasted, dropped or attached by an agent (8.6) |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Disk all attachments may take; past it the oldest unneeded files are deleted, else an upload is refused (8.6) |
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host: the guard hook refuses commands that would reach it, and an approval naming it is dangerous (8.7). Repeatable; added to the file's hosts |
@@ -378,14 +384,13 @@ unless `--force`, which keeps the replaced database as `<db>.before-restore-<sta
 once (so newer migrations run), and gets kv `pause.state` `{paused: true, by: "restore", …}`
 (the pause switch's own row and shape, 6.13 on `wip/landing`) and `restore.pending`.
 
-**The start after a restore.** While `pause.state` says paused by a restore
-(`cmd/crowsnest/restorehold.go`), the orchestrator's start gate stays shut and the job
-supervisor does not start, so nothing is dispatched. In the background the start waits (up to
-90 s) for herdr and compares the restored live jobs with herdr's panes, journals which still
-have one and which do not (kinds `storage` and `alert`), and clears `restore.pending`. The
-System page shows "Paused after a restore" with **Resume** (`POST /restore/resume`, which deletes
-only a restore's pause row). Gap: project leads are not held (21.2 has no start gate); their
-jobs are, since the supervisor is.
+**The start after a restore.** The pause switch (6.13) reads the restore's `pause.state`
+row, so the restored instance starts paused: no job starts, restarts, retries, pokes, scheduled
+tasks or compaction until the human resumes (the account menu or the pause banner, which shows
+the restore's reason). In the background the start waits (up to 90 s) for herdr and compares the
+restored live jobs with herdr's panes, journals which still have one and which do not (kinds
+`storage` and `alert`), and clears `restore.pending`. The orchestrator's and leads' first start
+is not held by the pause (as for any paused start); they receive no pokes until resumed.
 
 **Scheduled backups** (`backupScheduler`): every minute, a backup when the newest
 `auto-<session>-*.tar.gz` in `<data-dir>/backups` is older than `--backup-every`; then all but
@@ -416,8 +421,8 @@ expired action tokens, uploads never sent after a day, released attachments past
 **except evidence** (role `result` or `ask`), and devices with five or more failures and no
 success in 30 days; remove a blob only when no row refers to it (checked again just before
 removal); remove job state directories of jobs that are gone (older than a minute) or settled
-past the archive time. **Held**: a settled `done` job with a worktree branch or `isolate` may
-hold unlanded work; it is listed with the reason and deleted only when its id is confirmed in a
+past the archive time. **Held**: a settled `done` job with a worktree branch or `isolate`, and no `land_state` (6.11:
+merged, pr or discarded), may hold unlanded work; it is listed with the reason and deleted only when its id is confirmed in a
 run (`confirm`), never by the nightly run. Worktrees are never removed here (the landing sweep
 owns them, 6.12 on `wip/landing`, and knows what landed). The nightly run: checked every 15
 minutes, runs in the 03:00 local hour once 20 hours have passed, or at any hour after 48; the
@@ -632,7 +637,25 @@ file in the roles directory still wins.
 ### 6.7 Budgets and review gates (after the core)
 
 - **Budget**: optional minutes and tokens per job (tokens summed from the transcript's usage records: since the spend branch, `jobs.Service.SpendOf(job)` returns exactly that, 7.11; budgets are to read it and are not built). At 80% the card warns; at 100% the agent is told to stop at a safe point and the job goes `needs_you` with "raise the budget or stop". Nothing is killed.
-- **Review gate**: a job may name a reviewer engine. On `done` it becomes `in_review`; crowsnest starts a reviewer child job in the same worktree; findings go back to the builder as a message; at most two rounds; then `done` with the review attached.
+- **Review gate** (built on `wip/landing`, `internal/jobs/review.go`). A job may name a reviewer
+  (`reviewer`: `off`, `claude`, `codex`; empty takes `--review`, which applies to builder jobs
+  in a worktree: `auto`, the default, is the other engine when it is installed (`codex` on PATH)
+  and else the same engine; `same`, `claude`, `codex` or `off`). When such a job calls `done` it
+  becomes `in_review` (round 1, then 2) with its result and walkthrough kept, and crowsnest
+  creates a **reviewer job**: an ordinary supervised job (its own pane, conversation, timeline
+  and hooks; never a hidden subagent), role `reviewer`, in the same worktree, not isolated, a
+  child of the job with `review_of` set, its brief crowsnest's own (read only: never edit,
+  commit, push, merge, rebase, stash or switch branches; the diff against the base; the brief,
+  result and walkthrough quoted as indented blocks; the previous round's findings in round 2).
+  It reports through `done`, its result starting `VERDICT: approve` or `VERDICT: changes`; a
+  result with no verdict counts as changes. **Approve** → the job is `done` with the review
+  attached. **Changes**, round 1 → the job goes back to `running`, the findings are kept on the
+  job (`review_md`, also `<state>/jobs/j_N/review-round-1.md`, and `job_get`) and typed to the
+  builder as `[crowsnest review j_R] …`; its next `done` starts round 2. **Changes after round
+  2**, or a reviewer that failed, was cancelled or could not start → `needs_you`, cause `review`,
+  the human decides (Land anyway, message the builder, discard). `done` while in review is
+  refused. The read-only rule is in the reviewer's brief and role; it is not enforced by a hook
+  (section 20).
 
 ### 6.8 As built in M7
 
@@ -906,6 +929,138 @@ all through `termtext.Block`, unless noted):
 | `orch/poker.go` send | the poke | every reason `Clean`ed and capped; agent titles and names `Quote` |
 | `orch/upkeep.go` | `/exit` (agent.prompt directly) and Esc / Ctrl+C keys | fixed |
 | `httpd/agents.go` keys, `jobs/actions.go` Cancel | `agent.send_keys` / `pane.send_keys` | allowlisted key names only (R1 I3) |
+
+### 6.11 Landing a finished job (built on `wip/landing`)
+
+Jeff, 2026-11-26: a builder job that says done "just leaves a worktree and a branch behind". The
+last mile is now crowsnest's (`internal/landing`, `internal/jobs/land.go`, `review.go`,
+`internal/httpd/landing.go`, `web/src/components/jobs/ReviewPanel.tsx`, migration
+`0014_landing.sql`):
+
+- **What a job produced.** At launch a worktree job records its base: the main checkout's branch
+  (`base_branch`), the worktree's first commit (`base_commit`) and herdr's workspace
+  (`workspace_id`). `landing.Inspect` reads, from the worktree: commits ahead of and behind the
+  base (`rev-list --left-right` against `refs/heads/<base>`, the merge base as the diff's start,
+  `base_commit` when the branch is gone), the files changed with `-M` (renames named, binary
+  files marked `-\t-` in numstat and never shown), lines added and removed, whether the tree is
+  clean (`status --porcelain`, untracked files included) and whether the branch is pushed (its
+  upstream holds HEAD). Nothing is cached: the Review tab reads git each time.
+- **The reading order** (`landing.Order`, the guided-diff standard): files the agent's
+  walkthrough names come first, in the order it names them; the rest by group, schema →
+  server → API → client state → UI → tests → docs → config, with churn (lockfiles, images,
+  generated code, snapshots) last and marked. Each file is collapsed and its diff fetched only
+  when opened (`GET /jobs/{id}/review/diff?path=`, refused for any path the branch did not
+  change, cut at 512 KB). Only `+` and `−` lines are coloured; nothing is highlighted; the diff is
+  text nodes only. The Inbox's `DiffView` compares two whole texts; git gives a unified diff,
+  so the Review tab has its own small renderer with the same styling rather than a conversion.
+- **The walkthrough.** `done` takes `walkthrough_md` (MCP and `crowsnest job done
+  --walkthrough-file`); the builder role and the protocol ask for it in a worktree (chunk by
+  chunk, why each exists, what was tested and what was not, risk both ways). Done is never
+  refused for its absence. It is shown beside the diff with the result and the evidence, goes to
+  the reviewer, and into a pull request's body.
+- **Land** (the human's): **merge** into the base locally (`--merge merge`, a merge commit
+  `Merge job j_N: <title>`, or `ff`, fast-forward only), **pr** (push with `--set-upstream` to the
+  branch's remote, else `origin`, else the only remote; then `gh pr create --base --head --title
+  --body-file` when the remote, as configured and before `insteadOf` rewrites, is on github.com
+  and `gh auth status` succeeds; never `--reviewer` or `--assignee`; other hosts are pushed and
+  the result says to open the request there), or **discard**. Each is a button with a
+  confirmation stating exactly what will happen (`LandOptions.confirm`), and the server needs
+  `confirm: true` too (`409 CONFIRM_REQUIRED`). Refusals change nothing: a protected base
+  branch (`--protected-branch`; Land offers the PR path), a main checkout on another branch or
+  with uncommitted changes to tracked files, a job worktree with uncommitted work (it would be
+  lost), a branch with nothing ahead, a fast-forward that is not one under `ff`, and a conflict
+  (`merge --abort`, the conflicting files named). A push never targets a protected branch.
+- **Teardown** follows a land in one step, each step on the job's timeline: cancel any live
+  reviewer, stop the agent (`/exit`, then Ctrl+C), `worktree.remove` (no `force`; **verified**
+  against herdr 0.9.5: a dirty tree, untracked files included, is refused with
+  `dirty_worktree_requires_force`, and a clean removal closes the workspace too), then
+  `workspace.close` (an already-closed one answers `workspace_not_found`, ignored), delete the
+  branch (`-d` after a merge, so git confirms it is merged; `-D` for a discard; kept for a pull
+  request), revoke the job's tokens and remove `<state>/jobs/j_N/`. A step that fails stops the
+  teardown, leaves the job landed but not torn down, and says why; "Tear down again" retries.
+  A discard checks the tree first and refuses a dirty one before anything happens.
+- **An agent never lands.** `job_land` (MCP) and `crowsnest job land j_N merge|pr|discard`
+  only ask: the request becomes a confirm question to the human (`land_for` in its context),
+  the job records `land_request`, and the human's Allow (with no note: a note is a condition
+  crowsnest cannot follow, as for delegation) runs it; anything else drops it.
+- **The sweep**: finished jobs that ran in a worktree and are not torn down
+  (`GET /sweep`), oldest first with their age and whether the tree is dirty, behind an "N to
+  land" button above the board and "Worktrees to land" in the palette; bulk discard after one
+  confirmation (`POST /sweep/discard`), each refused dirty tree reported, never forced.
+
+### 6.12 Throttling (built on `wip/landing`)
+
+The machine hit load 63 with three agents running test suites at once. Three parts:
+
+- **Running-job limit** (`internal/throttle`, `internal/jobs/holds.go`). At most
+  `--max-running-jobs` job agents (default a quarter of the cores, at least 2), optionally per
+  project (in the app: `PUT /throttle` `project_limits`). A job agent counts while its job is
+  live (queued with a launch in flight, running, needs you, blocked) and holds a pane;
+  `in_review` does not count (its agent waits idle, and counting it let two reviewed jobs
+  starve their own reviewers); the orchestrator and leads never count. The check runs inside
+  the launch's claim, under the jobs lock, with one store query (`CountSlots`): running plus
+  older jobs still waiting must be under the limit, so jobs start in order and a new job never
+  overtakes the queue. A held job is `queued`, cause `held`, the reason as its detail ("waiting
+  for a slot: 3 of 3 running, 1 ahead in the queue"); the timeline gets one line per change of
+  reason kind. The supervisor tries held jobs every tick, oldest first. **Start anyway** (the
+  card's action, `POST /jobs/{id}/start-anyway`) sets `start_anyway` and starts it past the
+  slot limit, the load hold and the pause.
+- **Load hold**: the one-minute load average per core (sysctl `vm.loadavg` on macOS,
+  `/proc/loadavg` on Linux) is sampled every 10 s; when every sample of a whole minute is above
+  `--load-hold` (default 2.0; `0` off) new starts wait ("waiting: the machine is busy: load 4.1
+  per core for a minute"). Running work is never touched.
+- **`crowsnest heavy -- <command…>`**: at most `--heavy-slots` (default 2) heavy commands at a
+  time for the instance. Slots are files in `<state>/heavy`, taken with a non-blocking exclusive
+  `flock(2)`, so a killed command's slot is freed by the kernel (Jeff's script needed
+  stale-holder detection for its mkdir locks). The holder writes `{pid, job, command, dir,
+  since}` into its slot; a waiter writes `wait.<pid>` and prints "all 2 slots busy, waiting for
+  … (job j_4)" at once and every minute; `--timeout` (1 h) then exit 75 with nothing run. The
+  command runs under `nice -n 10` with the same environment caps as `heavy` (MAKEFLAGS, GOFLAGS,
+  CARGO_BUILD_JOBS, VITEST_MAX_*, MSBuild's) set only when unset; reentrant through
+  `CROWSNEST_HEAVY_HOLDER`. **Deference**: when a `heavy` that is not crowsnest is on PATH
+  (Jeff's `~/.local/bin/heavy`), `crowsnest heavy` execs it instead, so a machine has one set
+  of slots; `CROWSNEST_HEAVY_DEFER=0` turns that off. serve writes the slot count to
+  `<state>/heavy/config.json` and names the directory in every agent's pane
+  (`CROWSNEST_HEAVY_DIR`). The protocol tells every agent to run builds, suites and typechecks
+  through it; the builder and reviewer roles repeat it. `GET /system/heavy` and the Limits
+  sheet show the slots (running and waiting, by job), and say when commands go to an outside
+  `heavy` (whose own slots `heavy --status` shows).
+
+### 6.13 The pause switch (built on `wip/landing`)
+
+`internal/pause`: one switch that stops crowsnest's own automation without stopping any agent.
+While paused: no pokes (the reasons stay pending and go with the first poke after), no nudges,
+no backstop prompts, no compaction or hand-over, no `as: job` scheduled tasks, no new job
+starts or dispatch to a standing agent, no restarts (jobs, the orchestrator, leads) and no
+retries, no held brief typed; each held thing is journalled once (kind `pause`). Hooks still
+record, questions and approvals still arrive, and the human can still chat, answer, message,
+nudge, retry, restart, Poke now and Start anyway. **The Stop hook allows every stop while
+paused** and records "Turn ended (paused: …)", so no agent is held in a loop against a
+supervisor that will not act. State in kv `pause.state` (who, when, reason, optional
+auto-resume time), so it survives restarts; the auto-resume is applied when read and published
+by a 5 s watch. `~/.config/crowsnest/paused` (beside the config file; not under `--demo`) pauses
+too, the front door's switch; Resume removes it. Controls: the account menu (Pause automation…
+with an optional HH:MM and a reason; Resume), the palette, a banner on every view with Resume,
+`crowsnest pause [--until HH:MM] [--reason]` / `resume` / `pause --status` (over the socket;
+`resume` is refused to a caller with an agent token; with the server down `pause` writes the
+file), and `POST /pause`, `/resume`.
+
+### 6.14 Presence and attention routing (built on `wip/landing`)
+
+`internal/presence`, `web/src/components/control/usePresenceHeartbeat.ts`. Each browser sends a
+heartbeat every 30 s and on every visibility or focus change: a random per-tab client id, and
+whether its tab is visible and focused and how many seconds since input (keys, pointer, touch,
+wheel); a closing tab says it is gone. The server keeps these in memory only (stale after 75 s)
+and folds them into the front door's three states: **here** (a visible, focused tab with input
+in the last 2 minutes), **maybe** (a visible tab, or input in the last 15 minutes), **away**
+(otherwise), each with a reason. Routing (`Route`): here, the tray and voice only, no Web Push
+or `--notify-url` (it is on screen); maybe, Web Push only (a blocking item also to the notify
+URL); away, both. The on-screen channels and the remote ones are never both used for one item
+within 2 minutes. **Do not disturb until HH:MM** (account menu, `PUT /presence/dnd`, kv
+`presence.dnd_until`) holds every non-blocking push and notify line and sends one summary when
+it ends; blocking questions and dangerous approvals get through. The poke header carries
+`human=here|maybe|away`, and `CROWSNEST.md` says what to do with it. Nothing but the coarse
+states is stored or sent.
 
 ## 7. The orchestrator
 
@@ -1330,6 +1485,31 @@ replies (talk mode reads Claude's transcript); Chat shows the pane's text rather
 conversation, and no spend is metered; no resume (a restart is a new Codex session); jobs given
 to "the orchestrator" are still recorded with engine `claude`. A job with a directory and no
 engine takes the `engine` setting's resolution (`jobs.Service.SetDefaults`).
+
+**7.13 The daily digest** (built on `wip/landing`; `internal/digest`, `cmd/crowsnest/digest.go`,
+`web/src/components/control/Digest*.tsx`, table `digests`):
+
+- **A built-in schedule**, off by default: `--digest-at HH:MM` (`CROWSNEST_DIGEST_AT`), an
+  ordinary setting (3.2's precedence: a flag or variable locks it, else the app's value), shown
+  in Settings and as one switch and a time at the top of the Schedule sheet, which writes the
+  same setting (the time is remembered while off). Checked every 30 s; once a local day, after the
+  time, unless a digest for the day exists; not while paused. "Digest now" (palette, Digests
+  sheet, `POST /digest/now`) runs it at once, paused or not.
+- **Facts, not memory.** crowsnest gathers the day's facts from its records (`Facts`): jobs
+  finished and failed since local midnight, live jobs stuck or needing the human, jobs in
+  review, the queue (what is next), finished jobs whose worktrees still wait, open and blocking
+  questions, pending approvals, each project's finished and live counts with its lead, and the
+  day's spend estimate. Reviewer jobs are folded into the job they review.
+- **Written by the orchestrator, else by crowsnest.** When the orchestrator is idle the facts
+  go to `<state>/digests/facts-<day>.md` and it is asked (`[crowsnest digest <day>] …`) to write
+  the digest from them and deliver it with `crowsnest digest submit --day --file` (socket
+  `POST /digest`, agent token required; only a day crowsnest asked for, once). If it is off,
+  not idle, or has not delivered within 15 minutes, crowsnest sends its own plain digest
+  (`Render`), saying so when it replaces a late one.
+- **Delivered** as a `notice` in the Inbox (pushed once, as notices are, through presence
+  routing), and kept in `digests(day, at, source, body_md, question_id)`; the Digests sheet
+  (from Schedule's "Past digests" and the palette) lists them newest first. Journal kind
+  `digest`. `--demo` seeds one into the history without an Inbox notice.
 
 ## 8. Needs-you: questions and dialogs
 
@@ -1846,7 +2026,11 @@ The same binary, talking to the unix socket named by `CROWSNEST_SOCKET`, identif
 | `crowsnest job update|done|fail|get|create|list` | The job protocol of section 6.2 for agents without MCP (Codex) and for scripts. The job is `CROWSNEST_JOB` unless `--job` is given; `done --attach file` attaches files to the result (8.6) |
 | `crowsnest hook <event> [--job j_<n>] [--socket PATH] [--token-file PATH] [--rules PATH]` | Claude Code hook entry point (section 6.3): stdin JSON to the server with a 5 s timeout, the server's decision to stdout (`permission-request` instead holds on a long-poll until the human decides, 8.7; `pre-tool-use` decides locally from `--rules`, the guard); silent success when the server is unreachable, slow, or anything else fails |
 | `crowsnest project list\|get <slug>` | The projects with their leads and job counts, or one project with its defaults and live jobs (21.2): what the orchestrator reads before handing a project work |
-| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done`, `fail`, `job_create` (with `project` and `to` for the orchestrator, 21.2), `job_get`, `project_list`, `project_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
+| `crowsnest job land j_<n> merge\|pr\|discard [--reason]` | Ask the human to land a finished job (6.11): a question; only their Allow lands it. `job done --walkthrough-file` attaches the walkthrough |
+| `crowsnest heavy [--status] [--timeout 1h] -- <command…>` | Run a build, suite or typecheck through the heavy-command gate (6.12); defers to an outside `heavy`; exit 75 when no slot came free |
+| `crowsnest pause [--until HH:MM] [--reason] \| pause --status \| resume` | The pause switch (6.13), from an agent's pane or the human's shell (the socket of `--session`); `resume` refused to an agent; with the server down `pause` writes `~/.config/crowsnest/paused` |
+| `crowsnest digest submit --file f.md [--day]` | The orchestrator delivers the digest it was asked for (7.13) |
+| `crowsnest mcp` | stdio MCP server exposing `job_update`, `ask`, `get_question`, `done` (with `walkthrough_md`), `fail`, `job_land` (a request, 6.11), `job_create` (with `project` and `to` for the orchestrator, 21.2), `job_get`, `project_list`, `project_get`, `say`; a thin proxy to the same socket. `ask` with `wait=true` returns the whole answer and note, as text and structured content |
 
 ## 10. HTTP API
 
@@ -1911,7 +2095,6 @@ browser reconnects, gets `hello`, and refetches.
 | `GET /term/tui` (WebSocket), `GET /term/pane/{pane_id}` (WebSocket) | Terminals |
 | `GET /backup` | A fresh backup as a download (4.17) |
 | `GET /updated`, `POST /updated/seen` | The "what changed" notice `{from, to, at, release_url}` or `null` (4.18) |
-| `GET /restore/hold`, `POST /restore/resume` | The pause a restore left `{at, reason}` or `null`; lift it (4.17) |
 | `GET /storage`, `POST /storage/cleanup` | The Storage card; `{dry_run (default true), confirm: [j_…]}` → the retention report (4.19) |
 | `GET /summary` | Session or a read token (`Authorization: Bearer cnk_…`): `{name, version, attention, questions, blocking, approvals, needs_you, running, jobs, orchestrator, paused, stats, at}` (4.21) |
 | `GET`/`POST /tokens`, `DELETE /tokens/{id}` | Scoped tokens; `POST {name}` → `201 {token, record}` (4.21) |
@@ -1979,6 +2162,18 @@ The client sends a resize first; the server starts the process on that first res
   browser TUI is where the user meets it. The pane bridge is not affected. The TUI integration
   test dismisses it when it is up (found running the suite on Linux, 2026-11-26).
 
+**Added on `wip/landing`** (6.11 to 6.14, 7.13): `GET /jobs/{id}/review` (what the job produced,
+files in reading order, the agent's account, review rounds, which land actions are open, why
+not, and each one's confirmation text), `GET /jobs/{id}/review/diff?path=`, `POST
+/jobs/{id}/land` `{action: merge|pr|discard, confirm: true}` (409 `CONFIRM_REQUIRED` without),
+`POST /jobs/{id}/teardown` `{confirm: true}`, `POST /jobs/{id}/start-anyway`, `GET /sweep`, `POST
+/sweep/discard` `{ids, confirm: true}`, `GET /queue`, `GET|POST /pause`, `POST /resume`, `GET|PUT|DELETE
+/throttle`, `GET /system/heavy`, `GET|POST /presence` (heartbeat `{client, visible, focused,
+idle_seconds}`), `POST /presence/gone`, `PUT /presence/dnd` `{until}`, `GET /digests`, `GET|PUT
+/digest/settings`, `POST /digest/now`. Events `pause`, `presence`, `throttle`. On the agent socket:
+`POST /jobs/{id}/land` (a request: 202 with the question id), `GET|POST /pause`, `POST /resume`
+(403 to an agent token), `POST /digest`.
+
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
 - `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host)` (`host` added by migration `0003_session_host.sql`, R1 M2: the `Host:port` the session is valid at)
@@ -2000,9 +2195,10 @@ The client sends a resize first; the server starts the process on that first res
 - `agent_layers(subject, started_at, hash, layers_json)` (0013, 21.3): what an agent was last started with, replaced at every start: the manifest of its layers (scope, key, revision, source, size, sha256) and the sha256 of the composed text; `subject` is `j_<n>`, `orchestrator` or `lead:<slug>`
 - `agent_instructions(id, subject, session_id, at, path, memory_type, load_reason, size)` (0013, 21.3): the instruction files Claude reported loading (the `InstructionsLoaded` hook), paths and a stat's size only, at most 200 rows per subject
 - `projects(id, slug, name, dir, root_dir, description, default_role, default_engine, default_model, default_isolate, permission_mode, lead_start, archived_at, created_at, updated_at)` (migration `0013_projects.sql`, 21.1): archived, never deleted; a partial unique index keeps two live projects off one root; `jobs.project_id` (0 Unfiled) with an index on `(project_id, state)`
+- Migration `0014_landing.sql` (6.7, 6.11, 6.12, 7.13): `jobs` gains `base_branch`, `base_commit`, `workspace_id`, `walkthrough_md`, `reviewer`, `review_of` (indexed), `review_round`, `review_verdict`, `review_md`, `land_state`, `land_detail`, `landed_at`, `torn_down_at`, `land_request`, `land_question_id`, `start_anyway`; new `digests(id, day, at, source, body_md, question_id)`. kv adds `pause.state`, `throttle.settings`, `presence.dnd_until`, `digest.settings`
 - `kv(key, value)`: each lead's session id and pane (`lead.<slug>.session_id`, `.pane_id`), its poker's bookkeeping (`lead.<slug>.poke.state`) and whether it should be running (`lead.<slug>.running`, 21.2); the agents' voices (`voice.agents`, 13.5); orchestrator session id, poke bookkeeping (`poke.state`: per-agent last pushed state, delivered reason keys, last agent push, timer fingerprint; 7.7), scheduled task stamps and switches (`schedule.state`, 7.8), the orchestrator's upkeep (`upkeep.state`: last compaction attempt, day of the last fresh start, hand-over time; 7.9), the stored login (`auth.owner`: `{username, hash}`, the hash argon2id in PHC form, 4.2 and 4.14) and the instance name chosen at setup or in the Account sheet (`instance.name`; `--name` wins), settings. The owner lives in `kv` rather than a table of its own, so setup needed no migration
 
-- Migration `0014_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
+- Migration `0015_ops.sql` (R4, 4.19 to 4.21): `job_archive(job_id, archived_at)`; `api_tokens(id, name, scope, hash, hint, created_at, last_used_at, revoked_at)`; `machines(id, name, url, token, created_at)`. kv adds `restore.pending`, `version.last_started`, `version.updated_from`, `retention.last_run`, `tailscale.allow`; a restore writes `pause.state`
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -2802,12 +2998,27 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 86. **The folder-trust question is answered on a card, not by crowsnest** (4.14.1). Detecting the arrow-key menu and sending the keys the person picked keeps the rule (crowsnest never answers a start-up dialog itself) and removes the one step that needed the Terminal view.
 87. **Codex can be the orchestrator, with its gaps stated** (7.12) rather than refused: a machine with only Codex still gets a working crowsnest.
 
-88. **Backups never carry a credential, and restore starts paused** (4.17). A backup is a file meant to be copied elsewhere; anything that lets its holder act as the user (sessions, tokens, the push key, the notify URL) is removed from the copy, at the cost of signing in and subscribing again after a restore. Paused, because a restored database describes agents that may no longer exist: the human looks before anything is dispatched.
-89. **Archive is a table, not a column** (4.19): the jobs row, and every query of it (and the landing branch's sixteen new columns), stay as they were; the board filters by the set.
-90. **Retention holds what may be unlanded** (4.19): deleting the record of a job whose branch was never merged loses the only pointer to that work, so it needs the human's tick, one job at a time.
-91. **The Terminal view's client gets its own state directory** (10, 20): herdr's client reads saved SSH machines from its state directory; a directory of crowsnest's own removes the one-click path from a browser session to the user's other hosts without changing herdr or the user's files. `--terminal-machines` puts it back.
-92. **Tailscale identity only from this machine's serve, for listed logins** (4.20), and a session made from it is re-checked on every request rather than trusted for 30 days.
-93. **One crowsnest per machine, a read-only Machines list** (4.21): the small version that answers "what needs me where" without moving the agent socket, hooks or terminals across machines.
+88. **Land is the human's; agents only ask** (6.11). Merging, pushing and deleting a branch are
+    the expensive-to-undo steps the absolute rules reserve for Jeff, so an agent's `job_land`
+    is a question, and the server needs `confirm: true` even from the browser.
+89. **The slot check lives inside the launch claim** (6.12): counting running agents and the
+    queue ahead in one store query under the jobs lock is what makes "start in order" and "never
+    two past the last slot" true without a separate queue table.
+90. **flock over mkdir for heavy slots** (6.12): the kernel drops a dead holder's lock; and
+    deferring to an outside `heavy` keeps one machine on one set of slots.
+91. **Paused allows every Stop** (6.13): a supervisor that will not act must not hold agents in
+    a nudge loop; the stop is recorded so the timeline says why it went through.
+92. **Presence routes by groups, not channels** (6.14): away, Web Push and the notify URL both go
+    (the brief's "away → Web Push and --notify-url"); what is never doubled is screen and phone
+    for one item within two minutes.
+93. **The digest is written from facts crowsnest hands over** (7.13), and crowsnest writes its
+    own when the orchestrator cannot, so a digest never depends on the model remembering the day.
+94. **Backups never carry a credential, and restore starts paused** (4.17). A backup is a file meant to be copied elsewhere; anything that lets its holder act as the user (sessions, tokens, the push key, the notify URL) is removed from the copy, at the cost of signing in and subscribing again after a restore. Paused, because a restored database describes agents that may no longer exist: the human looks before anything is dispatched.
+95. **Archive is a table, not a column** (4.19): the jobs row, and every query of it (and the landing branch's sixteen new columns), stay as they were; the board filters by the set.
+96. **Retention holds what may be unlanded** (4.19): deleting the record of a job whose branch was never merged loses the only pointer to that work, so it needs the human's tick, one job at a time.
+97. **The Terminal view's client gets its own state directory** (10, 20): herdr's client reads saved SSH machines from its state directory; a directory of crowsnest's own removes the one-click path from a browser session to the user's other hosts without changing herdr or the user's files. `--terminal-machines` puts it back.
+98. **Tailscale identity only from this machine's serve, for listed logins** (4.20), and a session made from it is re-checked on every request rather than trusted for 30 days.
+99. **One crowsnest per machine, a read-only Machines list** (4.21): the small version that answers "what needs me where" without moving the agent socket, hooks or terminals across machines.
 
 ## 18. Milestones
 
@@ -2887,7 +3098,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - The long-poll's waiter state is in memory: after a crowsnest restart, an asker blocked on `ask --wait` gets its answer from its next poll and also typed into its pane.
 - One controller per pane: two browsers on the same pane view take turns (the one that lost the pane says so and offers Reconnect).
 - The Terminal view is herdr's own TUI. Until R4 it showed every SSH machine the user had saved in herdr (`herdr machine add`), so anyone who could open it reached those hosts as well (M5). Since R4 (`wip/ops`) its client runs with `XDG_STATE_HOME=<state>/terminal-client`, a state directory of crowsnest's own, so it has no saved machines and still attaches to the session (the session's socket is under herdr's config directory, which is not changed); `--terminal-machines` restores the old behaviour. What remains: the TUI is still a shell as the user, and from any pane a user can still type `ssh` or `herdr --remote` by hand; the isolation removes the one-click path, not the user's own reach. The pane view is limited to the session's own panes.
-- **Day thirty (R4, `wip/ops`)**: a restored instance holds the orchestrator and the job supervisor but not project leads, which start as before (4.17). The reconciliation after a restore only reports which restored jobs still have their pane; it changes no job's state. Retention's held rule knows only a branch or worktree, not whether a job's result was reviewed or landed (the landing branch's landed predicate should replace it once merged). The Storage card's database figure is the file and its WAL, not per table bytes. Sign in with Tailscale trusts any local process that can open a loopback connection (4.20). Machines show only another instance's headline figures, refetched every minute; tokens of a machine restored from a backup are blank and must be minted again. The update notice links to a release page only for release versions. The archived-job search has an API and no view of its own yet.
+- **Day thirty (R4, `wip/ops`)**: a restored instance starts paused through the pause switch (6.13), which holds every automatic step but not the orchestrator's and leads' first start (4.17). The reconciliation after a restore only reports which restored jobs still have their pane; it changes no job's state. Retention's held rule uses the landing step's `land_state`; a job settled before landing existed, or landed by hand outside crowsnest, counts as held until ticked. The Storage card's database figure is the file and its WAL, not per table bytes. Sign in with Tailscale trusts any local process that can open a loopback connection (4.20). Machines show only another instance's headline figures, refetched every minute; tokens of a machine restored from a backup are blank and must be minted again. The update notice links to a release page only for release versions. The archived-job search has an API and no view of its own yet.
 - **Login lockout by a peer** (R1 L1): anyone who can reach the port can make 20 failed logins a minute and so keep every new login refused, the real user's included, for as long as they keep it up. Sessions that already exist keep working; only signing in on a new device is blocked. This is the trade DESIGN 4.2 states (a global cap stops a guesser that rotates IPs); a loopback exemption or a delay instead of a refusal are the options if it bites.
 - **Open from the R1 review**: there is no "sign out everywhere" (I6): revoking a stolen session means changing the password, which ends every session. (I1, the missing `redact` helper, was closed by M6's `internal/redact`, which `--notify-url` notices go through; the `POST /keys` log line can now carry only allowlisted key names, R1 I3.)
 - Talk mode has been checked once against the real ElevenLabs API (13.4), from a Mac, not from a
@@ -2942,6 +3153,18 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
   `~/.claude/CLAUDE.md` too was not seen in the two runs made (only the project file appeared).
   Skills and slash commands available to an agent are not listed: no hook input or start-up
   record carries them cheaply.
+
+- **Landing and throttling (`wip/landing`)**: the reviewer's read-only rule is in its brief and
+  role, not enforced by a hook (the guard covers protected branches and hosts only), so a
+  reviewer that commits anyway is caught only by the human reading the timeline and diff. Land
+  needs the main checkout to be on the base branch; it never switches branches for you. A
+  pull request is opened only on GitHub with `gh`; other hosts are pushed only. Per-project
+  limits are set through the API (`PUT /throttle`); the Limits sheet edits the instance-wide
+  limit and the load hold. The load hold reads the host's load average, not a container's
+  cgroup. A queued job held by its project's limit still counts as "ahead" for other jobs'
+  instance-wide slot. Presence's voice channel is decided in the browser (speak mode); the
+  server's routing covers Web Push and the notify URL. The demo's seeded jobs carry agent names
+  other than `job-N`, so the demo's queue line shows 0 running.
 
 ## 21. Projects, leads, instruction layers and app schedules
 

@@ -24,6 +24,10 @@ import { useSpeakMode } from "../../lib/voice/speak";
 import { CommandPalette } from "./CommandPalette";
 import { PaletteContext, type PaletteApi } from "./palette-context";
 import { ShortcutsSheet } from "./ShortcutsSheet";
+import { DigestsSheet } from "../control/DigestsSheet";
+import { LimitsSheet } from "../control/LimitsSheet";
+import { PauseSheet } from "../control/PauseSheet";
+import { SweepSheet } from "../control/SweepSheet";
 import { useRunCommand } from "./useRunCommand";
 
 export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void; children: ReactNode }) {
@@ -128,6 +132,17 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
         onOpen={(next) => setSheet(next === "account" ? null : next === "voice" && !voice ? null : next)}
       />
       <InstructionsSheet open={sheet === "instructions"} onClose={() => setSheet(null)} />
+      <PauseSheet open={sheet === "pause"} onClose={() => setSheet(null)} />
+      <DigestsSheet open={sheet === "digests"} onClose={() => setSheet(null)} />
+      <LimitsSheet open={sheet === "limits"} onClose={() => setSheet(null)} />
+      <SweepSheet
+        open={sheet === "worktrees"}
+        onClose={() => setSheet(null)}
+        onOpenJob={(id) => {
+          setSheet(null);
+          void navigate({ to: "/", search: { job: id } } as unknown as Parameters<typeof navigate>[0]);
+        }}
+      />
       <NotificationSettings open={sheet === "notifications"} onClose={() => setSheet(null)} />
       {voice && <VoiceSettingsSheet open={sheet === "voice"} onClose={() => setSheet(null)} />}
     </PaletteContext.Provider>

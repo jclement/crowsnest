@@ -108,10 +108,10 @@ test("giving a job from the palette puts it on the board, and the toast opens it
   await expect(activeOption(page)).toContainText("Give job: Rewrite the onboarding emails for new users");
   await page.keyboard.press("Enter");
   await expect(palette(page)).toBeHidden();
-  await expect(page.getByText("Job j_11 given")).toBeVisible();
+  await expect(page.getByText("Job j_16 given")).toBeVisible();
   await expect(page.getByRole("region", { name: "In progress" }).or(page.getByRole("region", { name: "Needs you or stuck" })).getByText("Rewrite the onboarding emails for new users").first()).toBeVisible();
-  await page.getByRole("button", { name: "Open j_11" }).click();
-  await expect(page).toHaveURL(/job=j_11/);
+  await page.getByRole("button", { name: "Open j_16" }).click();
+  await expect(page).toHaveURL(/job=j_16/);
   const detail = isPhone(testInfo) ? page.getByRole("dialog") : page.getByRole("region", { name: "Selected job" });
   await expect(detail.getByRole("heading", { name: "Rewrite the onboarding emails for new users" })).toBeVisible();
 });

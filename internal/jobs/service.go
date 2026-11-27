@@ -116,6 +116,15 @@ type Options struct {
 	// Instructions composes the instruction layers a job agent is started with (global, role,
 	// project; DESIGN.md 21.3) and records them. Nil: the bare role prompt, as before layers.
 	Instructions InstructionLayers
+	// Pause is the automation's pause switch (DESIGN.md 6.13): while paused nothing automatic
+	// reaches an agent. Nil: never paused.
+	Pause PauseSwitch
+	// Throttle limits the job agents running at once and holds new starts on a busy machine
+	// (6.12). Nil: no limit.
+	Throttle StartThrottle
+	// Landing configures the review gate and Land (DESIGN.md 6.7, 6.11). Zero: no review gate,
+	// merge commits, no protected branches.
+	Landing LandingOptions
 }
 
 // InstructionLayers is what the launcher needs of internal/instructions, as an interface so that
@@ -147,7 +156,9 @@ type Service struct {
 	opts Options
 	// liveDefaults overrides opts.DefaultModel and the default engine (Settings, SetDefaults).
 	liveDefaults atomic.Pointer[[2]string]
-	mu           sync.Mutex
+	// liveLanding overrides opts.Landing's review default and merge mode (Settings, SetLanding).
+	liveLanding atomic.Pointer[LandingOptions]
+	mu          sync.Mutex
 	// instance names this process in the lifecycle claims it writes (lifecycle.go).
 	instance string
 
@@ -513,6 +524,12 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 	if r.ParentID > 0 {
 		job.ParentID = FormatID(r.ParentID)
 	}
+	job.BaseBranch, job.WalkthroughMD, job.Reviewer, job.ReviewRound = r.BaseBranch, r.WalkthroughMD, r.Reviewer, r.ReviewRound
+	job.ReviewVerdict, job.ReviewMD, job.LandState, job.LandDetail = r.ReviewVerdict, r.ReviewMD, r.LandState, r.LandDetail
+	job.LandedAt, job.TornDownAt, job.LandRequest, job.StartAnyway = timePtr(r.LandedAt), timePtr(r.TornDownAt), r.LandRequest, r.StartAnyway
+	if r.ReviewOf > 0 {
+		job.ReviewOf = FormatID(r.ReviewOf)
+	}
 	job.DoingNow = doingNow(r, s.opts.Now())
 	return job
 }
@@ -614,6 +631,21 @@ func firstNonEmptyDir(dirs ...string) string {
 // engine of a job with a directory that names none (the app's Settings). engine "" or "auto"
 // means claude.
 func (s *Service) SetDefaults(engine, model string) { s.liveDefaults.Store(&[2]string{engine, model}) }
+
+// SetLanding applies a change of the review gate's default or Land's merge mode made in Settings.
+func (s *Service) SetLanding(reviewDefault, mergeMode string) {
+	next := s.landing()
+	next.ReviewDefault, next.MergeMode = reviewDefault, mergeMode
+	s.liveLanding.Store(&next)
+}
+
+// landing is the review and Land settings in force.
+func (s *Service) landing() LandingOptions {
+	if live := s.liveLanding.Load(); live != nil {
+		return *live
+	}
+	return s.opts.Landing
+}
 
 func (s *Service) defaultModel() string {
 	if live := s.liveDefaults.Load(); live != nil {

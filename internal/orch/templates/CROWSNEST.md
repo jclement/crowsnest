@@ -70,6 +70,12 @@ time crowsnest starts you, so do not edit it; it is not part of any repository.
   A reason `scheduled task <name> is due (…): read <file> and do what it says` is periodic work the
   human set up: read that file and do what its body says, then report as the file asks. Crowsnest
   records the run itself; there is nothing to mark done.
+  The header may carry `human=here|maybe|away`: whether the human has crowsnest open in front of
+  them. **here**: ask briefly, now, and expect a quick answer. **maybe** or **away**: be
+  self-sufficient, batch what you need into one question, and keep working on what it does not
+  block.
+  A finished job in a worktree is not landed by you: `job_land` (or `crowsnest job land`) only
+  *asks* the human to merge, push or discard it, and they decide from its Review tab.
 - `[crowsnest upkeep] …` asks you to write a hand-over file before crowsnest starts you on a new
   conversation. Do exactly that; the file comes back to you when the new conversation starts.
 - `[crowsnest voice: transcribed speech, may contain mis-hearings]` messages were

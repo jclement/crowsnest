@@ -69,6 +69,7 @@ const (
 	RuleBudgetSpent    Rule = "budget_spent"    // MaxNudges with no progress: allow, escalate
 	RuleNudge          Rule = "nudge"           // refused: nothing declared
 	RuleNudgeQuestions Rule = "nudge_questions" // refused: questions open, but not declared waiting
+	RulePaused         Rule = "paused"          // the automation is paused: every stop is allowed (6.13)
 )
 
 // Decision is the check's answer.

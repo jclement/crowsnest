@@ -106,11 +106,14 @@ type SettledJob struct {
 	WorktreeBranch string
 	WorkDir        string
 	SettledAt      time.Time
+	// LandState is the landing branch's verdict on the job's work (6.11): '' not landed, or
+	// merged, pr, discarded.
+	LandState string
 }
 
 // SettledJobsBefore lists settled jobs that settled before cutoff, oldest first.
 func (s *Store) SettledJobsBefore(ctx context.Context, cutoff time.Time, limit int) ([]SettledJob, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, title, state, isolate, worktree_branch, work_dir, settled_at FROM jobs
+	rows, err := s.db.QueryContext(ctx, `SELECT id, title, state, isolate, worktree_branch, work_dir, settled_at, land_state FROM jobs
 		WHERE state IN `+settledStates+` AND settled_at > 0 AND settled_at < ? ORDER BY settled_at, id LIMIT ?`, cutoff.Unix(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing settled jobs: %w", err)
@@ -120,7 +123,7 @@ func (s *Store) SettledJobsBefore(ctx context.Context, cutoff time.Time, limit i
 	for rows.Next() {
 		var job SettledJob
 		var settled int64
-		if err := rows.Scan(&job.ID, &job.Title, &job.State, &job.Isolate, &job.WorktreeBranch, &job.WorkDir, &settled); err != nil {
+		if err := rows.Scan(&job.ID, &job.Title, &job.State, &job.Isolate, &job.WorktreeBranch, &job.WorkDir, &settled, &job.LandState); err != nil {
 			return nil, fmt.Errorf("listing settled jobs: %w", err)
 		}
 		job.SettledAt = time.Unix(settled, 0)

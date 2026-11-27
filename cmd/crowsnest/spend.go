@@ -97,8 +97,22 @@ func seedDemoSpend(ctx context.Context, meter *spend.Meter, service *jobs.Servic
 	// The orchestrator: a little every day this past week, so the by-day view has a shape.
 	for day := 6; day >= 0; day-- {
 		start := now.AddDate(0, 0, -day).Add(-3 * time.Hour)
+		end := start.Add(2 * time.Hour)
+		if day == 0 {
+			// Today's share must fall today, even just after midnight (three hours back was
+			// yesterday before 03:00, and "today" showed no cost).
+			midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			start, end = maxTime(start, midnight), now
+		}
 		subjects = append(subjects, spend.DemoSubject{Subject: spend.OrchestratorSubject, Model: "claude-sonnet-5-5",
-			Start: start, End: start.Add(2 * time.Hour), Calls: 6 + day})
+			Start: start, End: end, Calls: 6 + day})
 	}
 	return spend.SeedDemo(ctx, meter, subjects)
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }

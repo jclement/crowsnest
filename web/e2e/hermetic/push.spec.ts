@@ -161,6 +161,10 @@ test("a question answered from a notification's button, with a single-use token"
   const sheet = await openNotifications(page);
   await sheet.getByRole("button", { name: "Turn on for this device" }).click();
   await expect(page.getByText("Notifications are on for this device")).toBeVisible();
+  // Presence (DESIGN.md 6.14): this tab is in front, so crowsnest would show the question in the
+  // tray and push nothing. The browser says it has gone, as a closed tab does, so the push goes.
+  const client = await page.evaluate(() => sessionStorage.getItem("crowsnest.presence.client"));
+  await page.request.post(`${baseURL}/api/v1/presence/gone`, { data: { client }, headers: { "X-Crowsnest": "1", Origin: baseURL! } });
   const before = fake.requests.length;
   const id = await askAsAgent(app, { title: "Deploy the docs site?", kind: "confirm", recommend: "yes", urgency: "blocking" });
   await expect.poll(() => fake.requests.length, { timeout: 10_000 }).toBeGreaterThan(before);

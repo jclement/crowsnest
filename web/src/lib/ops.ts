@@ -113,8 +113,6 @@ export const opsEndpoints = {
   tailscale: () => api<TailscaleState>("/auth/tailscale"),
   setTailscale: (logins: string[]) => api<TailscaleState>("/auth/tailscale", { method: "PUT", body: { logins } }),
   allowMe: () => api<TailscaleState>("/auth/tailscale/allow-me", { method: "POST", body: {} }),
-  restoreHold: () => api<{ at: string; reason: string } | null>("/restore/hold"),
-  resumeAfterRestore: () => api<null>("/restore/resume", { method: "POST", body: {} }),
   updated: () => api<UpdateNotice | null>("/updated"),
   dismissUpdated: () => api<null>("/updated/seen", { method: "POST", body: {} }),
 };
@@ -125,7 +123,6 @@ export const opsKeys = {
   machines: ["machines"] as const,
   tailscale: ["tailscale"] as const,
   updated: ["updated"] as const,
-  restoreHold: ["restore-hold"] as const,
 };
 
 /** The URL "Download backup" opens: a fresh backup, streamed as a file. */

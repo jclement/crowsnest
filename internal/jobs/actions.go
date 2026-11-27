@@ -79,6 +79,7 @@ func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
 	if !s.cancelEffect(job.ID) {
 		s.interrupt(ctx, job.PaneID)
 	}
+	s.afterSettled(ctx, job)
 	return job, nil
 }
 
@@ -184,6 +185,9 @@ func mustParse(id string) int64 {
 // refunded; a stale nudge claim found after a crash stays counted. It reports whether it nudged.
 func (s *Service) NudgeIfDue(ctx context.Context, job orch.BackstopJob) (bool, error) {
 	if s.opts.Herdr == nil {
+		return false, nil
+	}
+	if s.heldWhilePaused(ctx, "backstop:"+job.ID, "a backstop nudge for "+job.ID) {
 		return false, nil
 	}
 	var decision Decision

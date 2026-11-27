@@ -3,8 +3,9 @@
 // and reports what uses how much for the System page's Storage card.
 //
 // The rule it never breaks: nothing unlanded or unreviewed is deleted without the human's
-// explicit confirmation. A settled job that worked in a worktree or on its own branch may hold
-// the only copy of work nobody has merged, so it is "held": listed in the preview with the
+// explicit confirmation. A settled job that worked in a worktree or on its own branch, and whose
+// work the landing step has not merged, opened as a pull request or discarded (jobs.land_state),
+// may hold the only copy of work nobody has merged, so it is "held": listed in the preview with the
 // reason, and deleted only when its id is confirmed in a "clean up now" (never by the nightly
 // run). Worktrees themselves are not removed here: the landing branch's sweep owns that (it
 // knows what landed), and the Storage card points to it.
@@ -183,6 +184,8 @@ func (s *Service) archive(ctx context.Context, now time.Time, policy Policy, dry
 // heldReason says why a settled job is not deleted without confirmation, or "" when it may go.
 func heldReason(job store.SettledJob) string {
 	switch {
+	case job.LandState != "":
+		return "" // merged, opened as a pull request, or discarded on purpose: the landing step decided (6.11)
 	case job.State == "done" && job.WorktreeBranch != "":
 		return "worked on branch " + job.WorktreeBranch + ", which may hold unlanded work"
 	case job.State == "done" && job.Isolate:

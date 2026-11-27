@@ -9,7 +9,7 @@ import { ClipboardCopy, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { CheckList, StatusMark } from "../components/system/CheckList";
 import { MachineDetail } from "../components/system/MachineStats";
-import { MachinesCard, RestoreHoldBanner, StorageCard, TailscaleCard, UpdatedNotice } from "../components/system/OpsCards";
+import { MachinesCard, StorageCard, TailscaleCard, UpdatedNotice } from "../components/system/OpsCards";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
@@ -58,7 +58,6 @@ export function SystemView() {
           Copy diagnostics
         </Button>
       </header>
-      <RestoreHoldBanner />
       <UpdatedNotice />
       {report.isPending && <p className="text-xs text-muted">Running the checks…</p>}
       {report.isError && <p className="text-xs text-danger">Could not load the system report. {(report.error as Error).message}</p>}

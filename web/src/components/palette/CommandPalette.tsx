@@ -13,6 +13,9 @@
 // leaves the input); groups are role=group with their heading as label; a polite status line
 // announces the result count. Row chevrons are not focusable, so options hold nothing interactive.
 import {
+  FolderGit2,
+  Newspaper,
+  PauseCircle,
   ArrowLeft,
   Bell,
   ChevronRight,
@@ -72,7 +75,7 @@ import {
   type RankedItem,
 } from "../../lib/palette";
 import { queryTokens } from "../../lib/fuzzy";
-import { useApprovals, useFleet, useJobs, useMe, useProjects, useQuestions } from "../../lib/queries";
+import { useApprovals, useFleet, useJobs, useMe, usePause, useProjects, useQuestions } from "../../lib/queries";
 import { readTheme, THEME_EVENT, type ThemeChoice } from "../../lib/theme";
 import { Chip, StatusDot } from "../ui/Chip";
 
@@ -108,6 +111,9 @@ const icons: Record<PaletteIcon, LucideIcon> = {
   settings: SlidersHorizontal,
   project: FolderKanban,
   instructions: BookText,
+  pause: PauseCircle,
+  digest: Newspaper,
+  worktrees: FolderGit2,
 };
 
 const ROOT = { kind: "root" } as const;
@@ -431,6 +437,7 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
   const me = useMe();
   const orchestrator = useOrchestrator();
   const projects = useProjects();
+  const pause = usePause();
   const [theme, setTheme] = useState<ThemeChoice>(readTheme);
   useEffect(() => {
     const follow = (event: Event) => setTheme((event as CustomEvent<ThemeChoice>).detail);
@@ -449,8 +456,9 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
       speak,
       voiceSettings,
       projects: projects.data?.projects,
+      paused: pause.data?.paused ?? false,
     }),
-    [jobs.data, questions.data, approvals.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings, projects.data],
+    [jobs.data, questions.data, approvals.data, fleet.data, orchestrator.data, me.data, theme, speak, voiceSettings, projects.data, pause.data],
   );
 }
 

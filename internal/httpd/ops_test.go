@@ -171,8 +171,6 @@ func (fakeOps) Summary(context.Context) (Summary, error) {
 }
 func (fakeOps) ArchivedJobs(context.Context) (map[int64]bool, error)      { return map[int64]bool{}, nil }
 func (fakeOps) SearchJobs(context.Context, string, bool) ([]int64, error) { return nil, nil }
-func (fakeOps) RestoreHold(context.Context) *RestoreHold                  { return nil }
-func (fakeOps) ResumeAfterRestore(context.Context) error                  { return nil }
 
 func TestCleanupPreviewsUnlessToldOtherwise(t *testing.T) {
 	h := newHarness(t, harnessOptions{ops: fakeOps{}})

@@ -47,7 +47,8 @@ test.describe("with a login", () => {
       expect(response.status, path).toBe(401);
     }
     const list = await page.request.get(`${app.baseURL}/api/v1/tokens`);
-    const id = ((await list.json()) as { data: { id: number }[] }).data[0].id;
+    const id = ((await list.json()) as { data: { id: number }[] }).data[0]?.id;
+    expect(id).toBeDefined();
     await page.request.delete(`${app.baseURL}/api/v1/tokens/${id}`, { headers: sameOriginHeaders(app) });
     const after = await fetch(`${app.baseURL}/api/v1/summary`, { headers: { Authorization: `Bearer ${token}` } });
     expect(after.status).toBe(401);

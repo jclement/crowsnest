@@ -45,6 +45,8 @@ type liveServices struct {
 	tender  atomic.Pointer[orch.Tender]
 	jobs    atomic.Pointer[jobs.Service]
 	system  atomic.Pointer[system.Service]
+	// ctl are the throttle and review settings (landing_wiring.go).
+	ctl atomic.Pointer[controls]
 	// config is the config with the settings changed in the app applied (backups and retention
 	// read it on every pass, ops.go).
 	config liveConfig
@@ -69,6 +71,9 @@ func (l *liveServices) apply(_ config.Config, next config.Config) {
 		tender.SetThresholds(next.CompactAt, next.FreshAt)
 	}
 	l.applyJobDefaults(context.Background(), next)
+	if ctl := l.ctl.Load(); ctl != nil {
+		ctl.applyConfig(next, l.jobs.Load())
+	}
 }
 
 // applyJobDefaults sets the jobs' default engine (auto resolved against what is installed) and

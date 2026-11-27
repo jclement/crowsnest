@@ -1,4 +1,4 @@
--- 0014: day thirty (DESIGN.md 4.17 to 4.21, 11): archived jobs, scoped API tokens and the other
+-- 0015: day thirty (DESIGN.md 4.17 to 4.21, 11): archived jobs, scoped API tokens and the other
 -- crowsnest machines this one shows.
 --
 -- Archiving is its own table rather than a column on jobs, so the jobs row and every query that

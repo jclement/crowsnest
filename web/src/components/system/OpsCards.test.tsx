@@ -2,7 +2,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithClient, stubApi } from "../../test/render";
-import { MachinesCard, RestoreHoldBanner, StorageCard, TailscaleCard, UpdatedNotice } from "./OpsCards";
+import { MachinesCard, StorageCard, TailscaleCard, UpdatedNotice } from "./OpsCards";
 
 const policy = { ArchiveAfterDays: 14, DeleteAfterDays: 180 };
 const storage = {
@@ -89,23 +89,5 @@ describe("TailscaleCard and UpdatedNotice", () => {
     expect(await screen.findByRole("link", { name: "What changed" })).toHaveAttribute("href", "https://github.com/jclement/crowsnest/releases/tag/v1.1.0");
     await user.click(await screen.findByRole("button", { name: "Allow me (jeff@github)" }));
     await vi.waitFor(() => expect(calls.some((call) => call.path === "/auth/tailscale/allow-me")).toBe(true));
-  });
-});
-
-describe("RestoreHoldBanner", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("says the instance is paused after a restore and resumes it", async () => {
-    const calls = stubApi((call) => {
-      if (call.path === "/restore/hold") return { body: { data: { at: "2026-11-27T03:00:00Z", reason: "restored from a backup made 2026-11-26" } } };
-      if (call.path === "/restore/resume") return { body: { data: null } };
-      return undefined;
-    });
-    const user = userEvent.setup();
-    renderWithClient(<RestoreHoldBanner />);
-    expect(await screen.findByText(/Paused after a restore/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Resume" }));
-    await vi.waitFor(() => expect(calls.some((call) => call.path === "/restore/resume")).toBe(true));
-    await vi.waitFor(() => expect(screen.queryByText(/Paused after a restore/)).not.toBeInTheDocument());
   });
 });

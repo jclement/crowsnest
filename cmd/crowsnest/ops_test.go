@@ -28,36 +28,6 @@ func opsStore(t *testing.T) *store.Store {
 	return db
 }
 
-func TestRestoreHoldShutsTheGateUntilResumed(t *testing.T) {
-	ctx := context.Background()
-	db := opsStore(t)
-	hold := restoreHold{db: db}
-	open := func(context.Context) string { return "" }
-	if hold.held(ctx) || hold.gate(open)(ctx) != "" {
-		t.Fatal("held with no pause row")
-	}
-	if err := db.SetKV(ctx, backup.PauseKey, `{"paused":true,"by":"you","at":"2026-11-27T00:00:00Z"}`); err != nil {
-		t.Fatal(err)
-	}
-	if hold.held(ctx) {
-		t.Error("a pause the human set is not the restore's to hold or lift")
-	}
-	if err := db.SetKV(ctx, backup.PauseKey, `{"paused":true,"by":"restore","at":"2026-11-27T00:00:00Z","reason":"restored"}`); err != nil {
-		t.Fatal(err)
-	}
-	if !hold.held(ctx) || !strings.Contains(hold.gate(open)(ctx), "Resume") {
-		t.Fatal("a restore's pause did not shut the orchestrator's gate")
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-	defer cancel()
-	if hold.wait(waitCtx) {
-		t.Error("wait went on while held")
-	}
-	if err := hold.resume(ctx); err != nil || hold.held(ctx) {
-		t.Fatalf("resume: %v, still held %v", err, hold.held(ctx))
-	}
-}
-
 func TestRecordVersionAndUpdateNotice(t *testing.T) {
 	ctx := context.Background()
 	db := opsStore(t)

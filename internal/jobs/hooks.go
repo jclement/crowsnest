@@ -151,6 +151,14 @@ func (s *Service) hookStop(ctx context.Context, id string, input HookInput) (Hoo
 	var reply HookReply
 	_, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		s.touchLocked(r, c, input)
+		if s.paused() {
+			// The supervisor will not act while paused, so it must not hold the agent in a loop
+			// either: every turn may end, and the timeline says why (holds.go).
+			r.LastStopAt = s.opts.Now()
+			c.event(EventHook, "Turn ended (paused: crowsnest's automation is paused, so the stop was allowed)", map[string]any{"rule": RulePaused})
+			reply = HookReply{}
+			return nil
+		}
 		job := s.toJob(*r, c.questions.Open)
 		decision := Decide(&job, c.questions.Open, StopInput{SessionID: input.SessionID, StopHookActive: input.StopHookActive}, s.historyLocked(*r, c), s.opts.Now())
 		// The stop is handled here: the herdr-side backstop leaves a stop whose hook ran alone, so

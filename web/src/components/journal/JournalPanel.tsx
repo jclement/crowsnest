@@ -25,6 +25,10 @@ const kindTones: Record<JournalKind, ChipTone> = {
   backstop: "warning",
   task: "accent",
   upkeep: "neutral",
+  pause: "warning",
+  land: "success",
+  review: "accent",
+  digest: "neutral",
   settings: "neutral",
 };
 

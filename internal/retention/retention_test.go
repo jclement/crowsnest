@@ -29,6 +29,7 @@ func service(t *testing.T) (*Service, *store.Store, string, time.Time) {
 		{Title: "cancelled long ago", BriefMD: "b", State: "cancelled", CreatedAt: old, SettledAt: old},
 		{Title: "done on a branch", BriefMD: "b", State: "done", WorktreeBranch: "cn/j2", Isolate: true, CreatedAt: old, SettledAt: old},
 		{Title: "running", BriefMD: "b", State: "running", CreatedAt: old},
+		{Title: "landed on a branch", BriefMD: "b", State: "done", WorktreeBranch: "cn/j4", Isolate: true, CreatedAt: old, SettledAt: old, LandState: "merged"},
 	} {
 		if _, err := db.InsertJob(ctx, record); err != nil {
 			t.Fatal(err)
@@ -60,7 +61,7 @@ func TestPlanIsTheRunAndHeldJobsNeedConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Archive != 2 || plan.DeleteJobs != 1 || len(plan.Held) != 1 || plan.Held[0].ID != "j_2" || plan.StateDirs != 3 {
+	if plan.Archive != 3 || plan.DeleteJobs != 2 || len(plan.Held) != 1 || plan.Held[0].ID != "j_2" || plan.StateDirs != 3 {
 		t.Fatalf("plan %+v", plan)
 	}
 	if exists, _, _, _ := db.JobExists(ctx, 1); !exists {

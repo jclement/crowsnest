@@ -43,12 +43,7 @@ type opsWiring struct {
 	approvals *approvals.Service
 	orch      *orch.Orchestrator
 	stats     *sysstat.Sampler
-	hold      restoreHold
 }
-
-func (o *opsWiring) RestoreHold(ctx context.Context) *httpd.RestoreHold { return o.hold.state(ctx) }
-
-func (o *opsWiring) ResumeAfterRestore(ctx context.Context) error { return o.hold.resume(ctx) }
 
 func (o *opsWiring) BackupName() string {
 	return fmt.Sprintf("crowsnest-%s-%s%s", o.cfg().Session, backup.Stamp(time.Now()), backupSuffix)
@@ -180,9 +175,10 @@ func (l *liveConfig) set(cfg config.Config) { l.value.Store(&cfg) }
 // anyway (and saying it could not see herdr).
 const reconcileWait = 90 * time.Second
 
-// reconcileRestore runs once after a restore, before the job supervisor starts: it compares the
-// restored live jobs with the panes herdr really has, journals what it found, and clears the
-// pending mark. The automation stays paused until the human resumes it.
+// reconcileRestore runs once after a restore, while the pause switch the restore turned on holds
+// every dispatch (internal/pause): it compares the restored live jobs with the panes herdr really
+// has, journals what it found, and clears the pending mark. The automation stays paused until
+// the human resumes it.
 func reconcileRestore(ctx context.Context, db *store.Store, fleetCache *fleet.Cache, journalLog *journal.Journal, logger *slog.Logger) {
 	raw, err := db.GetKV(ctx, backup.PendingKey)
 	if err != nil {

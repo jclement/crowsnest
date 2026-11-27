@@ -4,7 +4,10 @@
 
 package herdr
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // WorktreeCreateParams are worktree.create's options. Cwd names the repository (any directory
 // inside it); Branch is created from Base (herdr's default when empty); Path is where the
@@ -32,6 +35,32 @@ type WorktreeCreated struct {
 	Tab       Tab          `json:"tab"`
 	RootPane  Pane         `json:"root_pane"`
 	Worktree  WorktreeInfo `json:"worktree"`
+}
+
+// WorktreeRemoveParams are worktree.remove's options (protocol 22). Force is never set by
+// crowsnest; it is here so the wire shape is complete.
+type WorktreeRemoveParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	Force       bool   `json:"force"`
+}
+
+// WorktreeRemoved is the result of worktree.remove.
+type WorktreeRemoved struct {
+	WorkspaceID string       `json:"workspace_id"`
+	Worktree    WorktreeInfo `json:"worktree"`
+	Forced      bool         `json:"forced"`
+}
+
+// WorktreeRemove implements Client.
+func (c *SocketClient) WorktreeRemove(ctx context.Context, params WorktreeRemoveParams) (WorktreeRemoved, error) {
+	var result WorktreeRemoved
+	err := c.call(ctx, "worktree.remove", params, &result, 60*time.Second)
+	return result, err
+}
+
+// WorkspaceClose implements Client.
+func (c *SocketClient) WorkspaceClose(ctx context.Context, workspaceID string) error {
+	return c.call(ctx, "workspace.close", map[string]any{"workspace_id": workspaceID}, nil, 0)
 }
 
 // WorktreeCreate implements Client.

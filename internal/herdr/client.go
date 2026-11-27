@@ -23,6 +23,12 @@ type Client interface {
 	TabList(ctx context.Context, workspaceID string) ([]Tab, error)
 	// WorktreeCreate makes a git worktree and opens a workspace on it (M7, the job launcher).
 	WorktreeCreate(ctx context.Context, params WorktreeCreateParams) (WorktreeCreated, error)
+	// WorktreeRemove removes the git worktree a workspace is open on, and the workspace with it
+	// (DESIGN.md 6.11, Land's teardown). herdr refuses a dirty tree unless forced; crowsnest
+	// never forces.
+	WorktreeRemove(ctx context.Context, params WorktreeRemoveParams) (WorktreeRemoved, error)
+	// WorkspaceClose closes a workspace and every pane in it.
+	WorkspaceClose(ctx context.Context, workspaceID string) error
 
 	// PaneList lists the panes of one workspace, or all when id is empty.
 	PaneList(ctx context.Context, workspaceID string) ([]Pane, error)

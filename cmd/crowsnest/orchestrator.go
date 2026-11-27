@@ -53,7 +53,7 @@ type orchGate struct {
 // startOrchestrator builds the orchestrator and the transcript manager, starts both running until
 // ctx ends, and returns them for the HTTP server. With --no-orchestrator the orchestrator reports
 // itself disabled and the conversations of other agents still work.
-func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, agentSocket string, talk *voice.Service, journalLog *journal.Journal, guardRules *guard.Rules, layers *instructions.Service, gate orchGate, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
+func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Client, db *store.Store, identity *agentid.Registry, events *hub.Hub, agentSocket string, talk *voice.Service, journalLog *journal.Journal, guardRules *guard.Rules, layers *instructions.Service, gate orchGate, ctl *controls, logger *slog.Logger) (*orch.Orchestrator, *transcript.Manager) {
 	claudeDir := claudeConfigDir(cfg)
 	binDir, executable := "", ""
 	if path, err := os.Executable(); err == nil {
@@ -81,7 +81,7 @@ func startOrchestrator(ctx context.Context, cfg config.Config, client herdr.Clie
 		return body, nil
 	}
 	orchestrator := orch.New(orch.Options{
-		Render: render,
+		Render: render, Paused: ctl.paused, ExtraEnv: ctl.heavyEnv(),
 		Client: client, KV: db, Hub: events, Journal: journalLog, Logger: logger, Session: cfg.Session, Dir: cfg.Dir,
 		StateDir: cfg.StateDir, Model: cfg.Model, PermissionMode: cfg.PermissionMode, Version: version,
 		RemoteControlName: orchestratorRemoteControl(cfg), Gate: gate.gate, Launch: gate.launch,

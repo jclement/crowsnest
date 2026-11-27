@@ -34,12 +34,16 @@ const (
 	KindTask     Kind = "task"     // a scheduled task started its job (7.8)
 	KindUpkeep   Kind = "upkeep"   // the orchestrator was compacted or handed over to a new conversation (7.9)
 	KindSettings Kind = "settings" // a setting was changed in the app, or the first run finished (3.2)
+	KindPause    Kind = "pause"    // the automation was paused or resumed, or held something while paused (6.13)
+	KindLand     Kind = "land"     // a finished job was merged, pushed, discarded or torn down (6.11)
+	KindReview   Kind = "review"   // the review gate started a reviewer or settled a round (6.7)
+	KindDigest   Kind = "digest"   // the daily digest was written (7.13)
 	// KindStorage records backups, restores and the retention sweeper (4.17, 4.19).
 	KindStorage Kind = "storage"
 )
 
 // Kinds lists every kind, for validating a filter.
-var Kinds = []Kind{KindPoke, KindSkip, KindSend, KindAnswer, KindRestart, KindAlert, KindBackstop, KindTask, KindUpkeep, KindSettings, KindStorage}
+var Kinds = []Kind{KindPoke, KindSkip, KindSend, KindAnswer, KindRestart, KindAlert, KindBackstop, KindTask, KindUpkeep, KindSettings, KindPause, KindLand, KindReview, KindDigest, KindStorage}
 
 // Valid reports whether k is a known kind.
 func (k Kind) Valid() bool {

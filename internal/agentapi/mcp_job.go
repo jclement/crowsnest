@@ -31,6 +31,15 @@ type DoneArgs struct {
 	Verified    []string `json:"verified" jsonschema:"what you checked and saw, each with the command or evidence. [] if nothing"`
 	NotVerified []string `json:"not_verified" jsonschema:"what you did not check or could not run. [] if nothing"`
 	Attachments []string `json:"attachments,omitempty" jsonschema:"files to attach to the result (a report, a screenshot of what you built): paths inside your working directory or job directory, at most 10"`
+	// WalkthroughMD is the change explained chunk by chunk (DESIGN.md 6.11).
+	WalkthroughMD string `json:"walkthrough_md,omitempty" jsonschema:"for work in a git worktree: Markdown walking a reviewer through the change chunk by chunk, in the order it is best understood (schema, logic, API, UI, tests), naming each file path, why each part exists, what was tested and what was not, and the risk both ways"`
+}
+
+// LandArgs are job_land's arguments.
+type LandArgs struct {
+	JobID  string `json:"job_id" jsonschema:"the finished job to land (j_<n>): a child of yours, or one in your project"`
+	Action string `json:"action" jsonschema:"merge (into its base branch locally), pr (push and open a pull request) or discard"`
+	Reason string `json:"reason,omitempty" jsonschema:"one or two sentences for the human: why this action, what you checked"`
 }
 
 // FailArgs are fail's arguments.
@@ -96,9 +105,12 @@ func init() {
 		mcp.AddTool(server, &mcp.Tool{Name: "done", Title: "Finish the job", Description: doneDescription},
 			func(ctx context.Context, _ *mcp.CallToolRequest, args DoneArgs) (*mcp.CallToolResult, any, error) {
 				return jobCall(client, args.JobID, func(id string) (string, error) {
-					job, err := client.DoneJob(ctx, id, jobs.DoneInput{ResultMD: args.ResultMD, Verified: args.Verified, NotVerified: args.NotVerified, Attachments: args.Attachments})
+					job, err := client.DoneJob(ctx, id, jobs.DoneInput{ResultMD: args.ResultMD, Verified: args.Verified, NotVerified: args.NotVerified, Attachments: args.Attachments, WalkthroughMD: args.WalkthroughMD})
 					if err != nil {
 						return "", err
+					}
+					if job.State == jobs.StateInReview {
+						return fmt.Sprintf("Job %s is in review: a reviewer agent is looking at the change. You may end your turn; if it asks for changes, its findings arrive as a [crowsnest review …] message.", job.ID), nil
 					}
 					return fmt.Sprintf("Job %s is done. You may end your turn.", job.ID), nil
 				}), nil, nil
@@ -114,6 +126,18 @@ func init() {
 					}
 					return fmt.Sprintf("Job %s is marked failed; the human has been told. You may end your turn.", job.ID), nil
 				}), nil, nil
+			})
+	})
+	registerTool("job_land", func(server *mcp.Server, client *Client) {
+		mcp.AddTool(server, &mcp.Tool{Name: "job_land", Title: "Ask the human to land a job",
+			Description: "Ask the human to land a finished job that ran in a worktree: merge it into its base, push it with a pull request, or discard it. " +
+				"This only asks: the human sees the change in the job's Review tab and decides. Nothing is merged, pushed or deleted until they allow it; the answer arrives as a message."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, args LandArgs) (*mcp.CallToolResult, any, error) {
+				response, err := client.RequestLand(ctx, strings.TrimSpace(args.JobID), strings.TrimSpace(args.Action), args.Reason)
+				if err != nil {
+					return errorResult(toolError("The request failed", err)), nil, nil
+				}
+				return textResult(fmt.Sprintf("Asked the human (%s). %s", response.QuestionID, response.Note)), nil, nil
 			})
 	})
 	registerTool("job_create", func(server *mcp.Server, client *Client) {

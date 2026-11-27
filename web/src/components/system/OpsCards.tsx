@@ -51,30 +51,6 @@ export function UpdatedNotice() {
   );
 }
 
-// ---- After a restore ----------------------------------------------------------
-
-/** "Paused after a restore", with Resume: nothing is dispatched until it is pressed. */
-export function RestoreHoldBanner() {
-  const queryClient = useQueryClient();
-  const hold = useQuery({ queryKey: opsKeys.restoreHold, queryFn: opsEndpoints.restoreHold, refetchInterval: 30_000 });
-  const resume = useMutation({ mutationFn: opsEndpoints.resumeAfterRestore, onSuccess: () => queryClient.setQueryData(opsKeys.restoreHold, null) });
-  if (!hold.data) return null;
-  return (
-    <Banner
-      tone="warning"
-      role="alert"
-      action={
-        <Button compact variant="warning" onClick={() => resume.mutate()} disabled={resume.isPending}>
-          Resume
-        </Button>
-      }
-    >
-      Paused after a restore ({hold.data.reason}). The orchestrator and the job supervisor wait until you resume; the journal lists which restored jobs still have
-      their pane in herdr.
-    </Banner>
-  );
-}
-
 // ---- Storage --------------------------------------------------------------------
 
 /** What uses how much, the last clean-up, and "Clean up now" with a preview first. */

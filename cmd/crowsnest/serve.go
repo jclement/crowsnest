@@ -192,13 +192,15 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	}
 	live := &liveServices{}
 	live.config.set(cfg)
-	hold := restoreHold{db: db}
 	journalLog := journal.New(db, events, logger, nil)
 	sys := newSystem(cfg, db, events, journalLog, client, agentSocketPath(cfg), hooks, live, logger)
 	identity := agentid.New(db, nil)
 	startTokenSweeper(ctx, client, identity, logger)
 	agentSocket := agentSocketPath(cfg)
-	refs := &jobRefs{guard: guardRules(cfg, logger), projects: newProjectWiring(cfg, db, events), instructions: instructions.New(instructions.Options{Store: db, RolesDir: rolesDir(cfg), Hub: events, Logger: logger})}
+	ctl := newControls(cfg, db, events, journalLog, logger)
+	ctl.run(ctx, cfg.Demo)
+	live.ctl.Store(ctl)
+	refs := &jobRefs{ctl: ctl, guard: guardRules(cfg, logger), projects: newProjectWiring(cfg, db, events), instructions: instructions.New(instructions.Options{Store: db, RolesDir: rolesDir(cfg), Hub: events, Logger: logger})}
 	approvalLinks := &approvalWiring{}
 	approvalService, err := newApprovals(cfg, db, events, refs.guard, approvalLinks, logger)
 	if err != nil {
@@ -220,21 +222,22 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	approvalLinks.jobs.Store(jobService)
 	files.jobs = jobService
 	go files.run(ctx, events, refs.questions.Load)
-	pushService, pusher, err := startPush(ctx, cfg, db, events, logger)
+	pushService, pusher, err := startPush(ctx, cfg, db, events, ctl, logger)
 	if err != nil {
 		return err
 	}
 	approvalLinks.pusher.Store(pusher)
 	runApprovals(ctx, approvalService, fleetCache, client, logger)
+	digests := &digestProxy{}
 	questionService, stopQuestions, err := startQuestions(ctx, cfg, client, db, identity, events, jobService, speakerOf(talk), pusher, agentSocket,
-		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, logger)
+		standingContext(cfg, refs, refs.questions.Load, jobService), files, approvalService, refs.instructions, refs.projects.subjectOf, projectReader{w: refs.projects, jobs: jobService}, sys, ctl, digests, logger)
 	refs.questions.Store(questionService)
 	defer stopQuestions() // deferred after db.Close, so it runs first
 	if err != nil {
 		return err
 	}
 	orchestrator, conversations := startOrchestrator(ctx, cfg, client, db, identity, events, agentSocket, talk, journalLog, refs.guard, refs.instructions,
-		orchGate{gate: hold.gate(sys.Gate), launch: sys.LaunchSettings(orchestratorRemoteControl)}, logger)
+		orchGate{gate: sys.Gate, launch: sys.LaunchSettings(orchestratorRemoteControl)}, ctl, logger)
 	sys.SetOrchestrator(orchestrator)
 	greet := greeter(ctx, client, orchestrator, logger)
 	live.greeter.Store(&greet)
@@ -243,30 +246,19 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	if cfg.Demo {
 		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)
 	}
-	// After a restore, take stock of the agents herdr really has before the supervisor may
-	// dispatch anything, and hold the supervisor until the human resumes (DESIGN.md 4.17). The
-	// stock-taking can wait for herdr, so a held start does it in the background and the app
-	// comes up meanwhile.
-	hold.journal = journalLog
-	if hold.held(ctx) {
-		go func() {
-			reconcileRestore(ctx, db, fleetCache, journalLog, logger)
-			if hold.wait(ctx) {
-				startJobs(ctx, jobService, client, projectOf, logger)
-			}
-		}()
-	} else {
-		reconcileRestore(ctx, db, fleetCache, journalLog, logger)
-		startJobs(ctx, jobService, client, projectOf, logger)
-	}
+	// After a restore, take stock of the agents herdr really has (DESIGN.md 4.17). The restore
+	// left the pause switch on, so nothing is dispatched meanwhile; the stock-taking can wait for
+	// herdr, so it runs in the background and the app comes up.
+	go reconcileRestore(ctx, db, fleetCache, journalLog, logger)
+	startJobs(ctx, jobService, client, projectOf, cfg.StateDir, logger)
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
-	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, logger)
+	scheduleService := startSchedule(ctx, cfg, db, events, journalLog, jobService, client, &pokerRef, ctl, logger)
 	tender := newTender(cfg, client, db, journalLog, orchestrator, conversations, logger)
 	live.tender.Store(tender)
 	poker := startPoker(ctx, cfg, db, events, pokeServices{
 		orchestrator: orchestrator, jobs: jobService, questions: questionService, talk: talk, journal: journalLog, alert: refs.notify,
-		tasks: scheduleTasks{service: scheduleService}, tender: tender, leads: refs.projects.leads.Load,
+		tasks: scheduleTasks{service: scheduleService}, tender: tender, leads: refs.projects.leads.Load, ctl: ctl,
 	}, client, logger)
 	pokerRef.Store(poker)
 	live.poker.Store(poker)
@@ -276,7 +268,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	refs.projects.taskSource.Store(&tasksFor)
 	refs.projects.useInstructions(refs.instructions, logger)
 	leads := refs.projects.startLeads(ctx, leadDeps{
-		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, guard: refs.guard, logger: logger,
+		cfg: cfg, client: client, db: db, events: events, journal: journalLog, identity: identity, agentSocket: agentSocket, guard: refs.guard, logger: logger, ctl: ctl,
 		onStatus: func(project projects.Project, status orch.Status) {
 			if status.PaneID != "" {
 				go func() { _ = conversations.Pin(ctx, status.Name) }()
@@ -294,7 +286,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		go seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
 	}
 
+	digestService := startDigest(ctx, digestDeps{cfg: cfg, db: db, journal: journalLog, client: client, orchestrator: orchestrator,
+		questions: questionService, approvals: approvalService, meter: meter, projects: refs.projects.service, ctl: ctl, sys: sys, logger: logger})
+	digests.service.Store(digestService)
+	ctl.presence.SetOnDNDEnd(dndSummary(refs.notify))
 	deps := httpd.Deps{
+		Pause: ctl.pause, Throttle: ctl.throttle, Presence: ctl.presence, Digest: digestService,
+		HeavyDir: ctl.heavyDir, HeavyDeferred: ctl.heavyDeferred,
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
 		Orchestrator: orchestrator, Conversations: conversations,
@@ -318,7 +316,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return server != nil && server.OpenStreams() > 0
 	}, logger)
 	deps.Ops = &opsWiring{cfg: live.config.get, db: db, retention: cleanup, jobs: jobService, questions: refs.questions.Load,
-		approvals: approvalService, orch: orchestrator, stats: deps.Stats, hold: hold}
+		approvals: approvalService, orch: orchestrator, stats: deps.Stats}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
 	}
