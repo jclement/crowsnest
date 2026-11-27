@@ -147,7 +147,7 @@ func landQuestion(job Job, action, reason, token, head, mergeMode string) questi
 		// land request was refused by validation (only a fake asker in the tests hid it). Deny,
 		// as for a delegation approval: crowsnest has not looked at the change.
 		Recommend: "deny",
-		Context: map[string]string{questions.ContextLandFor: job.ID, questions.ContextLandAction: action, questions.ContextLandToken: token},
+		Context:   map[string]string{questions.ContextLandFor: job.ID, questions.ContextLandAction: action, questions.ContextLandToken: token},
 	}
 }
 

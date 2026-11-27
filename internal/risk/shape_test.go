@@ -49,7 +49,7 @@ func TestRespellingsAndUnknownShapes(t *testing.T) {
 		{`git config core.hooksPath /tmp/h`, Elevated},
 		{`npm run deploy`, Elevated},
 		{`mise run release`, Elevated},
-		{"ls‮ -la", Elevated},
+		{"ls\u202e -la", Elevated},
 		// Redirections: a write to a file is not low; descriptor copies and /dev/null are.
 		{`echo x > ~/.bashrc`, Elevated},
 		{`go test ./... >> out.txt`, Elevated},

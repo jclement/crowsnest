@@ -332,7 +332,7 @@ func TestValidation(t *testing.T) {
 // TestSummaryShowsWhatIsCut is R5-S7: the summary drops bidi and other format characters, and a
 // long call says how much is not shown rather than ending in a bare ellipsis.
 func TestSummaryShowsWhatIsCut(t *testing.T) {
-	if got := Summary("Bash", json.RawMessage(`{"command":"ls ‮-la"}`)); got != "Bash: ls -la" {
+	if got := Summary("Bash", json.RawMessage("{\"command\":\"ls \u202e-la\"}")); got != "Bash: ls -la" {
 		t.Fatalf("bidi control kept: %q", got)
 	}
 	long := strings.Repeat("a", 200)

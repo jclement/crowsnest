@@ -30,8 +30,8 @@ import (
 
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/risk"
-	"github.com/jclement/crowsnest/internal/termtext"
 	"github.com/jclement/crowsnest/internal/store"
+	"github.com/jclement/crowsnest/internal/termtext"
 )
 
 // Status is an approval's lifecycle state.

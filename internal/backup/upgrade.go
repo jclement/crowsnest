@@ -91,10 +91,7 @@ func writeUpgradeCopy(ctx context.Context, dbPath, dir, final string) error {
 	if err != nil {
 		return fmt.Errorf("making a private staging directory: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(staging) }()
-	if err := os.Chmod(staging, 0o700); err != nil {
-		return fmt.Errorf("making the staging directory private: %w", err)
-	}
+	defer func() { _ = os.RemoveAll(staging) }() // MkdirTemp makes it 0700
 	temp := filepath.Join(staging, "copy.db")
 	if err := store.VacuumFileInto(ctx, dbPath, temp); err != nil {
 		return err

@@ -142,7 +142,9 @@ func assignment(word string) (name, value string, ok bool) {
 		return "", "", false
 	}
 	for i, r := range name {
-		if !(r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || i > 0 && r >= '0' && r <= '9') {
+		letter := r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
+		digit := i > 0 && r >= '0' && r <= '9'
+		if !letter && !digit {
 			return "", "", false
 		}
 	}

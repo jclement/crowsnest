@@ -50,11 +50,19 @@ func TestServeStartsWithoutHerdrAndRecovers(t *testing.T) {
 		deadline := time.Now().Add(90 * time.Second)
 		for {
 			var view orchestratorView
-			if code := getJSON(base+"/api/v1/orchestrator", nil, &view); code == 200 && ok(view) {
+			code := getJSON(base+"/api/v1/orchestrator", nil, &view)
+			if code == 200 && ok(view) {
 				return view
 			}
+			select {
+			case err := <-done:
+				// serve stopped (it could not bind its port, say): no poll can succeed now, and
+				// its background goroutines may keep logging as if it were still up.
+				t.Fatalf("%s: serve returned early: %v (last HTTP %d)\n%s", what, err, code, logs.String())
+			default:
+			}
 			if time.Now().After(deadline) {
-				t.Fatalf("%s: last %+v\n%s", what, view.Data, logs.String())
+				t.Fatalf("%s: last HTTP %d, %+v\n%s", what, code, view.Data, logs.String())
 			}
 			time.Sleep(100 * time.Millisecond)
 		}

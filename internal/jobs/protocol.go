@@ -45,7 +45,7 @@ type CreateInput struct {
 
 	reviewOf    int64 // set by the review gate for a reviewer job
 	reviewRound int   // and the round it reviews (R5-C05: the reconciler finds a round's reviewer by it)
-	fixOf    int64 // set by AskRebase for a job that brings another job's branch up to date
+	fixOf       int64 // set by AskRebase for a job that brings another job's branch up to date
 }
 
 // maxTitleRunes caps the title taken from the brief's first line.

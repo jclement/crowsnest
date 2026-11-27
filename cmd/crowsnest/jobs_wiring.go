@@ -219,7 +219,7 @@ func startJobs(ctx context.Context, service *jobs.Service, client herdr.Client, 
 		}
 		return // the demo's jobs are scripted; the supervisor would "recover" them
 	}
-	service.ReconcileApprovals(ctx) // a decision that landed just before a restart (R2-H1)
+	service.ReconcileApprovals(ctx)    // a decision that landed just before a restart (R2-H1)
 	service.ReconcileLandRequests(ctx) // likewise for an agent's land request (R5-C09)
 	go service.Run(ctx, 0)
 }

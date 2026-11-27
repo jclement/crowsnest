@@ -202,7 +202,7 @@ func (s *Server) handlePushAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// A gate is never answered from a notification (R5-S2, questions.GateShaped, the same rule the
-// notices are built with; this endpoint is the authority): no button is offered for one, and
+		// notices are built with; this endpoint is the authority): no button is offered for one, and
 		// a token that somehow names one is refused here too. A gate's context is fixed when it
 		// is asked, so reading it first cannot race.
 		if asked, err := service.Get(r.Context(), id); err != nil {
