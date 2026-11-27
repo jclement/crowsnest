@@ -319,7 +319,9 @@ func (s *Service) DeleteComment(ctx context.Context, ask Ask, id int64) error {
 
 // DismissComment hides a note for good (an outdated one the agent has answered).
 func (s *Service) DismissComment(ctx context.Context, ask Ask, id int64) error {
-	return s.changeComment(ctx, ask, func(subject string) error { return s.opts.Store.DismissDiffComment(ctx, subject, id, s.opts.Now().UTC()) })
+	return s.changeComment(ctx, ask, func(subject string) error {
+		return s.opts.Store.DismissDiffComment(ctx, subject, id, s.opts.Now().UTC())
+	})
 }
 
 // ResendComment puts a sent note back with the drafts, so the next send carries it again.

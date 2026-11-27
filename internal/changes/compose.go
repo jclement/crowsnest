@@ -118,7 +118,9 @@ func (t *hiddenTally) reveal(text string) string {
 		}
 		out.WriteRune(r)
 	}
-	for _, word := range strings.FieldsFunc(text, func(r rune) bool { return !(unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsDigit(r) || r == '_') }) {
+	for _, word := range strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsMark(r) && !unicode.IsDigit(r) && r != '_'
+	}) {
 		if mixesScripts(word) && !contains(t.mixed, word) && len(t.mixed) < 20 {
 			t.mixed = append(t.mixed, word)
 		}
