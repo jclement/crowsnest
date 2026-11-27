@@ -13,6 +13,22 @@ import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } fro
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
 import type { Approval, DecideRequest } from "./approvals";
 import type { CreateJobRequest, DirEntry, Job, JobDetail, RoleInfo } from "./jobs";
+import type {
+  Digest,
+  DigestSettings,
+  DigestStart,
+  FileDiffView,
+  HeavyStatus,
+  LandAction,
+  LandResult,
+  PauseState,
+  PresenceState,
+  QueueLine,
+  ReviewView,
+  SweepItem,
+  ThrottleSettings,
+  ThrottleView,
+} from "./landing";
 import type { JournalKind, JournalPage, PokeResult } from "./journal";
 import type { ContextInfo, ScheduleInput, ScheduleView } from "./schedule";
 import type { LeadAction, LeadStatus, ProjectInput, ProjectList, ProjectView } from "./projects";
@@ -228,6 +244,31 @@ export const endpoints = {
   jobAction: (id: string, action: "cancel" | "nudge" | "resume") => api<Job>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
   roles: () => api<RoleInfo[]>("/roles"),
   dirs: () => api<DirEntry[]>("/dirs"),
+  // ---- Landing, throttling, the pause, presence, the digest (DESIGN.md 6.11 to 6.14, 7.12) ----
+  review: (id: string) => api<ReviewView>(`/jobs/${encodeURIComponent(id)}/review`),
+  reviewDiff: (id: string, path: string) => api<FileDiffView>(`/jobs/${encodeURIComponent(id)}/review/diff?path=${encodeURIComponent(path)}`),
+  land: (id: string, action: LandAction) => api<LandResult>(`/jobs/${encodeURIComponent(id)}/land`, { method: "POST", body: { action, confirm: true } }),
+  teardown: (id: string) => api<LandResult>(`/jobs/${encodeURIComponent(id)}/teardown`, { method: "POST", body: { confirm: true } }),
+  startAnyway: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/start-anyway`, { method: "POST" }),
+  sweep: () => api<SweepItem[]>("/sweep"),
+  sweepDiscard: (ids: string[]) =>
+    api<Array<{ id: string; ok: boolean; torn_down: boolean; error?: string }>>("/sweep/discard", { method: "POST", body: { ids, confirm: true } }),
+  queue: () => api<QueueLine>("/queue"),
+  pause: () => api<PauseState>("/pause"),
+  setPause: (until: string, reason: string) => api<PauseState>("/pause", { method: "POST", body: { ...(until ? { until } : {}), reason } }),
+  resume: () => api<PauseState>("/resume", { method: "POST" }),
+  throttle: () => api<ThrottleView>("/throttle"),
+  saveThrottle: (settings: ThrottleSettings) => api<ThrottleSettings>("/throttle", { method: "PUT", body: settings }),
+  resetThrottle: () => api<ThrottleSettings>("/throttle", { method: "DELETE" }),
+  heavy: () => api<HeavyStatus>("/system/heavy"),
+  presence: () => api<PresenceState>("/presence"),
+  heartbeat: (beat: { client: string; visible: boolean; focused: boolean; idle_seconds: number }) =>
+    api<PresenceState>("/presence", { method: "POST", body: beat }),
+  setDND: (until: string) => api<PresenceState>("/presence/dnd", { method: "PUT", body: { until: until || "0001-01-01T00:00:00Z" } }),
+  digests: () => api<Digest[]>("/digests"),
+  digestSettings: () => api<DigestSettings>("/digest/settings"),
+  saveDigestSettings: (settings: DigestSettings) => api<DigestSettings>("/digest/settings", { method: "PUT", body: settings }),
+  digestNow: () => api<DigestStart>("/digest/now", { method: "POST" }),
   // ---- M8: pokes and the journal ----
   /** "Poke now": the orchestrator is poked if anything is due and the gate allows it. */
   poke: () => api<PokeResult>("/orchestrator/poke", { method: "POST" }),
@@ -432,6 +473,15 @@ export const queryKeys = {
   jobs: ["jobs"] as const,
   jobList: ["jobs", "list"] as const,
   job: (id: string) => ["jobs", "one", id] as const,
+  review: (id: string) => ["jobs", "review", id] as const,
+  reviewDiff: (id: string, path: string) => ["jobs", "review", id, "diff", path] as const,
+  sweep: ["jobs", "sweep"] as const,
+  queue: ["jobs", "queue"] as const,
+  pause: ["pause"] as const,
+  throttle: ["throttle"] as const,
+  presence: ["presence"] as const,
+  digests: ["digests"] as const,
+  digestSettings: ["digests", "settings"] as const,
   roles: ["roles"] as const,
   dirs: ["dirs"] as const,
   /** Everything about questions sits under ["questions"], so one `question` event refreshes it all. */

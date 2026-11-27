@@ -16,6 +16,8 @@ import { useApprovals, useFleet, useInboxSummary, useMe } from "../lib/queries";
 import type { StreamStatus } from "../lib/sse";
 import { useNoStrayFileDrops } from "./attach/useAttachments";
 import { ConnectionBanner } from "./ConnectionBanner";
+import { PauseBanner } from "./control/PauseBanner";
+import { usePresenceHeartbeat } from "./control/usePresenceHeartbeat";
 import { Footer } from "./Footer";
 import { navItems } from "./nav";
 import { PaletteButton } from "./palette/PaletteButton";
@@ -28,6 +30,7 @@ import { useSyncPlaybackRate } from "../lib/voice/settings";
 
 export function AppFrame() {
   useNoStrayFileDrops();
+  usePresenceHeartbeat();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -96,6 +99,7 @@ export function AppFrame() {
         </div>
       </header>
       <ConnectionBanner stream={stream} />
+      <PauseBanner />
       {voice && <NowPlaying />}
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Views" className="hidden w-44 shrink-0 flex-col gap-0.5 border-r border-border bg-surface-raised p-2 md:flex">
