@@ -152,7 +152,8 @@ func (r *stopRig) testPausedNotNudged(t *testing.T, pause *switchPause) {
 	pause.set(true)
 	defer pause.set(false)
 	var job jobs.Job
-	if code := r.call(http.MethodPost, "/api/v1/jobs", map[string]any{"brief": "Reply with the single word hello and end your turn. Do not call any tool.",
+	if code := r.call(http.MethodPost, "/api/v1/jobs", map[string]any{"brief": "Reply with the single word hello and end your turn. Do not call any tool: not done, not job_update, nothing. " +
+		"This is a test of what happens when a turn ends with nothing declared, so calling done would spoil it.",
 		"dir": r.repo, "model": "haiku", "reviewer": "off"}, &job); code != http.StatusCreated {
 		t.Fatalf("creating the job: %d", code)
 	}
