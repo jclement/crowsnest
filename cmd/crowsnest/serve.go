@@ -271,6 +271,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		go seedDemoExtras(ctx, refs.projects, leads, scheduleService, refs.instructions, logger)
 	}
 
+	attentionService, nowSources := startAttention(ctx, attentionDeps{
+		db: db, events: events, fleet: fleetCache, approvals: approvalService, questions: questionService, jobs: jobService,
+		projects: refs.projects.service, orchestrator: orchestrator, leads: leads, meter: meter, logger: logger,
+	})
+
 	deps := httpd.Deps{
 		Config: cfg, Auth: authService, Hub: events, Logger: logger, Version: version,
 		Herdr: client, Fleet: fleetCache, HerdrVersion: herdrVersion,
@@ -280,7 +285,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		Attachments: files.service, AttachLayout: files.layout, Spend: meter,
 		Names: db, Projects: refs.projects.service, Leads: leads, Instructions: refs.instructions, Approvals: approvalService, Actions: &actions.Tokens{Store: db},
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
-		Processes: sysstat.NewProcesses(),
+		Processes: sysstat.NewProcesses(), Attention: attentionService, Now: nowSources,
 	}
 	var serverRef atomic.Pointer[httpd.Server]
 	deps.Stats = startStats(ctx, cfg, events, fleetCache, func() bool {

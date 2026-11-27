@@ -216,6 +216,9 @@ func standingDoing(agent StandingAgent, list []jobs.Job) string {
 			if line == "" {
 				line = job.Progress
 			}
+			if line == "" {
+				line = string(job.State)
+			}
 			return job.ID + " " + job.Title + ": " + line
 		}
 	}

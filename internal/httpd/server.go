@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/approvals"
+	"github.com/jclement/crowsnest/internal/attention"
 	"github.com/jclement/crowsnest/internal/attach"
 	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
@@ -146,6 +147,10 @@ type Deps struct {
 	Processes *sysstat.Processes
 	// Instructions serves /instructions and /agents-instructions (DESIGN.md 21.3). Nil: 503.
 	Instructions *instructions.Service
+	// Attention serves /attention and /now (the one queue of what needs the human, DESIGN.md
+	// 22); Now says where the Now view's rows and "since you left" are read from. Nil: 503.
+	Attention *attention.Service
+	Now       NowSources
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).
@@ -246,6 +251,7 @@ func (s *Server) routes() http.Handler {
 	s.registerApprovalRoutes(mux)
 	s.registerSystemRoutes(mux)
 	s.registerStatsRoutes(mux)
+	s.registerAttentionRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
 	mux.HandleFunc("/api/", s.handleAPINotFound)
