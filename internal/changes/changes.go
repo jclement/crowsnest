@@ -339,10 +339,10 @@ func readCheckout(ctx context.Context, target Target, now time.Time) (*reading, 
 	sum := sha256.New()
 	for _, scope := range []string{ScopeAll, ScopeCommitted, ScopeUncommitted} {
 		for _, file := range r.scopes[scope] {
-			fmt.Fprintf(sum, "%s %s %s\n", scope, file.Path, file.Hash)
+			_, _ = fmt.Fprintf(sum, "%s %s %s\n", scope, file.Path, file.Hash)
 		}
 	}
-	fmt.Fprintf(sum, "%s %s", r.base, r.head)
+	_, _ = fmt.Fprintf(sum, "%s %s", r.base, r.head)
 	r.fingerprint = hex.EncodeToString(sum.Sum(nil))[:16]
 	return r, nil
 }
@@ -710,9 +710,9 @@ func (s *Service) File(ctx context.Context, ask Ask, fileAsk FileAsk) (FileView,
 	opts := landing.PatchOptions{Context: fileAsk.Context, IgnoreWhitespace: fileAsk.IgnoreWhitespace}
 	oldBlob, newBlob := file.OldBlob, file.NewBlob
 	if fileAsk.Since {
-		marks, err := s.opts.Store.ListDiffMarks(ctx, target.Subject)
-		if err != nil {
-			return FileView{}, err
+		marks, listErr := s.opts.Store.ListDiffMarks(ctx, target.Subject)
+		if listErr != nil {
+			return FileView{}, listErr
 		}
 		mark, ok := staleMark(markIndex(marks)[file.Path], fileAsk.Scope)
 		switch {

@@ -129,7 +129,7 @@ func (r changesResolver) Retired(ctx context.Context, subject string) bool {
 	if err != nil {
 		return false
 	}
-	return detail.Job.LandState != "" || detail.Job.TornDownAt != nil
+	return detail.LandState != "" || detail.TornDownAt != nil
 }
 
 // startChanges builds the live diff service and runs its loop until ctx ends.

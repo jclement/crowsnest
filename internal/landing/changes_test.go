@@ -2,6 +2,7 @@ package landing
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,7 +201,7 @@ func TestHashStableAndChanges(t *testing.T) {
 	if err != nil || !strings.Contains(text, "println(1)") {
 		t.Errorf("blob = %q %v", text, err)
 	}
-	if _, err := Blob(ctx, r.worktree, changed.NewBlob, 4); err != ErrBlobTooLarge {
+	if _, err := Blob(ctx, r.worktree, changed.NewBlob, 4); !errors.Is(err, ErrBlobTooLarge) {
 		t.Errorf("blob over the limit: %v", err)
 	}
 }

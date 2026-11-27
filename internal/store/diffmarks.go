@@ -75,7 +75,8 @@ func (s *Store) DeleteDiffMarks(ctx context.Context, subject, reviewer, scope st
 	}
 	query, args := `DELETE FROM diff_marks WHERE subject = ? AND reviewer = ? AND scope = ?`, []any{subject, reviewer, scope}
 	if len(paths) > 0 {
-		query += ` AND path IN (?` + strings.Repeat(",?", len(paths)-1) + `)`
+		// Only placeholders are added to the query; the paths are arguments.
+		query += ` AND path IN (?` + strings.Repeat(",?", len(paths)-1) + `)` //nolint:gosec // placeholders, not values
 		for _, path := range paths {
 			args = append(args, path)
 		}

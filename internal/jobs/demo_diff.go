@@ -127,7 +127,7 @@ func DemoDiffTouch(ctx context.Context, s *Service, id string) error {
 		return err
 	}
 	line := fmt.Sprintf("\n// Edit %d: keep the cart badge in step with the server (touch %d).\nexport const cartRevision%d = %d;\n", demoDiff.touches, demoDiff.touches, demoDiff.touches, demoDiff.touches)
-	if err := os.WriteFile(path, append(body, line...), 0o600); err != nil {
+	if err := os.WriteFile(path, append(body, line...), 0o600); err != nil { //nolint:gosec // the demo's own worktree and a fixed file
 		return err
 	}
 	return s.Journal(ctx, id, EventProgress, fmt.Sprintf("Edited %s (change %d)", demoCartPath, demoDiff.touches), nil)
@@ -175,17 +175,27 @@ func demoCheckoutWork(dir string) error {
 		func() error {
 			return demoWrite(dir, "web/src/lib/format.ts", utilTS+"\nexport function percent(n: number): string {\n  return Math.round(n * 100) + \"%\";\n}\n")
 		},
-		func() error { return demoWrite(dir, "web/src/styles/cart.css", strings.Replace(cartCSS, "  padding: 8px;\n  border: 1px solid #ccc;", "  padding: 12px 16px;\n  border-radius: 8px;\n  border: 1px solid var(--border);", 1)) },
+		func() error {
+			return demoWrite(dir, "web/src/styles/cart.css", strings.Replace(cartCSS, "  padding: 8px;\n  border: 1px solid #ccc;", "  padding: 12px 16px;\n  border-radius: 8px;\n  border: 1px solid var(--border);", 1))
+		},
 		func() error { return demoGit(dir, "rm", "-q", "server/legacy_checkout.go") },
 		func() error { return os.WriteFile(filepath.Join(dir, "web/public/logo.png"), demoPNG(1), 0o600) },
 		func() error { return demoWrite(dir, "web/src/generated/api.ts", generatedAPI(1400)) },
-		func() error { return demoWrite(dir, "README.md", strings.Replace(storefrontBase()["README.md"], "A tiny shop.", "A tiny shop with a one-page checkout.", 1)) },
+		func() error {
+			return demoWrite(dir, "README.md", strings.Replace(storefrontBase()["README.md"], "A tiny shop.", "A tiny shop with a one-page checkout.", 1))
+		},
 		func() error { return demoGit(dir, "add", "-A") },
-		func() error { return demoGit(dir, "commit", "-q", "-m", "Checkout: one page, Intl money, rounded cart") },
+		func() error {
+			return demoGit(dir, "commit", "-q", "-m", "Checkout: one page, Intl money, rounded cart")
+		},
 		// Uncommitted on top: the cart (which keeps changing), the handler's test, a new doc.
-		func() error { return demoWrite(dir, demoCartPath, strings.Replace(cartTS, "return items.length;", "return items.reduce((sum, item) => sum + item.quantity, 0);", 1)) },
+		func() error {
+			return demoWrite(dir, demoCartPath, strings.Replace(cartTS, "return items.length;", "return items.reduce((sum, item) => sum + item.quantity, 0);", 1))
+		},
 		func() error { return demoWrite(dir, "server/checkout_test.go", checkoutTestGo) },
-		func() error { return demoWrite(dir, "docs/checkout.md", "# Checkout\n\nOne page: cart, address, payment.\n\n```ts\nmoney(1999) // \"$19.99\"\n```\n") },
+		func() error {
+			return demoWrite(dir, "docs/checkout.md", "# Checkout\n\nOne page: cart, address, payment.\n\n```ts\nmoney(1999) // \"$19.99\"\n```\n")
+		},
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {

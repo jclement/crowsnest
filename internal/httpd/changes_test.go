@@ -30,7 +30,7 @@ func (o oneJob) Orchestrator(context.Context) (changes.Target, error) {
 	return changes.Target{}, &changes.Error{Kind: "not_found", Message: "no orchestrator"}
 }
 func (o oneJob) ProjectJobs(context.Context, string) ([]changes.Target, error) { return nil, nil }
-func (o oneJob) Retired(context.Context, string) bool                        { return false }
+func (o oneJob) Retired(context.Context, string) bool                          { return false }
 
 func changesHarness(t *testing.T, requireViewed bool) *harness {
 	t.Helper()
