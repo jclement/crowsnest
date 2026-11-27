@@ -900,7 +900,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--dir` | `CROWSNEST_DIR` | `<data-dir>/orchestrator` | Orchestrator's working directory |
 | `--model` | `CROWSNEST_MODEL` | `sonnet` | Orchestrator model. An explicit empty value (`--model=` or `CROWSNEST_MODEL=`) means Claude's own default |
 | `--job-model` | `CROWSNEST_JOB_MODEL` | unset (Claude's default) | Model for job agents whose job names none (a delegated job still inherits its parent's) |
-| `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Orchestrator permission mode (`acceptEdits`, `auto`, `bypassPermissions`, `dontAsk`, `manual`, `plan`) |
+| `--permission-mode` | `CROWSNEST_PERMISSION_MODE` | `auto` | Permission mode of the orchestrator and job agents (`acceptEdits`, `auto`, `bypassPermissions`, `dontAsk`, `manual`, `plan`; `default`, `manual`'s older name, is taken too) |
 | `--poke-interval` | `CROWSNEST_POKE_INTERVAL` | `15m` | Timer poke interval; `0` disables timer pokes |
 | `--no-orchestrator` | `CROWSNEST_NO_ORCHESTRATOR` | `false` | Serve the UI over the session without starting Claude |
 | `--engine` | `CROWSNEST_ENGINE` | `auto` | Agent for the orchestrator and for jobs that name none: `auto` (Claude when signed in, else Codex), `claude` or `codex`. Editable in Settings |

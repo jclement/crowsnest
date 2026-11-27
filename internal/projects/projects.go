@@ -42,10 +42,11 @@ const (
 )
 
 var (
-	slugPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
-	rolePattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
-	modelPattern    = regexp.MustCompile(`^[A-Za-z0-9._:\[\]-]{1,64}$`)
-	permissionModes = map[string]bool{"": true, "default": true, "auto": true, "acceptEdits": true, "plan": true, "bypassPermissions": true, "dontAsk": true}
+	slugPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	rolePattern  = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	modelPattern = regexp.MustCompile(`^[A-Za-z0-9._:\[\]-]{1,64}$`)
+	// Claude Code's modes; "manual" is the current name of "default" (both are taken).
+	permissionModes = map[string]bool{"": true, "default": true, "manual": true, "auto": true, "acceptEdits": true, "plan": true, "bypassPermissions": true, "dontAsk": true}
 )
 
 // Project is a project as the API shows it.

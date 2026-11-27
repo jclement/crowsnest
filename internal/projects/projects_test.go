@@ -7,6 +7,7 @@ package projects
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -59,6 +60,7 @@ func TestCreateValidates(t *testing.T) {
 		{"bad engine", Input{Name: ptr("x"), Dir: ptr(repo), DefaultEngine: ptr("gpt")}, "claude or codex"},
 		{"bad lead start", Input{Name: ptr("x"), Dir: ptr(repo), LeadStart: ptr("sometimes")}, "lead_start"},
 		{"bad slug", Input{Name: ptr("x"), Dir: ptr(repo), Slug: ptr("Not OK")}, "short name"},
+		{"bad permission mode", Input{Name: ptr("x"), Dir: ptr(repo), PermissionMode: ptr("yolo")}, "unknown permission mode"},
 		{"ok", Input{Name: ptr("Crow's Nest"), Dir: ptr("~/Work/crowsnest"), DefaultRole: ptr("builder"), DefaultIsolate: ptr(1), LeadStart: ptr("job")}, ""},
 	}
 	for _, tc := range cases {
@@ -76,6 +78,19 @@ func TestCreateValidates(t *testing.T) {
 				t.Fatalf("err %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// A project's permission mode takes Claude Code's current name for the asking mode, "manual", as
+// well as its old one, "default" (the Settings flag offers manual; a project refused it).
+func TestPermissionModeManualAndDefault(t *testing.T) {
+	svc, _, home := newService(t)
+	for i, mode := range []string{"manual", "default"} {
+		dir := mkdir(t, filepath.Join(home, "Work", "mode"+mode))
+		project, err := svc.Create(context.Background(), Input{Name: ptr(fmt.Sprintf("Mode %d", i)), Dir: ptr(dir), PermissionMode: ptr(mode)})
+		if err != nil || project.PermissionMode != mode {
+			t.Fatalf("permission mode %s: %+v %v", mode, project.PermissionMode, err)
+		}
 	}
 }
 
