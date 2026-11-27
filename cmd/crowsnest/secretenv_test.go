@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -45,8 +46,19 @@ func TestHandedOverSecretsAreRestored(t *testing.T) {
 	}
 	_, _ = writer.WriteString(`{"CROWSNEST_PASSWORD":"hunter2","PATH":"/evil"}`)
 	_ = writer.Close()
+	defer func() { _ = reader.Close() }()
+	// restoreHandedOverSecrets takes the descriptor over and closes it, as the re-executed process
+	// does with the one it inherits. So it gets a duplicate nobody else owns: handing it reader's
+	// own number left reader to close that number again when the GC collected it, by which time
+	// the kernel had given it to the next test's database (Linux reuses the lowest free number):
+	// TestServeStartsWithoutHerdrAndRecovers failed on every CI run with "disk I/O error" (778 on
+	// writes, 266 on reads), the database's descriptor closed under it.
+	handed, err := syscall.Dup(int(reader.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("CROWSNEST_PASSWORD", "")
-	t.Setenv(secretsFDEnv, strconv.Itoa(int(reader.Fd())))
+	t.Setenv(secretsFDEnv, strconv.Itoa(handed))
 	path := os.Getenv("PATH")
 	if restored, err := restoreHandedOverSecrets(); err != nil || !restored {
 		t.Fatalf("restored %v, %v", restored, err)
