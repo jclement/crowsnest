@@ -717,6 +717,15 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--review` | `CROWSNEST_REVIEW` | `auto` | The review gate for builder jobs in a worktree: `auto` (the other engine when installed, else the same one), `same`, `claude`, `codex` or `off`. A job can ask for its own |
 | `--merge` | `CROWSNEST_MERGE` | `merge` | How Land merges a finished job's branch into its base: `merge` (a merge commit) or `ff` (fast-forward only) |
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | off | `HH:MM`: write the daily digest into the Inbox after this local time (also the switch in the Schedule sheet and in Settings) |
+| `--check-timeout` | `CROWSNEST_CHECK_TIMEOUT` | `30m` | Longest crowsnest's own check of a finished coding job may run (DESIGN 6.15) |
+| `--check-rounds` | `CROWSNEST_CHECK_ROUNDS` | `3` | Failed checks sent back to the agent before the job needs you |
+| `--job-budget-usd` | `CROWSNEST_JOB_BUDGET_USD` | `0` (none) | Default budget per job in estimated dollars, its delegated jobs included (DESIGN 6.16) |
+| `--job-budget-minutes` | `CROWSNEST_JOB_BUDGET_MINUTES` | `0` (none) | Default budget per job in minutes since its agent started |
+| `--job-budget-turns` | `CROWSNEST_JOB_BUDGET_TURNS` | `0` (none) | Default budget per job in ended turns, delegated jobs included |
+| `--job-budget-tokens` | `CROWSNEST_JOB_BUDGET_TOKENS` | `0` (none) | Default budget per job in tokens, delegated jobs included |
+| `--daily-ceiling-usd` | `CROWSNEST_DAILY_CEILING_USD` | `0` (none) | The fleet's spend ceiling per day: bounds jobs with no budget of their own, and holds new starts once reached |
+| `--orchestrator-ceiling-usd` | `CROWSNEST_ORCHESTRATOR_CEILING_USD` | `0` (none) | The orchestrator's spend ceiling per day; past it automatic pokes wait |
+| `--lead-ceiling-usd` | `CROWSNEST_LEAD_CEILING_USD` | `0` (none) | Each project lead's spend ceiling per day, where its spend is measured |
 | `--attachment-max-mb` | `CROWSNEST_ATTACHMENT_MAX_MB` | `25` | Largest file you can paste, drop or attach, and that an agent can attach to a question or a result, in MB |
 | `--attachment-quota-mb` | `CROWSNEST_ATTACHMENT_QUOTA_MB` | `1024` | Disk all attachments may take, in MB; past it the oldest files nobody needs any more are deleted, else an upload is refused |
 | `--protected-host` | `CROWSNEST_PROTECTED_HOSTS` | none | A production host no agent may reach unattended: the guard hook refuses a command that would reach it, and an approval naming it is dangerous. Repeatable; added to the file below |

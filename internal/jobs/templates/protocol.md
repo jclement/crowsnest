@@ -8,7 +8,9 @@ the job's state declared.
 
 {{if .MCP}}- `job_update(progress)`: one line saying what you are doing now. Call it when you start a
   new step, at least every few minutes. `state: "blocked"` with a `reason` when you are waiting on
-  something other than the human (an outage, another job); `state: "running"` when it clears.
+  something other than the human (an outage, another job), and a wake-up: `recheck_in` ("30m"),
+  `recheck_at` ("14:10"), `until_job` ("j_7") or `until_human`. crowsnest wakes you then to look
+  again. `state: "running"` when it clears.
 - `ask(...)`: ask the human. It does NOT block: you get an id at once. Keep working on everything
   the answer does not block; the answer arrives later as a message starting
   `[crowsnest answer q_<n>]`. If truly nothing is left that your open questions do not block,
@@ -19,6 +21,10 @@ the job's state declared.
   `walkthrough_md`: the change chunk by chunk in the order it is best understood, naming each
   file, why each part exists, what was tested and what was not, and the risk both ways. The
   human reviews it beside the diff, and a reviewer agent may be started on it.
+  In a git checkout, crowsnest checks before it accepts your done: commit everything first (a
+  dirty tree is refused), a worktree branch needs commits (or `no_commits_reason`), and crowsnest
+  runs the project's check itself. A failure comes back as a `[crowsnest check]` message naming
+  the output file: fix it, commit, and call done again.
 - `fail(reason)`: the job cannot be finished, and why.
 - `job_get()`: your job, its brief and your questions with their answers. Read it after a
   restart or when you lose track.
@@ -27,8 +33,9 @@ the job's state declared.
   directory, another engine, `isolate: false` when you are isolated) waits for the human's
   approval, and the answer reaches you as a message.
 {{else}}- `crowsnest job update "what you are doing now"`: call it when you start a new step, at least
-  every few minutes. `--state blocked --reason "…"` when you are waiting on something other than
-  the human; `--state running` when it clears. `--waiting` declares that nothing is left that
+  every few minutes. `--state blocked --reason "…"` with `--recheck-in 30m` (or `--recheck-at
+  HH:MM`, `--until-job j_N`, `--until-human`) when you are waiting on something other than the
+  human: crowsnest wakes you then; `--state running` when it clears. `--waiting` declares that nothing is left that
   your open questions do not block.
 - `crowsnest ask --file q.json`: ask the human (JSON: title, body_md, kind, options, recommend).
   It returns an id at once; keep working. The answer arrives later as a message starting
@@ -36,7 +43,8 @@ the job's state declared.
 - `crowsnest job done --result "…" --verified "…" --not-verified "…"` (repeat the list flags;
   pass `--not-verified none` when there is nothing): the job is finished, with evidence. In a git
   worktree add `--walkthrough-file walk.md`: the change chunk by chunk, why each part exists,
-  what was tested and not, the risk both ways.
+  what was tested and not, the risk both ways. Commit first: in a git checkout crowsnest refuses
+  a dirty tree and runs the project's check itself before it accepts the job.
 - `crowsnest job fail "reason"`: it cannot be finished.
 - `crowsnest job get`: your job, its brief and your questions with their answers.
 {{end}}
@@ -47,7 +55,8 @@ several agents testing at once cannot freeze it. Never wrap a dev server or a wa
 Rules:
 
 1. Never end a turn without declaring: done, fail, blocked, or waiting on questions. An
-   undeclared stop is refused and you are sent back to work.
+   undeclared stop is refused and you are sent back to work. A question to the human goes
+   through ask: one asked in your reply is never seen.
 2. An irreversible or expensive step (deleting data, pushing, deploying, spending money) needs
    approval first: {{if .MCP}}`ask` with `wait: true`{{else}}`crowsnest ask --wait --file q.json`{{end}}, which blocks until the human answers.
 3. An expired, cancelled or unanswered question is never consent.

@@ -86,7 +86,7 @@ func TestBackstopJobsListsOnlyRunningUnwaitingJobs(t *testing.T) {
 	ctx := context.Background()
 	running := r.create(CreateInput{Brief: "Run", Dir: t.TempDir()})
 	blocked := r.create(CreateInput{Brief: "Block", Dir: t.TempDir()})
-	if _, err := r.svc.Update(ctx, blocked.ID, UpdateInput{Progress: "waiting on CI", State: string(StateBlocked), Reason: "CI is down"}); err != nil {
+	if _, err := r.svc.Update(ctx, blocked.ID, UpdateInput{Progress: "waiting on CI", State: string(StateBlocked), Reason: "CI is down", RecheckIn: "30m"}); err != nil {
 		t.Fatal(err)
 	}
 	list, err := r.svc.BackstopJobs(ctx)

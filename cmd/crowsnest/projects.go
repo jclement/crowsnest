@@ -36,6 +36,8 @@ type projectWiring struct {
 	extra atomic.Pointer[func(ctx context.Context, project projects.Project) string]
 	// taskSource gives a lead's poker its project's scheduled tasks; nil gives none.
 	taskSource atomic.Pointer[func(projectID int64) orch.TaskSource]
+	// jobs is the jobs service, for a lead poker's spend ceiling and usage-limit hold (6.16).
+	jobs atomic.Pointer[jobs.Service]
 }
 
 func newProjectWiring(cfg config.Config, db *store.Store, events *hub.Hub) *projectWiring {
@@ -167,6 +169,9 @@ func (w *projectWiring) leadFactory(deps leadDeps) projects.LeadFactory {
 		}
 		if deps.ctl != nil {
 			options.Paused, options.Held, options.Presence = deps.ctl.paused, deps.ctl.held, deps.ctl.presenceWord
+		}
+		if service := w.jobs.Load(); service != nil {
+			options.Hold = standingHold(service, projects.AgentName(project.Slug))
 		}
 		if source := w.taskSource.Load(); source != nil {
 			options.Tasks = (*source)(project.ID)

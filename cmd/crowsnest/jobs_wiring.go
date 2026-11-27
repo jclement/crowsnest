@@ -84,8 +84,15 @@ func newJobService(cfg config.Config, client herdr.Client, db *store.Store, even
 	if refs.ctl != nil {
 		pauseSwitch, startThrottle, landingOpts, extraEnv = refs.ctl.pause, refs.ctl.throttle, refs.ctl.landing, refs.ctl.heavyEnv()
 	}
+	questionsReceived := func(id int64) {
+		if service := refs.questions.Load(); service != nil {
+			service.MarkReceived(context.Background(), id)
+		}
+	}
 	return jobs.New(jobs.Options{
 		Pause: pauseSwitch, Throttle: startThrottle, Landing: landingOpts,
+		Accept: acceptOptions(cfg, executable), Budgets: budgetOptions(cfg), Limits: fleetLimits(db, events),
+		SpendToday: spendToday(meter), OnViolation: violationJournal(journalLog), OnReceived: questionsReceived,
 		Projects: projectSource,
 		Store:    db, Hub: events, Logger: logger, Herdr: client, Roles: roles, Notify: alert, DefaultModel: cfg.JobModel,
 		Attachments: files, Spend: meter, Instructions: jobInstructions(refs.instructions),

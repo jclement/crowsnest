@@ -151,6 +151,7 @@ func (s *Service) Get(ctx context.Context, id string) (Question, error) {
 		question.Attachments, _ = source.List(ctx, attach.OwnerQuestion, question.ID, attach.RoleAsk)
 		question.AnswerAttachments, _ = source.ListByRef(ctx, attach.RoleAnswer, question.ID)
 	}
+	s.withReceipt(ctx, &question)
 	return question, nil
 }
 
@@ -321,6 +322,7 @@ func (s *Service) Collected(ctx context.Context, question Question, caller Calle
 	if err := s.opts.Store.MarkPollCollected(ctx, numeric, s.opts.Now()); err != nil {
 		s.opts.Logger.Warn("recording a collected answer", "question", question.ID, "err", err)
 	}
+	_, _ = s.opts.Store.MarkQuestionReceived(ctx, numeric, s.opts.Now()) // its own call returned it (6.19)
 }
 
 // RetypeUncollected switches poll deliveries nobody collected within collectGrace, and whose

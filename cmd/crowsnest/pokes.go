@@ -7,6 +7,7 @@
 package main
 
 import (
+	"github.com/jclement/crowsnest/internal/spend"
 	"context"
 	"fmt"
 	"log/slog"
@@ -52,6 +53,9 @@ func startPoker(ctx context.Context, cfg config.Config, db *store.Store, events 
 	}
 	if services.ctl != nil {
 		options.Paused, options.Held, options.Presence = services.ctl.paused, services.ctl.held, services.ctl.presenceWord
+	}
+	if services.jobs != nil {
+		options.Hold = standingHold(services.jobs, spend.OrchestratorSubject)
 	}
 	if services.tender != nil && !cfg.NoOrchestrator {
 		options.Tender = services.tender

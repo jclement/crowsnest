@@ -23,8 +23,10 @@ package httpd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/digest"
@@ -110,6 +112,10 @@ func (s *Server) handleReviewDiff(w http.ResponseWriter, r *http.Request) {
 type landBody struct {
 	Action  string `json:"action"`
 	Confirm bool   `json:"confirm"`
+	// Override lands a revision crowsnest's evidence does not support (stale, failed or missing
+	// check, or a base that moved on: DESIGN.md 6.15). Only ever sent by an explicit second
+	// confirmation in the app.
+	Override bool `json:"override"`
 }
 
 func (s *Server) handleLand(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +133,12 @@ func (s *Server) handleLand(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), landTimeout)
 	defer cancel()
-	result, err := service.Land(ctx, r.PathValue("id"), body.Action, "you")
+	result, err := service.LandWith(ctx, r.PathValue("id"), body.Action, "you", body.Override)
+	var evidence *jobs.EvidenceError
+	if errors.As(err, &evidence) {
+		writeError(w, http.StatusConflict, "EVIDENCE_"+strings.ToUpper(evidence.Code), evidence.Message)
+		return
+	}
 	if err != nil {
 		s.writeJobError(w, r, err)
 		return

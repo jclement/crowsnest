@@ -22,6 +22,11 @@ type JobUpdateArgs struct {
 	State    string `json:"state,omitempty" jsonschema:"blocked (waiting on something other than the human; give reason) or running (it cleared). Omit otherwise"`
 	Reason   string `json:"reason,omitempty" jsonschema:"with state blocked: what you are waiting on"`
 	Waiting  *bool  `json:"waiting,omitempty" jsonschema:"true: nothing is left that your open questions do not block, so you may end your turn until an answer arrives"`
+	// A blocked declaration's wake-up (DESIGN.md 6.18): exactly one.
+	RecheckIn  string `json:"recheck_in,omitempty" jsonschema:"with state blocked: when crowsnest should wake you to look again, as a duration (30m, 2h; 1m to 24h)"`
+	RecheckAt  string `json:"recheck_at,omitempty" jsonschema:"with state blocked: or a time to look again, HH:MM local or RFC 3339"`
+	UntilJob   string `json:"until_job,omitempty" jsonschema:"with state blocked: or another job (j_<n>) whose finishing wakes you"`
+	UntilHuman bool   `json:"until_human,omitempty" jsonschema:"with state blocked: or true when only the human can unblock it (prefer ask)"`
 }
 
 // DoneArgs are done's arguments.
@@ -33,6 +38,8 @@ type DoneArgs struct {
 	Attachments []string `json:"attachments,omitempty" jsonschema:"files to attach to the result (a report, a screenshot of what you built): paths inside your working directory or job directory, at most 10"`
 	// WalkthroughMD is the change explained chunk by chunk (DESIGN.md 6.11).
 	WalkthroughMD string `json:"walkthrough_md,omitempty" jsonschema:"for work in a git worktree: Markdown walking a reviewer through the change chunk by chunk, in the order it is best understood (schema, logic, API, UI, tests), naming each file path, why each part exists, what was tested and what was not, and the risk both ways"`
+	// NoCommitsReason explains a finished worktree job with no commits (DESIGN.md 6.15).
+	NoCommitsReason string `json:"no_commits_reason,omitempty" jsonschema:"only when your branch has no commits because the job needed no change: why"`
 }
 
 // LandArgs are job_land's arguments.
@@ -69,11 +76,12 @@ type JobGetArgs struct {
 
 const (
 	jobUpdateDescription = "Report what you are doing now, in one line. Call it at the start of each step and at least every few minutes; the human watches this line on their phone.\n\n" +
-		"state=blocked with a reason: you are waiting on something other than the human (an outage, another job). state=running: it cleared.\n" +
+		"state=blocked with a reason and a wake-up: you are waiting on something other than the human (an outage, another job). Give recheck_in (30m), recheck_at, until_job (j_N) or until_human; crowsnest wakes you then. state=running: it cleared.\n" +
 		"waiting=true: you asked questions and truly nothing is left that they do not block; you may then end your turn and the answer will wake you."
 	doneDescription = "Declare your job finished. Call it once, when the work is complete and checked. result_md says what was done. " +
 		"verified lists what you checked and saw pass, with commands. not_verified lists what you skipped or could not run. Both lists are required (use [] for none). " +
-		"Never call done over failing tests; say so in not_verified or call fail."
+		"Never call done over failing tests; say so in not_verified or call fail. In a git checkout crowsnest checks before it accepts: the tree must be clean (commit first), "+
+		"a worktree branch needs commits (or no_commits_reason), and crowsnest runs the project's check itself; a failure comes back to you as a [crowsnest check] message."
 	failDescription      = "Declare that your job cannot be finished, with the reason and what you tried. Use it only when no path forward is left; if you need a decision, call ask instead."
 	jobCreateDescription = "Delegate a unit of work as a child job (leads). crowsnest starts a new agent for it with the role's instructions; a builder given a git repo works in its own worktree. " +
 		"A child inside your own directory, with your engine, starts at once; anything wider (another directory, no directory, another engine, isolate=false when you are isolated) waits for the human's approval. " +
@@ -86,7 +94,8 @@ func init() {
 		mcp.AddTool(server, &mcp.Tool{Name: "job_update", Title: "Report progress", Description: jobUpdateDescription},
 			func(ctx context.Context, _ *mcp.CallToolRequest, args JobUpdateArgs) (*mcp.CallToolResult, any, error) {
 				return jobCall(client, args.JobID, func(id string) (string, error) {
-					job, err := client.UpdateJob(ctx, id, jobs.UpdateInput{Progress: args.Progress, State: args.State, Reason: args.Reason, Waiting: args.Waiting})
+					job, err := client.UpdateJob(ctx, id, jobs.UpdateInput{Progress: args.Progress, State: args.State, Reason: args.Reason, Waiting: args.Waiting,
+						RecheckIn: args.RecheckIn, RecheckAt: args.RecheckAt, UntilJob: args.UntilJob, UntilHuman: args.UntilHuman})
 					if err != nil {
 						return "", err
 					}
@@ -96,6 +105,8 @@ func init() {
 						text += " It waits on the human; you may end your turn, and the answer will arrive as a message."
 					case jobs.StateRunning:
 						text += " Keep going."
+					case jobs.StateBlocked:
+						text += " " + job.Wake + "; you may end your turn."
 					}
 					return text, nil
 				}), nil, nil
@@ -105,9 +116,13 @@ func init() {
 		mcp.AddTool(server, &mcp.Tool{Name: "done", Title: "Finish the job", Description: doneDescription},
 			func(ctx context.Context, _ *mcp.CallToolRequest, args DoneArgs) (*mcp.CallToolResult, any, error) {
 				return jobCall(client, args.JobID, func(id string) (string, error) {
-					job, err := client.DoneJob(ctx, id, jobs.DoneInput{ResultMD: args.ResultMD, Verified: args.Verified, NotVerified: args.NotVerified, Attachments: args.Attachments, WalkthroughMD: args.WalkthroughMD})
+					job, err := client.DoneJob(ctx, id, jobs.DoneInput{ResultMD: args.ResultMD, Verified: args.Verified, NotVerified: args.NotVerified, Attachments: args.Attachments,
+						WalkthroughMD: args.WalkthroughMD, NoCommitsReason: args.NoCommitsReason})
 					if err != nil {
 						return "", err
+					}
+					if job.State == jobs.StateInReview && job.AcceptState == jobs.AcceptChecking {
+						return fmt.Sprintf("Job %s is being checked: crowsnest runs the project's check in your worktree. You may end your turn; if it fails, the output arrives as a [crowsnest check] message.", job.ID), nil
 					}
 					if job.State == jobs.StateInReview {
 						return fmt.Sprintf("Job %s is in review: a reviewer agent is looking at the change. You may end your turn; if it asks for changes, its findings arrive as a [crowsnest review …] message.", job.ID), nil

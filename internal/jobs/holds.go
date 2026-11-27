@@ -20,6 +20,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jclement/crowsnest/internal/store"
 	"github.com/jclement/crowsnest/internal/throttle"
@@ -37,6 +38,9 @@ type StartThrottle interface {
 	Settings(ctx context.Context) throttle.Settings
 	Load(ctx context.Context) throttle.LoadState
 }
+
+// ceilingHoldPrefix starts a start-hold reason for the fleet's daily spend ceiling (6.16).
+const ceilingHoldPrefix = "spend ceiling: "
 
 // pausedText is the hold reason while paused.
 const pausedText = "crowsnest's automation is paused; it starts when you resume (or Start anyway)"
@@ -65,6 +69,12 @@ func (s *Service) startHoldLocked(ctx context.Context, r store.JobRecord) string
 	}
 	if s.paused() {
 		return pausedText
+	}
+	if held, state := s.limitHeld(ctx, r.Engine); held {
+		return limitHoldPrefix + limitText(state) + "; it starts after the reset (or Start anyway)"
+	}
+	if reached, why := s.FleetCeilingReached(ctx); reached {
+		return ceilingHoldPrefix + why + "; it starts tomorrow, when the ceiling is raised, or with Start anyway"
 	}
 	if s.opts.Throttle == nil {
 		return ""
@@ -111,6 +121,10 @@ func holdKind(reason string) string {
 	switch {
 	case reason == pausedText:
 		return "paused"
+	case strings.HasPrefix(reason, limitHoldPrefix):
+		return "limit"
+	case strings.HasPrefix(reason, ceilingHoldPrefix):
+		return "ceiling"
 	case len(reason) >= 8 && reason[:8] == "waiting:":
 		return "load"
 	default:

@@ -211,6 +211,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, files, meter, logger)
 	jobServiceRef.Store(jobService)
 	live.jobs.Store(jobService)
+	refs.projects.jobs.Store(jobService)
 	go live.applyJobDefaults(ctx, cfg)
 	approvalLinks.jobs.Store(jobService)
 	files.jobs = jobService

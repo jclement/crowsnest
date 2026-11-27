@@ -151,6 +151,11 @@ type Question struct {
 	Delivery      Delivery   `json:"delivery"`
 	DeliveredAt   *time.Time `json:"delivered_at"`
 	DeliveryError string     `json:"delivery_error,omitempty"`
+	// Receipt is the answer's journey (receipt.go): stored, held, uncertain, failed, delivered or
+	// received; "" while open. Filled by Get.
+	Receipt    string     `json:"receipt,omitempty"`
+	ReceivedAt *time.Time `json:"received_at,omitempty"`
+	HeldReason string     `json:"held_reason,omitempty"`
 }
 
 // Event is the data of a `question` hub event: something about question ID changed. The title,

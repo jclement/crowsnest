@@ -82,6 +82,11 @@ type LandOptions struct {
 	Why       map[string]string `json:"why,omitempty"` // action → why it is not allowed
 	Confirm   map[string]string `json:"confirm"`       // action → exactly what it will do
 	Request   string            `json:"request,omitempty"`
+	// Evidence is why crowsnest's evidence does not support merging or pushing this revision
+	// (6.15): "" when it does, else stale, failed, missing, checking or needs_rebase, with
+	// EvidenceWhy. Land then needs the human's explicit override.
+	Evidence    string `json:"evidence,omitempty"`
+	EvidenceWhy string `json:"evidence_why,omitempty"`
 }
 
 // ReviewOf builds the Review tab for a job.
@@ -122,6 +127,14 @@ func (s *Service) ReviewOf(ctx context.Context, id string) (ReviewView, error) {
 		view.Reviews = append(view.Reviews, ReviewRound{Round: max(job.ReviewRound, 1), Verdict: job.ReviewVerdict, Findings: job.ReviewMD, State: StateDone})
 	}
 	view.Land = s.landOptions(job, view.Produced)
+	var snap *landing.Snapshot
+	if view.Produced != nil {
+		snap = &landing.Snapshot{Head: view.Produced.Head, Clean: view.Produced.Clean, Ahead: view.Produced.Ahead, Behind: view.Produced.Behind,
+			Based: view.Produced.DiffBase != ""}
+	}
+	if job.LandState == "" {
+		view.Land.Evidence, view.Land.EvidenceWhy = s.LandEvidence(ctx, job, snap)
+	}
 	return view, nil
 }
 
@@ -265,6 +278,13 @@ type LandResult struct {
 // Land runs a land action for the human (by names them on the timeline: "you", or "you, as
 // lead-x asked"). A refusal changes nothing and comes back as a ValidationError.
 func (s *Service) Land(ctx context.Context, id, action, by string) (LandResult, error) {
+	return s.LandWith(ctx, id, action, by, false)
+}
+
+// LandWith is Land with the human's explicit override of crowsnest's evidence (6.15): without
+// it, a merge or push of a revision whose check is stale, failed or missing, or whose base has
+// moved on, is refused.
+func (s *Service) LandWith(ctx context.Context, id, action, by string, override bool) (LandResult, error) {
 	if !ValidLandAction(action) {
 		return LandResult{}, invalid("unknown land action %q: give merge, pr or discard", action)
 	}
@@ -278,6 +298,14 @@ func (s *Service) Land(ctx context.Context, id, action, by string) (LandResult, 
 	}
 	if action == LandDiscard {
 		return s.discard(ctx, job, by)
+	}
+	if code, why := s.LandEvidence(ctx, job, nil); code != "" {
+		if !override {
+			s.markEvidence(ctx, job.ID, code, why)
+			_ = s.Journal(ctx, job.ID, EventLand, "Land ("+action+") refused: "+why, map[string]any{"evidence": code})
+			return LandResult{}, &EvidenceError{Code: code, Message: why + ". Land it anyway only with an explicit override"}
+		}
+		_ = s.Journal(ctx, job.ID, EventLand, "Landed over crowsnest's evidence by "+firstNonEmptyDir(by, "you")+" ("+code+": "+why+")", map[string]any{"evidence": code, "override": true})
 	}
 	detailText, err := s.landRemote(ctx, job, action)
 	if err != nil {
@@ -670,4 +698,28 @@ func parseInt64(text string) (int64, error) {
 	var n int64
 	_, err := fmt.Sscan(text, &n)
 	return n, err
+}
+
+// EvidenceError is Land's refusal for want of evidence: Code is stale, failed, missing, checking
+// or needs_rebase. The HTTP layer answers 409 with the code, so the app can offer the override.
+type EvidenceError struct {
+	Code    string
+	Message string
+}
+
+func (e *EvidenceError) Error() string { return e.Message }
+
+// markEvidence records what Land found (stale, needs rebase) on a finished job's accept state.
+func (s *Service) markEvidence(ctx context.Context, id, code, why string) {
+	if code != AcceptStale && code != AcceptNeedsRebase {
+		return
+	}
+	_, _ = s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
+		if r.AcceptState == code || r.AcceptState == AcceptChecking || r.AcceptState == AcceptNone {
+			return errSkip
+		}
+		r.AcceptState, r.AcceptDetail = code, oneLine(why, 300)
+		c.event(EventAccept, "Land found: "+oneLine(why, 200), nil)
+		return nil
+	})
 }
