@@ -172,6 +172,19 @@ func (s *Service) roots(ctx context.Context) []root {
 	return out
 }
 
+// Roots lists the allowed trees as the picker shows them (their paths as configured).
+func (s *Service) Roots(ctx context.Context) []Place {
+	roots := s.roots(ctx)
+	out := make([]Place, len(roots))
+	for i, r := range roots {
+		out[i] = r.Place
+		if out[i].Label == "" {
+			out[i].Label = s.label(r.Path)
+		}
+	}
+	return out
+}
+
 // rootOf is the root holding resolved, if any.
 func rootOf(roots []root, resolved string) (root, bool) {
 	for _, candidate := range roots {

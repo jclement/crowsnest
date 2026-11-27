@@ -334,6 +334,12 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(), Attention: attentionService, Now: nowSources,
 	}
+	if cfg.Demo {
+		if err := seedDemoTree(cfg); err != nil {
+			logger.Warn("making the demo's folder tree", "err", err)
+		}
+	}
+	deps.Browse = newBrowser(cfg, browserSources{jobs: jobService, projects: refs.projects.service, fleet: fleetCache})
 	// The nightly clean-up and the automatic backup are automation: the pause switch holds both
 	// (DESIGN.md 6.13). Clean up now and Download backup are the human's and are not held.
 	cleanup := newRetention(live.config.get, db, journalLog, ctl.paused, logger)
