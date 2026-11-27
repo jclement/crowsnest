@@ -170,7 +170,7 @@ test.describe.serial("the supervisor and the human, with real Claude", () => {
     test.setTimeout(10 * 60_000);
     await page.goto(`${instance.baseURL}/jobs`);
     await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Pause automation…" }).click();
+    await page.getByRole("menuitemcheckbox", { name: "Pause automation" }).click();
     const sheet = page.getByRole("dialog", { name: "Pause automation" });
     await sheet.getByLabel(/Reason/).fill("e2e hold");
     await sheet.getByRole("button", { name: "Pause", exact: true }).click();

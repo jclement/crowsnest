@@ -16,7 +16,6 @@
 import { useDiffProgress } from "../lib/changes-queries";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CalendarClock, FolderGit2, Gauge, ListTodo, NotebookText, Plus, RefreshCw } from "lucide-react";
-import { LimitsSheet } from "../components/control/LimitsSheet";
 import { SweepSheet } from "../components/control/SweepSheet";
 import { queueText } from "../lib/landing";
 import { useState } from "react";
@@ -52,7 +51,6 @@ export function JobsView() {
   const [journalOpen, setJournalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [spendOpen, setSpendOpen] = useState(false);
-  const [limitsOpen, setLimitsOpen] = useState(false);
   const [sweepOpen, setSweepOpen] = useState(false);
   const queue = useQueue();
   const sweep = useSweep();
@@ -74,7 +72,7 @@ export function JobsView() {
             <SpendButton onOpen={() => setSpendOpen(true)} />
           </span>
           {queue.data && (
-            <Button compact variant="ghost" icon={Gauge} onClick={() => setLimitsOpen(true)} title="Running-job limit, load hold and heavy slots">
+            <Button compact variant="ghost" icon={Gauge} onClick={() => void navigate({ to: "/settings", hash: "limits" })} title="Running-job limit, load hold and heavy slots: Settings → Limits">
               <span className={queue.data.paused || queue.data.load_hold ? "text-warning" : undefined}>{queueText(queue.data)}</span>
             </Button>
           )}
@@ -92,7 +90,6 @@ export function JobsView() {
           <HelpButton topic="concepts/jobs#states" what="job states" inline={false} />
         </div>
         <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
-        <LimitsSheet open={limitsOpen} onClose={() => setLimitsOpen(false)} />
         <SweepSheet
           open={sweepOpen}
           onClose={() => setSweepOpen(false)}

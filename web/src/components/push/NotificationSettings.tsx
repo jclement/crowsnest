@@ -71,7 +71,8 @@ export function NotificationSettings({ open, onClose, env }: NotificationSetting
   );
 }
 
-function NotificationSettingsBody({ env }: { env: PushEnvironment }) {
+/** The notification settings themselves: the Settings view's section, and the first run's sheet. */
+export function NotificationSettingsBody({ env }: { env: PushEnvironment }) {
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: settingsKey, queryFn: endpoints.pushSettings });
   // This browser's own subscription, if any, and its hash to find it in the device list.

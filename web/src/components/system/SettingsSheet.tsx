@@ -1,95 +1,60 @@
-// The Settings sheet (account menu → Settings): the settings that make sense to change while
-// crowsnest runs, by section, each showing where its value comes from and when a change takes
-// effect. A setting given by a flag or an environment variable is read-only here ("set by the
+// The server's settings (what can change while crowsnest runs), drawn as sections of the Settings
+// view (routes/SettingsView.tsx), each row showing where its value comes from and when a change
+// takes effect. A setting given by a flag or an environment variable is read-only ("set by the
 // environment: change it there"); the bind is shown read-only with the command that changes it.
-// Account, Voice and Notifications keep their own sheets; this one links to them.
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+// The server groups its settings by section name; the view decides which group each lands in.
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../../lib/api";
 import { applyLabels, sourceLabels, systemEndpoints, systemKeys, type SettingView, type SettingsPage } from "../../lib/system";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
-import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
-import { backupURL } from "../../lib/ops";
 import { CommandLine } from "./CheckList";
-import { HelpButton } from "../help/HelpButton";
 
 const inputClass = "h-11 w-full min-w-0 rounded border border-border bg-surface px-3 text-sm font-normal text-heading md:h-9 disabled:bg-surface-sunken disabled:text-muted";
 
-interface SettingsSheetProps {
-  open: boolean;
-  onClose: () => void;
-  /** Opens one of the other sheets this one links to. */
-  onOpen?: (sheet: "account" | "voice" | "notifications" | "appearance") => void;
-}
-
-export function SettingsSheet({ open, onClose, onOpen }: SettingsSheetProps) {
-  const page = useQuery({ queryKey: systemKeys.settings, queryFn: systemEndpoints.settings, enabled: open });
-  return (
-    <Sheet open={open} onClose={onClose} title="Settings" headerExtra={<HelpButton topic="reference/settings" what="every setting and flag" inline={false} />}>
-      <div className="flex flex-col gap-5 p-4">
-        {page.isPending && <p className="text-xs text-muted">Loading…</p>}
-        {page.isError && <p className="text-xs text-danger">Could not load the settings. {(page.error as Error).message}</p>}
-        {page.data && <SettingsBody page={page.data} onOpen={onOpen} />}
-      </div>
-    </Sheet>
-  );
-}
-
-export function SettingsBody({ page, onOpen }: { page: SettingsPage; onOpen?: SettingsSheetProps["onOpen"] }) {
-  const sections = [...new Set(page.settings.map((setting) => setting.section))];
+/**
+ * The rows of the server sections named, each under its own heading (a section with no rows is
+ * left out). A section named `titled`, the enclosing view section's own title, is drawn without a
+ * heading of its own, so the page never says the same name twice.
+ */
+export function ServerSettings({ page, sections, titled }: { page: SettingsPage; sections: string[]; titled?: string }) {
   return (
     <>
-      <section className="flex flex-col gap-2">
-        <h3 className="text-2xs uppercase tracking-wide text-muted">Elsewhere</h3>
-        <div className="flex flex-wrap gap-2">
-          <Button compact onClick={() => onOpen?.("account")}>
-            Account and name ({page.name})
-          </Button>
-          <Button compact onClick={() => onOpen?.("appearance")}>
-            Appearance
-          </Button>
-          <Button compact onClick={() => onOpen?.("notifications")}>
-            Notifications
-          </Button>
-          <Button compact onClick={() => onOpen?.("voice")}>
-            Voice
-          </Button>
-          <a
-            href={backupURL}
-            download
-            className="inline-flex min-h-11 items-center rounded border border-border-strong px-2 text-xs font-medium text-heading hover:bg-hover md:min-h-7"
-          >
-            Download backup
-          </a>
-        </div>
-        <p className="text-2xs text-muted">Storage, clean-up, Machines and Sign in with Tailscale are on the System page.</p>
-      </section>
-      {sections.map((section) => (
-        <section key={section} className="flex flex-col gap-1" aria-label={section}>
-          <h3 className="text-2xs uppercase tracking-wide text-muted">{section}</h3>
-          <ul className="divide-y divide-border">
-            {page.settings
-              .filter((setting) => setting.section === section)
-              .map((setting) => (
+      {sections.map((section) => {
+        const rows = page.settings.filter((setting) => setting.section === section);
+        if (rows.length === 0) return null;
+        const own = section !== titled;
+        return (
+          <section key={section} className="flex flex-col gap-1" aria-label={own ? section : undefined}>
+            {own && <h3 className="text-2xs uppercase tracking-wide text-muted">{section}</h3>}
+            <ul className="divide-y divide-border">
+              {rows.map((setting) => (
                 <li key={setting.name} className="py-3">
                   <SettingRow setting={setting} engineNow={setting.name === "engine" ? page.orchestrator_engine : undefined} />
                 </li>
               ))}
-          </ul>
-        </section>
-      ))}
-      <section className="flex flex-col gap-1.5" aria-label="Network">
-        <h3 className="text-2xs uppercase tracking-wide text-muted">Network</h3>
-        <p className="text-xs text-body">
-          Listening on <span className="font-mono">{page.bind}</span>. The bind, the login, the herdr session and the data directory are not changed from a
-          browser: restart crowsnest with the flag or variable.
-        </p>
-        <CommandLine command={page.bind_command} />
-      </section>
-      {page.config_file && <p className="text-2xs text-muted">Config file: {page.config_file}. A value set here wins over the file; a flag or environment variable wins over both.</p>}
+            </ul>
+          </section>
+        );
+      })}
     </>
+  );
+}
+
+/** The bind, read-only, with the command that changes it, and the config file's place. */
+export function NetworkSettings({ page }: { page: SettingsPage }) {
+  return (
+    <section className="flex flex-col gap-1.5" aria-label="Network">
+      <h3 className="text-2xs uppercase tracking-wide text-muted">Network</h3>
+      <p className="text-xs text-body">
+        Listening on <span className="font-mono">{page.bind}</span>. The bind, the login, the herdr session and the data directory are not changed from a
+        browser: restart crowsnest with the flag or variable.
+      </p>
+      <CommandLine command={page.bind_command} />
+      {page.config_file && <p className="text-2xs text-muted">Config file: {page.config_file}. A value set here wins over the file; a flag or environment variable wins over both.</p>}
+    </section>
   );
 }
 

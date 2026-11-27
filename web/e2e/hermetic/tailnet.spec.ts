@@ -40,11 +40,11 @@ for (const size of [
   { name: "390", width: 390, height: 844 },
   { name: "1440", width: 1440, height: 900 },
 ]) {
-  test(`publish from the System page at ${size.name}, see the address and QR, stop`, async ({ page, app, tsDir }, testInfo) => {
+  test(`publish from Settings → Tailnet at ${size.name}, see the address and QR, stop`, async ({ page, app, tsDir }, testInfo) => {
     await page.setViewportSize({ width: size.width, height: size.height });
     const login = await page.request.post(`${app.baseURL}/api/v1/auth/login`, { headers: sameOriginHeaders(app), data: TEST_LOGIN });
     expect(login.ok()).toBe(true);
-    await page.goto("/system");
+    await page.goto("/settings#tailnet"); // R8 moved it off the System page
     const card = page.getByRole("region", { name: "Publish to your tailnet" });
     await expect(card.getByText("https://quark.tail1234.ts.net", { exact: true })).toBeVisible();
     await expect(card.getByText(/gets crowsnest's sign-in page there/)).toBeVisible();

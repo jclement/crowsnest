@@ -136,7 +136,7 @@ stderr:
 Open it, choose a username, a password (at least 12 characters; a few unrelated words make a good
 one) and the instance's name, and you are signed in. Only then does crowsnest start its herdr
 session and the orchestrator. The login is stored in the database (an argon2id hash); change it
-later in the account menu's **Account** sheet, or on the machine with `crowsnest reset-password`.
+later in Settings → **Account and name**, or on the machine with `crowsnest reset-password`.
 `crowsnest reset-setup` goes back to the first-run state. Until setup is done every other page
 and API call is refused (`/api/v1/health` says `setup_required: true`); the token is new at every
 start, works once, is never stored, and is replaced (and the new link logged) after ten wrong
@@ -254,7 +254,7 @@ needs for talk mode, or bind the tailnet address:
 ./bin/crowsnest --bind tailnet --username jeff --password-file ~/.config/crowsnest/password
 ```
 
-**Notifications on your phone (Web Push).** Account menu → **Notifications** → *Turn on for this
+**Notifications on your phone (Web Push).** Settings → **Notifications** → *Turn on for this
 device*. Push needs a **secure context** (`localhost`, `tailscale serve`, or
 `--tls-cert`/`--tls-key`), and on an iPhone the app added to the Home Screen. The server makes its
 VAPID key pair on first start and keeps it in the database; it POSTs only to public `https://`
@@ -294,7 +294,9 @@ memory, load against the cores, and from wide screens free disk and working agen
 two seconds only while a browser is connected; in a container with cgroup limits the figures are
 the container's.
 
-**Settings** (account menu → Settings) changes what makes sense to change while crowsnest runs:
+**Settings** (account menu → Settings, `/settings`; one view since R8, with sections for this
+device, this instance, agents and safety, each linkable as `/settings#<section>`) changes what
+makes sense to change while crowsnest runs:
 the orchestrator's model, the job model, the default engine, the permission mode, Remote Control
 (the orchestrator's and jobs'), the poke interval, compaction and the daily fresh start,
 attachment limits, the notify URL (write-only), protected hosts and branches, and whether to
@@ -305,7 +307,7 @@ variable is read-only there ("set by the environment: change it there"): precede
 then environment, then a value saved in the app, then the config file, then the default. The
 login, the bind, the session and the data directory are never changed from a browser.
 
-**Appearance** (account menu → Appearance, the Settings sheet, or the palette) picks a theme and,
+**Appearance** (Settings → Appearance, or the palette) picks a theme and,
 separately, the mode (System, Light or Dark; the header's toggle cycles the mode). Five themes
 ship, each a light and a dark partner: Crowsnest (the house theme), Phosphor (a green-screen
 terminal, all in mono), Deep sea, Ember and High contrast (every text colour at WCAG AAA). The
@@ -793,8 +795,8 @@ directory.
   two; leads and the orchestrator not counted); the rest wait queued with the reason and start
   in order, or you press **Start anyway**. New starts also wait while the load per core stays
   above `--load-hold` for a minute. Agents run builds and suites through `crowsnest heavy`. The
-  board's "2 of 4 running" opens the Limits sheet.
-- **Pause.** Account menu → Pause automation (or the palette, or `crowsnest pause`): agents keep
+  board's "2 of 4 running" opens Settings → Limits.
+- **Pause.** The account menu's Pause automation switch (or the palette, or `crowsnest pause`): agents keep
   working, crowsnest stops acting by itself, a banner says so until you resume.
   `~/.config/crowsnest/paused` pauses it too.
 - **Presence.** Your open tab tells crowsnest whether you are here, maybe, or away (only those
@@ -995,7 +997,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--tls-key` | `CROWSNEST_TLS_KEY` | none | PEM key for `--tls-cert` |
 | `--elevenlabs-api-key` | `ELEVENLABS_API_KEY` | none | Enables talk mode |
 | `--elevenlabs-api-key-file` | `ELEVENLABS_API_KEY_FILE` | none | File holding the ElevenLabs key (first line, mode 600): keeps it out of the environment |
-| `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id (`21m00Tcm4TlvDq8ikWAM`) | Default voice for spoken replies, until one is chosen in the app (account menu, Voice) |
+| `--elevenlabs-voice` | `CROWSNEST_ELEVENLABS_VOICE` | a stock voice id (`21m00Tcm4TlvDq8ikWAM`) | Default voice for spoken replies, until one is chosen in the app (Settings → Voice) |
 | `--elevenlabs-url` | `CROWSNEST_ELEVENLABS_URL` | `https://api.elevenlabs.io` | ElevenLabs API base URL: https, or plain http only to a loopback address (tests point it at a local fake). Redirects are never followed |
 | `--notify-url` | `CROWSNEST_NOTIFY_URL` | none | POST a one-line notice here when something needs you (ntfy-style) |
 | `--notify-url-file` | `CROWSNEST_NOTIFY_URL_FILE` | none | File holding the notify URL (first line, mode 600) |

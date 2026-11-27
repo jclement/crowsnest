@@ -73,10 +73,9 @@ test.describe("accessibility in every theme", () => {
   }
 
   test("the Appearance gallery: every theme in both modes, accessible", async ({ page }, testInfo) => {
-    await page.goto("/");
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Appearance" }).click();
-    const sheet = page.getByRole("dialog", { name: "Appearance" });
+    // Settings → Appearance (R8: one Settings view).
+    await page.goto("/settings#appearance");
+    const sheet = page.getByRole("region", { name: "Appearance" });
     await expect(sheet.getByRole("radio", { name: /theme$/ })).toHaveCount(themes.length);
     for (const theme of themes) await expect(sheet.locator(`[data-theme="${theme}"]`)).toHaveCount(2);
     await expectAccessible(page, testInfo, "appearance");
@@ -93,12 +92,14 @@ test("picking a theme applies it at once, survives a reload with no flash, and t
   const terminalBackground = () => page.locator(".xterm-scrollable-element").first().evaluate((element) => getComputedStyle(element).backgroundColor);
   const before = await terminalBackground();
 
+  // Picked in Settings → Appearance; back at the terminal, it has the new theme.
   await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Appearance" }).click();
-  await page.getByRole("radio", { name: "Phosphor theme" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await page.getByRole("region", { name: "Appearance" }).getByRole("radio", { name: "Phosphor theme" }).click();
   await expect(html).toHaveAttribute("data-theme", "phosphor");
   await expect(page.getByRole("radio", { name: "Phosphor theme" })).toHaveAttribute("aria-checked", "true");
-  await page.keyboard.press("Escape");
+  await page.goBack();
+  await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible({ timeout: 15_000 });
   await expect.poll(terminalBackground).not.toBe(before);
   // The phone's status bar and the installed app's title bar follow the chrome.
   const chrome = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--color-chrome").trim());

@@ -10,6 +10,7 @@ import { LoginPage } from "./routes/LoginPage";
 import { SetupPage } from "./routes/SetupPage";
 import { NotFound } from "./routes/NotFound";
 import { AgentsView } from "./routes/AgentsView";
+import { SettingsView } from "./routes/SettingsView";
 import { ChatView } from "./routes/ChatView";
 import { InboxView } from "./routes/InboxView";
 import { JobsView } from "./routes/JobsView";
@@ -207,6 +208,8 @@ const terminalRoute = createRoute({
   },
 });
 const systemRoute = createRoute({ getParentRoute: () => appRoute, path: "/system", component: SystemView });
+// Settings (R8): the one door to configuration; #<section> lands on a section (lib/settingsSections.ts).
+const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsView });
 // The built-in manual (DESIGN.md 12.11): /help is its contents, /help/<page>#<heading> a place in it.
 const helpRoute = createRoute({ getParentRoute: () => appRoute, path: "/help", component: () => <HelpView /> });
 const helpPageRoute = createRoute({
@@ -227,7 +230,7 @@ const diffRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, agentsRoute, fleetRoute, terminalRoute, systemRoute, helpRoute, helpPageRoute, diffRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, agentsRoute, fleetRoute, terminalRoute, systemRoute, settingsRoute, helpRoute, helpPageRoute, diffRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

@@ -91,4 +91,4 @@ hold against a process that already acts as your user by other means (see above)
 
 The full threat model is section 4 of `DESIGN.md` in the repository.
 
-[Open Settings](app:sheet/settings) to set protected branches and hosts.
+[Open Settings → Protected hosts and branches](app:/settings#guard) to set them.

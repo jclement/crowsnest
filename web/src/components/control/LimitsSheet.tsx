@@ -1,21 +1,16 @@
-// LimitsSheet: the throttle (DESIGN.md 6.12): how many job agents may run at once (waiting jobs
-// start in order), the load hold, and who holds the heavy-command slots right now.
-import { useState } from "react";
+// Settings → Limits: the throttle (DESIGN.md 6.12) as it stands: how many job agents run and may
+// run at once (waiting jobs start in order), the load hold, and who holds the heavy-command slots
+// right now. The settings that bound them sit just below it in the Settings view.
 import { relativeTime } from "../../lib/format";
 import { useThrottle } from "../../lib/queries";
-import { SettingsSheet } from "../system/SettingsSheet";
-import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
-import { Sheet } from "../ui/Sheet";
-import { HelpButton } from "../help/HelpButton";
 
-export function LimitsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const throttle = useThrottle(open);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+/** The throttle's live state. */
+export function LimitsBody() {
+  const throttle = useThrottle(true);
   const data = throttle.data;
   return (
-    <Sheet open={open} onClose={onClose} title="Limits" size="md" headerExtra={<HelpButton topic="concepts/budgets-limits-pause#limits-on-running-jobs" what="the running-job limits" inline={false} />}>
-      <div className="flex flex-col gap-3 p-4 text-sm">
+      <div className="flex flex-col gap-3 text-sm">
         {data && (
           <>
             <Card title="Running jobs">
@@ -24,12 +19,9 @@ export function LimitsSheet({ open, onClose }: { open: boolean; onClose: () => v
                 counted. Load now {data.load.per_core.toFixed(1)} per core on {data.load.cores} cores{data.load.holding ? `: ${data.load.reason}` : ""}.
               </p>
               <p className="text-xs text-muted">
-                Limit {data.settings.max_running} at once · hold above load {data.settings.load_per_core || "off"} per core. These are Settings (with the
+                Limit {data.settings.max_running} at once · hold above load {data.settings.load_per_core || "off"} per core: the settings below (with the
                 usual precedence: a flag or variable locks them).
               </p>
-              <Button compact className="mt-2 self-start" onClick={() => setSettingsOpen(true)}>
-                Change in Settings
-              </Button>
             </Card>
             <Card title={`Heavy commands (${data.heavy.slots} slots)`}>
               {data.heavy.deferred && <p className="mb-1 text-xs text-muted">`crowsnest heavy` hands commands to {data.heavy.deferred}, whose slots are its own.</p>}
@@ -54,7 +46,5 @@ export function LimitsSheet({ open, onClose }: { open: boolean; onClose: () => v
           </>
         )}
       </div>
-      <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </Sheet>
   );
 }

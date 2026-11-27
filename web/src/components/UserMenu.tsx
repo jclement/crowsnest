@@ -1,36 +1,28 @@
-// The user menu in the header: who is signed in, System (the doctor's checks and versions),
-// Settings (what can change while crowsnest runs), Account (password and instance name),
-// Notifications (the Web Push sheet), Instructions (the layers crowsnest adds to every agent it
-// starts, DESIGN.md 21.3), Voice (the
-// voice, speed and model of spoken replies, when voice is on) and "Sign out". With --no-auth there is no one to sign out, so the menu says so instead.
+// The user menu in the header: who is signed in, System (the machine, the doctor's checks and
+// versions), Settings (R8: the one door to configuration, routes/SettingsView.tsx, which replaced
+// the Settings, Appearance, Account, Notifications, Instructions and Voice entries), the Pause and
+// Do not disturb switches, and "Sign out". With --no-auth there is no one to sign out, so the menu
+// says so instead.
 import { useNavigate } from "@tanstack/react-router";
-import { Activity, AudioLines, Bell, BellOff, BookText, CircleUser, KeyRound, LogOut, Palette, PauseCircle, PlayCircle, SlidersHorizontal } from "lucide-react";
+import { Activity, BellOff, CircleUser, LogOut, PauseCircle, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Me } from "../lib/api";
-import { AccountSheet } from "./account/AccountSheet";
 import { DndSheet } from "./control/DndSheet";
 import { PauseSheet } from "./control/PauseSheet";
-import { usePause, useSetPause } from "../lib/queries";
-import { SettingsSheet } from "./system/SettingsSheet";
-import { AppearanceSheet } from "./appearance/AppearanceSheet";
-import { InstructionsSheet } from "./instructions/InstructionsSheet";
-import { NotificationSettings } from "./push/NotificationSettings";
-import { VoiceSettingsSheet } from "./voice/VoiceSettings";
+import { usePause, usePresence, useSetDND, useSetPause } from "../lib/queries";
 import { IconButton } from "./ui/Button";
+import { useToast } from "./ui/toast-context";
 
 export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [voiceOpen, setVoiceOpen] = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const navigate = useNavigate();
-  const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
   const [dndOpen, setDndOpen] = useState(false);
   const pause = usePause();
   const setPause = useSetPause();
+  const presence = usePresence(open);
+  const setDND = useSetDND();
+  const toast = useToast();
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -79,100 +71,35 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              setSettingsOpen(true);
+              void navigate({ to: "/settings" });
             }}
             className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
           >
             <SlidersHorizontal className="h-4 w-4 text-muted" aria-hidden />
             Settings
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
+          {/* Pause and Do not disturb stay here as switches (R8): one tap from every view. Turning
+              one on asks its reason or its end time; turning it off is immediate. */}
+          <MenuSwitch
+            icon={PauseCircle}
+            label="Pause automation"
+            on={!!pause.data?.paused}
+            onToggle={() => {
               setOpen(false);
-              setAppearanceOpen(true);
-            }}
-            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
-          >
-            <Palette className="h-4 w-4 text-muted" aria-hidden />
-            Appearance
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              setAccountOpen(true);
-            }}
-            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
-          >
-            <KeyRound className="h-4 w-4 text-muted" aria-hidden />
-            Account
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              setNotificationsOpen(true);
-            }}
-            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
-          >
-            <Bell className="h-4 w-4 text-muted" aria-hidden />
-            Notifications
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              setInstructionsOpen(true);
-            }}
-            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
-          >
-            <BookText className="h-4 w-4 text-muted" aria-hidden />
-            Instructions
-          </button>
-          {me.features.voice && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                setVoiceOpen(true);
-              }}
-              className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
-            >
-              <AudioLines className="h-4 w-4 text-muted" aria-hidden />
-              Voice
-            </button>
-          )}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              if (pause.data?.paused) setPause.mutate({ paused: false });
+              if (pause.data?.paused) setPause.mutate({ paused: false }, { onSuccess: () => toast.show({ tone: "success", title: "Automation resumed" }) });
               else setPauseOpen(true);
             }}
-            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
-          >
-            {pause.data?.paused ? <PlayCircle className="h-4 w-4 text-muted" aria-hidden /> : <PauseCircle className="h-4 w-4 text-muted" aria-hidden />}
-            {pause.data?.paused ? "Resume automation" : "Pause automation…"}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
+          />
+          <MenuSwitch
+            icon={BellOff}
+            label="Do not disturb"
+            on={!!presence.data?.dnd_until}
+            onToggle={() => {
               setOpen(false);
-              setDndOpen(true);
+              if (presence.data?.dnd_until) setDND.mutate("", { onSuccess: () => toast.show({ tone: "success", title: "Do not disturb is off" }) });
+              else setDndOpen(true);
             }}
-            className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
-          >
-            <BellOff className="h-4 w-4 text-muted" aria-hidden />
-            Do not disturb…
-          </button>
+          />
           {me.features.auth && (
             <button
               type="button"
@@ -189,24 +116,27 @@ export function UserMenu({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           )}
         </div>
       )}
-      <AccountSheet open={accountOpen} onClose={() => setAccountOpen(false)} />
-      <SettingsSheet
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onOpen={(sheet) => {
-          setSettingsOpen(false);
-          if (sheet === "account") setAccountOpen(true);
-          if (sheet === "notifications") setNotificationsOpen(true);
-          if (sheet === "voice") setVoiceOpen(true);
-          if (sheet === "appearance") setAppearanceOpen(true);
-        }}
-      />
-      <AppearanceSheet open={appearanceOpen} onClose={() => setAppearanceOpen(false)} />
-      <NotificationSettings open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
-      <InstructionsSheet open={instructionsOpen} onClose={() => setInstructionsOpen(false)} />
       <PauseSheet open={pauseOpen} onClose={() => setPauseOpen(false)} />
       <DndSheet open={dndOpen} onClose={() => setDndOpen(false)} />
-      {me.features.voice && <VoiceSettingsSheet open={voiceOpen} onClose={() => setVoiceOpen(false)} />}
     </div>
+  );
+}
+
+/** A menu row that is a switch: its state shown, a tap flips it. */
+function MenuSwitch({ icon: Icon, label, on, onToggle }: { icon: LucideIcon; label: string; on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={on}
+      onClick={onToggle}
+      className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm hover:bg-hover md:min-h-9"
+    >
+      <Icon className="h-4 w-4 text-muted" aria-hidden />
+      <span className="flex-1">{label}</span>
+      <span aria-hidden className={`relative inline-flex h-4 w-7 shrink-0 rounded-full border border-border-strong ${on ? "bg-accent" : "bg-surface-sunken"}`}>
+        <span className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-surface transition-[left] ${on ? "left-3.5" : "left-0.5"}`} />
+      </span>
+    </button>
   );
 }

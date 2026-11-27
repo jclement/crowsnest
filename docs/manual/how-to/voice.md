@@ -50,7 +50,7 @@ once.
 - **Per agent**: each agent's **Speak** switch in its Chat header chooses whose replies you hear.
   Job agents share one switch, **Job agents (say)**. Turning an agent on turns the header's switch
   on.
-- **Voices**: account menu → **Voice** ([Open Voice settings](app:sheet/voice)): the instance's
+- **Voices**: account menu → **Settings** → **Voice** ([Open Voice settings](app:/settings#voice)): the instance's
   voice, a voice per agent (so you can tell leads apart by ear), the speed (0.8× to 1.5×) and the
   model (fast or higher quality).
 

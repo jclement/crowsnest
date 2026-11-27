@@ -32,7 +32,7 @@ Pokes carry it too: the orchestrator's and leads' instructions tell them what `h
 
 ## Do not disturb
 
-Account menu → **Do not disturb…**: **Do not disturb until (HH:MM)**, then **Hold notifications**.
+Account menu → the **Do not disturb** switch: **Do not disturb until (HH:MM)**, then **Hold notifications**. The switch shows it is on; a tap turns it off.
 Until then every non-blocking push and notify line is held, and one summary is sent when it ends.
 Blocking questions and dangerous approvals still get through. **Turn off** ends it early.
 

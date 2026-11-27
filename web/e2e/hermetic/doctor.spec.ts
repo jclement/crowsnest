@@ -192,14 +192,17 @@ test.describe("system page", () => {
     await page.getByRole("button", { name: "Search or run…" }).click();
     await input.fill("settings");
     await page.getByRole("option", { name: /^Settings/ }).first().click();
-    await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+    // The Settings view (R8: one door to configuration), at the server's settings.
+    await expect(page).toHaveURL(/\/settings#instance$/);
+    await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   });
 
   test("Settings: a change is saved, shown as set here and journalled; an env-set value is read-only", async ({ page, app }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Settings" }).click();
-    const sheet = page.getByRole("dialog", { name: "Settings" });
+    await expect(page).toHaveURL(/\/settings$/);
+    const sheet = page.getByRole("main");
     // Set by the environment: read-only, says where.
     const poke = sheet.getByLabel("Poke interval");
     await expect(poke).toBeDisabled();
@@ -259,7 +262,7 @@ test.describe("system page", () => {
       await page.goto("/");
       await page.getByRole("button", { name: "Account" }).click();
       await page.getByRole("menuitem", { name: "Settings" }).click();
-      await expect(page.getByRole("dialog", { name: "Settings" }).getByText("Agents", { exact: true })).toBeVisible();
+      await expect(page.getByRole("main").getByRole("region", { name: "Agent settings" })).toBeVisible();
       await shoot(page, `settings-${size.name}`);
     });
   }

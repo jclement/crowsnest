@@ -76,7 +76,7 @@ session, crowsnest's or not; use the project layer for what only crowsnest's age
 
 ## How
 
-1. Open **Instructions** ([Open Instructions](app:sheet/instructions)), or the project page's
+1. Open **Instructions** ([Open Instructions](app:/settings#instructions)), or the project page's
    **Project instructions** card.
 2. Pick the layer, edit on **Edit**, check **Preview**, **Save**.
 3. **History** keeps the newest 20 revisions with their diffs; **Restore** saves an old one again

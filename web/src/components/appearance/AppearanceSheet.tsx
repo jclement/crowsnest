@@ -1,4 +1,5 @@
-// Settings → Appearance: the theme gallery and picker (DESIGN.md "Design language").
+// Settings → Appearance: the theme gallery and picker (DESIGN.md "Design language"), a section
+// of the Settings view.
 //
 // The mode (System / Light / Dark) and the theme (a named light/dark pair) are chosen
 // separately and kept per browser. Every theme is shown in both modes with real components,
@@ -27,9 +28,7 @@ import { DEFAULT_THEME, themes, type ThemeInfo } from "../../themes";
 import { Mark } from "../brand/Brand";
 import { Button } from "../ui/Button";
 import { Chip, StateMark, type WorkState } from "../ui/Chip";
-import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
-import { HelpButton } from "../help/HelpButton";
 
 /** The mode and theme now applied, following changes made anywhere (palette, shortcut, toggle). */
 export function useAppearance(): { mode: ThemeMode; theme: string; chosen: boolean } {
@@ -52,13 +51,6 @@ const modes: Array<{ mode: ThemeMode; label: string; icon: typeof Sun }> = [
   { mode: "dark", label: "Dark", icon: Moon },
 ];
 
-export function AppearanceSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Sheet open={open} onClose={onClose} title="Appearance" headerExtra={<HelpButton topic="how-to/appearance" what="themes and modes" inline={false} />}>
-      <AppearanceBody />
-    </Sheet>
-  );
-}
 
 /** The sheet's content, also usable on its own (the e2e gallery renders it full-page). */
 export function AppearanceBody() {

@@ -1,8 +1,10 @@
 // The command palette's owner: the global shortcuts (lib/hotkeys.ts: ⌘K / Ctrl K, ?, g j…), the
 // open state, focus coming back to where it was on close, the recents list, and the sheets the
-// palette can open (shortcuts, journal, notifications, voice). AppFrame mounts it once around the
-// views. With voice on (an ElevenLabs key) the palette also offers "Speak replies: on/off", wired
-// to lib/voice/speak.ts, and "Voice settings".
+// palette can open (shortcuts, journal, schedule, spend, pause…; the configuration ones, such as
+// settings, appearance, notifications, voice, instructions and limits, land on their section of the
+// Settings view, R8). AppFrame mounts it once around the views. With voice on (an ElevenLabs key)
+// the palette also offers "Speak replies: on/off", wired to lib/voice/speak.ts, and "Voice
+// settings".
 //
 // The key listener sits on the window in the capture phase, so a terminal (xterm stops the
 // events it handles) or a view's own handler never sees the chord first.
@@ -11,18 +13,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { flushSync } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { chordLabel, focusContext, hotkeyFor, initialSequence, isMacPlatform, type SequenceState } from "../../lib/hotkeys";
-import { SettingsSheet } from "../system/SettingsSheet";
-import { AppearanceSheet } from "../appearance/AppearanceSheet";
 import { cycleThemeName } from "../../lib/theme";
 import { findTheme } from "../../themes";
 import { useToast } from "../ui/toast-context";
 import { loadRecents, pushRecent, saveRecents, type PaletteSheet } from "../../lib/palette";
+import { sectionForSheet } from "../../lib/settingsSections";
 import { JournalSheet } from "../journal/JournalPanel";
-import { InstructionsSheet } from "../instructions/InstructionsSheet";
 import { ScheduleSheet } from "../schedule/SchedulePanel";
 import { SpendSheet } from "../spend/SpendSheet";
-import { NotificationSettings } from "../push/NotificationSettings";
-import { VoiceSettingsSheet } from "../voice/VoiceSettings";
 import { useMe } from "../../lib/queries";
 import { useSpeakMode } from "../../lib/voice/speak";
 import { CommandPalette } from "./CommandPalette";
@@ -30,7 +28,6 @@ import { PaletteContext, type PaletteApi } from "./palette-context";
 import { ShortcutsSheet } from "./ShortcutsSheet";
 import { HelpSheet } from "../help/HelpSheet";
 import { DigestsSheet } from "../control/DigestsSheet";
-import { LimitsSheet } from "../control/LimitsSheet";
 import { PauseSheet } from "../control/PauseSheet";
 import { SweepSheet } from "../control/SweepSheet";
 import { useRunCommand } from "./useRunCommand";
@@ -82,10 +79,21 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
   const [helpTopic, setHelpTopic] = useState<string | null>(null);
   // It stacks over whatever sheet is open (Schedule, Settings…), so reading help loses nothing.
   const openHelp = useCallback((topic: string) => setHelpTopic(topic), []);
-  const openSheet = useCallback((next: PaletteSheet) => {
-    setHelpTopic(null);
-    setSheet(next);
-  }, []);
+  // A sheet that was a door to configuration lands on its section of the Settings view instead (R8:
+  // one door); the palette's own sheets (Schedule, Spend, Journal…) still open here.
+  const openSheet = useCallback(
+    (next: PaletteSheet) => {
+      setHelpTopic(null);
+      const section = sectionForSheet(next);
+      if (section) {
+        setSheet(null);
+        void navigate({ to: "/settings", hash: section });
+        return;
+      }
+      setSheet(next);
+    },
+    [navigate],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -123,7 +131,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
     };
   }, [open]);
 
-  const run = useRunCommand({ openSheet: setSheet, signOut: onSignOut, setSpeak });
+  const run = useRunCommand({ openSheet, signOut: onSignOut, setSpeak });
   const onRan = useCallback((itemId: string) => {
     setRecents((current) => {
       const next = pushRecent(current, itemId);
@@ -148,16 +156,8 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
       <JournalSheet open={sheet === "journal"} onClose={() => setSheet(null)} />
       <ScheduleSheet open={sheet === "schedule"} onClose={() => setSheet(null)} />
       <SpendSheet open={sheet === "spend"} onClose={() => setSheet(null)} />
-      <AppearanceSheet open={sheet === "appearance"} onClose={() => setSheet(null)} />
-      <SettingsSheet
-        open={sheet === "settings"}
-        onClose={() => setSheet(null)}
-        onOpen={(next) => setSheet(next === "account" ? null : next === "voice" && !voice ? null : next)}
-      />
-      <InstructionsSheet open={sheet === "instructions"} onClose={() => setSheet(null)} />
       <PauseSheet open={sheet === "pause"} onClose={() => setSheet(null)} />
       <DigestsSheet open={sheet === "digests"} onClose={() => setSheet(null)} />
-      <LimitsSheet open={sheet === "limits"} onClose={() => setSheet(null)} />
       <SweepSheet
         open={sheet === "worktrees"}
         onClose={() => setSheet(null)}
@@ -166,8 +166,6 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
           void navigate({ to: "/", search: { job: id } } as unknown as Parameters<typeof navigate>[0]);
         }}
       />
-      <NotificationSettings open={sheet === "notifications"} onClose={() => setSheet(null)} />
-      {voice && <VoiceSettingsSheet open={sheet === "voice"} onClose={() => setSheet(null)} />}
     </PaletteContext.Provider>
   );
 }

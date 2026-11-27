@@ -62,7 +62,7 @@ On Android, Chrome offers **Install app** or **Add to Home screen** in its menu.
 
 ## Turn on notifications
 
-1. Account menu → **Notifications** ([Open Notifications](app:sheet/notifications)).
+1. Account menu → **Settings** → **Notifications** ([Open Notifications](app:/settings#notifications)).
 2. **Turn on for this device**, and allow notifications when the browser asks.
 3. **Send a test** to check it arrives.
 4. Under **What to send**, switch kinds on or off for every device: Approvals, Questions, Terminal

@@ -83,7 +83,10 @@ test("a job waiting for a slot says why, and Start anyway starts it", async ({ p
 test("pausing shows a banner everywhere until resumed", async ({ page }, testInfo) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Pause automation…" }).click();
+  // A switch in the account menu (R8): off, so turning it on asks for the reason.
+  const toggle = page.getByRole("menuitemcheckbox", { name: "Pause automation" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await toggle.click();
   const sheet = page.getByRole("dialog", { name: "Pause automation" });
   await sheet.getByLabel(/Reason/).fill("deploy window");
   await sheet.getByRole("button", { name: "Pause", exact: true }).click();
@@ -132,7 +135,8 @@ test("throttling and review are Settings, and the System page shows the heavy sl
   await expect(page.getByRole("region", { name: "Heavy commands" })).toContainText("Heavy commands (2 slots");
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
-  const settings = page.getByRole("dialog", { name: "Settings" });
+  // Settings → Limits: the throttle now, with its settings beneath (R8).
+  const settings = page.getByRole("region", { name: "Limits" });
   await expect(settings.getByText("Throttling and review")).toBeVisible();
   await expect(settings.getByText("Running jobs at once")).toBeVisible();
   await expect(settings.getByText("Daily digest at")).toBeVisible();

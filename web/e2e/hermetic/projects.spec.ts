@@ -177,9 +177,9 @@ test("filter the board by project; the choice is remembered", async ({ page }) =
 
 test("edit a role's instructions and see the diff against the built-in", async ({ page }, testInfo) => {
   await page.goto("/jobs");
-  await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Instructions" }).click();
-  const sheet = page.getByRole("dialog", { name: "Instructions" });
+  // Settings → Instructions and roles (R8: one Settings view); the palette's old target lands there.
+  await page.goto("/settings#instructions");
+  const sheet = page.getByRole("region", { name: "Instructions and roles" });
   await sheet.getByRole("region", { name: "Roles" }).getByRole("button", { name: /tester/ }).click();
   const editor = sheet.getByRole("textbox", { name: /tester instructions/ });
   await expect(editor).not.toHaveValue("");

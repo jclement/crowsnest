@@ -3,9 +3,30 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithClient, stubApi } from "../../test/render";
 import { settingsPage } from "./fixtures.test-data";
-import { SettingsBody } from "./SettingsSheet";
+import type { SettingsPage } from "../../lib/system";
+import { NetworkSettings, ServerSettings } from "./SettingsSheet";
 
-describe("SettingsBody", () => {
+/** Every server section and the network, as the Settings view draws them across its sections. */
+function SettingsBody({ page }: { page: SettingsPage }) {
+  const sections = [...new Set(page.settings.map((setting) => setting.section))];
+  return (
+    <>
+      <ServerSettings page={page} sections={sections} />
+      <NetworkSettings page={page} />
+    </>
+  );
+}
+
+describe("the server's settings", () => {
+  it("draws only the sections asked for", () => {
+    stubApi(() => undefined);
+    const page = settingsPage();
+    const first = page.settings[0]!.section;
+    renderWithClient(<ServerSettings page={page} sections={[first]} />);
+    expect(screen.getByRole("region", { name: first })).toBeInTheDocument();
+    expect(screen.getAllByRole("region")).toHaveLength(1);
+  });
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("shows each value's source and a locked setting read-only with where to change it", () => {

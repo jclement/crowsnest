@@ -95,7 +95,7 @@ Open a project from **Projects** or a row on **Now**. Top to bottom:
   does it now. See [Instruction layers](../concepts/instruction-layers.md).
 - **Its model**: leads run on the orchestrator's model (Settings → Agents → **Orchestrator
   model**). The job agents use the project's **Model** default.
-- **Its voice** (with talk mode on): account menu → **Voice**, where each standing agent has its
+- **Its voice** (with talk mode on): account menu → **Settings** → **Voice**, where each standing agent has its
   own voice and Speak switch, so you can tell two leads apart by ear. See [Talk and listen](voice.md).
 - **When it runs**: **Start the lead** (above). **Stop lead** keeps it stopped until you start it.
 

@@ -24,15 +24,15 @@ func ManualSettingsMarkdown() string {
 	b.WriteString("<!-- Generated from internal/config (the option table and the settings the app may change). " +
 		"Do not edit by hand: run `UPDATE_MANUAL=1 go test ./internal/config -run Manual`. -->\n\n")
 	b.WriteString("Every setting crowsnest has, and where you can change it. A value is taken from the first of these that sets it: " +
-		"a command-line flag, an environment variable, the app's **Settings** sheet (only the settings marked below), " +
+		"a command-line flag, an environment variable, the app's **Settings** view (only the settings marked below), " +
 		"the config file (`~/.config/crowsnest/config.yaml`, keys are the flag names), then the default. " +
-		"When a flag or variable sets something, the Settings sheet shows it locked, with where to change it.\n\n")
+		"When a flag or variable sets something, the Settings view shows it locked, with where to change it.\n\n")
 	b.WriteString("Durations need a unit (`15m`, `2h`); a bare number is refused. Lists repeat as flags, are comma-separated in the environment, and are a YAML list in the file.\n\n")
-	b.WriteString("Open the Settings sheet: [Open Settings](app:sheet/settings). " +
+	b.WriteString("Open the Settings view: [Open Settings](app:/settings). " +
 		"The [Settings concept](../concepts/budgets-limits-pause.md) and [how-to pages](../README.md) explain what the important ones are for.\n\n")
 
 	b.WriteString("## Changeable in the app\n\n")
-	b.WriteString("These appear in the **Settings** sheet (account menu → Settings), grouped as the sheet groups them.\n\n")
+	b.WriteString("These appear in the **Settings** view (account menu → Settings), under the headings below, each in the view's section for it (Limits, Budgets, upkeep and notices, Backups and storage, Tailnet, Agent settings, Protected hosts and branches).\n\n")
 	section := ""
 	for _, setting := range editable {
 		if setting.Section != section {

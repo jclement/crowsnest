@@ -76,11 +76,8 @@ test("all themes at 1440, and the Appearance gallery", async ({ page, browser })
   );
   for (const size of sizes) {
     await page.setViewportSize({ width: size.width, height: size.height });
-    await page.goto("/");
-    await expect(page.getByRole("list", { name: "Projects" })).toBeVisible();
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Appearance" }).click();
-    const sheet = page.getByRole("dialog", { name: "Appearance" });
+    await page.goto("/settings#appearance");
+    const sheet = page.getByRole("region", { name: "Appearance" });
     await expect(sheet.locator('[data-theme="contrast"]')).toHaveCount(2);
     await page.evaluate(() => document.fonts.ready);
     await page.screenshot({ path: `screenshots/themes-appearance-${size.name}.png`, animations: "disabled", caret: "hide" });

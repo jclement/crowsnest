@@ -1,4 +1,4 @@
-// The Account sheet, opened from the account menu: who is signed in and where that login comes
+// Settings → Account, a section of the Settings view: who is signed in and where that login comes
 // from, changing the password (it needs the current one and signs every other browser out), and
 // the instance name. A login set by --username/CROWSNEST_PASSWORD, or a name set by --name, is
 // managed outside crowsnest and shown read-only with where to change it.
@@ -9,22 +9,20 @@ import { passwordStrength } from "../../lib/password";
 import { StrengthMeter } from "../../routes/SetupForm";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
-import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
 
 const inputClass = "h-11 w-full rounded border border-border bg-surface px-3 text-sm font-normal text-heading md:h-9";
 const labelClass = "flex flex-col gap-1 text-xs font-medium text-heading";
 
-export function AccountSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const account = useQuery({ queryKey: queryKeys.account, queryFn: endpoints.account, enabled: open });
+/** The account section: loads the account, then its body. */
+export function AccountSection() {
+  const account = useQuery({ queryKey: queryKeys.account, queryFn: endpoints.account });
   return (
-    <Sheet open={open} onClose={onClose} title="Account" size="md">
-      <div className="flex flex-col gap-5 overflow-y-auto p-4">
-        {account.isPending && <p className="text-xs text-muted">Loading…</p>}
-        {account.isError && <p className="text-xs text-danger">Could not load the account. {(account.error as Error).message}</p>}
-        {account.data && <AccountBody account={account.data} />}
-      </div>
-    </Sheet>
+    <div className="flex flex-col gap-5">
+      {account.isPending && <p className="text-xs text-muted">Loading…</p>}
+      {account.isError && <p className="text-xs text-danger">Could not load the account. {(account.error as Error).message}</p>}
+      {account.data && <AccountBody account={account.data} />}
+    </div>
   );
 }
 

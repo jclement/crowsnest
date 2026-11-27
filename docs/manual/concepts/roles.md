@@ -23,7 +23,7 @@ read someone else's branch. A project can set its own default role (**Edit** on 
 
 ## Changing a role
 
-1. Open **Instructions** (account menu → Instructions, or [Open Instructions](app:sheet/instructions)).
+1. Open **Instructions** (account menu → **Settings** → **Instructions and roles**, or [Open Instructions](app:/settings#instructions)).
 2. Pick the role under **Roles** (each says built-in, edited or from file). Edit its text on the
    **Edit** tab; **Preview** shows it rendered; **Diff vs built-in** shows what you changed.
 3. **Save**. Every save is a revision (the newest 20 are kept); the **History** tab lists them,

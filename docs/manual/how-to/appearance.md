@@ -23,7 +23,7 @@ added and removed lines included), charts and diagrams.
 
 ## Choose one
 
-1. Account menu → **Appearance** ([Open Appearance](app:sheet/appearance)), or the **Appearance**
+1. Account menu → **Settings** → **Appearance** ([Open Appearance](app:/settings#appearance)), or the **Appearance**
    link in the Settings sheet, or the palette.
 2. **Mode**: **System** (follows this device's light or dark setting), **Light** or **Dark**.
 3. **Theme**: the gallery shows every theme in both modes, drawn with real parts of the app. Press

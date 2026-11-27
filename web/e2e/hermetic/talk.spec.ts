@@ -350,15 +350,14 @@ test.describe("hold Space", () => {
   });
 });
 
-// ---- The Voice sheet ---------------------------------------------------------------------------
+// ---- Settings → Voice ---------------------------------------------------------------------------
 
 test("Voice sheet: the account's voices, a preview, and a saved voice and speed used for the next reply", async ({ page, fakeURL, browserName }) => {
   chromiumOnly(browserName);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await openChat(page);
-  await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Voice" }).click();
-  const sheet = page.getByRole("dialog", { name: "Voice" });
+  // Settings → Voice (R8: one Settings view).
+  await page.goto("/settings#voice");
+  const sheet = page.getByRole("region", { name: "Voice", exact: true });
   await expect(sheet.getByTestId("voice-source")).toContainText("stock voice");
   const select = sheet.getByRole("combobox", { name: "Voice", exact: true });
   await expect(select.locator("option")).toHaveCount(3); // default + two voices
@@ -373,10 +372,12 @@ test("Voice sheet: the account's voices, a preview, and a saved voice and speed 
   const previewCall = upstream.find((request) => request.path?.startsWith("/v1/text-to-speech/nPczCjzI2devNBz1zQrb/"));
   expect(previewCall?.json).toMatchObject({ voice_settings: { speed: 1.2 } });
 
+  const stored = page.waitForResponse((response) => response.url().includes("/api/v1/voice/settings") && response.request().method() === "PUT");
   await sheet.getByRole("button", { name: "Save" }).click();
-  await expect(sheet).toBeHidden();
+  expect((await stored).status()).toBe(200);
   const saved = await (await page.request.get("/api/v1/voice/settings")).json();
   expect(saved.data).toMatchObject({ voice_id: "nPczCjzI2devNBz1zQrb", voice_source: "settings", speed: 1.5, playback_rate: 1.25 });
+  await openChat(page);
 
   // The next reply is spoken in the new voice (the orchestrator's own switch also unmutes).
   await page.getByTestId("agent-speak-toggle").click();
@@ -395,10 +396,8 @@ test("Voice sheet: the account's voices, a preview, and a saved voice and speed 
 test("the Voice sheet lists each standing agent with its own speak switch and voice", async ({ page, browserName }) => {
   chromiumOnly(browserName);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Voice" }).click();
-  const agents = page.getByRole("dialog", { name: "Voice" }).getByRole("region", { name: "Agents" });
+  await page.goto("/settings#voice");
+  const agents = page.getByRole("region", { name: "Voice", exact: true }).getByRole("region", { name: "Agents" });
   const leadSwitch = agents.getByRole("switch", { name: /Crowsnest.*replies/ });
   await expect(leadSwitch).toHaveAttribute("aria-checked", "false");
   await leadSwitch.click();
@@ -433,7 +432,8 @@ test("the palette turns speak mode on and off and opens the Voice sheet", async 
   await palette("speak replies");
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await palette("voice settings");
-  await expect(page.getByRole("dialog", { name: "Voice" }).getByRole("combobox", { name: "Voice", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/settings#voice$/);
+  await expect(page.getByRole("region", { name: "Voice", exact: true }).getByRole("combobox", { name: "Voice", exact: true })).toBeVisible();
 });
 
 // ---- Screenshots -------------------------------------------------------------------------------

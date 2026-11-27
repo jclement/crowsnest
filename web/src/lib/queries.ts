@@ -3,6 +3,7 @@
 import type { SpendGroup } from "./spend";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys } from "./api";
+import { systemEndpoints, systemKeys } from "./system";
 import type { CreateJobRequest } from "./jobs";
 import type { BrowseOptions } from "./browse";
 import type { BudgetInput, ProjectAccept } from "./accept";
@@ -664,4 +665,9 @@ export function useDigestNow() {
 /** The heavy-command slots (DESIGN.md 6.12): cheap file reads on the server, polled. */
 export function useHeavy(intervalMs = 5_000) {
   return useQuery({ queryKey: ["heavy"], queryFn: endpoints.heavy, refetchInterval: intervalMs });
+}
+
+/** The server's settings page (every editable setting with its source), for the Settings view. */
+export function useSettingsPage() {
+  return useQuery({ queryKey: systemKeys.settings, queryFn: systemEndpoints.settings });
 }

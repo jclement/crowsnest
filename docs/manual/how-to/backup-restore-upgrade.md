@@ -38,7 +38,7 @@ crowsnest restore --force FILE    # over an existing database (the old one is ke
 2. `crowsnest restore --verify FILE`, then `crowsnest restore FILE`.
 3. Start crowsnest. **The restored instance starts paused**: it first compares the restored jobs
    with the panes herdr really has (the Journal says which still have one), and nothing starts,
-   restarts, retries or is poked until you **Resume** (the banner, or the account menu).
+   restarts, retries or is poked until you **Resume** (the banner, or the account menu's **Pause automation** switch).
 4. Sign in again on every browser, and turn notifications on again on every device.
 
 A restore is all or nothing: every file is checked against the manifest and prepared beside its

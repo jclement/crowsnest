@@ -3618,17 +3618,36 @@ Connection loss shows a banner and reconnects with backoff; terminals reconnect 
 
 ### 12.9 System, Settings and the machine strip (the doctor branch)
 
-**System** (`routes/SystemView.tsx`, `/system`, account menu → System, palette "System"): the
-doctor's verdict and summary, Re-check (`?recheck=1`), Copy diagnostics, versions, the agents with
+**System** (`routes/SystemView.tsx`, `/system`, account menu → System, palette "System"): live
+status, not configuration (R8 moved Storage and backups, Sign in with Tailscale and Publish to your
+tailnet to Settings): the doctor's verdict and summary, Re-check (`?recheck=1`), Copy diagnostics, versions, the agents with
 which one runs the orchestrator and jobs, the running instance (uptime, orchestrator state, herdr
 connected, hooks seen firing), paths, the machine card, recent warnings and errors, every check by
 group (`components/system/CheckList.tsx`: a shape per status, not colour alone; a fix line and a
 copyable command for anything not fine), and the settings not at their default with their source.
 
-**Settings** (`components/system/SettingsSheet.tsx`, account menu → Settings, palette "Settings"):
-one sheet, sections from the server (Agents, Orchestrator upkeep, Attachments, Notices, Guard),
-links to the Account, Notifications and Voice sheets rather than duplicating them, then the bind
-read-only with its command. Each row: the control (text, switch, choice, write-only password
+**Settings** (`routes/SettingsView.tsx`, `/settings`, account menu → Settings, palette
+"Settings"; R8: one door to configuration). It replaced nine doors (the Settings, Appearance,
+Account, Notifications, Voice, Instructions and Limits sheets, their account-menu entries, and
+System's Storage and tailnet cards) with one view in four groups, each section an anchor
+(`/settings#<id>`, `lib/settingsSections.ts`):
+
+| Group | Sections |
+|---|---|
+| This device | Appearance (`AppearanceBody`; its "Use for new browsers" is the server's default theme), Notifications, Voice (with talk mode) |
+| This instance | Account and name, Limits (`LimitsBody`, the throttle now, and the server's "Throttling and review" settings), Budgets, upkeep and notices (the server's "Budgets and acceptance", "Orchestrator upkeep", "Attachments", "Notices", and the bind read-only with its command), Backups and storage (`StorageCard` and its settings), Tailnet (`PublishCard`, `TailscaleCard` and its setting), System (a link: live status stays a view) |
+| Agents | Agent settings (the server's "Agents": models, engine, permission mode, Remote Control), Instructions and roles (`InstructionsPanel`), Schedules (a link to the Schedule sheet: there are no instance-wide schedule defaults) |
+| Safety | Approval rules (kept per project: a pointer to the project pages), Protected hosts and branches (the server's "Guard"), Pause and do not disturb (switches in the account menu; no defaults exist) |
+
+Every old door still lands: `PaletteProvider.openSheet` sends the palette's `settings`,
+`appearance`, `notifications`, `voice`, `instructions` and `limits` sheets (and the manual's
+`app:sheet/<name>` buttons, which go through it) to their sections (`SHEET_SECTIONS`); the manual
+links a section directly with `app:/settings#<id>` (`appTarget` accepts a hash only for a real
+section); the Jobs board's running count opens `#limits`. The section list sits at the left from
+`md` and wraps at the top on a phone; a hash scrolls to its section, again as the sections above
+it load. The account menu is now System, Settings, the **Pause automation** and **Do not disturb**
+switches (`menuitemcheckbox`, showing their state: on asks its reason or end time in the old
+small sheet, off is one tap) and Sign out. Each server setting row: the control (text, switch, choice, write-only password
 field), its source chip (default, config file, set here, environment, command line), when it
 applies, and a Reset for a value set here; a locked row is disabled and says where to change it.
 

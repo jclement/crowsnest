@@ -79,7 +79,7 @@ retry, restart, **Poke now** and **Start anyway**.
 
 How:
 
-1. Account menu → **Pause automation…** ([Open the pause sheet](app:sheet/pause)), or the palette.
+1. Account menu → the **Pause automation** switch ([Open the pause sheet](app:sheet/pause)), or the palette. The switch shows whether it is on; turned off, the automation resumes at once.
 2. Optionally **Resume by itself at (optional, HH:MM)** and a **Reason (shown on the banner)**.
 3. **Pause**. A banner on every view says who paused it, why and until when, with **Resume**.
 
@@ -94,7 +94,7 @@ paused on purpose.
 - **Running jobs at once** and **heavy slots** when the machine is struggling.
 - **The pause** before a deploy window, while you work in the repositories by hand, or when
   something is going wrong and you want crowsnest to stop acting while you look.
-- **Do not disturb** (account menu) when you want quiet, not a stop: see [Presence](presence.md).
+- **Do not disturb** (a switch in the account menu) when you want quiet, not a stop: see [Presence](presence.md).
 
 ## What can go wrong
 

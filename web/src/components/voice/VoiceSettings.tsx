@@ -1,4 +1,4 @@
-// The Voice sheet (DESIGN.md 13.3), opened from the account menu when voice is on: which
+// Settings → Voice (DESIGN.md 13.3), a section of the Settings view when voice is on: which
 // ElevenLabs voice speaks replies (the account's voices, listed by the server), how fast (0.8x to
 // 1.5x), and with which model (fast, or higher quality but slower to start). Preview plays a
 // sample sentence with the choices before they are saved; Save stores them in crowsnest's
@@ -22,20 +22,11 @@ import { useAgentSpeak } from "../../lib/voice/speak";
 import { Switch } from "../ui/Switch";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
-import { Sheet } from "../ui/Sheet";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
-import { HelpButton } from "../help/HelpButton";
 
-export function VoiceSettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Sheet open={open} onClose={onClose} title="Voice" size="md" headerExtra={<HelpButton topic="how-to/voice#speak-mode-vs-the-mic" what="speak mode and the mic" inline={false} />}>
-      {open && <VoiceSettingsBody onSaved={onClose} />}
-    </Sheet>
-  );
-}
-
-function VoiceSettingsBody({ onSaved }: { onSaved: () => void }) {
+/** The voice settings: the instance voice, and each standing agent's. */
+export function VoiceSettingsBody({ onSaved = () => {} }: { onSaved?: () => void }) {
   const settings = useVoiceSettings();
   if (settings.isPending) return <SkeletonRows rows={4} label="Loading the voice settings" />;
   if (settings.isError) {

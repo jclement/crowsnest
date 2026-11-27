@@ -3,8 +3,7 @@
 On a phone the bottom bar is **Now**, **Projects**, **Inbox**, **Chat** and **More**; More holds
 **Jobs**, **Agents**, **Help** and **System**. On a desktop the left rail shows the
 same, with the More views under a heading. The account menu (top right) holds **System**,
-**Settings**, **Appearance**, **Account**, **Notifications**, **Instructions**, **Pause automation…** and **Do not
-disturb…** (and **Voice** with talk mode on).
+**Settings**, and two switches, **Pause automation** and **Do not disturb** (and **Sign out** with a login).
 
 ## Now
 
@@ -98,9 +97,30 @@ heading. A **?** beside a view's title or a card opens a section in a side sheet
 
 The doctor's report from the running server (**Re-check**, **Copy diagnostics**), versions, the
 agents and which runs what, the running instance, paths, the machine, recent warnings and errors,
-every check by group, settings not at their default, **Storage** (with **Download backup** and
-**Clean up now…**), **Waits without an owner**, **Machines** and **Sign in with Tailscale**. See
-[Doctor checks](../troubleshooting/doctor.md).
+every check by group, settings not at their default, **Waits without an owner** and **Machines**.
+It is live status; configuration is in [Settings](#settings). See [Doctor
+checks](../troubleshooting/doctor.md).
+
+## Settings
+
+`/settings` · [Open Settings](app:/settings)
+
+The one place to configure crowsnest (it replaced the separate Settings, Appearance, Account,
+Notifications, Voice, Instructions and Limits sheets). A section list at the left (at the top on a
+phone), then four groups:
+
+- **This device**: **Appearance** (theme and mode), **Notifications**, **Voice** (with talk mode).
+- **This instance**: **Account and name**, **Limits** (running jobs, load, heavy slots, and the
+  throttling and review settings), **Budgets, upkeep and notices**, **Backups and storage**
+  (**Download backup**, **Clean up now…**), **Tailnet** (publish to your tailnet, sign in with
+  Tailscale), **System** (a link to the System view).
+- **Agents**: **Agent settings** (models, engine, permission mode, Remote Control), **Instructions
+  and roles**, **Schedules**.
+- **Safety**: **Approval rules** (kept per project), **Protected hosts and branches**, **Pause and
+  do not disturb** (switches in the account menu).
+
+Each section has its own link, `/settings#<section>` (for example `/settings#limits`); the palette's
+Settings, Appearance, Notifications, Instructions, Voice and Limits items land on theirs.
 
 ## Sheets
 
@@ -108,16 +128,11 @@ Opened from menus and the palette, over the current view:
 
 | Sheet | What | From |
 |---|---|---|
-| **Settings** | Every setting the app may change, with its source and when it applies | Account menu; [Open Settings](app:sheet/settings) |
-| **Appearance** | The theme and the mode, a gallery of every theme | Account menu, Settings, palette; [Open Appearance](app:sheet/appearance) |
-| **Instructions** | Global, role and project instruction layers | Account menu; [Open Instructions](app:sheet/instructions) |
-| **Notifications** | This device, what to send, devices | Account menu; [Open Notifications](app:sheet/notifications) |
 | **Schedule** | Scheduled tasks and the daily digest | Jobs, Chat's menu, palette; [Open Schedule](app:sheet/schedule) |
 | **Spend** | Estimated spend by job, model or day | Jobs' spend button, palette; [Open Spend](app:sheet/spend) |
 | **Journal** | Every poke, skip, send, answer, restart and alert | Jobs, Chat's menu, palette; [Open the Journal](app:sheet/journal) |
-| **Limits** | Running jobs, load, heavy slots | Jobs' running count, palette; [Open Limits](app:sheet/limits) |
 | **Worktrees still around** | Finished worktree jobs to land or discard | Jobs' **N to land**, palette; [Open it](app:sheet/worktrees) |
-| **Pause automation** | Pause with an optional resume time and reason | Account menu; [Open it](app:sheet/pause) |
+| **Pause automation** | Pause with an optional resume time and reason | The account menu's switch, palette; [Open it](app:sheet/pause) |
 | **Digests** | Past daily digests | Schedule, palette; [Open Digests](app:sheet/digests) |
 | **Keyboard shortcuts** | Every shortcut | `?`; [Open it](app:sheet/shortcuts) |
 
@@ -128,5 +143,5 @@ load; from wide screens free disk and working agents; on a phone one chip that o
 **Search or run…** (the command palette), the connection state, **Speak replies** (with talk
 mode), the theme switch and the account menu.
 
-The theme and mode: account menu → **Appearance**, the palette, or `T` for the next theme. See
+The theme and mode: **Settings** → **Appearance**, the palette, or `T` for the next theme. See
 [Choose a theme](../how-to/appearance.md).

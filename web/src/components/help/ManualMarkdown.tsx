@@ -121,7 +121,7 @@ function OpenButton({ target, children, onNavigate, openSheet }: { target: AppTa
     );
   }
   return (
-    <Link to={target.to} search={target.search as never} onClick={onNavigate} className={className} data-open-target={target.to}>
+    <Link to={target.to} search={target.search as never} hash={target.hash} onClick={onNavigate} className={className} data-open-target={target.to + (target.hash ? `#${target.hash}` : "")}>
       {children}
     </Link>
   );

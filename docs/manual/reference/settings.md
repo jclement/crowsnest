@@ -2,15 +2,15 @@
 
 <!-- Generated from internal/config (the option table and the settings the app may change). Do not edit by hand: run `UPDATE_MANUAL=1 go test ./internal/config -run Manual`. -->
 
-Every setting crowsnest has, and where you can change it. A value is taken from the first of these that sets it: a command-line flag, an environment variable, the app's **Settings** sheet (only the settings marked below), the config file (`~/.config/crowsnest/config.yaml`, keys are the flag names), then the default. When a flag or variable sets something, the Settings sheet shows it locked, with where to change it.
+Every setting crowsnest has, and where you can change it. A value is taken from the first of these that sets it: a command-line flag, an environment variable, the app's **Settings** view (only the settings marked below), the config file (`~/.config/crowsnest/config.yaml`, keys are the flag names), then the default. When a flag or variable sets something, the Settings view shows it locked, with where to change it.
 
 Durations need a unit (`15m`, `2h`); a bare number is refused. Lists repeat as flags, are comma-separated in the environment, and are a YAML list in the file.
 
-Open the Settings sheet: [Open Settings](app:sheet/settings). The [Settings concept](../concepts/budgets-limits-pause.md) and [how-to pages](../README.md) explain what the important ones are for.
+Open the Settings view: [Open Settings](app:/settings). The [Settings concept](../concepts/budgets-limits-pause.md) and [how-to pages](../README.md) explain what the important ones are for.
 
 ## Changeable in the app
 
-These appear in the **Settings** sheet (account menu → Settings), grouped as the sheet groups them.
+These appear in the **Settings** view (account menu → Settings), under the headings below, each in the view's section for it (Limits, Budgets, upkeep and notices, Backups and storage, Tailnet, Agent settings, Protected hosts and branches).
 
 ### Agents
 

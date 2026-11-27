@@ -1,5 +1,5 @@
-// Day thirty on the System page (DESIGN.md 4.17 to 4.21), against `crowsnest --demo`: the Storage
-// card with Download backup and a clean-up preview, Machines with a read token that opens the
+// Day thirty (DESIGN.md 4.17 to 4.21), against `crowsnest --demo`: Settings → Backups and storage
+// (R8 moved it off the System page) with Download backup and a clean-up preview, Machines with a read token that opens the
 // summary and nothing else, and Sign in with Tailscale off by default. At 375 and 1440 px.
 import { expect, expectNoSidewaysScroll, sameOriginHeaders, test, TEST_LOGIN } from "../support/fixtures";
 
@@ -9,10 +9,10 @@ for (const size of [
   { name: "375", width: 375, height: 812 },
   { name: "1440", width: 1440, height: 900 },
 ]) {
-  test(`System at ${size.name}: storage, a clean-up preview and a backup download`, async ({ page }) => {
+  test(`Settings at ${size.name}: storage, a clean-up preview and a backup download`, async ({ page }) => {
     await page.setViewportSize({ width: size.width, height: size.height });
-    await page.goto("/system");
-    const storage = page.getByRole("region", { name: "Storage" });
+    await page.goto("/settings#backups");
+    const storage = page.getByRole("region", { name: "Storage", exact: true });
     await expect(storage.getByText("Database", { exact: true })).toBeVisible();
     await storage.getByRole("button", { name: "Clean up now…" }).click();
     await expect(page.getByLabel("Clean-up preview")).toContainText("archive");

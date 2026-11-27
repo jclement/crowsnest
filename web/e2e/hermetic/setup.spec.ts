@@ -92,8 +92,9 @@ test("changing the password in the Account sheet signs a second browser out", as
   expect((await other.request.get("/api/v1/auth/me")).status()).toBe(200);
 
   await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Account" }).click();
-  const sheet = page.getByRole("dialog", { name: "Account" });
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  // Settings → Account and name (R8: one Settings view).
+  const sheet = page.getByRole("region", { name: "Account and name" });
   await expect(sheet.getByText("Chosen at setup")).toBeVisible();
   await sheet.getByLabel("Current password").fill(OWNER.password);
   await sheet.getByLabel("New password", { exact: true }).fill("e2e setup password two");

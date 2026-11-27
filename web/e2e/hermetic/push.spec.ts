@@ -33,12 +33,14 @@ test.beforeEach(async ({ context, page, baseURL }) => {
 });
 test.afterEach(async () => fake.close());
 
-/** Opens the Notifications sheet from the account menu. */
+/** Opens Settings → Notifications from the account menu (R8: one Settings view). */
 async function openNotifications(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Notifications" }).click();
-  return page.getByRole("dialog", { name: "Notifications" });
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Notifications" }).click();
+  await expect(page).toHaveURL(/\/settings#notifications$/);
+  return page.getByRole("region", { name: "Notifications" });
 }
 
 /** The service worker's registration id, from CDP. */
@@ -93,7 +95,6 @@ test("turn on, test, receive a push and open its deep link", async ({ page, cont
   }).toPass({ timeout: 20_000 });
 
   // Tapping it: the worker's notificationclick focuses this tab and the app routes to the item.
-  await page.getByRole("button", { name: "Close" }).click();
   // Under heavy parallel load headless Chromium now and then drops the shown notice before the
   // click (about 1 run in 30 at fifteen-fold repetition; the app itself closes a notice only when
   // it is clicked: see sw.js). CDP delivery is a test hook, so when the notice is gone it is

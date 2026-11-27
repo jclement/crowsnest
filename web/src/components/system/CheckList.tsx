@@ -37,7 +37,10 @@ export function CommandLine({ command, className }: { command: string; className
   };
   return (
     <div className={cn("flex min-w-0 items-center gap-1 rounded border border-border bg-surface-sunken pl-2", className)}>
-      <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap py-1.5 font-mono text-2xs text-heading">{command}</code>
+      {/* Focusable: on a narrow screen it scrolls sideways, and the keyboard must reach that. */}
+      <code tabIndex={0} className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap py-1.5 font-mono text-2xs text-heading">
+        {command}
+      </code>
       <button type="button" onClick={copy} aria-label={`Copy ${command}`} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted hover:bg-hover hover:text-heading">
         <Copy className="h-3.5 w-3.5" aria-hidden />
       </button>

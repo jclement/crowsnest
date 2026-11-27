@@ -1,5 +1,5 @@
-// Settings → Instructions (DESIGN.md 21.3), opened from the account menu and the command
-// palette: every instruction layer crowsnest adds to the agents it starts — Global (every agent),
+// Settings → Instructions (DESIGN.md 21.3), a section of the Settings view (the account menu's
+// Settings, the command palette): every instruction layer crowsnest adds to the agents it starts — Global (every agent),
 // each role (built-in, edited, or from a file and then read-only), each project — with the layer
 // editor (components/instructions/LayerEditor.tsx). A list beside the editor from md; on a phone
 // the list, then the chosen layer with a way back. Nothing here touches the user's own CLAUDE.md
@@ -15,18 +15,9 @@ import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { EmptyState } from "../ui/EmptyState";
-import { Sheet } from "../ui/Sheet";
 import { SkeletonRows } from "../ui/Skeleton";
 import { LayerEditor } from "./LayerEditor";
-import { HelpButton } from "../help/HelpButton";
 
-export function InstructionsSheet({ open, onClose, initial }: { open: boolean; onClose: () => void; initial?: string }) {
-  return (
-    <Sheet open={open} onClose={onClose} title="Instructions" headerExtra={<HelpButton topic="concepts/instruction-layers" what="instruction layers" inline={false} />}>
-      {open && <InstructionsPanel initial={initial} />}
-    </Sheet>
-  );
-}
 
 const hints: Record<Layer["scope"], string> = {
   global: "Every agent crowsnest starts gets this: job agents, project leads and the orchestrator.",

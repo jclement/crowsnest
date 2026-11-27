@@ -7,7 +7,7 @@ on whether you are watching: [Presence](../concepts/presence.md).
 ## Kinds
 
 Switch each on or off for every device in **Notifications** → **What to send**
-([Open Notifications](app:sheet/notifications)):
+([Open Notifications](app:/settings#notifications)):
 
 | Kind | Sent when |
 |---|---|
@@ -50,7 +50,7 @@ server even if a button were forged.
 
 ## Do not disturb
 
-Account menu → **Do not disturb…** holds every non-blocking push and notify line until a time and
+The account menu's **Do not disturb** switch holds every non-blocking push and notify line until a time and
 sends one summary then. Blocking questions and dangerous approvals still get through.
 
 ## The notify URL

@@ -61,7 +61,7 @@ something else. Use the running one, stop it, or start this one with `--port N` 
 1. You opened crowsnest **from the Home Screen icon**, not from Safari. Web Push on iOS works only
    for the installed app (Safari, Share, **Add to Home Screen**; iOS 16.4 or later).
 2. It is served over **HTTPS** (`tailscale serve`), not plain HTTP on a tailnet IP.
-3. In the installed app: account menu → **Notifications** → **Turn on for this device**, allow it,
+3. In the installed app: account menu → **Settings** → **Notifications** → **Turn on for this device**, allow it,
    then **Send a test**.
 4. iOS Settings → Notifications → crowsnest is allowed, and Focus is not hiding it.
 5. You were not "here" on another device: while a focused desk tab is in use, nothing is pushed

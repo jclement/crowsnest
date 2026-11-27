@@ -4,6 +4,7 @@
 // the one list of pages), headings and their anchors (GitHub's slugs, so a deep link works in both
 // places), where a link inside a page goes, a section's text for the contextual help sheet, and the
 // client-side search the Help view and the command palette share.
+import { isSettingsSection } from "./settingsSections";
 import { PALETTE_SHEETS, type PaletteSheet } from "./palette";
 
 export interface Heading {
@@ -173,15 +174,18 @@ export function partOf(manual: Manual, id: string): ContentsPart | undefined {
 // ---- Links --------------------------------------------------------------------------------
 
 /** The views an "open the thing" link may open (app:/jobs). Keep in step with router.tsx. */
-export const APP_ROUTES = ["/", "/jobs", "/projects", "/chat", "/inbox", "/agents", "/fleet", "/terminal", "/system", "/help"] as const;
+export const APP_ROUTES = ["/", "/jobs", "/projects", "/chat", "/inbox", "/agents", "/fleet", "/terminal", "/system", "/settings", "/help"] as const;
 /** The sheets one may open (app:sheet/settings): exactly the palette's. */
 export const APP_SHEETS = PALETTE_SHEETS;
 
 export type AppSheet = PaletteSheet;
 
-export type AppTarget = { kind: "route"; to: string; search: Record<string, string> } | { kind: "sheet"; sheet: AppSheet };
+export type AppTarget = { kind: "route"; to: string; search: Record<string, string>; hash?: string } | { kind: "sheet"; sheet: AppSheet };
 
-/** An "open the thing" link: app:/projects, app:/jobs?project=unfiled, app:sheet/settings. */
+/**
+ * An "open the thing" link: app:/projects, app:/jobs?project=unfiled, app:sheet/settings, and a
+ * section of a view: app:/settings#guard (a Settings section must exist, lib/settingsSections.ts).
+ */
 export function appTarget(href: string): AppTarget | null {
   if (!href.startsWith("app:")) return null;
   const rest = href.slice(4);
@@ -189,10 +193,12 @@ export function appTarget(href: string): AppTarget | null {
     const sheet = rest.slice(6);
     return (APP_SHEETS as readonly string[]).includes(sheet) ? { kind: "sheet", sheet: sheet as AppSheet } : null;
   }
-  const [path = "", query = ""] = rest.split("?", 2);
+  const [beforeHash = "", hash] = rest.split("#", 2);
+  const [path = "", query = ""] = beforeHash.split("?", 2);
   const known = (APP_ROUTES as readonly string[]).includes(path) || /^\/projects\/[a-z0-9-]{1,32}$/.test(path);
   if (!known) return null;
-  return { kind: "route", to: path, search: Object.fromEntries(new URLSearchParams(query)) };
+  if (hash !== undefined && (path !== "/settings" || !isSettingsSection(hash))) return null;
+  return { kind: "route", to: path, search: Object.fromEntries(new URLSearchParams(query)), ...(hash ? { hash } : {}) };
 }
 
 /** A relative path from one page to another file, resolved to a page id or an image name. */
