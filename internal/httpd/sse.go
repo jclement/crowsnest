@@ -103,8 +103,14 @@ func (s *Server) sessionStillValid(r *http.Request) bool {
 	if !s.deps.Auth.Enabled() {
 		return true
 	}
-	_, err := s.deps.Auth.Authenticate(r.Context(), sessionToken(r), sessionHost(r))
-	return err == nil
+	session, err := s.deps.Auth.Authenticate(r.Context(), sessionToken(r), sessionHost(r))
+	if err == nil {
+		return s.tailscaleSessionValid(r, session)
+	}
+	// A stream opened by a request signed in with Tailscale carries no cookie of its own (the
+	// cookie was set on that very response): it stays while that sign-in would still succeed.
+	login := s.trustedTailscaleLogin(r)
+	return login != "" && s.deps.Tailscale.Allowed(r.Context(), login)
 }
 
 // writeEvent writes one SSE frame and flushes it. The event name is checked because a newline

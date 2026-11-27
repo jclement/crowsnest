@@ -10,6 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jclement/crowsnest/internal/machines"
+	"github.com/jclement/crowsnest/internal/tsauth"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -146,6 +148,12 @@ type Deps struct {
 	Processes *sysstat.Processes
 	// Instructions serves /instructions and /agents-instructions (DESIGN.md 21.3). Nil: 503.
 	Instructions *instructions.Service
+	// Ops serves backups, storage, the update notice and the summary (ops.go). Nil: 503.
+	Ops Ops
+	// Machines mints scoped tokens and keeps the machine list (DESIGN.md 4.21). Nil: 503.
+	Machines *machines.Service
+	// Tailscale is sign in with Tailscale (DESIGN.md 4.20). Nil: off.
+	Tailscale *tsauth.Gate
 }
 
 // ActionRedeemer spends a notification's action token (internal/actions.Tokens).
@@ -248,6 +256,7 @@ func (s *Server) routes() http.Handler {
 	s.registerStatsRoutes(mux)
 	mux.Handle("GET /api/v1/term/tui", s.requireAuth(http.HandlerFunc(s.handleTermTUI)))
 	mux.Handle("GET /api/v1/term/pane/{pane_id}", s.requireAuth(http.HandlerFunc(s.handleTermPane)))
+	s.registerOpsRoutes(mux)
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 	mux.Handle("/", s.spaHandler())
 	return mux

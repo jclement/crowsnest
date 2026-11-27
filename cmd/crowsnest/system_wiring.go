@@ -45,6 +45,9 @@ type liveServices struct {
 	tender  atomic.Pointer[orch.Tender]
 	jobs    atomic.Pointer[jobs.Service]
 	system  atomic.Pointer[system.Service]
+	// config is the config with the settings changed in the app applied (backups and retention
+	// read it on every pass, ops.go).
+	config liveConfig
 }
 
 // greet runs the first-run greeting, when it is wired.
@@ -56,6 +59,9 @@ func (l *liveServices) greet() {
 
 // apply pushes the settings that apply live into the services.
 func (l *liveServices) apply(_ config.Config, next config.Config) {
+	if current := l.config.value.Load(); current != nil {
+		l.config.set(current.WithSettings(next))
+	}
 	if poker := l.poker.Load(); poker != nil {
 		poker.SetInterval(next.PokeInterval)
 	}

@@ -10,6 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jclement/crowsnest/internal/machines"
+	"github.com/jclement/crowsnest/internal/tsauth"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -145,11 +147,15 @@ func noAuthWarning(cfg config.Config) string {
 func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks serveHooks) error {
 	ctx, restart := context.WithCancel(ctx)
 	defer restart()
+	if err := prepareUpgrade(ctx, cfg, logger); err != nil {
+		return err
+	}
 	db, err := store.Open(ctx, cfg.DatabasePath())
 	if err != nil {
 		return fmt.Errorf("opening database %s: %w", cfg.DatabasePath(), err)
 	}
 	defer func() { _ = db.Close() }()
+	recordVersion(ctx, db, logger)
 
 	mode, err := decideLogin(ctx, cfg, db)
 	if err != nil {
@@ -185,6 +191,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		return err
 	}
 	live := &liveServices{}
+	live.config.set(cfg)
 	journalLog := journal.New(db, events, logger, nil)
 	sys := newSystem(cfg, db, events, journalLog, client, agentSocketPath(cfg), hooks, live, logger)
 	identity := agentid.New(db, nil)
@@ -235,6 +242,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	if cfg.Demo {
 		projectOf = seedDemoProjects(ctx, cfg, refs.projects, logger)
 	}
+	// After a restore, take stock of the agents herdr really has before the supervisor may
+	// dispatch anything (DESIGN.md 4.17).
+	reconcileRestore(ctx, db, fleetCache, journalLog, logger)
 	startJobs(ctx, jobService, client, projectOf, logger)
 	startSpend(ctx, cfg, meter, jobService, logger)
 	var pokerRef atomic.Pointer[orch.Poker]
@@ -282,11 +292,20 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 		System: sys, OpenShell: openShell(cfg, client), HerdrVersionNow: herdrVersionNow(client),
 		Processes: sysstat.NewProcesses(),
 	}
+	cleanup := newRetention(live.config.get, db, journalLog, logger)
+	if !cfg.Demo {
+		go cleanup.RunNightly(ctx)
+		go backupScheduler{cfg: live.config.get, db: db, journal: journalLog, logger: logger}.run(ctx)
+	}
+	deps.Machines = &machines.Service{Store: db}
+	deps.Tailscale = tsauth.New(tsauth.Options{Enabled: cfg.TailscaleAuth, KV: db, Port: cfg.Port})
 	var serverRef atomic.Pointer[httpd.Server]
 	deps.Stats = startStats(ctx, cfg, events, fleetCache, func() bool {
 		server := serverRef.Load()
 		return server != nil && server.OpenStreams() > 0
 	}, logger)
+	deps.Ops = &opsWiring{cfg: live.config.get, db: db, retention: cleanup, jobs: jobService, questions: refs.questions.Load,
+		approvals: approvalService, orch: orchestrator, stats: deps.Stats}
 	if !cfg.WebDev {
 		deps.Web = web.Dist()
 	}
