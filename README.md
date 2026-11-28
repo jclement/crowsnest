@@ -167,7 +167,9 @@ exists. It waits (state `waiting`, with the reason) while the first-run checklis
 herdr is not connected or no agent is installed, and starts by itself when that changes. The
 first start in a new directory stops at Claude's folder-trust question; the checklist, the Inbox
 and Chat show it as a card with **Trust this folder** and **Don't trust**. A project created in the
-app records that answer for its folder (a box, ticked by default; setting
+app records that answer for its folder (a box, ticked by default only when the folder carries
+nothing an agent runs at its start; otherwise unticked, listing the hooks, MCP servers, Codex config
+and instruction files it found, because trusting lets them run with no prompt; setting
 `--trust-project-folders`), and its jobs' worktrees inherit it, so its agents never ask (DESIGN.md
 8.2.1). Conversations are read from
 Claude's JSONL transcripts in `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
@@ -397,7 +399,17 @@ without the secure context, so no microphone or Web Push.
 Off by default. Start crowsnest with `--tailscale-auth` (`CROWSNEST_TAILSCALE_AUTH=true`) and
 `tailscale serve` signs you in by your tailnet identity: no password to type on the phone.
 
-1. Start with `--tailscale-auth`, and publish (the card above, or `tailscale serve` by hand).
+**Not together with Publish to your tailnet**, by default: while crowsnest publishes itself, any
+program on this machine (an agent included) could forge serve's identity header with one request
+and sign in as you. So crowsnest refuses the pair (a start error when both come from flags or the
+environment; Publish refuses when it is saved in Settings) unless you also pass
+`--tailscale-auth-local-risk` to accept that, and even then doctor fails and both cards say it.
+Use `tailscale serve` by hand with this option instead, or leave one of them off. A session signed
+in with Tailscale can never change publishing, the guard (protected hosts and branches), the
+permission mode or the review gates: those need the password.
+
+1. Start with `--tailscale-auth`, and publish with `tailscale serve` by hand (or the card above,
+   with `--tailscale-auth-local-risk`).
 2. Open `https://<machine>.<tailnet>.ts.net`, sign in with the password once, open System,
    **Sign in with Tailscale**, and press **Allow me (you@github)**. Add others by login if you
    want (`friend@github`); remove them the same way.
@@ -678,6 +690,15 @@ Each change is a revision (the newest 20 kept, any one restorable). Crowsnest ne
 `AGENTS.md`, `CLAUDE.md` or skills; it records which of those files Claude loaded (the
 `InstructionsLoaded` hook) by path only, and tells you when an agent's layers changed after it
 started (DESIGN.md 21.3).
+
+## Codex jobs
+
+A Codex job runs in Codex's own sandbox with its network off: it can read your files, but it
+cannot write outside its folder or reach the internet without an approval card you answer, and it
+will not start in a repository whose own `.codex/` configuration you have not allowed on the
+project page. crowsnest reaches it from outside the sandbox (its MCP tools and hooks), so the stop
+guarantee and approvals from the browser hold as for Claude; what it lacks (answer receipts,
+usage-limit and spinning detection, restart) is listed in the manual's engines page and on the job.
 
 ## Projects and leads
 
@@ -1002,6 +1023,7 @@ environment, and are a YAML list or string in the file. An unknown key in the fi
 | `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | `false` | Let the session terminal's herdr client show your saved SSH machines (`herdr machine add`). Off, it runs with a state directory of crowsnest's own and sees only this session, so signing in to crowsnest does not reach your other hosts |
 | `--tailscale-serve` | `CROWSNEST_TAILSCALE_SERVE` | `false` | Publish crowsnest to your tailnet while it runs: a foreground `tailscale serve` that ends with crowsnest, on the first free of 443, 8443 and 10000. Needs a login (refused with `--no-auth`); never Funnel. Editable in Settings and from the System page. See [Publish to your tailnet](#publish-to-your-tailnet) |
 | `--tailscale-serve-port` | `CROWSNEST_TAILSCALE_SERVE_PORT` | `0` | The tailnet HTTPS port `--tailscale-serve` uses; `0` picks the first free of 443, 8443 and 10000. A port another serve config uses is refused, never taken over |
+| `--tailscale-auth-local-risk` | `CROWSNEST_TAILSCALE_AUTH_LOCAL_RISK` | `false` | Accept `--tailscale-auth` while crowsnest publishes itself to the tailnet (any local program could then sign in as you); without it the pair is refused. Doctor still fails while both are on (DESIGN 3.5.1) |
 | `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | `false` | Sign in tailnet users the owner allowed (Settings, Sign in with Tailscale) from the identity headers `tailscale serve` on this machine adds. Password login stays. See [Sign in with Tailscale](#sign-in-with-tailscale) |
 | `--backup-every` | `CROWSNEST_BACKUP_EVERY` | `0` (off) | Make an automatic backup this often (at least `1h`), into `<data-dir>/backups`. Also in Settings |
 | `--backup-keep` | `CROWSNEST_BACKUP_KEEP` | `7` | Automatic backups kept |
@@ -1158,7 +1180,8 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `POST /jobs/{id}/message` | session | `{text, force_over_draft, attachments}`: typed into the job's agent as `[crowsnest message j_<n>] …`; errors like a Chat send |
 | `POST /jobs/{id}/cancel`, `/nudge`, `/resume` | session | Cancel (Esc to the agent, then `cancelled`; the pane stays), nudge by hand, or resume a stuck job (retry now after a limit, restart a gone agent, else nudge) |
 | `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}`, `PUT /projects/{ref}` | session | Projects with their lead and job counts; create `{name, dir, …}`; one by id or slug (`?open=1` when opened in the app); edit or `{archived}` |
-| `POST /projects` with `trust_folder: true`, `POST /projects/{ref}/trust` | session | Record Claude Code's and Codex's folder trust for the project's folder (DESIGN.md 8.2.1); `409` while `--trust-project-folders` is off. The project view says `folder_trusted` |
+| `POST /projects` with `trust_folder: true`, `POST /projects/{ref}/trust` | session | Record Claude Code's and Codex's folder trust for the project's folder (DESIGN.md 8.2.1); `409` while `--trust-project-folders` is off. The project view says `folder_trusted`, `agent_start` (what the folder runs at agent start) and `codex_config` (its `.codex/`, and whether Codex jobs may use it) |
+| `POST /projects/{ref}/codex-config` | session | `{fingerprint}`: allow the folder's own `.codex/` for Codex jobs as the page showed it; `409` when it changed since (DESIGN.md 20.1) |
 | `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | session | Running leads; a project's lead controls |
 | `POST /jobs/{id}/restart-agent` | session | Restart the job's agent on the same conversation with fresh instructions |
 | `GET /voice/agents`, `PUT /voice/agents/{agent}` | session | Each standing agent's voice (`{voice_id}`, empty for the instance's) |
@@ -1202,7 +1225,7 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `mise run test` | Go tests with `-race`, then Vitest (single run) |
 | `mise run test:integration` | Go tests against real herdr in throwaway `crowsnest-test-*` sessions (created, stopped and deleted by the tests): the socket client, the pane and TUI terminal bridges, and the fleet cache following herdr's events. Also self-update's real Sigstore check of a published release's bundle (needs the network) |
 | `mise run test:claude` | Real-Claude smoke (a few cents): a real orchestrator on haiku in a throwaway session answers one prompt through the HTTP API, then Restart and New conversation; a manual poke with one synthetic reason is delivered through `POST /orchestrator/poke` and answered; and it calls the `ask` MCP tool, the question is answered through the browser API, and the answer arrives in its transcript; and a PNG with a word drawn in it, uploaded and sent with a prompt under the `default` permission mode, is read (no permission prompt) and the word named. Then **the stop test**: three haiku job agents in a scratch git repo, where an undeclared stop is refused by the Stop hook, `done` stops cleanly, and a non-blocking `ask` answered through the browser API reaches the agent, which finishes. And **the approvals test**: three haiku job agents under the `default` permission mode: a Bash call becomes an approval, is allowed through the API and runs with no terminal answer; another is denied with a note the agent quotes back; and `ssh` to a protected host is refused by the guard hook with no approval asked |
-| `mise run test:codex` | Real-Codex test (opt-in, a few cents on `gpt-5.6-luna`; `CROWSNEST_CODEX_MODEL` picks another): Codex job agents with crowsnest's hooks in a throwaway `crowsnest-test-*` session: a job ends done with its SessionStart hook on the timeline and its spend measured from its rollout (tokens, no cost); an undeclared stop is refused by the Stop hook; a write outside the sandbox becomes an approval allowed through the API; a protected host is refused by the guard. Codex's trust prompt is answered through the trust card's API path. Unset `HERDR_*` first |
+| `mise run test:codex` | Real-Codex test (opt-in, a few cents on `gpt-5.6-luna`; `CROWSNEST_CODEX_MODEL` picks another): Codex job agents with crowsnest's hooks in a throwaway `crowsnest-test-*` session: a job ends done with its SessionStart hook on the timeline and its spend measured from its rollout (tokens, no cost); an undeclared stop is refused by the Stop hook; a write outside the sandbox becomes an approval allowed through the API; a protected host is refused by the guard; a network call (the sandbox's network is off) becomes an approval, and the job still reports done through crowsnest's MCP server. Codex's trust prompt is answered through the trust card's API path, and the test removes its scratch folder's records from your `~/.codex/config.toml` and `~/.claude.json` at the end. Unset `HERDR_*` first |
 | `mise run fonts:terminal` | Regenerate the terminal's fallback webfonts (`web/src/fonts/terminal/`, committed) with `web/scripts/terminal-fonts.py`: downloads the pinned Nerd Fonts symbols release and Unicode emoji data (checked by SHA-256), reads DejaVu and Noto from the pinned `@fontsource` devDependencies, and writes the unicode-range chunks and their CSS. Run after changing a pin |
 | `mise run lint` | `go vet`, golangci-lint, gofmt check, `tsc`, eslint. Read-only |
 | `mise run fmt` | gofmt and eslint `--fix` |

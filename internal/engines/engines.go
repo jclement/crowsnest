@@ -35,6 +35,7 @@ const (
 	CapSpinning     = "spinning"     // spinning detection: the same failing step over and over
 	CapInstrRestart = "instructions" // instruction layers: changed-since-start, and restart to apply
 	CapTrustSkip    = "folder_trust" // a project folder trusted at creation starts without the prompt
+	CapHeavy        = "heavy"        // builds and suites wait for one of the machine's heavy slots
 )
 
 // Rescue action ids (POST /jobs/{id}/rescue), as internal/jobs names them.
@@ -97,9 +98,10 @@ var labels = map[string]string{
 	CapSpinning:     "Spinning detection",
 	CapInstrRestart: "Instruction changes: restart to apply",
 	CapTrustSkip:    "No folder-trust prompt in a trusted project",
+	CapHeavy:        "Heavy-command slots",
 }
 
-var order = []string{CapStop, CapApprovals, CapGuard, CapSpend, CapReceipts, CapUsageLimit, CapSpinning, CapInstrRestart, CapTrustSkip}
+var order = []string{CapStop, CapApprovals, CapGuard, CapSpend, CapReceipts, CapUsageLimit, CapSpinning, CapInstrRestart, CapTrustSkip, CapHeavy}
 
 func capability(id string, available bool, note string) Capability {
 	return Capability{ID: id, Label: labels[id], Available: available, Note: note}
@@ -123,6 +125,7 @@ func ClaudeEngine(installed bool) Engine {
 			capability(CapSpinning, true, "read from the transcript: the same failing step, over and over"),
 			capability(CapInstrRestart, true, "changed-since-start is shown, and Restart applies the new layers in the same conversation"),
 			capability(CapTrustSkip, true, "a linked worktree inherits its checkout's trust (Claude Code 2.1.332)"),
+			capability(CapHeavy, true, "crowsnest heavy waits for a slot, so agents testing at once cannot freeze the machine"),
 		},
 		Rescue: rescues(nil),
 		Models: claudeModels,
@@ -140,10 +143,10 @@ var codexRefusals = map[string]string{
 func CodexEngine(installed bool, models []Model) Engine {
 	return finish(Engine{
 		ID: Codex, Name: "Codex", Installed: installed,
-		Summary: "The stop guarantee, approvals from the browser and the guard (through Codex's hooks), and spend in tokens; no answer receipts, usage-limit or spinning detection, and no restart, compact or model switch in Rescue.",
+		Summary: "The stop guarantee, approvals from the browser and the guard (through Codex's hooks), and spend in tokens, with the sandbox's network off: anything that needs the internet asks you first. No answer receipts, usage-limit or spinning detection, and no restart, compact or model switch in Rescue.",
 		Capabilities: []Capability{
-			capability(CapStop, true, "Codex's Stop hook, handed to the job for its session (--dangerously-bypass-hook-trust, the hooks crowsnest wrote)"),
-			capability(CapApprovals, true, "Codex asks on request inside its workspace-write sandbox (writes outside the workspace; the network is on, as for a Claude job, so the shell reaches crowsnest); its PermissionRequest hook brings each request to the browser, and an unanswered one falls back to Codex's own dialog, shown as a card. Codex keeps .git read-only in its sandbox, so every commit asks: a project approval rule for git commit answers those"),
+			capability(CapStop, true, "Codex's Stop hook, handed to the job for its session (--dangerously-bypass-hook-trust, the hooks crowsnest wrote); the job reports through crowsnest's MCP server, which Codex runs outside its sandbox. A repository's own .codex/ config would run unreviewed with that flag, so a Codex job waits until you have allowed it on the project page"),
+			capability(CapApprovals, true, "Codex asks on request inside its workspace-write sandbox, whose network is off: a write outside the workspace and any command that needs the network escalate, and the PermissionRequest hook brings each request to the browser, rated by risk; an unanswered one falls back to Codex's own dialog, shown as a card. Codex keeps .git read-only in its sandbox, so every commit asks: a project approval rule for git commit answers those"),
 			{ID: CapGuard, Label: labels[CapGuard], Available: true, Partial: true, Note: "shell commands are checked by the PreToolUse hook; apply_patch edits are held while crowsnest checks the worktree but not otherwise inspected"},
 			{ID: CapSpend, Label: labels[CapSpend], Available: true, Partial: true, Note: "tokens from Codex's session log; no cost estimate (crowsnest has no prices for OpenAI's models)"},
 			capability(CapReceipts, false, "receipts read Claude's transcript; a Codex answer stops at \"delivered\""),
@@ -151,6 +154,7 @@ func CodexEngine(installed bool, models []Model) Engine {
 			capability(CapSpinning, false, "spinning is read from Claude's transcript"),
 			{ID: CapInstrRestart, Label: labels[CapInstrRestart], Available: false, Partial: true, Note: "changed-since-start is shown, but a Codex job cannot be restarted from crowsnest to apply it"},
 			capability(CapTrustSkip, true, "Codex resolves a worktree to its repository root's trust (codex-cli 0.167)"),
+			{ID: CapHeavy, Label: labels[CapHeavy], Available: true, Partial: true, Note: "the sandbox cannot write the slot files, so crowsnest heavy runs the command at once, at low priority with the tools' parallelism capped, and does not wait for a slot"},
 		},
 		Rescue: rescues(codexRefusals),
 		Models: models,

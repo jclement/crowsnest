@@ -165,6 +165,7 @@ All of them, in `crowsnest --help` order. The config-file key is the flag's name
 | `--digest-at` | `CROWSNEST_DIGEST_AT` | none | Throttling and review → Daily digest at | HH:MM: write the daily digest into the Inbox after this local time (default off) |
 | `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | `false` | no | let the session terminal's herdr client show your saved SSH machines (off: it gets a state directory of crowsnest's own and sees only this session) |
 | `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | `false` | no | sign in tailnet users the owner allowed, from the identity headers of `tailscale serve` on this machine (password login stays) |
+| `--tailscale-auth-local-risk` | `CROWSNEST_TAILSCALE_AUTH_LOCAL_RISK` | `false` | no | allow --tailscale-auth while crowsnest publishes itself to the tailnet, accepting that any program on this machine could then sign in as the owner |
 | `--backup-every` | `CROWSNEST_BACKUP_EVERY` | `0` | Backups and storage → Automatic backup every | make an automatic backup this often, such as 24h; 0 off |
 | `--backup-keep` | `CROWSNEST_BACKUP_KEEP` | `7` | Backups and storage → Automatic backups kept | automatic backups kept; older ones are deleted |
 | `--archive-after-days` | `CROWSNEST_ARCHIVE_AFTER_DAYS` | `14` | Backups and storage → Archive settled jobs after (days) | settled jobs leave the boards after this many days (still searchable); 0 never |

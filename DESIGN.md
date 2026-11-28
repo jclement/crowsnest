@@ -108,6 +108,7 @@ Cobra + Viper. `crowsnest` with no subcommand is `crowsnest serve`.
 | `--terminal-machines` | `CROWSNEST_TERMINAL_MACHINES` | false | Let the Terminal view's herdr client read the user's saved SSH machines; off, it runs with `XDG_STATE_HOME=<state>/terminal-client` (10, 20). Never editable from a browser |
 | `--tailscale-serve` | `CROWSNEST_TAILSCALE_SERVE` | false | Publish crowsnest to the tailnet while it runs: a supervised foreground `tailscale serve` (3.5.1). Editable in the app; refused with `--no-auth` |
 | `--tailscale-serve-port` | `CROWSNEST_TAILSCALE_SERVE_PORT` | `0` (the first free of 443, 8443, 10000) | The tailnet HTTPS port `--tailscale-serve` uses; one another serve config uses is refused (3.5.1) |
+| `--tailscale-auth-local-risk` | `CROWSNEST_TAILSCALE_AUTH_LOCAL_RISK` | false | Accept `--tailscale-auth` while crowsnest publishes itself (R9-S3): without it the combination is refused (3.5.1). Flag or environment only |
 | `--tailscale-auth` | `CROWSNEST_TAILSCALE_AUTH` | false | Sign in allowed tailnet logins from `tailscale serve`'s identity headers (4.20). Never editable from a browser |
 | `--backup-every` | `CROWSNEST_BACKUP_EVERY` | `0` (off) | Automatic backup interval, at least `1h` (4.17); editable in Settings |
 | `--backup-keep` | `CROWSNEST_BACKUP_KEEP` | `7` | Automatic backups kept (4.17); editable |
@@ -178,6 +179,17 @@ sheet (12.9): `model`, `job-model`, `engine`, `permission-mode`, `no-remote-cont
 `delete-after-days` (section "Backups and storage", all live), and since `wip/tsserve`
 `tailscale-serve` (section "Tailnet", live: 3.5.1); the instance name stays in the Account sheet, voice and notifications in
 theirs. They are kept in `kv` as `settings.<option>` in the text form a flag would take.
+
+**Publishing is the one setting that widens who reaches crowsnest and is still an app setting**
+(R9-S13 settles what used to read as a contradiction with "options that widen who reaches
+crowsnest are flags only, where a stolen session could turn them on", `config/ops.go`). It is the
+exception because it widens nothing the login does not still stand in front of: it needs a login
+(refused under `--no-auth`), it only ever targets crowsnest's own loopback listener, it is never
+Funnel (the argv allowlist), and only a password session may change it. The same holds for every
+setting that acts outward or grants (`config.RestoreSetsAside`: publishing, the notify URL, Remote
+Control, the permission mode, protected hosts and branches, the review gates, folder trust): a
+session signed in with Tailscale gets 403 on `PUT /settings/<name>` for any of them; a restore
+sets them aside (4.17).
 
 **Precedence, decided deliberately: flag, then environment, then the app (database), then the
 config file, then the default.** Whoever starts the process with a flag or a variable is being
@@ -437,6 +449,22 @@ publishing does to it:
   Tailscale gets 403 on the card's POST and DELETE and on `PUT /settings/tailscale-serve`, the
   4.20 rule that a tailnet login must not widen how crowsnest is reached. Origin and `X-Crowsnest`
   apply as to every change.
+- *Sign in with Tailscale while publishing* (R9-S3): this was the one widening. `tsauth` believes
+  serve's identity header from a loopback request whose Host a serve config fronts, and crowsnest's
+  own foreground session counts, so with both on any local process (an agent, with one `curl`
+  carrying Host, the login header, Origin and `X-Crowsnest`) gets an owner session. Crowsnest cannot
+  tell serve's request from a forged one at a loopback port, so the combination is **refused**:
+  publishing given at start with `--tailscale-auth` is a start error, and a saved setting makes the
+  publisher refuse with the reason, unless `--tailscale-auth-local-risk` (flag or environment only)
+  accepts it. Doctor fails whenever both are on, accepted or not (`tailscale.auth-with-serve`), and
+  with the risk accepted the Publish card and the Sign in with Tailscale card both say it in words
+  (`local_risk`).
+
+**Health while publishing (R9-C13).** Once confirmed, the session is looked for again every 15 s
+(`HealthPoll`): tailscaled can drop a foreground session (a restart, a re-login) while the CLI lives
+on. Two misses in a row (a status that cannot be read counts as one) stop the child, show the card
+as failed with the reason, journal it as an alert, and publish again after the backoff, so the card
+never keeps saying "publishing" over a dead URL. The fake's `lose-session` mode tests it.
 
 ## 4. Security model
 
@@ -546,7 +574,19 @@ while its saved text still has that hash it is **withheld** from every agent (a 
 its built-in), the layer editor shows the text with **Apply it** (`POST
 /instructions/{scope}/{key}/apply-restored {hash}`, 409 if it changed), and the human's own save
 replaces it. Applying changes what a start would write, so the standing agents restart for new
-instructions as for any other change (7.x freshness). The replaced database is **scrubbed** like a backup
+instructions as for any other change (7.x freshness). R9-S2: every **setting that acts outward
+or grants** (`config/restore.go`: `tailscale-serve` first, the notify URL, Remote Control for the
+orchestrator and jobs, the permission mode, protected hosts and branches, the review gate,
+require-viewed-before-land, trust-project-folders) is set aside: its saved value is moved to kv
+`restored.setting.<name>` and stops applying (the file, then the default, apply instead), the
+CLI's summary names each with why, and the Settings view shows the backup's value with **Use it**
+and **Keep the current**; any save of that setting ends the offer. A restored instance therefore
+never publishes itself, nor comes back with a backup's emptied guard or `bypassPermissions`.
+The notify URL is dropped rather than offered (it is write-only). The table classifies every app
+setting, and `TestEverySettingHasARestoreRule` fails for a new one until someone decides; the
+same list is what a Tailscale-signed-in session may not change (3.2). Not done here (R9-S2's
+other rows, following the tag): `risk.yaml` and role files from the backup are still restored as
+files, and `pending_feedback` and restored pane ids are kept. The replaced database is **scrubbed** like a backup
 (sessions, token hashes, the push key, the notify URL): rolling back to it means signing in again.
 R6-S6: snapshots, backups and pre-migration copies drop every `*remote_control` key and carry a
 scrub mark (`snapshot.scrubbed`); a pre-migration copy without the current mark is scrubbed again
@@ -617,7 +657,10 @@ not loopback and is refused (tested). **Without the option**: headers are ignore
 **A local process**: anything on this machine can connect over loopback with a Host and the
 header; serve strips client copies, but a process that bypasses serve is not stopped. On a
 single-user machine that process already runs as the user (and could read the database); on a
-shared machine, leave the option off. **Tagged devices and Funnel**: serve sends no identity for
+shared machine, leave the option off. That process includes every agent crowsnest runs, which is
+why R9-S3 refuses this option while crowsnest publishes itself (its serve session is then always
+up), unless `--tailscale-auth-local-risk` accepts it (3.5.1); and why a session signed in with
+Tailscale may not change any setting that acts outward or grants (3.2, R9-S13). **Tagged devices and Funnel**: serve sends no identity for
 them, so they cannot sign in this way. **A serve config pointed elsewhere later**: noticed within
 30 s. The `--trusted-proxy` setting is independent (it only decides the limiter's client
 address).
@@ -2658,18 +2701,32 @@ was right. What `wip/trust` adds:
    keeps the folder per pane). The answer is checked (`dialog_gone`). Crowsnest still never
    presses either by itself.
 2. **Where the human already decided, there is no question.** Creating a project in the app (the
-   human chose that folder) offers "Agents may work in this folder without asking", ticked by
-   default and explained; ticked, POST /projects (`trust_folder: true`) records both agents' answer
+   human chose that folder) offers "Agents may work in this folder without asking", explained,
+   and ticked by default **only for a folder that carries nothing an agent runs or reads at its
+   start** (R9-S4: agent hooks in `.claude/settings*.json`, `.mcp.json`, `.codex/`, `CLAUDE.md`,
+   `AGENTS.md`; `agenttrust.Inspect`, in GET /browse/facts and the project view as `agent_start`);
+   otherwise, and until the facts are known, it is unticked and lists what was found, hooks, MCP
+   servers and Codex config under "These run when an agent starts, with no prompt once the folder
+   is trusted", instructions apart. The banner lists the same. Ticked, POST /projects (`trust_folder: true`) records both agents' answer
    for the project's folder (as given and resolved). Job worktrees crowsnest makes from it then
    start trusted by the agents' own rule (the table above): nothing is ever written for a
    worktree. A project whose folder Claude does not trust shows a banner with **Trust this
    folder** (POST /projects/{ref}/trust). **This is the one exception to "nothing is written into
    the user's Claude settings"**, kept narrow: one key per folder, every other value carried byte
    for byte (raw JSON for Claude, whose file is re-indented with its keys sorted; an appended table
-   for Codex, never a rewrite), an atomic write (a temporary file and rename, the old mode kept),
-   read back and retried while an agent rewrites the file, a file that does not parse (or an
-   inline `projects` table) left alone and reported, Codex's explicit "untrusted" for the folder
-   respected. Only a signed-in human's request naming a project reaches it (agents cannot create
+   for Codex, never a rewrite), and a careful write (R9-C8, R9-S8, `agenttrust/file.go`): under
+   Claude Code's own lock on its state file (a `<file>.lock` directory, as proper-lockfile makes
+   it and Claude Code 2.1.332's saveConfigWithLock takes it; abandoned after 10 s untouched, as
+   proper-lockfile treats it; waited for up to 15 s, then a failure with nothing written; Codex has
+   no such lock, so there it only orders crowsnest's writers), the file is read, the change written
+   to a temporary file beside it, and the file read again just before the rename, which happens only
+   if the bytes are unchanged (else the update starts over, five times, then fails with nothing
+   written). The window left is the instant between that comparison and the rename, for a writer
+   that ignores the lock; no file API closes it. The old mode is kept; a symlinked file is written
+   at its target, so the link stays; a FIFO, a non-regular file or one over 64 MB is refused without
+   blocking. It is read back and retried while an agent rewrites the file; a file that does not
+   parse, is not a JSON object (`null` included, R9-C9), or has an inline `projects` table is left
+   alone and reported; Codex's explicit "untrusted" for the folder is respected. Only a signed-in human's request naming a project reaches it (agents cannot create
    projects); never a folder an agent chose, never the orchestrator's own folder. **Setting**
    `trust-project-folders` (on; Settings → Agents) turns it off for good: then no box writes, and
    every new project's first agent asks on its card. A demo instance writes into its own state
@@ -2680,7 +2737,8 @@ project created in the UI with its box ticked gets a builder job, in its own wor
 reaches running with no trust question and no terminal; one created unticked meets the question
 on the decision screen, Trust this folder is pressed there, and its job runs. The real-Claude
 browser suite gives each instance a scratch `CODEX_HOME`, so its projects never write into the real
-Codex config. `mise run test:codex` answers Codex's trust prompt through the same screen and keys
+Codex config; and every real-agent suite removes exactly its own scratch folders' records from the
+user's `~/.claude.json` and `~/.codex/config.toml` at teardown (15). `mise run test:codex` answers Codex's trust prompt through the same screen and keys
 API the card uses and requires `dialog_gone`.
 
 **A cancelled job's questions are cancelled** (found by the real-Claude journeys): cancelling a
@@ -3326,7 +3384,8 @@ times under one page.
 | `GET /browse/facts?path=` | One folder's facts: `{path, resolved, label, name, git, worktree, git_top?, branch?, detached?, default_branch?, remote? (no credentials), host?: github\|azure\|gitlab\|bitbucket\|other, check_command?, agents_md, claude_md, claude_trusted?, is_home, is_filesystem_root, project: {id, slug, name, dir, exact} \| null, contains: [the same]}`; errors as `/browse` |
 | `GET /browse/places` | Where the picker starts: `{home, favourites: [Place], roots: [Place]}`, a `Place` being `{path, label, kind: home\|favourite\|root\|project\|project-parent\|remembered\|recent, git?}` |
 | `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}[?open=1]`, `PUT /projects/{ref}` | Projects (21.1): `{projects: [Project + {lead, counts: {needs_you, running, total}}], unfiled: counts}`; create `{name, dir, slug?, description?, default_role?, default_engine?, default_model?, default_isolate?: -1\|0\|1, permission_mode?, lead_start?}` (`400` with the reason: not a directory, too wide, overlapping); `{ref}` is the id or slug; `?open=1` applies `lead_start=open`; `PUT` edits or `{archived}` (archiving stops the lead). A `project` event `{id, change}` |
-| `POST /projects` `trust_folder`, `POST /projects/{ref}/trust` | Folder trust (8.2.1): `trust_folder: true` on a create (left out: false) records Claude Code's and Codex's trust for the project's folder; `/trust` does it for an existing project (`409` while the `trust-project-folders` setting is off). The view carries `folder_trusted` (Claude trusts the folder or a parent) and, after either, `trust: [{agent, status: trusted\|already\|skipped\|failed, detail}]` |
+| `POST /projects` `trust_folder`, `POST /projects/{ref}/trust` | Folder trust (8.2.1): `trust_folder: true` on a create (left out: false) records Claude Code's and Codex's trust for the project's folder; `/trust` does it for an existing project (`409` while the `trust-project-folders` setting is off). The view carries `folder_trusted` (Claude trusts the folder or a parent) and, after either, `trust: [{agent, status: trusted\|already\|skipped\|failed, detail}]`. Every view also carries `agent_start: [{path, kind: hooks\|mcp\|codex\|instructions, runs}]` (R9-S4) and, for a folder with a `.codex/`, `codex_config: {files, fingerprint, seen, error?}` (R9-S5); trusting the folder marks its `.codex/` seen |
+| `POST /projects/{ref}/codex-config` | `{fingerprint}`: allow the project folder's own `.codex/` for Codex jobs, exactly as the page showed it (R9-S5, 20.1); `409` when the files changed since (the fingerprint no longer matches) or cannot be read safely. Session only; Origin and `X-Crowsnest` |
 | `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | Project leads (21.2): the running leads' statuses (the orchestrator's status shape plus `project_id`, `slug`, `running`; state `off` when not running, `stopped` after Stop; Remote Control's `remote_control`, `remote_control_note` and `remote_control_url` as the orchestrator's, 7.10.1); the lead's controls (`poke` answers as `POST /orchestrator/poke`). A `lead` event carries a lead's status |
 | `POST /jobs/{id}/restart-agent` | Restart the job's agent on the same conversation with its start-up files and instruction layers written afresh (21.3); refused for a job a standing agent holds (restart that agent) |
 | `GET /voice/agents`, `PUT /voice/agents/{agent}` | Each standing agent's voice (13.5): `{agents: [{agent, label, voice_id}], default_voice}`; `{voice_id}` (`""`: the instance's). 404 when talk mode is off |
@@ -4207,6 +4266,19 @@ mise tasks: `setup`, `dev` (the real binary on its own herdr session `crowsnest-
 Test-safety rules, enforced in the helpers rather than by convention: a test session name must
 match `^crowsnest-test-`; helpers scrub `HERDR_*` from the environment; teardown stops and deletes
 only the session it created; nothing addresses the `default` session or an agent named `orchestrator` outside its own session.
+**The user's agent files (R9 test hygiene).** Real Claude and real Codex run with the user's own
+login, so they record every scratch folder in the user's `~/.claude.json` (a `projects` entry per
+folder they run in, and trust answers) and `~/.codex/config.toml` (a trust table when its prompt is
+answered). A scratch home would not keep the login (checked: a scratch `CLAUDE_CONFIG_DIR` reports
+`loggedIn: false`, the login being in the keychain under the default directory; a scratch
+`CODEX_HOME` is "Not logged in", and copying `auth.json` is unsafe because Codex's refresh token is
+single-use). So every real-agent suite removes, at teardown, exactly the records at or under its
+own scratch folder, and under `~/.herdr/worktrees/<its repo>` where herdr keeps its job worktrees,
+with the same careful update as a trust write (`agenttrust.ForgetUnder`; Go suites register it
+before the herdr session so it runs after the agents are gone; the browser rig calls the hidden
+`crowsnest forget-scratch`). It refuses home, home's ancestors and paths under two levels deep.
+Records left by older runs are not touched: listing them is the human's call (REPORT of
+`wip/fix-r9b` has a read-only script).
 A fake `claude` for the real-herdr tier is worth a one-hour spike (herdr detects agents by process and screen); if herdr will not recognise it, the smoke tier covers that ground.
 
 ## 16. Distribution
@@ -4580,10 +4652,15 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 129. **Review comments on a finished job start a fix job; the job is not reopened** (6.21, `wip/comments`). The brief asked for "the existing path that sends feedback and returns the job to work". For a live job that is the message path, or pending feedback when it is held. A done job has no such path: done is terminal by design (`CheckTransition`), its agent's tokens are revoked when it settles, and jobs that waited on it were woken. Reopening would have had to undo all three, in the part of the code the R6 and R7 reviews care most about. The existing way to change a finished job's branch is a fix job in its worktree followed by a fresh check (`AskRebase`, `fixSettled`), so comments take that path. The cost: the fix job is a new conversation, so the comments carry the job's brief with them.
 130. **A note's quote is read from git, and "outdated" means the work-tree content changed** (6.21). The browser shows the lines but does not supply them: the server reads the blob named by the hash it showed, so a note cannot carry code that was never there. Outdated compares the file's current new blob with the one the note was written against, not the diff hash: committing an edit unchanged changes no content, and a note should not go stale because the agent committed.
 131. **Comments to a held or paused job wait as pending feedback** (6.21, R7-C04). A human's message types now even into a held job; review comments are a batch the human composed earlier and may send in passing, so they take the gate automatic prompts take and are typed when nothing holds the job. The answer says "waiting" and why, so the human is not misled into thinking the agent has them.
-132. **Folder trust is written only for a folder the human chose, and only where the agents themselves would record it** (8.2.1). Neither agent offers a flag that skips the question for a session, and the agents' own rule (a worktree takes its checkout's trust) means one record at project creation covers every job; so the narrow write of the agents' own record, behind a box ticked by default and a Setting, removes the prompt without crowsnest ever answering a prompt on screen. Writing per worktree, or for a folder an agent named, would be crowsnest deciding trust for code nobody looked at.
+132. **Folder trust is written only for a folder the human chose, and only where the agents themselves would record it** (8.2.1). Neither agent offers a flag that skips the question for a session, and the agents' own rule (a worktree takes its checkout's trust) means one record at project creation covers every job; so the narrow write of the agents' own record, behind a box ticked by default and a Setting, removes the prompt without crowsnest ever answering a prompt on screen. Writing per worktree, or for a folder an agent named, would be crowsnest deciding trust for code nobody looked at. (R9-S4: the box is ticked by default only for a folder that carries nothing an agent runs or reads at its start; decision 136.)
 133. **The trust question is a decision with two named buttons, not the agent's menu** (8.2.1). "Trust this folder" and "Don't trust" read the same whatever shape the agent drew (an arrow list, a numbered list, a digit that only selects), and each carries its own key sequence; the screen is one tap away. An answer is confirmed by watching the screen (`dialog_gone`), because "the keys were sent" is not "the question went".
-134. **Codex gets crowsnest's hooks on the command line, not in its config** (20.1). `-c hooks.…` with `--dangerously-bypass-hook-trust` hands them to the one session, reviewed by crowsnest (it wrote them); writing them into `~/.codex/hooks.json` would add them to every Codex session Jeff starts. The cost is that a repository's own Codex hooks also run unreviewed in a crowsnest job, the same trust Claude Code gives a trusted folder.
+134. **Codex gets crowsnest's hooks on the command line, not in its config** (20.1). `-c hooks.…` with `--dangerously-bypass-hook-trust` hands them to the one session, reviewed by crowsnest (it wrote them); writing them into `~/.codex/hooks.json` would add them to every Codex session Jeff starts. The cost was that a repository's own Codex hooks also ran unreviewed in a crowsnest job; since R9-S5 a Codex job does not start until the human has allowed the folder's `.codex/` as it is (decision 137).
 135. **One table says what each engine gets** (20.1). The job form, project defaults, a Codex job's card, Rescue, the API's refusals and the manual all read `internal/engines`, so an engine's gap is stated once and cannot be promised away by one surface.
+136. **The trust box defaults from the folder's facts** (8.2.1, R9-S4). Trusting a folder lets its agent hooks, MCP servers and Codex config run the moment an agent starts, with no prompt, and a cloned repository is someone else's code. So the box is ticked by default only when the folder carries none of them and no instruction files (`agenttrust.Inspect`); otherwise it is unticked and lists them under "These run when an agent starts", and the banner says the same. The human can still tick it: they chose the folder; the default just stops being a yes for code nobody read.
+137. **A Codex job reports through crowsnest's MCP server, with the sandbox's network off** (20.1, R9-S1). With the network on, a prompt-injected command could send any file anywhere with no escalation, so no card: worse than a Claude job, whose network commands are asked for. Codex runs MCP servers and hooks outside its sandbox (verified), so the protocol needs no network; every capability survived, and anything that needs the internet is an approval. And since `--dangerously-bypass-hook-trust` would run a repository's own `.codex/` unreviewed, a Codex job starts only once the human has allowed that `.codex/` as it is now (R9-S5), rather than drop the hooks (and with them the stop guarantee and browser approvals).
+138. **A restore sets aside every setting that acts outward or grants** (4.17, R9-S2). One table (`config/restore.go`) says, for each app setting, whether a backup may bring it back; a test fails for a new setting until it is classified. Set aside: publishing to the tailnet, the notify URL, Remote Control, the permission mode, protected hosts and branches, the review gates, folder trust. The Settings view offers the backup's value with "Use it". The same list is what a session signed in with Tailscale may not change (R9-S13).
+139. **Publishing and Sign in with Tailscale do not run together by default** (3.5.1, 4.20, R9-S3). With crowsnest's own serve session always up, any local process can forge serve's identity header with one `curl` and become the owner; crowsnest cannot tell (the serve target is a loopback port), so the combination is refused (a start error from flags, a publisher refusal from a saved setting) unless `--tailscale-auth-local-risk` accepts it, and even then doctor fails and both cards say it. Making it safe would need serve to proxy to a target only tailscaled can reach, which was not verified (no real `tailscale serve` may be run in a build).
+140. **Crowsnest's own items outrank agents' questions** (22.1, R9-S6). Within a band, approvals, dialogs (the trust prompt included), jobs and crowsnest's gates come before questions an agent asked, whatever urgency it chose, and Web Push gives agents' questions a rate budget of their own. An agent choosing "blocking" can still put its question in the blocking band, but never above what crowsnest itself raised.
 
 ## 18. Milestones
 
@@ -4646,7 +4723,7 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - After a crash in the middle of typing a brief, the brief counts as sent and is not typed again (6.9). If it did not arrive, a Claude agent still has it from the SessionStart hook; a Codex agent is only nudged (its SessionStart hook carries no brief), and reads it with `crowsnest job get`.
 - A launch interrupted by a crash while herdr was creating the worktree can leave that worktree behind; the relaunch makes a new one (or fails on the branch name and shows `needs_you`/launch).
 - A restart mints a new start token, which revokes the agent's previous one. It now happens only once the old agent is confirmed gone (R2-C07); replacing tokens atomically per pane is R2-C15, in `internal/agentid`.
-- Codex jobs get crowsnest's hooks through `--dangerously-bypass-hook-trust` (20.1). That flag also runs a repository's own `.codex/hooks.json` without Codex's per-hook review, as Claude runs a trusted folder's hooks. A Codex agent with no agent socket (no token) gets none and is covered by the herdr-side backstop (M8 calls `NudgeIfDue`).
+- Codex jobs get crowsnest's hooks through `--dangerously-bypass-hook-trust` (20.1). That flag also runs a repository's own `.codex/hooks.json` without Codex's per-hook review, so a Codex job starts only once the human has allowed the folder's `.codex/` as it is now (R9-S5). The fingerprint is checked just before the agent starts, not continuously: a `.codex/` that appears in the worktree while a job runs (an approved escalation that writes it) is caught at the next start in that worktree, not mid-session. A Codex agent with no agent socket (no token) gets none and is covered by the herdr-side backstop (M8 calls `NudgeIfDue`).
 - Where an engine is chosen for a job (the new-job form, a schedule's job, Settings' default engine; a project's defaults carry main's own line), `EngineNote` says what Codex runs without, from `GET /api/v1/engines` (R8 cut 8; the same table as the card and detail).
 - Pokes (M8): the agent-settled trigger is herdr's `done`/`blocked`; an agent that goes `idle` without passing through `done` is not reported. The timer reports a change in the standing list, not elapsed time, so a stuck job that stays stuck is pushed once (at its event) and then only when the list changes. A poke whose delivery was uncertain is not resent, and the scheduled tasks it carried count as run.
 - Scheduled work (7.8) and upkeep (7.9): a task's run is "the poke carrying it was delivered", not "the orchestrator did it"; crowsnest cannot see the difference, and a task file should say what to report. `every: change` watches herdr's agent states, which flicker between turns, so it runs at most every 5 minutes rather than on every change. The context size is unknown after an auto compaction until the next call (Claude 2.1.332 records no `postTokens` for those). The hand-over is written by the orchestrator's own Write tool into the state directory, outside its working directory; whether that needs a permission prompt was not tested (under `default` it may stop at a dialog; the Inbox would then show it and the restart waits). The daily new conversation and compaction were exercised against the fake herdr only, not against a real Claude (the real tests cover the scheduled task and Remote Control). Job agents are not compacted by crowsnest. An app poke schedule's materialised file is under the state directory, outside the standing agent's working directory, so reading it may ask for permission the first time (as the hand-over may); a lead's poker calling `DueTasksFor` is another branch's work, so until it lands a lead-targeted task is listed but only the orchestrator's tasks are poked.
@@ -4780,8 +4857,8 @@ short, as built:
 
 | | Claude Code | Codex (codex-cli 0.167) |
 |---|---|---|
-| Stop guarantee | Stop hook | **yes**: Codex's Stop hook, handed to the session |
-| Approvals from the browser | PermissionRequest hook | **yes**: on-request inside the workspace-write sandbox; the PermissionRequest hook; an unanswered one falls back to Codex's own dialog, a card |
+| Stop guarantee | Stop hook | **yes**: Codex's Stop hook, handed to the session; the job reports through crowsnest's MCP server; a repository's own `.codex/` runs only once allowed (R9-S5) |
+| Approvals from the browser | PermissionRequest hook | **yes**: on-request inside the workspace-write sandbox, **network off** (R9-S1): a write outside the workspace or any network use escalates; the PermissionRequest hook; an unanswered one falls back to Codex's own dialog, a card |
 | Guard | PreToolUse | **partly**: shell commands checked; `apply_patch` held while crowsnest checks, not otherwise inspected |
 | Spend | tokens and estimated cost | **partly**: tokens from the rollout, no cost |
 | Answer receipts | yes | no |
@@ -4789,15 +4866,29 @@ short, as built:
 | Spinning detection | transcript | no |
 | Instruction changes, restart to apply | yes | no (changed-since-start is shown) |
 | No trust prompt in a trusted project | yes | yes |
+| Heavy-command slots | yes | **partly**: the sandbox cannot write the slot files; `crowsnest heavy` runs the command at once, niced and capped |
 | Rescue | all | interrupt, continue, nudge, get it moving; **no** restart, compact or model switch (refused by the API) |
 
-**How a Codex job is supervised.** It starts with `--ask-for-approval on-request --sandbox
-workspace-write`, `-c sandbox_workspace_write.network_access=true`, and crowsnest's hooks for
-that one session: `-c hooks.<Event>=[…]` for Stop, SessionStart, PostToolUse, PermissionRequest
-and PreToolUse (Bash and apply_patch), each running `<state>/jobs/<id>/codex-hook <event>`, a
-0500 script that runs `crowsnest hook <event>` with the job's socket and token file (five full
-hook commands would not fit the typed start command), plus `--dangerously-bypass-hook-trust` so
-they run without Codex's per-hook review. Checked against the real CLI (2026-11-27): Codex 0.167
+**How a Codex job is supervised (R9-S1, R9-S5).** It starts with `--ask-for-approval on-request
+--sandbox workspace-write`, `-c sandbox_workspace_write.network_access=false` (said explicitly: a
+user's own `~/.codex/config.toml` may turn it on for their sessions), crowsnest's MCP server
+(`-c mcp_servers.crowsnest={command=<script>, args=["mcp"], required=true,
+default_tools_approval_mode="approve", tool_timeout_sec=86400}`), and crowsnest's hooks for that
+one session: `-c hooks.<Event>=[…]` for Stop, SessionStart, PostToolUse, PermissionRequest and
+PreToolUse (Bash and apply_patch), each running `<script> hook <event>`. The script is
+`<state>/jobs/<id>/codex-crowsnest`, 0500, which runs `crowsnest "$@"` with the job's socket, id
+and token file appended (five full hook commands would not fit the typed start command, and no
+token is ever on the command line), plus `--dangerously-bypass-hook-trust` so the hooks run
+without Codex's per-hook review. Codex starts MCP servers and runs hooks itself, outside its
+sandbox, so both reach the agent socket with the network off; the sandboxed shell cannot (checked
+on codex-cli 0.167, 2026-11-27, with a unix-socket listener and a fake model provider, so no model
+call: the MCP server and the SessionStart and UserPromptSubmit hooks connected, `codex sandbox
+-P :workspace` got "Operation not permitted"). So a supervised Codex job's brief tells it the MCP
+tools (`job_update`, `done`, `ask`, …), not the `crowsnest job` commands. Before R9 the network
+was on so that the shell could run `crowsnest job …`; that let any command send any file anywhere
+with no escalation and so no card (R9-S1), and no capability needed it once the MCP server
+carried the protocol. A command that needs the network now escalates and is a risk-rated approval
+card, as a network command is for a Claude job under the default permission mode. Checked against the real CLI (2026-11-27): Codex 0.167
 fires these events with Claude Code's input shape (`session_id`, `transcript_path`, `cwd`,
 `stop_hook_active`, `last_assistant_message`, `tool_name`, `tool_input.command`) and reads Claude
 Code's output shape (`decision: block`, `hookSpecificOutput.decision.behavior`,
@@ -4805,10 +4896,21 @@ Code's output shape (`decision: block`, `hookSpecificOutput.decision.behavior`,
 `session_id` is Codex's thread id, kept in the job's session column; it finds the job's rollout
 (`~/.codex/sessions/YYYY/MM/DD/rollout-*-<thread>.jsonl`), whose `token_count` events are read as
 usage (fresh input is input minus cached; cached is a cache read; the running total stands in for a
-message id). The network switch is on because it is the only way the sandboxed shell reaches the
-agent socket (`codex sandbox` probes: `network.unix_sockets` and `network.allow_unix_sockets` did
-not open it); without it every `crowsnest job …` call became an approval card. A Claude job has
-the network too, and the guard still refuses protected hosts. Codex keeps `.git` read-only inside
+message id). **The repository's own Codex config (R9-S5).** `--dangerously-bypass-hook-trust`
+would also run a repository's `.codex/hooks.json` without review, and a project `.codex/config.toml`
+can name MCP servers, which start outside the sandbox. The agent cannot plant one: codex-cli 0.167
+keeps the workspace root's `.codex/` (missing or existing), `.agents/` and `.git/` read-only inside
+workspace-write (`codex sandbox -P :workspace`: mkdir, overwrite and rename all refused; a nested
+`sub/.codex/` is writable, but Codex loads project config from the working directory, the
+workspace root). A clone, a pull or a branch can bring one, though, so just before a supervised
+Codex job's agent starts, its working directory's `.codex/` is fingerprinted (every file's name
+and content, bounded, no links; `agenttrust.CodexConfigOf`) and the fingerprint must be one the
+human allowed: trusting the folder while the form or banner listed the files, or the project page's
+**Allow it for Codex jobs** (`POST /projects/{ref}/codex-config` with the fingerprint the page
+showed). Otherwise the job is needs-you with the reason and nothing starts (`jobs.codexConfigGate`).
+Any later change to those files stops the next Codex job the same way. `crowsnest heavy` cannot make
+a slot file inside the sandbox (it used to wait for ever there); it now notices the unwritable slot
+directory and runs the command at once, niced, with the tools' parallelism capped, saying so. Codex keeps `.git` read-only inside
 its sandbox (`sandbox_workspace_write.writable_roots` naming the git directory does not lift it,
 checked with `codex sandbox`), so every `git commit` in a Codex job is an escalation and reaches the
 human as an approval (seen in `test:codex`); a project approval rule for `git commit` answers them.
@@ -4818,7 +4920,9 @@ into `~/.codex/config.toml` for any of this. A Codex job with no agent token kee
 `gpt-5.6-luna`) proves each "yes": a job ends done with its SessionStart hook on the timeline, its
 thread learned and its spend measured with no cost; an undeclared stop is refused by the Stop
 hook and the agent goes on; a write outside the workspace reaches the browser as an approval,
-allowed through the API, and runs; a protected host is refused by the guard with no approval.
+allowed through the API, and runs; a protected host is refused by the guard with no approval; a
+network call reaches the browser as an approval (denied), and the job still reports done through
+its MCP server.
 
 What Codex still lacks, and why: answer receipts and spinning detection read Claude's transcript
 format (a reader for Codex's rollout is possible: its user messages are there); usage-limit
@@ -5111,11 +5215,19 @@ browser, from my phone".
 - **The label (R8: "Blocking" means blocking).** Urgency is the fact; `LabelOf` (`model.go`, the one
   ranking function) gives the word every surface shows and counts by: **dangerous** (a dangerous
   approval), **blocking** (work stopped and no approval rule could have answered it:
-  `approvals.RuleAnswerable` is false for a dangerous call, a Bash line `SimpleCommands` refuses or
-  an edit with no path; elevated approvals are blocking too, since a rule allows them only when
-  opted in), **approval** (a low-risk call a rule could have allowed: routine) and **can wait**.
-  The queue is ordered dangerous and blocking, then approval, then can wait; within a label by
-  rank (dangerous approvals first), then the longest wait first (Fable 1.9). `counts.blocking` is
+  `approvals.RuleAnswerable` is false for a dangerous call, a Bash line `SimpleCommands` refuses,
+  or an edit outside the job's root or with no root at all, as the real matcher `insideRule` sees
+  it (R9-S7: the orchestrator's write to `~/.zshrc` is not routine); elevated approvals are
+  blocking too, since a rule allows them only when opted in), **approval** (a low-risk call a rule
+  could have allowed: routine) and **can wait**. A crowsnest gate question (a land request, a
+  delegation, a task review) is blocking whatever urgency it was asked with (R9-S6). The queue is
+  ordered dangerous and blocking, then approval, then can wait; within a label **crowsnest's own
+  items (approvals, dialogs including the folder-trust prompt, jobs, standing agents, its gates)
+  come before questions an agent asked** (R9-S6: an agent chooses its questions' urgency, so three
+  "blocking" questions must not push a trust dialog or an approval out of the tray's top three or
+  the phone's Now); then by rank (dangerous approvals first), then the longest wait first (Fable
+  1.9). Web Push gives agents' questions and crowsnest's own notices separate rate buckets, per
+  source and overall, for the same reason. `counts.blocking` is
   dangerous plus blocking, `counts.approval` the routine approvals; Now's sentence and the Inbox's
   count line read them ("15 need you: 5 blocking, 3 approvals, 7 can wait"). The lock screen's
   "blocking question" is `attention.QuestionLabel`, the same rule for a question (23.4). The web
