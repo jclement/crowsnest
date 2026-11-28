@@ -358,6 +358,8 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
     <Sheet open={commentsSheet} onClose={() => setCommentsSheet(false)} title={`Comments · ${summary.label}`}>
       {commentList ? (
         <CommentsPanel
+          // The sheet's body had no padding: the file names sat on its edge (R10 Opus polish).
+          className="p-3"
           who={who}
           list={commentList}
           onJump={(path) => {
