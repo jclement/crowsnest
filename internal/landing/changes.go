@@ -286,6 +286,9 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 			}
 		}
 	}
+	if err := boundTrackedChanges(ctx, dir, call); err != nil {
+		return "", nil, err
+	}
 	if _, err := call("add", "--update", "--ignore-errors").run(ctx); err != nil && !strings.Contains(err.Error(), "exit status 1") {
 		return "", nil, err
 	}
@@ -295,6 +298,7 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 	}
 	var addable []string
 	var skipped []Skipped
+	var untrackedBytes int64
 	for _, name := range strings.Split(others, "\x00") {
 		if name == "" {
 			continue
@@ -309,8 +313,13 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 			appendSkipped(&skipped, skip(name, info, "not a regular file"))
 		case info.Size() > MaxUntrackedBytes:
 			appendSkipped(&skipped, skip(name, info, fmt.Sprintf("untracked, %s: too large to read", humanBytes(info.Size()))))
+		case untrackedBytes+info.Size() > maxUntrackedTotal:
+			appendSkipped(&skipped, skip(name, info, fmt.Sprintf("untracked: past the %s the new files of one reading may hold, not read", humanBytes(maxUntrackedTotal))))
 		default:
-			addable = appendCapped(addable, &skipped, name, info)
+			before := len(addable)
+			if addable = appendCapped(addable, &skipped, name, info); len(addable) > before {
+				untrackedBytes += info.Size()
+			}
 		}
 	}
 	if len(addable) > 0 {
@@ -330,6 +339,47 @@ func WorkTree(ctx context.Context, dir string) (string, []Skipped, error) {
 		return "", nil, err
 	}
 	return strings.TrimSpace(out), skipped, nil
+}
+
+// Bounds on what one snapshot reads in all (R7-C09 residual); variables so a test can lower them.
+var (
+	// maxUntrackedTotal bounds the bytes of untracked files one snapshot reads: past it the rest
+	// are listed as skipped, as past the file count.
+	maxUntrackedTotal int64 = 64 << 20
+	// maxSnapshotBytes bounds the bytes of changed tracked files one snapshot reads: a tracked file
+	// cannot be left out of the tree without misdescribing it, so past this the snapshot is refused
+	// (ErrSnapshotTooLarge) rather than read.
+	maxSnapshotBytes int64 = 1 << 30
+)
+
+// ErrSnapshotTooLarge means a checkout's changed tracked files hold more than one reading reads.
+var ErrSnapshotTooLarge = errors.New("too much has changed to read the checkout")
+
+// boundTrackedChanges refuses a snapshot whose changed tracked files (as the temporary index sees
+// them: every tracked file when it was built from HEAD) hold more than maxSnapshotBytes, before
+// git reads any of them (R7-C09 residual). A listing cut short is refused too.
+func boundTrackedChanges(ctx context.Context, dir string, call func(args ...string) gitCall) error {
+	out, err := call("diff-files", "-z", "--name-only").run(ctx)
+	if errors.Is(err, ErrOutputCut) {
+		return fmt.Errorf("%w: more changed files than crowsnest lists", ErrSnapshotTooLarge)
+	}
+	if err != nil {
+		return err
+	}
+	var total int64
+	for _, name := range strings.Split(out, "\x00") {
+		if name == "" {
+			continue
+		}
+		info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(name)))
+		if err != nil || !info.Mode().IsRegular() {
+			continue // deleted, or a link: nothing (or a name) to read
+		}
+		if total += info.Size(); total > maxSnapshotBytes {
+			return fmt.Errorf("%w: the changed tracked files hold more than %s", ErrSnapshotTooLarge, humanBytes(maxSnapshotBytes))
+		}
+	}
+	return nil
 }
 
 // copyIndex copies the checkout's index into tmp (R7-S2). The index is a file the agent controls:

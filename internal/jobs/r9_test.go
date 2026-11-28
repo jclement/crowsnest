@@ -341,3 +341,54 @@ func TestDeferredCommentsKeepDraftProtection(t *testing.T) {
 		t.Fatalf("after Send anyway the comments were typed %d times, want 1", n)
 	}
 }
+
+// TestBudgetContinuationsPassTheGate (R7-C04 residual): raising a held job's budget, or letting it
+// finish its step, does not type "carry on" through the pause or another hold.
+func TestBudgetContinuationsPassTheGate(t *testing.T) {
+	pause := &fakePause{}
+	r := newRig(t, func(o *Options) { o.Pause = pause })
+	ctx := context.Background()
+	job := r.create(CreateInput{Brief: "Build it", Dir: t.TempDir()})
+	r.edit(job.ID, func(rec *store.JobRecord) { rec.BudgetState = BudgetExceeded })
+	r.placeHold(job.ID, HoldBudget, "")
+	pause.Set(true)
+	big := 100.0
+	if _, err := r.svc.SetJobBudget(ctx, job.ID, BudgetInput{USD: &big}); err != nil {
+		t.Fatal(err)
+	}
+	if n := promptsContaining(r, "[crowsnest budget]"); n != 0 {
+		t.Fatalf("the raise typed into a paused job (%d)", n)
+	}
+	r.placeHold(job.ID, HoldBudget, "")
+	if _, err := r.svc.BudgetFinishStep(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := promptsContaining(r, "[crowsnest budget]"); n != 0 {
+		t.Fatalf("finish the step typed into a paused job (%d)", n)
+	}
+	pause.Set(false)
+	r.placeHold(job.ID, HoldBudget, "")
+	if _, err := r.svc.SetJobBudget(ctx, job.ID, BudgetInput{USD: &big}); err != nil {
+		t.Fatal(err)
+	}
+	if n := promptsContaining(r, "raised job "+job.ID+"'s budget"); n != 1 {
+		t.Fatalf("unpaused, the raise was typed %d times, want 1", n)
+	}
+}
+
+// TestHeldRecordSeesHoldsAndFeedback: a standing agent's pane holding a held job is busy.
+func TestHeldRecordSeesHoldsAndFeedback(t *testing.T) {
+	var r store.JobRecord
+	if HeldRecord(r) {
+		t.Fatal("an empty record is held")
+	}
+	setHolds(&r, []Hold{{Kind: HoldBudget, Lift: LiftHuman}})
+	if !HeldRecord(r) {
+		t.Fatal("a budget hold is not seen")
+	}
+	setHolds(&r, nil)
+	queueFinding(&r, FeedbackCheck, "x", time.Now())
+	if !HeldRecord(r) {
+		t.Fatal("waiting feedback is not seen")
+	}
+}

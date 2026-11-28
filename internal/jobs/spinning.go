@@ -437,8 +437,8 @@ func (s *Service) applySpinning(ctx context.Context, id string, verdict SpinVerd
 		}
 		return nil
 	})
-	if err != nil || message == "" || job.PaneID == "" || s.paused() {
+	if err != nil || message == "" {
 		return
 	}
-	_ = s.sendText(ctx, job.PaneID, job.AgentName, message)
+	s.typeContinuation(ctx, job, "the spinning nudge", message)
 }

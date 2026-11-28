@@ -395,6 +395,28 @@ func (s *Service) continuationRefusal(ctx context.Context, id string, ignore ...
 	return ""
 }
 
+// typeContinuation types an automatic message that starts a turn (a budget raise's "carry on",
+// "finish the step", a budget notice, a spinning nudge) only if the continuation gate lets the job
+// go on now (R7-C04 residual): a budget change is not the human lifting a pause, another hold, a
+// budget above the job or the fleet's usage limit. A refused message is not queued: the backstop
+// keeps the agent going once nothing holds it. ignore names holds the caller itself is lifting.
+func (s *Service) typeContinuation(ctx context.Context, job Job, what, text string, ignore ...HoldKind) {
+	if job.PaneID == "" || text == "" {
+		return
+	}
+	if why := s.continuationRefusal(ctx, job.ID, ignore...); why != "" {
+		s.noteHeldContinuation(ctx, job.ID, what, why)
+		return
+	}
+	if err := s.sendText(ctx, job.PaneID, job.AgentName, text); err != nil {
+		_ = s.Journal(ctx, job.ID, EventHold, "Could not type "+what+" to the agent: "+oneLine(err.Error(), 160), nil)
+	}
+}
+
+// HeldRecord reports whether a job's row carries any hold or waiting feedback: a standing agent's
+// pane holding such a job is not restarted or compacted under it (R7-C04 residual).
+func HeldRecord(r store.JobRecord) bool { return len(holdsOf(r)) > 0 || hasFeedback(r) }
+
 // noteHeldContinuation journals, at most every 30 minutes per job, that an automatic prompt waits.
 // The pause journals its own waits (Pause.Held), so it is not repeated here.
 func (s *Service) noteHeldContinuation(ctx context.Context, id, what, why string) {
