@@ -7,7 +7,8 @@ supervised job. Concepts: [Jobs and their states](../concepts/jobs.md).
 
 The job box is at the bottom of **Now** (**Give a job**). The Jobs board is a list and has no box
 of its own: its **New job** button opens the same form in a sheet, given to the project the board
-shows (a project page's **New job** does the same).
+shows (a project page's **New job** does the same). On a phone the **+** in the header opens that
+form from any view.
 
 1. **For** (on Now) or the project buttons (on Jobs): who gets it.
    - **The orchestrator (no project)**: it holds the job, does it or delegates it.
@@ -48,14 +49,17 @@ With talk mode on (an ElevenLabs key; [Talk and listen](voice.md)), Now's job bo
 ## From the command palette
 
 1. `⌘K` (`Ctrl K` elsewhere), or **Search or run…** in the header.
-2. Type the brief. The first row offers **Give job: <your text>**; Enter gives it to the
-   orchestrator.
+2. Type the brief. A sentence (three words or more) offers **Give job: <your text>** first; Enter
+   gives it to the orchestrator. A word or two reads as a search: what matches comes first, and
+   **Send to orchestrator** and **Give job** come last.
 3. `⌘ Enter` instead opens the full job form (the Jobs board's **New job** sheet) with the text
-   filled in.
-4. Start with `>` (or `job `) to offer only Give job.
+   filled in. `→` on Give job lists every project: **Give it to <project>'s lead**.
+4. Start with `>`, `job ` or `give ` to offer only Give job (the word itself is not kept).
+5. Start with `@<project>` (`@website fix the login test`; the first letters are enough) to give
+   it to that project's lead.
 
-For a project's lead, type the project's name in the palette, press `→` for its actions, and
-choose **Give a job to <project>'s lead…**.
+Or type the project's name in the palette, press `→` for its actions, and choose **Give a job to
+<project>'s lead…**.
 
 ## Writing a good brief
 

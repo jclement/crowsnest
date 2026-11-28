@@ -11,6 +11,7 @@
 import { EngineNote } from "./EngineNote";
 import { ChevronDown, ChevronRight, FolderSearch, Send } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { onJobDraft, takeJobDraft } from "../../lib/jobDraft";
 import { useCreateJob, useDirs, useRoles } from "../../lib/queries";
 import type { Job } from "../../lib/jobs";
@@ -55,6 +56,7 @@ export function NewJobForm({ onCreated, project, autoFocus }: NewJobFormProps) {
   }
   const create = useCreateJob();
   const toast = useToast();
+  const navigate = useNavigate();
   const ids = useId();
   const briefRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -102,7 +104,8 @@ export function NewJobForm({ onCreated, project, autoFocus }: NewJobFormProps) {
           setDoneWhen("");
           attachments.clear();
           const where = project && destination === "lead" ? `Given to ${project.name}'s lead` : job.dir ? `Starting an agent in ${job.dir}` : "Sent to the orchestrator";
-          toast.show({ tone: "success", title: `Job ${job.id} given`, description: where });
+          // With a link to the job it made (R10 F polish, O-F6: the toast named it and went nowhere).
+          toast.show({ tone: "success", title: `Job ${job.id} given`, description: where, action: { label: `Open ${job.id}`, onClick: () => void navigate({ to: "/jobs", search: { job: job.id } }) } });
           onCreated?.(job);
         },
         onError: (error) => toast.show({ tone: "danger", title: "The job was not created", description: error.message }),

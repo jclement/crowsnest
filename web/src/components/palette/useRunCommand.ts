@@ -108,6 +108,42 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
             .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.jobs }));
           return;
         }
+        case "decide":
+          endpoints
+            .decideApproval(command.approvalId, { decision: command.decision })
+            .then(() => toast.show({ tone: "success", title: `${command.label}: ${command.approvalId}` }))
+            .catch(failed(`Not answered: ${command.approvalId}`))
+            .finally(() => {
+              void queryClient.invalidateQueries({ queryKey: queryKeys.approvals });
+              void queryClient.invalidateQueries({ queryKey: queryKeys.attention });
+              void queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+            });
+          return;
+        case "land":
+          // What lands is what the Review tab shows: read its head, then merge exactly that.
+          endpoints
+            .review(command.id)
+            .then((view) => endpoints.land(command.id, "merge", view.land.head))
+            .then(() => toast.show({ tone: "success", title: `Merged ${command.id}`, action: { label: `Open ${command.id}`, onClick: () => go("/jobs", { job: command.id }) } }))
+            .catch((error: unknown) =>
+              toast.show({
+                tone: "danger",
+                title: `Not merged: ${command.id}`,
+                description: error instanceof Error ? error.message : String(error),
+                action: { label: `Open ${command.id}`, onClick: () => go("/jobs", { job: command.id }) },
+              }),
+            )
+            .finally(() => void queryClient.invalidateQueries({ queryKey: queryKeys.jobs }));
+          return;
+        case "dnd":
+          endpoints
+            .setDND(command.until)
+            .then((state) => {
+              queryClient.setQueryData(queryKeys.presence, state);
+              toast.show({ tone: "success", title: command.label });
+            })
+            .catch(failed("Do not disturb did not change"));
+          return;
         case "projectJob":
           endpoints
             .createJob({ brief: command.text, project_id: command.projectId, to: "lead" })

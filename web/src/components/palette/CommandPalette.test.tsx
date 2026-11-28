@@ -119,7 +119,7 @@ describe("CommandPalette", () => {
     expect(selectedOption()).toHaveTextContent("Fix the login redirect");
     await userEvent.keyboard("{ArrowRight}");
     expect(screen.getByRole("listbox", { name: "Actions for j_1" })).toBeInTheDocument();
-    expect(titles()).toEqual(["Open job", "Nudge", "Message its agent…", "Cancel job…"]);
+    expect(titles()).toEqual(["Open job", "Nudge", "Reply to its agent…", "Cancel job…"]);
     expect(input).toHaveValue("");
     await userEvent.type(input, "nud");
     expect(screen.getAllByRole("option")).toHaveLength(1);
@@ -158,7 +158,7 @@ describe("CommandPalette", () => {
     await userEvent.type(input, "login");
     await userEvent.keyboard("{ArrowRight}");
     await userEvent.type(input, "message{Enter}");
-    expect(screen.getByRole("combobox", { name: "Message j_1" })).toHaveFocus();
+    expect(screen.getByRole("combobox", { name: "Reply to j_1" })).toHaveFocus();
     await userEvent.keyboard("{Enter}");
     expect(run).not.toHaveBeenCalled();
     await userEvent.type(input, "use the staging config{Enter}");

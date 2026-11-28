@@ -37,6 +37,12 @@ export type PaletteCommand =
   | { kind: "jobForm"; brief: string }
   | { kind: "ask"; text: string; open?: boolean }
   | { kind: "jobAction"; id: string; action: "nudge" | "resume" | "cancel" }
+  /** Allow once or deny a pending tool call (R10 O-F10). A dangerous one is never allowed here. */
+  | { kind: "decide"; approvalId: string; decision: "allow" | "deny"; label: string }
+  /** Merge a job ready to land: what the Review tab shows is what lands (its head is read first). */
+  | { kind: "land"; id: string }
+  /** Do not disturb until an ISO time; "" turns it off. */
+  | { kind: "dnd"; until: string; label: string }
   | { kind: "jobMessage"; id: string; text: string }
   | { kind: "answer"; questionId: string; value?: string; label: string }
   | { kind: "poke" }
@@ -139,6 +145,8 @@ export interface PaletteAction {
   label: string;
   command: PaletteCommand;
   danger?: boolean;
+  /** Other words that find it among the actions ("message" finds Reply). */
+  keywords?: string[];
 }
 
 export interface PaletteItem {
@@ -185,6 +193,10 @@ export interface PaletteSources {
   projects?: ProjectView[];
   /** Whether the automation is paused (DESIGN.md 6.13): Pause or Resume is offered. */
   paused?: boolean;
+  /** Do not disturb is on (DESIGN.md 6.14): its switch is offered either way (R10 O-F10). */
+  dnd?: boolean;
+  /** Now, for the Do not disturb times; tests pass a fixed one. */
+  now?: Date;
 }
 
 const views: Array<{ to: ViewPath; label: string; icon: PaletteIcon; keywords: string[]; key: string }> = [
@@ -200,6 +212,21 @@ const views: Array<{ to: ViewPath; label: string; icon: PaletteIcon; keywords: s
 ];
 
 const sectionsWithOwnRow = new Set<SettingsSectionId>(["appearance", "notifications", "instructions", "voice"]);
+
+/** Do not disturb from the palette (R10 O-F10): off when on; for an hour or until 8:00 when off. */
+function dndItems(sources: PaletteSources): PaletteItem[] {
+  const base = { group: "actions" as const, icon: "bell" as const, verb: "Run", keywords: ["dnd", "quiet", "mute", "notifications", "do not disturb"] };
+  if (sources.dnd) return [{ ...base, id: "dnd:off", title: "Do not disturb: turn off", command: { kind: "dnd", until: "", label: "Do not disturb is off" } }];
+  const now = sources.now ?? new Date();
+  const hour = new Date(now.getTime() + 3_600_000);
+  const morning = new Date(now);
+  morning.setHours(8, 0, 0, 0);
+  if (morning <= now) morning.setDate(morning.getDate() + 1);
+  return [
+    { ...base, id: "dnd:hour", title: "Do not disturb for an hour", command: { kind: "dnd", until: hour.toISOString(), label: "Do not disturb for an hour" } },
+    { ...base, id: "dnd:morning", title: "Do not disturb until 8:00", command: { kind: "dnd", until: morning.toISOString(), label: "Do not disturb until 8:00" } },
+  ];
+}
 
 /** The g-sequence for each view (g j, g c, …), for the shortcuts sheet and lib/hotkeys.ts. */
 export const viewKeys: Array<{ key: string; to: ViewPath; label: string }> = views.map(({ key, to, label }) => ({ key, to, label }));
@@ -234,11 +261,28 @@ function jobItem(job: Job): PaletteItem {
     if (job.pane_id) {
       actions.push({
         id: "message",
-        label: "Message its agent…",
-        command: { kind: "input", input: { title: `Message ${job.id}`, placeholder: "What should the agent hear?", target: { kind: "jobMessage", id: job.id } } },
+        label: "Reply to its agent…",
+        keywords: ["message", "send", "tell"],
+        command: { kind: "input", input: { title: `Reply to ${job.id}`, placeholder: "What should the agent hear?", target: { kind: "jobMessage", id: job.id } } },
       });
     }
     actions.push({ id: "cancel", label: "Cancel job…", danger: true, command: { kind: "confirm", confirm: cancelConfirmation(job.id) } });
+  }
+  if (readyToLand(job)) {
+    actions.push({
+      id: "merge",
+      label: "Merge…",
+      command: {
+        kind: "confirm",
+        confirm: {
+          title: `Merge ${job.id}?`,
+          body: `${job.worktree_branch ?? "Its branch"} goes into the main checkout's branch, as the Review tab's Merge does; the worktree is removed.`,
+          confirmLabel: "Yes, merge",
+          cancelLabel: "Not now",
+          command: { kind: "land", id: job.id },
+        },
+      },
+    });
   }
   return {
     id: `job:${job.id}`,
@@ -299,8 +343,42 @@ function approvalItem(approval: Approval, where?: AttentionItem): PaletteItem {
     chip: approval.risk === "low" ? { label: "Approval", tone: "neutral" } : { label: riskLabels[approval.risk], tone: approval.risk === "dangerous" ? "danger" : "warning" },
     command: open,
     verb: "Open",
-    actions: [{ id: "open", label: "Answer in Inbox", command: open }],
+    actions: approvalActions(approval, open),
   };
+}
+
+/**
+ * An approval's actions (R10 O-F10): Allow once and Deny from the palette. A low-risk call is
+ * allowed in one step and an elevated one after a confirmation that says why; a dangerous call is
+ * only answered on its card, whose second confirmation sits beside the evidence.
+ */
+function approvalActions(approval: Approval, open: PaletteCommand): PaletteAction[] {
+  const actions: PaletteAction[] = [{ id: "open", label: "Answer in Inbox", command: open }];
+  const allow: PaletteCommand = { kind: "decide", approvalId: approval.id, decision: "allow", label: "Allowed" };
+  if (approval.risk === "low") actions.push({ id: "allow", label: "Allow once", command: allow });
+  else if (approval.risk === "elevated") {
+    actions.push({
+      id: "allow",
+      label: "Allow once…",
+      command: {
+        kind: "confirm",
+        confirm: {
+          title: `Allow ${approval.id} once?`,
+          body: `${approval.summary}. ${approval.risk_reasons.join(". ")}`.trim(),
+          confirmLabel: "Allow once",
+          cancelLabel: "Not now",
+          command: allow,
+        },
+      },
+    });
+  }
+  actions.push({ id: "deny", label: "Deny", danger: true, command: { kind: "decide", approvalId: approval.id, decision: "deny", label: "Denied" } });
+  return actions;
+}
+
+/** True when a job is finished, accepted and waiting to be merged (nextStep says Ready to land). */
+function readyToLand(job: Job): boolean {
+  return job.state === "done" && !!job.worktree_branch && !job.torn_down_at && nextStep(job).label.startsWith("Ready to land");
 }
 
 function fleetItems(fleet: Fleet | undefined): PaletteItem[] {
@@ -481,6 +559,7 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
   items.push(sheet("spend", "Spend", "spend", ["cost", "tokens", "usage", "money", "budget", "price"]));
   items.push(sheet("instructions", "Instructions", "instructions", ["settings", "roles", "global", "layers", "prompt", "claude.md", "agents.md"]));
   items.push(sheet("shortcuts", "Keyboard shortcuts", "keyboard", ["help", "keys", "?"]));
+  items.push(...dndItems(sources));
   // Each section of Settings is its own row (R10 F-F4), so "tailnet" or "backup" finds its section
   // rather than offering a job named after the search.
   for (const group of settingsGroups()) {
@@ -589,39 +668,78 @@ function jobRank(job: Job): number {
 // ---- The query ------------------------------------------------------------------------------
 
 export interface ParsedQuery {
-  /** "job" when the query starts with ">" or "job ": only Give job is offered. */
+  /** "job" when the query starts with ">", "job " or "give ": only Give job is offered. */
   mode: "all" | "job";
   /** The query without its prefix, trimmed. */
   text: string;
+  /** "@website …": the project the job goes to (its slug, as typed), else undefined. */
+  project?: string;
 }
 
+/**
+ * Reads a query: a leading ">", "job " or "give " (R10 O-B9: "give fix the typo" gave a job named
+ * "give fix the typo") asks for a job; a leading "@<slug> " aims it at a project (R10 F-F4).
+ */
 export function parseQuery(raw: string): ParsedQuery {
-  const leading = raw.trimStart();
-  if (leading.startsWith(">")) return { mode: "job", text: leading.slice(1).trim() };
-  const prefix = /^job\s+/i.exec(leading);
-  if (prefix) return { mode: "job", text: leading.slice(prefix[0].length).trim() };
-  return { mode: "all", text: raw.trim() };
+  let leading = raw.trimStart();
+  let project: string | undefined;
+  const at = /^@([\w.-]+)(\s+|$)/.exec(leading);
+  if (at) {
+    project = (at[1] ?? "").toLowerCase();
+    leading = leading.slice(at[0].length);
+  }
+  const withProject = (parsed: ParsedQuery): ParsedQuery => (project === undefined ? parsed : { ...parsed, project, mode: "job" });
+  if (leading.startsWith(">")) return withProject({ mode: "job", text: leading.slice(1).trim() });
+  const prefix = /^(job|give(\s+(a\s+)?job)?)\s+/i.exec(leading);
+  if (prefix) return withProject({ mode: "job", text: leading.slice(prefix[0].length).trim() });
+  return withProject({ mode: "all", text: project === undefined ? raw.trim() : leading.trim() });
+}
+
+/** What the Do items need besides the query: the projects to aim a job at, and the keys hint. */
+export interface DoContext {
+  projects?: ProjectView[];
+  /** A keyboard is in use: the hint names ⌘Enter. A touch screen gets no key hints (R10 F-F3). */
+  keys?: boolean;
 }
 
 /** The Give job and Ask items a query makes. */
-export function doItems(parsed: ParsedQuery): PaletteItem[] {
+export function doItems(parsed: ParsedQuery, context: DoContext = {}): PaletteItem[] {
   const text = parsed.text;
   if (!text) return [];
   const short = text.length > 80 ? `${text.slice(0, 79)}…` : text;
   const form: PaletteAction = { id: "form", label: "Open the full form (directory, role, done when)…", command: { kind: "jobForm", brief: text } };
   const askAndOpen: PaletteAction = { id: "chat", label: "Send and open Chat", command: { kind: "ask", text, open: true } };
+  const projects = context.projects ?? [];
+  const toLead = (project: ProjectView): PaletteCommand => ({ kind: "projectJob", projectId: project.id, name: project.name, text });
+  // Routing is the one decision made every time (R10 F-F4): each project is one of the row's
+  // actions, and "@slug" at the start aims Enter itself at that project's lead.
+  const target = parsed.project === undefined ? undefined : projects.find((project) => project.slug.startsWith(parsed.project ?? ""));
+  const perProject: PaletteAction[] = projects.map((project) => ({ id: `project:${project.slug}`, label: `Give it to ${project.name}'s lead`, command: toLead(project) }));
+  const hint = context.keys === false ? "" : " · ⌘Enter for the full form";
   const items: PaletteItem[] = [
-    {
-      id: "do:job",
-      group: "do",
-      title: `Give job: ${short}`,
-      subtitle: "To the orchestrator · ⌘Enter for the full form",
-      icon: "send",
-      command: { kind: "giveJob", brief: text, open: false },
-      verb: "Give",
-      actions: [form, { id: "open", label: "Give job and open it", command: { kind: "giveJob", brief: text, open: true } }],
-      alt: form,
-    },
+    target
+      ? {
+          id: "do:job",
+          group: "do",
+          title: `Give job to ${target.name}: ${short}`,
+          subtitle: `To ${target.name}'s lead`,
+          icon: "send",
+          command: toLead(target),
+          verb: "Give",
+          actions: [{ id: `project:${target.slug}`, label: `Give it to ${target.name}'s lead`, command: toLead(target) }, form],
+          alt: form,
+        }
+      : {
+          id: "do:job",
+          group: "do",
+          title: `Give job: ${short}`,
+          subtitle: `To the orchestrator${projects.length > 0 ? " (or @project first)" : ""}${hint}`,
+          icon: "send",
+          command: { kind: "giveJob", brief: text, open: false },
+          verb: "Give",
+          actions: [...perProject, form, { id: "open", label: "Give job and open it", command: { kind: "giveJob", brief: text, open: true } }],
+          alt: form,
+        },
   ];
   if (parsed.mode === "all") {
     items.push({
@@ -668,6 +786,8 @@ const KEYWORD_WEIGHT = 0.8;
 export const STRONG_MATCH = 0.75;
 /** A longer query is more likely to be a sentence: it needs a better match to outrank Give job. */
 export const STRONG_MATCH_LONG = 0.9;
+/** Up to this many words a query is read as a search: Give job and Send come last. */
+export const SEARCH_WORDS = 2;
 /**
  * The least a word of the query must score where it matched (field weight included). Below this
  * it is letters scattered through a subtitle or keyword, which reads as noise rather than a hit;
@@ -727,12 +847,12 @@ const emptyOrder: PaletteGroupId[] = ["recent", "needs", "navigate", "jobs", "pr
  * grouped, groups ordered by their best match, and Give job / Send to orchestrator placed first
  * unless something matches strongly (then second, so Enter does the obvious thing either way).
  */
-export function rankItems(items: PaletteItem[], rawQuery: string, recents: readonly string[]): PaletteGroup[] {
+export function rankItems(items: PaletteItem[], rawQuery: string, recents: readonly string[], context: DoContext = {}): PaletteGroup[] {
   const parsed = parseQuery(rawQuery);
   const plain = (item: PaletteItem): RankedItem => ({ item, score: 0, titlePositions: [], subtitlePositions: [] });
 
   if (parsed.mode === "job") {
-    const made = doItems(parsed);
+    const made = doItems(parsed, context);
     return made.length > 0 ? [{ id: "do", label: groupLabels.do, items: made.map(plain) }] : [];
   }
 
@@ -771,11 +891,18 @@ export function rankItems(items: PaletteItem[], rawQuery: string, recents: reado
   }
   groups.sort((a, b) => (b.items[0]?.score ?? 0) - (a.items[0]?.score ?? 0));
 
-  const made = doItems(parsed);
+  const made = doItems(parsed, context);
+  // A word or two is a search, not a brief (R10 F-F4, O-F10: "tailnet", "nudge" or "deny" gave
+  // a paid job named after the search): the catch-alls come last, Send before Give. From three
+  // words a query may be a sentence, and Give job leads unless something matches strongly.
+  if (tokens.length <= SEARCH_WORDS) {
+    if (groups.length > 0) made.reverse();
+    if (made.length > 0) groups.push({ id: "do", label: groupLabels.do, items: made.map(plain) });
+    return groups;
+  }
   const doGroup: PaletteGroup = { id: "do", label: groupLabels.do, items: made.map(plain) };
   const best = groups[0]?.items[0]?.score ?? 0;
-  const threshold = tokens.length >= 3 ? STRONG_MATCH_LONG : STRONG_MATCH;
-  const strong = matchQuality(best, tokens) >= threshold;
+  const strong = matchQuality(best, tokens) >= STRONG_MATCH_LONG;
   if (strong) groups.splice(1, 0, doGroup);
   else groups.unshift(doGroup);
   return groups;

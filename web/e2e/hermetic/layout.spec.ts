@@ -67,11 +67,18 @@ test.describe("at 375 px", () => {
   });
 });
 
-test("the theme toggle cycles system → light → dark, and a reload never flashes", async ({ page }) => {
+test("the theme toggle cycles system → light → dark, and a reload never flashes", async ({ page }, testInfo) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/jobs");
   const html = page.locator("html");
   const toggle = page.getByRole("button", { name: /theme$/ });
+  if (isPhone(testInfo)) {
+    // Below sm the header gives the toggle's room to New job and the machine name (R10 F-F3);
+    // the mode is in Settings → Appearance and the palette. From sm up the toggle is there.
+    await expect(page.getByRole("banner").getByRole("button", { name: "New job" })).toBeVisible();
+    await expect(toggle).toBeHidden();
+    await page.setViewportSize({ width: 700, height: 812 });
+  }
   await expect(toggle).toHaveAccessibleName("System theme");
   await expect(html).toHaveClass(/\bdark\b/); // system, and the OS is dark
   await toggle.click();

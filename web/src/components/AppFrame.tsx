@@ -28,6 +28,7 @@ import { inMore, moreNav, primaryNav, type NavItem } from "./nav";
 import { Sheet } from "./ui/Sheet";
 import { useBrowserBeat } from "../lib/browserBeat";
 import { PaletteButton } from "./palette/PaletteButton";
+import { NewJobButton } from "./jobs/NewJobButton";
 import { MachineStrip } from "./system/MachineStats";
 import { HeavyChip } from "./control/HeavySlots";
 import { PaletteProvider } from "./palette/PaletteProvider";
@@ -123,11 +124,16 @@ export function AppFrame() {
         )}
         <MachineStrip className="ml-auto" />
         <HeavyChip />
+        <NewJobButton className="md:hidden" />
         <PaletteButton className="sm:mr-1" />
         <div className="flex items-center">
           <Heartbeat status={stream.status} />
           {voice && <SpeakToggle />}
-          <ThemeToggle />
+          {/* On a phone its room goes to New job and the machine name (R10 F-F3, Fable polish):
+              the mode is in Settings → Appearance and the palette there. */}
+          <span className="hidden sm:contents">
+            <ThemeToggle />
+          </span>
           {me.data && <UserMenu me={me.data} onSignOut={() => void signOut()} />}
         </div>
       </header>

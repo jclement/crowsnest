@@ -82,7 +82,8 @@ import {
   type RankedItem,
 } from "../../lib/palette";
 import { queryTokens } from "../../lib/fuzzy";
-import { useAttention, useFleet, useJobs, useMe, usePause, useProjects } from "../../lib/queries";
+import { useAttention, useFleet, useJobs, useMe, usePause, usePresence, useProjects } from "../../lib/queries";
+import { COARSE_POINTER_QUERY, useMediaQuery } from "../../lib/media";
 import { activeItems } from "../../lib/attention";
 import { readTheme, readThemeName, THEME_EVENT, THEME_NAME_EVENT, type ThemeChoice } from "../../lib/theme";
 import { themes } from "../../themes";
@@ -162,17 +163,19 @@ export function CommandPalette({ inputRef, onClose, run, recents, onRan, mac, sp
   const query = level.kind === "root" ? rootQuery : levelQuery;
 
   const sources = usePaletteSources(speak, voiceSettings);
+  // No key hints on a touch screen (R10 F-F3: "⌘Enter for the full form" on a phone).
+  const coarse = useMediaQuery(COARSE_POINTER_QUERY);
   const items = useMemo(() => buildItems(sources), [sources]);
 
   // The manual's sections, searched on the same query (its chunk loads when the palette opens).
   const manual = useManual();
   const groups = useMemo(() => {
     if (level.kind !== "root") return null;
-    const ranked = rankItems(items, rootQuery, recents);
+    const ranked = rankItems(items, rootQuery, recents, { projects: sources.projects, keys: !coarse });
     const parsed = parseQuery(rootQuery);
     if (!manual.data || parsed.mode === "job" || parsed.text.trim().length < 2) return ranked;
     return withManual(ranked, searchManual(manual.data.index, parsed.text, 5), looksLikeQuestion(parsed.text));
-  }, [level, items, rootQuery, recents, manual.data]);
+  }, [level, items, rootQuery, recents, manual.data, sources.projects, coarse]);
   const rows: RankedItem[] = useMemo(() => {
     if (groups) return flatten(groups);
     if (level.kind === "actions") return actionRows(level.item, levelQuery);
@@ -457,6 +460,7 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
   const orchestrator = useOrchestrator();
   const projects = useProjects();
   const pause = usePause();
+  const presence = usePresence();
   const [theme, setTheme] = useState<ThemeChoice>(readTheme);
   useEffect(() => {
     const follow = (event: Event) => setTheme((event as CustomEvent<ThemeChoice>).detail);
@@ -483,8 +487,9 @@ function usePaletteSources(speak: PaletteSources["speak"], voiceSettings: boolea
       voiceSettings,
       projects: projects.data?.projects,
       paused: pause.data?.paused ?? false,
+      dnd: !!presence.data?.dnd_until,
     }),
-    [jobs.data, attention.data, fleet.data, orchestrator.data, me.data, theme, themeName, speak, voiceSettings, projects.data, pause.data],
+    [jobs.data, attention.data, fleet.data, orchestrator.data, me.data, theme, themeName, speak, voiceSettings, projects.data, pause.data, presence.data],
   );
 }
 
@@ -516,7 +521,7 @@ function actionItem(parent: PaletteItem, action: PaletteAction): PaletteItem {
     icon: parent.icon,
     command: action.command,
     verb: "Run",
-    keywords: action.danger ? ["danger"] : undefined,
+    keywords: [...(action.keywords ?? []), ...(action.danger ? ["danger"] : [])],
   };
 }
 

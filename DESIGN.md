@@ -3846,10 +3846,15 @@ key rules in `lib/hotkeys.ts`; all three are pure and unit-tested.
   order, section 22), the views, live jobs (needs attention first),
   actions. With a query: matching items grouped, groups ordered by their best match, at most 8 a
   group (10 jobs). **Give job: <text>** and **Send to orchestrator: <text>** are always offered
-  for free text; they come first unless the best match is strong (at least 0.75 of a perfect
-  word-start run per query character, 0.9 for three words or more), in which case they come
-  second, so Enter does the obvious thing either way. `>` or `job ` at the start offers only Give
-  job.
+  for free text. R10: a query of one or two words is a search, so they come last, Send before
+  Give (a search miss had started a paid job named after it); from three words they come first
+  unless the best match is strong (0.9 of a perfect word-start run per query character), then
+  second. `>`, `job ` or `give ` at the start offers only Give job, without the word; `@<slug>`
+  first aims it at that project's lead, and Give job's actions list every project. Approvals offer
+  Allow once (low: at once; elevated: after a confirmation naming the risk; never for dangerous,
+  which stays on its card) and Deny; a job offers Reply, and Merge when ready to land (a
+  confirmation, then the Review tab's head is merged); Do not disturb is two rows (an hour, until
+  8:00) or one (off). No key hints on a touch screen. Each Settings section is a row.
 - **Levels.** Enter runs an item; ⌘/Ctrl Enter runs its `alt` (Give job: the full new-job form
   prefilled through `lib/jobDraft.ts`; Send: send and open Chat; an agent: the other of
   conversation and terminal) or else opens its actions, never anything risky; → or Tab (or the

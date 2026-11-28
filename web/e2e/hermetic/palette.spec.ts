@@ -198,13 +198,14 @@ test("navigating: a view, the shortcuts sheet with ?, and g i / g j / g h", asyn
   await expect(sheet).toBeHidden();
 });
 
-test("an agent opens straight to its terminal, and the theme changes from the palette", async ({ page }) => {
+test("an agent opens straight to its terminal, and the theme changes from the palette", async ({ page }, testInfo) => {
   await openBoard(page);
   await openWithButton(page);
   await input(page).fill("theme dark");
   await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await expect(page.getByRole("button", { name: /Dark theme/ })).toBeVisible();
+  // The header toggle follows it (from sm up; below sm the mode lives in Settings, R10 F-F3).
+  if (!isPhone(testInfo)) await expect(page.getByRole("button", { name: /Dark theme/ })).toBeVisible();
   await openWithButton(page);
   await input(page).fill("job-12");
   const agent = palette(page).getByRole("group", { name: "Agents and panes" }).getByRole("option").first();
@@ -273,4 +274,32 @@ test("layout and accessibility: axe clean, no sideways scroll, 44 px rows on tou
   }
   await page.keyboard.press("ArrowRight");
   await expectAccessible(page, testInfo, "palette-actions");
+});
+
+// R10 F-F4, O-B9, O-F10: a word or two is a search (no paid job named after it); "@website"
+// aims a job at a project's lead; "give" is not kept in the brief; a low approval is allowed once.
+test("a search finds its section, @project routes a job, and an approval is allowed from the palette", async ({ page }) => {
+  await openBoard(page);
+  await openWithButton(page);
+  await input(page).fill("tailnet");
+  await expect(activeOption(page)).toContainText("Settings: Tailnet");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/settings#tailnet$/);
+
+  await openWithButton(page);
+  await input(page).fill("give @website fix the login test");
+  await expect(activeOption(page)).toContainText("Give job: @website fix the login test"); // "give" first: the @ is text
+  await input(page).fill("@website give fix the login test");
+  await expect(activeOption(page)).toContainText("Give job to Website: fix the login test");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(/Job j_\d+ given/)).toBeVisible();
+  await expect(page.getByText("To Website's lead")).toBeVisible();
+
+  await openWithButton(page);
+  await input(page).fill("npm run test:links");
+  await page.keyboard.press("ArrowRight");
+  await expect(palette(page).getByRole("option", { name: /^Allow once/ })).toBeVisible();
+  await expect(palette(page).getByRole("option", { name: /^Deny/ })).toBeVisible();
+  await palette(page).getByRole("option", { name: /^Allow once/ }).click();
+  await expect(page.getByText(/^Allowed: ap_/)).toBeVisible();
 });

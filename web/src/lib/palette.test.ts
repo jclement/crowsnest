@@ -21,6 +21,7 @@ import {
 } from "./palette";
 import { makeQuestion } from "./questionFixtures";
 import { fixtureSnapshot } from "./attentionFixtures";
+import { fixtureApprovals } from "./approvalFixtures";
 import type { AttentionItem } from "./attention";
 import type { Question } from "./questions";
 
@@ -106,7 +107,8 @@ describe("buildItems", () => {
     const cancel = job?.actions?.find((action) => action.id === "cancel");
     expect(cancel?.command).toMatchObject({ kind: "confirm", confirm: { title: "Cancel j_3?", confirmLabel: "Cancel the job", command: { kind: "jobAction", id: "j_3", action: "cancel" } } });
     // A finished job only opens.
-    expect(items.find((item) => item.id === "job:j_2")?.actions?.map((action) => action.id)).toEqual(["open"]);
+    // Finished and ready to land: open it, or merge it from here (R10 O-F10).
+    expect(items.find((item) => item.id === "job:j_2")?.actions?.map((action) => action.id)).toEqual(["open", "merge"]);
     // No pane, no message.
     expect(items.find((item) => item.id === "job:j_1")?.actions?.map((action) => action.id)).toEqual(["open", "nudge", "cancel"]);
   });
@@ -250,11 +252,13 @@ describe("rankItems", () => {
     expect(ids(groups[3]!.items)).toEqual(["job:j_3", "job:j_1"]);
   });
 
-  it("puts a strong match first and Give job second", () => {
+  // R10 F-F4 / O-F10: a word or two is a search; the catch-alls come last, Send before Give.
+  it("puts a match first and the catch-alls last for a word or two", () => {
     const groups = rankItems(all(), "inbox", []);
     expect(groups[0]?.id).toBe("navigate");
     expect(groups[0]?.items[0]?.item.id).toBe("nav:/inbox");
-    expect(groups[1]?.id).toBe("do");
+    expect(groups.at(-1)?.id).toBe("do");
+    expect(groups.at(-1)?.items.map((ranked) => ranked.item.id)).toEqual(["do:ask", "do:job"]);
   });
 
   it("puts Give job first when nothing matches well", () => {
@@ -382,5 +386,53 @@ describe("projects in the palette", () => {
     const { makeProjectList } = await import("./projectFixtures");
     const groups = rankItems(buildItems(sources({ projects: makeProjectList().projects })), "website", []);
     expect(flatten(groups).find((row) => row.item.group === "projects")?.item.title).toBe("Website");
+  });
+});
+
+// ---- R10: routing, a search miss, verbs, Do not disturb ----------------------------------------
+
+describe("R10 palette", () => {
+  it("strips a leading give and reads @project as the job's target (R10 O-B9, F-F4)", () => {
+    expect(parseQuery("give fix the typo in the README")).toEqual({ mode: "job", text: "fix the typo in the README" });
+    expect(parseQuery("Give a job fix it")).toEqual({ mode: "job", text: "fix it" });
+    expect(parseQuery("@website fix the login test")).toEqual({ mode: "job", text: "fix the login test", project: "website" });
+    expect(parseQuery("@web give fix it")).toEqual({ mode: "job", text: "fix it", project: "web" });
+  });
+
+  it("gives an @project job to that project's lead, and offers every project on the plain row", async () => {
+    const { makeProject } = await import("./projectFixtures");
+    const projects = [makeProject({ id: 2, slug: "website", name: "Website" }), makeProject({ id: 3, slug: "mobile", name: "Mobile" })];
+    const [aimed] = doItems(parseQuery("@web fix the login test"), { projects });
+    expect(aimed?.title).toBe("Give job to Website: fix the login test");
+    expect(aimed?.command).toEqual({ kind: "projectJob", projectId: 2, name: "Website", text: "fix the login test" });
+    const [plain] = doItems(parseQuery("fix the login test"), { projects, keys: false });
+    expect(plain?.subtitle).not.toContain("⌘");
+    expect(plain?.actions?.map((action) => action.label).slice(0, 2)).toEqual(["Give it to Website's lead", "Give it to Mobile's lead"]);
+  });
+
+  it("finds a Settings section rather than offering a job named after the search (R10 F-F4)", () => {
+    const groups = rankItems(buildItems(sources()), "tailnet", []);
+    expect(flatten(groups)[0]?.item.id).toBe("settings:tailnet");
+    expect(flatten(groups).at(-1)?.item.id).toBe("do:job");
+  });
+
+  it("allows a low call once, confirms an elevated one, and never allows a dangerous one (R10 O-F10)", () => {
+    const items = buildItems(sources({ attention: fixtureSnapshot(fixtureApprovals, []).items }));
+    for (const approval of fixtureApprovals) {
+      const actions = items.find((item) => item.id === `approval:${approval.id}`)?.actions ?? [];
+      const allow = actions.find((action) => action.id === "allow");
+      if (approval.risk === "low") expect(allow?.command).toEqual({ kind: "decide", approvalId: approval.id, decision: "allow", label: "Allowed" });
+      if (approval.risk === "dangerous") expect(allow).toBeUndefined();
+      expect(actions.find((action) => action.id === "deny")?.command).toEqual({ kind: "decide", approvalId: approval.id, decision: "deny", label: "Denied" });
+    }
+  });
+
+  it("switches Do not disturb on for a time, and off (R10 O-F10)", () => {
+    const now = new Date(2026, 10, 28, 22, 30);
+    const off = buildItems(sources({ dnd: false, now })).filter((item) => item.id.startsWith("dnd:"));
+    expect(off.map((item) => item.title)).toEqual(["Do not disturb for an hour", "Do not disturb until 8:00"]);
+    expect(off[1]?.command).toMatchObject({ kind: "dnd", until: new Date(2026, 10, 29, 8, 0).toISOString() });
+    const on = buildItems(sources({ dnd: true, now })).filter((item) => item.id.startsWith("dnd:"));
+    expect(on.map((item) => item.command)).toEqual([{ kind: "dnd", until: "", label: "Do not disturb is off" }]);
   });
 });
