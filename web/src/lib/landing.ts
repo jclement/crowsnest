@@ -44,6 +44,28 @@ export type LandAction = "merge" | "pr" | "discard";
 export const landActions: LandAction[] = ["merge", "pr", "discard"];
 export const landLabels: Record<LandAction, string> = { merge: "Merge", pr: "Push and open PR", discard: "Discard" };
 
+/**
+ * What a Land action does, in two or three short lines for its confirmation (R10 Fable F9, Opus
+ * polish: the server's full sentence, with absolute paths, pushed "Yes, merge" off a phone's
+ * screen). The server's exact text stays one tap away under "Exactly what happens".
+ */
+export function confirmLines(action: LandAction, branch: string, base: string): string[] {
+  const into = base || "its base";
+  switch (action) {
+    case "merge":
+      return [`Merges ${branch} into ${into}.`, "Removes its worktree and deletes the branch.", "Refused, with nothing changed, if the main checkout has uncommitted changes or the merge conflicts."];
+    case "pr":
+      return [`Pushes ${branch} and opens a pull request into ${into}.`, "Removes the worktree; the branch stays for the pull request."];
+    case "discard":
+      return ["Throws the work away: removes the worktree and deletes the branch with its commits.", "This cannot be undone."];
+  }
+}
+
+/** True when a refused Land names the main checkout's uncommitted changes (the way out is that checkout). */
+export function refusedForDirtyCheckout(message: string): boolean {
+  return /uncommitted changes/i.test(message) && /main checkout|checkout/i.test(message);
+}
+
 export interface LandOptions {
   state: "" | "merged" | "pr" | "discarded";
   detail: string;
@@ -104,9 +126,18 @@ export interface LandResult {
 }
 
 export interface SweepItem {
-  job: { id: string; title: string; state: string; worktree_branch: string; work_dir: string; land_state: string; land_detail: string };
+  job: { id: string; title: string; state: string; worktree_branch: string; work_dir: string; land_state: string; land_detail: string; changes_state?: string };
   age_seconds: number;
   dirty: boolean;
+}
+
+/**
+ * The sweep items the board counts as "to land": not those sent back with review comments, whose
+ * worktree is the fix job's to change (R10 Opus B3: the board still said "2 to land" for a job
+ * the detail and the card called Changes requested). The same exclusion as jobs.ts readyToLand.
+ */
+export function landable(items: SweepItem[] | undefined): SweepItem[] {
+  return (items ?? []).filter((item) => !item.job.changes_state);
 }
 
 export interface QueueLine {

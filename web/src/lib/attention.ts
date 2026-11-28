@@ -107,6 +107,24 @@ export const labelWords: Record<AttentionLabel, { text: string; tone: "danger" |
   can_wait: { text: "Can wait", tone: "neutral" },
 };
 
+/** The chip tone of an item's label: danger for dangerous and blocking, warning for a routine approval. */
+export function labelTone(item: Pick<AttentionItem, "label" | "urgency">): "danger" | "warning" | "neutral" {
+  return labelWords[labelOf(item)].tone;
+}
+
+/**
+ * The item's kind for a row's meta line after its label, or null when it only repeats the label
+ * ("Dangerous · Dangerous approval", "Approval · Approval": R10 Fable F7, Opus F2). "Check failed"
+ * or "Ready to land" add something and stay.
+ */
+export function kindAfterLabel(item: AttentionItem): string | null {
+  const kind = kindLabel(item);
+  const label = labelWords[labelOf(item)].text.toLowerCase();
+  if (kind.toLowerCase().includes(label)) return null;
+  if (item.kind === "approval" || item.kind === "question") return null;
+  return kind;
+}
+
 /** "16 need you: 4 blocking, 3 approvals, 9 can wait." without the parts that are zero (the total aside). */
 export function countsSentence(counts: AttentionCounts): string {
   if (counts.total === 0) return "Nothing needs you.";
@@ -207,6 +225,8 @@ export function plainPreview(markdown: string): string {
 
 export interface RowCounts {
   running: number;
+  /** Waiting for a slot: not running (R10 Opus B4). Absent from a server before R10. */
+  queued?: number;
   waiting: number;
   done_today: number;
   failed_today: number;

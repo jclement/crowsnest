@@ -57,9 +57,11 @@ interface RescuePanelProps {
   job: RescueJob;
   /** Open by default (a stuck job, or one that needs the human). */
   defaultOpen?: boolean;
+  /** The heading; "Other ways to get it moving" when a reply comes first. */
+  title?: string;
 }
 
-export function RescuePanel({ job, defaultOpen }: RescuePanelProps) {
+export function RescuePanel({ job, defaultOpen, title = "Rescue: get the agent moving without a terminal" }: RescuePanelProps) {
   const [open, setOpen] = useState(!!defaultOpen);
   const navigate = useNavigate();
   return (
@@ -72,7 +74,7 @@ export function RescuePanel({ job, defaultOpen }: RescuePanelProps) {
           className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 text-left text-sm font-medium text-heading hover:bg-hover md:min-h-9"
         >
           <LifeBuoy className="h-4 w-4 text-accent" aria-hidden />
-          <span className="flex-1">Rescue: get the agent moving without a terminal</span>
+          <span className="flex-1">{title}</span>
           {open ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
         </button>
         <HelpButton topic="how-to/rescue#the-rescue-panel" what="the rescue buttons" inline={false} />

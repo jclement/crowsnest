@@ -5,10 +5,10 @@
 // typed. Quotes are code the agent wrote and notes go to its terminal, so both are shown with
 // hidden characters revealed and a warning (R7-S3). Text nodes only.
 import { MessageSquarePlus, Pencil, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { relativeTime } from "../../lib/format";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { relativeTime } from "../../lib/format";
 import { sendLabel, sentText, statusText, whereText, type CommentList, type DiffComment, type SendResult } from "../../lib/comments";
 import { commentsApi, useCommentActions } from "../../lib/comments-queries";
 import type { DiffWho } from "../../lib/changes";
@@ -128,7 +128,7 @@ export function CommentCard({ comment, who, showPath, showQuote, className }: {
             may not have arrived
           </Chip>
         )}
-        {comment.sent_at && <span className="text-2xs text-muted">sent {new Date(comment.sent_at).toLocaleString()}</span>}
+        {comment.sent_at && <span className="text-2xs text-muted" title={new Date(comment.sent_at).toLocaleString()}>sent {relativeTime(comment.sent_at)}</span>}
         <span className="ml-auto flex items-center">
           {comment.pending && <IconButton icon={Pencil} label={`Edit the comment on ${where}`} onClick={() => setEditing(true)} />}
           {comment.pending && (
@@ -247,11 +247,7 @@ export function SendForm({ who, list, compact }: { who: DiffWho; list: CommentLi
           {list.drafts} to send · {list.sent} sent{list.outdated > 0 ? ` · ${list.outdated} outdated` : ""}
           {(list.waiting ?? 0) > 0 ? ` · ${list.waiting} waiting to be typed` : ""}
         </span>
-        {list.last_sent_at && (
-          <time dateTime={list.last_sent_at} title={new Date(list.last_sent_at).toLocaleString()} className="text-2xs text-muted">
-            Last sent {relativeTime(list.last_sent_at)}
-          </time>
-        )}
+        {list.last_sent_at && <span className="text-2xs text-muted" title={new Date(list.last_sent_at).toLocaleString()}>Last sent {relativeTime(list.last_sent_at)}</span>}
       </div>
       {list.drafts === 0 && (list.waiting ?? 0) > 0 && who.kind === "job" && (
         <p className="flex flex-wrap items-center gap-1.5 text-2xs text-muted">

@@ -6,9 +6,9 @@
 // the Inbox all link here with the queue's item id. A decision that is already settled (answered
 // elsewhere, superseded, expired) says so instead of failing on submit; the note is kept in
 // localStorage (lib/decision.ts) so rotation and backgrounding never lose it.
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowLeft, Clock, ExternalLink, Inbox, RefreshCw, Star } from "lucide-react";
-import type { ReactNode } from "react";
+import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router";
+import { ArrowLeft, CheckCircle2, ChevronRight, Clock, ExternalLink, Inbox, RefreshCw, ShieldCheck, Star } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AttachmentList } from "../components/attach/AttachmentList";
 import { CallBody } from "../components/approvals/ApprovalCard";
 import { AnswerBar } from "../components/decide/AnswerBar";
@@ -23,19 +23,22 @@ import { SkeletonRows } from "../components/ui/Skeleton";
 import type { Approval } from "../lib/approvals";
 import { riskLabels } from "../lib/approvals";
 import { shownFromAttachment } from "../lib/attachments";
-import { activeItems, kindLabel, type AttentionItem } from "../lib/attention";
+import { activeItems, kindLabel, labelTone, type AttentionItem } from "../lib/attention";
 import { useAgentMessages } from "../lib/conversation-queries";
 import {
   approvalBrief,
+  ADVANCE_GUARD_MS,
   approvalStale,
   dialogBrief,
   lastAssistantText,
   parseItemId,
   questionBrief,
   questionStale,
+  recentAnswer,
   type DecisionBrief,
 } from "../lib/decision";
 import { relativeTime } from "../lib/format";
+import { quotedReply } from "../lib/protocol";
 import { useAgentScreen, useApproval, useAttention, useQuestion } from "../lib/queries";
 import type { Question } from "../lib/questions";
 import type { AgentScreen } from "../lib/types";
@@ -48,11 +51,11 @@ export function DecideView() {
   if (!parsed || !itemId) return <NotADecision />;
   switch (parsed.kind) {
     case "question":
-      return <QuestionPacket id={parsed.ref} itemId={itemId} item={item} />;
+      return <QuestionPacket key={itemId} id={parsed.ref} itemId={itemId} item={item} />;
     case "approval":
-      return <ApprovalPacket id={parsed.ref} itemId={itemId} item={item} />;
+      return <ApprovalPacket key={itemId} id={parsed.ref} itemId={itemId} item={item} />;
     case "dialog":
-      return <DialogPacket paneId={parsed.ref} itemId={itemId} item={item} loaded={!attention.isPending} />;
+      return <DialogPacket key={itemId} paneId={parsed.ref} itemId={itemId} item={item} loaded={!attention.isPending} />;
   }
 }
 
@@ -60,7 +63,7 @@ export function DecideView() {
 
 function QuestionPacket({ id, itemId, item }: { id: string; itemId: string; item?: AttentionItem }) {
   const query = useQuestion(id);
-  if (query.isPending) return <Loading />;
+  if (query.isPending) return <Loading what={id} paused={query.fetchStatus === "paused"} retry={() => void query.refetch()} />;
   if (query.isError) return <LoadError what={id} message={query.error.message} retry={() => void query.refetch()} />;
   const question = query.data;
   const brief = questionBrief(question, item?.urgency === "blocking");
@@ -73,7 +76,7 @@ function QuestionPacket({ id, itemId, item }: { id: string; itemId: string; item
       since={question.created_at}
       stale={questionStale(question)}
       paneId={question.source_pane}
-      bar={(next) => <AnswerBar itemId={itemId} jobId={question.job_id ?? item?.job_id} target={{ kind: "question", question }} onAnswered={next} />}
+      bar={(next, armedAt) => <AnswerBar itemId={itemId} jobId={question.job_id ?? item?.job_id} target={{ kind: "question", question }} onAnswered={next} armedAt={armedAt} />}
     >
       {/* Settled: what was answered and how far it got (stored, held, received: DESIGN.md 6.19). */}
       {question.status !== "open" && <Outcome question={question} />}
@@ -84,7 +87,7 @@ function QuestionPacket({ id, itemId, item }: { id: string; itemId: string; item
 
 function ApprovalPacket({ id, itemId, item }: { id: string; itemId: string; item?: AttentionItem }) {
   const query = useApproval(id);
-  if (query.isPending) return <Loading />;
+  if (query.isPending) return <Loading what={id} paused={query.fetchStatus === "paused"} retry={() => void query.refetch()} />;
   if (query.isError) return <LoadError what={id} message={query.error.message} retry={() => void query.refetch()} />;
   const approval = query.data;
   return (
@@ -96,7 +99,7 @@ function ApprovalPacket({ id, itemId, item }: { id: string; itemId: string; item
       since={approval.created_at}
       stale={approvalStale(approval)}
       paneId={approval.pane_id}
-      bar={(next) => <AnswerBar itemId={itemId} jobId={approval.job_id} target={{ kind: "approval", approval }} onAnswered={next} />}
+      bar={(next, armedAt) => <AnswerBar itemId={itemId} jobId={approval.job_id} target={{ kind: "approval", approval }} onAnswered={next} armedAt={armedAt} />}
     >
       <ApprovalEvidence approval={approval} />
     </Packet>
@@ -105,7 +108,7 @@ function ApprovalPacket({ id, itemId, item }: { id: string; itemId: string; item
 
 function DialogPacket({ paneId, itemId, item, loaded }: { paneId: string; itemId: string; item?: AttentionItem; loaded: boolean }) {
   const screen = useAgentScreen(paneId);
-  if (screen.isPending) return <Loading />;
+  if (screen.isPending) return <Loading what={paneId} paused={screen.fetchStatus === "paused"} retry={() => void screen.refetch()} />;
   if (screen.isError) return <LoadError what={paneId} message={screen.error.message} retry={() => void screen.refetch()} />;
   const data: AgentScreen = screen.data;
   const present = !!item || (!loaded && data.dialog.present);
@@ -121,7 +124,7 @@ function DialogPacket({ paneId, itemId, item, loaded }: { paneId: string; itemId
       since={item?.since}
       stale={present && data.dialog.present ? null : "The dialog is gone: it was answered or the agent moved on."}
       paneId={paneId}
-      bar={(next) => <AnswerBar itemId={itemId} jobId={item?.job_id} target={{ kind: "dialog", paneId, screen: data, agentName: data.name }} onAnswered={next} />}
+      bar={(next, armedAt) => <AnswerBar itemId={itemId} jobId={item?.job_id} target={{ kind: "dialog", paneId, screen: data, agentName: data.name }} onAnswered={next} armedAt={armedAt} />}
     >
       <Section title="The screen">
         <ScreenText text={data.text} />
@@ -140,26 +143,47 @@ interface PacketProps {
   since?: string;
   stale: string | null;
   paneId?: string;
-  bar: (next: () => void) => ReactNode;
+  bar: (next: (answered: string) => void, armedAt: number) => ReactNode;
   children: ReactNode;
 }
 
 function Packet({ itemId, item, brief, jobId, since, stale, paneId, bar, children }: PacketProps) {
   const navigate = useNavigate();
   const attention = useAttention();
+  // The decisions in the queue, in its order: this one's place ("3 of 16") and the next one.
+  const decisions = activeItems(attention.data).filter((candidate) => candidate.kind === "question" || candidate.kind === "approval" || candidate.kind === "dialog");
+  const index = decisions.findIndex((candidate) => candidate.id === itemId);
+  const following = (index >= 0 ? [...decisions.slice(index + 1), ...decisions.slice(0, index)] : decisions).find((candidate) => candidate.id !== itemId);
+  // Arriving straight after an answer: say what was answered, and keep this item's choices inert
+  // for a moment so the tap that answered the last one cannot answer this one (R10 Opus B1).
+  const [arrival] = useState(() => {
+    const answered = recentAnswer();
+    return { answered: answered?.title ?? null, armedAt: answered ? Date.now() + ADVANCE_GUARD_MS : 0 };
+  });
   // After an answer, the next decision in the queue (else Now): a phone run through the queue
   // is answer, answer, answer, without going back to a list.
   const next = () => {
-    const following = activeItems(attention.data).find(
-      (candidate) => candidate.id !== itemId && (candidate.kind === "question" || candidate.kind === "approval" || candidate.kind === "dialog"),
-    );
     void navigate(following ? { to: "/decide", search: { item: following.id } } : { to: "/" });
   };
+  // Arriving after an answer, focus moves to the new ask, so a keyboard or a screen reader is told
+  // what is now on screen (R10 Opus B1, F22: focus fell to the body).
+  const askRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (arrival.answered) askRef.current?.focus();
+  }, [arrival.answered]);
   return (
     <div className="flex min-h-full flex-col" data-testid="decision-packet" data-item={itemId}>
       <article aria-labelledby="decision-ask" className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 p-3 md:p-4">
-        <Where item={item} jobId={jobId} since={since} kind={brief.kind} />
-        <h1 id="decision-ask" className="break-words text-base font-semibold leading-snug text-heading">
+        {arrival.answered && (
+          <p role="status" className="flex items-center gap-1.5 rounded border border-success/40 bg-success/10 px-2 py-1 text-xs text-heading" data-testid="answered-notice">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden />
+            <span className="min-w-0 truncate">
+              {arrival.answered}. <span className="font-medium">Next up:</span>
+            </span>
+          </p>
+        )}
+        <Where item={item} jobId={jobId} since={since} kind={brief.kind} position={index >= 0 ? { at: index + 1, of: decisions.length } : null} onSkip={following ? () => void navigate({ to: "/decide", search: { item: following.id } }) : undefined} />
+        <h1 id="decision-ask" ref={askRef} tabIndex={-1} className="break-words outline-none text-base font-semibold leading-snug text-heading">
           {brief.ask}
         </h1>
         {stale ? (
@@ -169,28 +193,56 @@ function Packet({ itemId, item, brief, jobId, since, stale, paneId, bar, childre
         ) : (
           brief.blocking && <p className="text-xs font-medium text-warning">{brief.blocking}</p>
         )}
-        {brief.choices.length > 0 && <Consequences brief={brief} />}
-        {brief.recommendation && (
-          <p className="flex items-start gap-1.5 rounded-md border border-accent/40 bg-accent/5 px-2.5 py-2 text-xs text-heading" data-testid="recommendation">
-            <Star className="mt-px h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
-            <span>{brief.recommendation}</span>
-          </p>
+        {brief.choices.some((choice) => choice.said) ? (
+          <Consequences brief={brief} />
+        ) : (
+          brief.recommendation && (
+            <p className="flex items-start gap-1.5 rounded-md border border-accent/40 bg-accent/5 px-2.5 py-2 text-xs text-heading" data-testid="recommendation">
+              {brief.kind === "approval" ? <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-success" aria-hidden /> : <Star className="mt-px h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />}
+              <span>{brief.recommendation}</span>
+            </p>
+          )
         )}
         {children}
         {paneId && <LastMessage paneId={paneId} />}
       </article>
-      {!stale && bar(next)}
+      {!stale && bar(next, arrival.armedAt)}
     </div>
   );
 }
 
-function Where({ item, jobId, since, kind }: { item?: AttentionItem; jobId?: string; since?: string; kind: string }) {
+interface WhereProps {
+  item?: AttentionItem;
+  jobId?: string;
+  since?: string;
+  kind: string;
+  /** This decision's place in the queue's decisions, or null when it has left the queue. */
+  position: { at: number; of: number } | null;
+  /** Go to the next decision without answering or snoozing this one; absent when it is the only one. */
+  onSkip?: () => void;
+}
+
+function Where({ item, jobId, since, kind, position, onSkip }: WhereProps) {
+  const router = useRouter();
+  // Back goes where the person came from (the Inbox, a job, Now), and to Now on a cold start.
+  const back = () => (window.history.length > 1 ? router.history.back() : void router.navigate({ to: "/" }));
+  // Esc does the same from anywhere but a field or an open sheet (R10 Fable F10).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target as Element | null;
+      if (target?.closest?.("input, textarea, select, [role=dialog]")) return;
+      back();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   return (
-    <nav aria-label="Where this belongs" className="flex flex-wrap items-center gap-1.5 text-xs">
-      <Link to="/" className="inline-flex min-h-9 items-center gap-1 rounded px-1 text-muted hover:bg-hover hover:text-heading md:min-h-6" aria-label="Back to Now">
+    <nav aria-label="Where this belongs" className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+      <button type="button" onClick={back} className="inline-flex min-h-9 items-center gap-1 rounded px-1 text-muted hover:bg-hover hover:text-heading md:min-h-6" aria-label="Back">
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-      </Link>
-      <Chip tone="accent">{item ? kindLabel(item) : kind}</Chip>
+      </button>
+      <Chip tone={item ? labelTone(item) : "accent"}>{item ? kindLabel(item) : kind}</Chip>
       <span className="font-medium text-heading">{item?.project?.name ?? "Unfiled"}</span>
       {jobId && (
         <Link to="/jobs" search={{ job: jobId }} className="inline-flex min-h-9 items-center font-mono text-accent hover:underline md:min-h-6">
@@ -198,13 +250,25 @@ function Where({ item, jobId, since, kind }: { item?: AttentionItem; jobId?: str
         </Link>
       )}
       {item?.job_title && <span className="min-w-0 truncate text-body">{item.job_title}</span>}
-      {item?.agent && <span className="text-muted">· {item.agent}</span>}
-      {since && (
-        <span className="ml-auto inline-flex items-center gap-1 text-2xs text-muted" title={since}>
-          <Clock className="h-3 w-3" aria-hidden />
-          waiting {relativeTime(since).replace(/ ago$/, "")}
-        </span>
-      )}
+      <span className="ml-auto inline-flex items-center gap-1.5">
+        {since && (
+          <span className="inline-flex items-center gap-1 text-2xs text-muted" title={since}>
+            <Clock className="h-3 w-3" aria-hidden />
+            {relativeTime(since).replace(/ ago$/, "")}
+          </span>
+        )}
+        {position && (
+          <span className="font-mono text-2xs text-muted" data-testid="decision-position">
+            {position.at} of {position.of}
+          </span>
+        )}
+        {onSkip && (
+          <button type="button" onClick={onSkip} className="inline-flex min-h-9 items-center gap-0.5 rounded px-1.5 text-xs text-accent hover:bg-hover md:min-h-6">
+            Skip
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        )}
+      </span>
     </nav>
   );
 }
@@ -218,7 +282,7 @@ function Consequences({ brief }: { brief: DecisionBrief }) {
           <li key={choice.key} className="flex flex-col gap-0.5 px-2.5 py-1.5">
             <span className="flex items-center gap-1.5 text-xs font-medium text-heading">
               {choice.label}
-              {choice.recommended && <Chip tone="accent">Recommended</Chip>}
+              {choice.recommended && <Star className="h-3 w-3 text-accent" aria-label="Recommended" />}
             </span>
             <span className="text-xs text-body">{choice.consequence}</span>
           </li>
@@ -275,7 +339,9 @@ function ApprovalEvidence({ approval }: { approval: Approval }) {
 
 function LastMessage({ paneId }: { paneId: string }) {
   const messages = useAgentMessages(paneId);
-  const text = lastAssistantText(messages.data?.messages);
+  // Without the SAY line and crowsnest's quoted headers: the agent's words only (R10 Fable).
+  const raw = lastAssistantText(messages.data?.messages);
+  const text = raw ? quotedReply(raw) : "";
   if (!text) return null;
   return (
     <Section title="The agent's last message">
@@ -308,7 +374,24 @@ function StaleActions() {
   );
 }
 
-function Loading() {
+/** After this long a decision still loading says so, with Retry: never a skeleton for good (R10 Opus B6). */
+const SLOW_LOAD_MS = 5_000;
+
+function Loading({ what, paused, retry }: { what: string; paused: boolean; retry: () => void }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), SLOW_LOAD_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  if (paused || slow) {
+    return (
+      <div className="p-3">
+        <Banner tone="warning" role="alert" action={<Button compact icon={RefreshCw} onClick={retry}>Retry</Button>}>
+          {paused ? `Cannot load ${what}: this browser is offline. It loads when the connection is back.` : `Still loading ${what}: the server has not answered.`}
+        </Banner>
+      </div>
+    );
+  }
   return (
     <div className="p-3">
       <SkeletonRows rows={6} label="Loading the decision" />

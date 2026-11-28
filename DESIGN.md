@@ -4098,7 +4098,9 @@ screenshots:themes`, the contact sheets `web/screenshots/themes-*.png`).
 
 **Motion** is small and means something: the working pulse; the heartbeat, one beat per event
 on the stream (machine samples keep a live session beating every two seconds; a stalled stream
-goes still, reconnecting draws a broken line); arrivals in the needs-you tray; a loading block's
+goes still, reconnecting draws a broken line; R10: an open stream silent for ten seconds, or any
+request waiting five, reads **Stalled** in the warning ink, since a frozen server keeps the socket
+up: `lib/pending.ts`); arrivals in the needs-you tray; a loading block's
 scan; a sheet sliding in. `prefers-reduced-motion` stops all of it (index.css).
 
 **The mark** is a lookout's nest on a mast above the horizon with two arcs of sweep, drawn inline
@@ -5438,13 +5440,16 @@ queue and the projects side by side.
    projects, Since you left and the job box are within the first two screens (R8;
    `now.spec.ts` measures it at 390x844).
 2. **Projects**: one row per live project with its lead's state, what it is doing in a line (the
-   most recently active moving job's "doing now", "+N more"), running / waiting on you (the
-   queue's count) / done today / failed today, estimated spend today (its jobs and its lead,
+   most recently active moving job's "doing now", "+N more"), running / queued (R10 Opus B4: a job
+   waiting for a slot is counted apart, `RowCounts.Queued`) / waiting on you (the queue's count) /
+   done today / failed today, estimated spend today (its jobs and its lead,
    7.11), last activity, and the sentence saying who owns its work (`orch.OwnershipLead`, or that
    no lead is running and the orchestrator hears instead); then **Unfiled** and the
    **Orchestrator** (its held job, its spend, `orch.OwnershipOrchestrator`). A row opens the
    project, the unfiled board, or Chat.
-3. **Since you left** (22.3), open by default, collapsible, with "Mark all seen".
+3. **Since you left** (22.3), open by default, collapsible, with "Mark all seen". A question still
+   in Needs you is left out of it (R10): it is listed once, above. An empty queue says how many jobs
+   are still running.
 4. **Give a job**: the job box with "For: the orchestrator / <project>".
 
 ### 22.3 Since you left
@@ -5503,19 +5508,41 @@ Control is 7.10.1; this section is the rest. Nothing here has run on a real iPho
    first; collapsed by default past 3 files or 120 changed lines; a tap jumps to a file and opens
    it; each file folds), attachments; the call (`ApprovalCard`'s `CallBody`); the screen; and the
    agent's last assistant message from its conversation.
-6. **The answer bar**, sticky at the bottom, opaque: the note, the choices (more than three scroll
-   inside the bar, at most 38 % of the height), and "Open the full job". A question's option
-   answers in one press (multi: checkboxes and Submit); a gate's granting option (`isGate`:
-   crowsnest's `land_for`/`approval_for`/`requested_by` context or an allow/approve/merge/push
-   option, the web mirror of `push.GateShaped`) asks "This widens what agents may do … Yes, <label>"
-   first (R5-S2); an approval is Allow once or Deny, a dangerous allow confirmed again; a dialog's
-   options press their digit bound to the screen hash, a form opens the terminal.
+6. **The answer bar**, sticky at the bottom, opaque: the choices (more than three scroll inside the
+   bar, at most 38 % of the height; two short ones side by side) and "Add a note", which opens the
+   note (R10: the job link is the header's only). A question's option answers in one press (multi:
+   checkboxes and Submit); a granting option takes a second tap first (R5-S2), worded as what
+   happens ("“Merge it” lets the agent go ahead with this. Tap again to confirm." then "Yes, merge
+   it"). Which options: `needsSecondTap` (R10 Opus F4): crowsnest's own gate context, or a
+   permission word (allow, approve, merge, land, push, deploy, delete, publish, grant, permit, and
+   their forms) in the title or the option. The everyday granting words (apply, accept, confirm,
+   proceed, "go ahead") still make the question gate-shaped (`isGate`, the web mirror of
+   `push.GateShaped`: never answerable from a notification or a row) but no longer cost the
+   packet's second tap, where the evidence is on screen: a confirm that is always there teaches the
+   tap to be automatic. An approval is Allow once or Deny, a dangerous allow confirmed again; a
+   dialog's options press their digit bound to the screen hash, a form opens the terminal.
 
 The **note** is kept in localStorage per item (`crowsnest-note:<item>`, swept after three days),
 so a rotation, a trip to another app or iOS discarding the page never loses it; it is cleared once
 the answer is in. A **stale** decision (answered elsewhere, expired, superseded, the dialog gone)
 shows why instead of the bar; a 409 on submit refetches, which turns the page stale, and keeps the
 note. After an answer the packet moves to the next decision in the queue, else Now.
+
+**R10 (lane A): sending, the advance guard, and the queue's place.** The pressed choice says
+"Sending…" at once; past `LATE_REQUEST_MS` (5 s) the bar says the server has not answered and that
+the answer goes through when it does; a failure is "Not sent: <reason>" in the bar with Retry,
+never only a toast (Fable B3). A Cancel was not added: aborting the fetch cannot unsend an answer
+the server may already hold. The next item after an answer says what was answered ("Allowed Bash:
+npm run test:links. Next up:"), takes focus on its ask, and keeps its choices inert
+(`aria-disabled`) for `ADVANCE_GUARD_MS` (700 ms), so a double tap or a late tap never answers what
+was not read (Opus B1; `lib/decision.ts` `noteAnswered`/`recentAnswer`). The header shows the
+item's label as a chip in its tone (a dangerous approval is red on every surface), its place among
+the queue's decisions ("3 of 9") and Skip (to the next, neither answered nor snoozed); Back and Esc
+go where the person came from; 1 to 9 press the choices. "If you choose" shows only when some
+choice's consequence says something beyond its label (`Choice.said`), else the recommendation; a
+decision whose fetch is paused offline, or still loading after 5 s, says so with Retry instead of a
+skeleton for good (Opus B6). The agent's last message is quoted without its SAY line or crowsnest's
+own headers (`lib/protocol.ts` `quotedReply`).
 
 Who links here: the queue's `itemLink` (palette, tray agent rows), a push (23.4), the tray's
 question rows ("Review the decision" for anything not routine, "Review (add a note)" beside a
@@ -5603,3 +5630,46 @@ confirmation; a long diff; rescue; the terminal's keys all on screen; axe on the
 rescue panel) and `phone-voice.spec.ts` (fake ElevenLabs and microphone: readback, Create, Undo);
 screenshots `web/screenshots/phone-*.png`.
 
+
+### 23.6 R10 usability, lane A: one truth, a job's rescue and Land, the diff, protocol text
+
+From `reviews/R10-fable-ux.md` and `reviews/R10-opus-ux.md` (built on `wip/ux1a`).
+
+- **One truth for a job's state.** The job's header leads with `nextStep`, the board's own chip;
+  the acceptance verdict follows only when it adds to it and nothing has overtaken it (comments
+  sent back, a merge). The board's "N to land" counts the sweep without jobs whose changes were
+  requested (`lib/landing.ts` `landable`), as `readyToLand` does. A finished job with no check
+  reads "Ready to land (not checked)"; "Run the check again" is not offered without a check
+  command. The Review tab keeps one name ("Review", "Review · 2" with comments to send).
+- **Rows** in the tray, Now and the Inbox lead with their label (Dangerous, Blocking, Approval,
+  Can wait), then the kind only when it adds to the label (`kindAfterLabel`), then project and job;
+  no pane name. The approval card and the decision bar use the same words ("Allow once…", "This
+  is dangerous. Allow it anyway?").
+- **A stuck job** that said something leads with its words and the message box; the Rescue panel
+  follows folded as "Other ways to get it moving". Its banner never recommends the nudge that
+  already failed: after two nudges, or when the last message asks in prose (`askedInProse`), the
+  action is Reply, which focuses the message box. A stuck job's wait line is not repeated in the
+  header, nor a running agent's wait on its own next turn.
+- **Land** is one line while the job works ("Lands when it finishes"). When it can land: the
+  reviewer's verdict, crowsnest's check and "N of M committed files not viewed" in one line (the
+  viewer's own count covers uncommitted work too, which Land does not merge); caveats behind the
+  "?"; Merge and Push buttons, Discard a quiet text button apart. The confirmation replaces the
+  buttons where they were, in two or three lines (`confirmLines`), with the server's exact text
+  under "Exactly what happens". A refusal stays in the card with Try again and, for a dirty main
+  checkout, a link to the project page's changes. The walkthrough sits above the diff, folded.
+- **The diff on a phone**: the selection bar rides with the file pager in one sticky block, so a
+  line comment can start from the job sheet (Fable B2); the toolbar is Files and the scopes in one
+  sideways-scrolling row, then the counts, full screen and "View options", which unfolds the rest
+  with Mark all viewed and Clear marks in words; ticking Viewed moves to the next unviewed file;
+  Wrap starts on below `md` (a saved choice wins). A second tap on the one selected line opens its
+  comment. On the desktop the selection bar floats at the bottom of the window.
+- **Protocol text** (`lib/protocol.ts`, tested on shapes from real transcripts): where a reply is
+  quoted (the packet's last message, a job's), its SAY line goes (its sentence kept when it is all
+  there is) and quoted "[crowsnest …]" headers are removed. In Chat a user message crowsnest typed
+  (a job handed over, a check result, review comments, a nudge, a restart, upkeep) is one line,
+  `SystemRow`, with what was sent one tap away; a job message is the human's own bubble without its
+  header; answers, voice and pokes keep their own treatment.
+- **Toasts** sit at the top on a phone, under the header, never over an answer bar or the job box;
+  "Job j_N given" has Open. Banners put their action under the text below `sm`.
+- **Transcription**: a response without its text is an `ApiError` (`BAD_RESPONSE`), so the recorder
+  shows the failure instead of "Transcribing…" for good.

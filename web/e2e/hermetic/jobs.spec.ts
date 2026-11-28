@@ -159,8 +159,9 @@ test("a running job: message its agent and watch the timeline", async ({ page },
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByRole("heading", { name: "Add retry back-off to the webhook sender" })).toBeVisible();
   await expect(detail.getByText("Doing now:")).toBeVisible();
-  // The demo makes j_1 a real worktree of the Crowsnest repository (R10: a made-up path read as
-  // "not in a git repository" on the project page).
+  // One line: the folder's last two parts and the branch (R10 Fable, lane A). The demo makes j_1 a
+  // real worktree of the Crowsnest repository (R10 lane B: a made-up path read as "not in a git
+  // repository" on the project page), so its last two parts are .worktrees/job-1-….
   await expect(detail.getByText(/\.worktrees\/job-1-add-retry-back-off · job\/1-add-retry-back-off/)).toBeVisible();
   // A job names the agent its pane holds (R3, ExpectAgent): job-1, in the Crowsnest workspace.
   const box = detail.getByRole("textbox", { name: "Message to job-1" });
@@ -216,19 +217,25 @@ test("each stuck cause shows its reason and the one action that fits", async ({ 
   await expect(detail.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
   await expect(detail.locator("[data-terminal]")).toBeVisible();
 
-  // Unresponsive after three nudges: Nudge.
+  // Unresponsive after three nudges: not a fourth nudge but a reply, with the agent's words and the
+  // message box first (R10 Fable F2, Opus F3).
   await openBoard(page, "?job=j_6");
   detail = detailRegion(page, testInfo, "Selected job");
   banner = detail.getByRole("alert");
   await expect(banner).toContainText("Ended its turn 4 times in a row");
-  await expect(banner.getByRole("button", { name: "Nudge" })).toBeVisible();
+  await expect(banner).toContainText("Nudged 3 times already");
+  await banner.getByRole("button", { name: "Reply" }).click();
+  await expect(detail.getByRole("form", { name: "Message the agent" }).getByRole("textbox")).toBeFocused();
 });
 
 test("nudging an unresponsive job sends it back to work and clears the flag", async ({ page }, testInfo) => {
   await openBoard(page, "?job=j_6");
   const detail = detailRegion(page, testInfo, "Selected job");
-  await detail.getByRole("alert").getByRole("button", { name: "Nudge" }).click();
-  await expect(page.getByText("Nudge: done")).toBeVisible();
+  // The banner recommends a reply after three nudges; Nudge is under "Other ways to get it moving".
+  const rescue = detail.getByTestId("rescue-panel");
+  await rescue.getByRole("button", { name: "Other ways to get it moving" }).click();
+  await rescue.getByRole("list", { name: "Rescue actions" }).getByRole("button", { name: /^Nudge/ }).click();
+  await expect(page.getByText("Nudged", { exact: true })).toBeVisible();
   await expect(detail.getByRole("alert")).toHaveCount(0);
   await expect(detail.getByRole("list", { name: "Timeline" })).toContainText("Nudged by you");
   await expect(detail.getByText("4 nudges")).toBeVisible();

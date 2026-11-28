@@ -92,10 +92,10 @@ test.describe.serial("the supervisor and the human, with real Claude", () => {
       await expect(page).toHaveURL(/\/decide\?item=/);
       const packet = page.getByTestId("decision-packet");
       await expect(packet.getByRole("heading", { level: 1 })).toContainText(/colou?r/i);
-      await expect(packet.getByRole("region", { name: "What each choice does" })).toBeVisible();
       const bar = page.getByTestId("answer-bar");
       await expect(bar.getByRole("button", { name: /blue/i })).toBeVisible();
       await page.screenshot({ path: "screenshots/e2e-claude-decide-390x844.png" });
+      await bar.getByRole("button", { name: "Add a note" }).click();
       await bar.getByLabel(/Note/).fill("red, for the e2e run");
       await bar.getByRole("group", { name: "Choices" }).getByRole("button", { name: /^red/i }).click();
       const confirm = page.getByRole("button", { name: /^Yes, / });

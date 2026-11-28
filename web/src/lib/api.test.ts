@@ -28,6 +28,15 @@ describe("api", () => {
     expect(init.credentials).toBe("same-origin");
   });
 
+  it("a transcription without its text is a failure, not a TypeError (R10 Fable: Transcribing… forever)", async () => {
+    mockFetch(200, { data: {} });
+    await expect(endpoints.transcribe(new Blob(["x"], { type: "audio/webm" }))).rejects.toMatchObject({ code: "BAD_RESPONSE" });
+    mockFetch(200, "<html>proxy error</html>");
+    await expect(endpoints.transcribe(new Blob(["x"], { type: "audio/webm" }))).rejects.toBeInstanceOf(ApiError);
+    mockFetch(200, { data: { text: "ship it" } });
+    await expect(endpoints.transcribe(new Blob(["x"], { type: "audio/webm" }))).resolves.toEqual({ text: "ship it" });
+  });
+
   it("posts JSON bodies", async () => {
     const fetchMock = mockFetch(200, { data: { username: "jeff", features: {} } });
     await endpoints.login("jeff", "pw");

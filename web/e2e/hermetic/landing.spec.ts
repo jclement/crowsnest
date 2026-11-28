@@ -39,7 +39,7 @@ test("the review tab shows what the job produced, and Merge lands it after a con
     await expect(sections.nth(1)).toHaveAttribute("data-file-section", "retry_test.go");
   }
   await expect(viewer.getByRole("table", { name: "Diff of retry.go" }).first()).toContainText("for attempt := 0; attempt < 4; attempt++ {");
-  await expect(detail.getByText("3 of 3 files not viewed")).toBeVisible();
+  await expect(detail.getByText("3 of 3 committed files not viewed")).toBeVisible();
   await expect(detail.getByRole("list", { name: "Review rounds" })).toContainText("Approved");
   await expectNoSidewaysScroll(page);
   await shot(page, testInfo, "review");

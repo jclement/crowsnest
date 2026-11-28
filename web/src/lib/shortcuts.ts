@@ -55,6 +55,8 @@ export function shortcutSections(mac: boolean): ShortcutSection[] {
         { keys: ["v"], what: "Changes: mark the current file viewed (again to unmark)" },
         { keys: ["c"], what: "Changes: comment on the selected lines (or the focused line, else the whole file)" },
         { keys: ["f"], what: "Changes: full screen (esc leaves it)" },
+        { keys: ["1", "…", "9"], what: "A decision: press its choices in order (a granting one still asks again)" },
+        { keys: ["esc"], what: "A decision: go back where you came from" },
       ],
     },
   ];

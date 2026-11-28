@@ -85,7 +85,7 @@ project's main checkout. See [Review changes with the diff viewer](../how-to/rev
 - **The worktree has uncommitted work**: open the job's terminal, commit or stash, then land.
 - **The main checkout is dirty or on another branch**: that is your working copy; crowsnest will
   not touch it. Clean it up and land again.
-- **A lead working in the main checkout** has no worktree and no Land tab: its commits are already
+- **A lead working in the main checkout** has no worktree and no Review tab: its commits are already
   in your checkout.
 
 Step by step: [Review and land a job](../how-to/review-and-land.md).

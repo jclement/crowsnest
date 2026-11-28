@@ -71,6 +71,17 @@ describe("JobDetail", () => {
     expect(screen.getByRole("button", { name: "Answer in Inbox" })).toBeInTheDocument();
   });
 
+  it("a finished job sent back with comments says Changes requested in its header, not Done · Accepted (R10 Opus B3)", async () => {
+    renderDetail(
+      makeDetail({ id: "j_18", state: "done", worktree_branch: "job/91-retry", accept_state: "accepted", changes_state: "requested", fix_job: "j_30", pane_id: "" }),
+    );
+    const header = await screen.findByRole("heading", { name: "Add retry back-off to the webhook sender" });
+    const chips = header.parentElement!;
+    expect(within(chips).getByText("Changes requested")).toBeInTheDocument();
+    expect(within(chips).queryByText("Accepted")).toBeNull();
+    expect(within(chips).queryByText("Done")).toBeNull();
+  });
+
   it("asks before cancelling", async () => {
     const calls = renderDetail(makeDetail());
     await userEvent.click(await screen.findByRole("button", { name: "Cancel job" }));

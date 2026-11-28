@@ -81,7 +81,7 @@ test("comment on lines in two files, send them, the agent gets one message with 
   if (!phone) {
     // The job's Review tab counts the comments waiting to be sent (the demo left two).
     await page.goto(`/jobs?job=${id}`);
-    await expect(detailRegion(page, testInfo, "Selected job").getByRole("tab", { name: "Review · 2 comments to send" })).toBeVisible();
+    await expect(detailRegion(page, testInfo, "Selected job").getByRole("tab", { name: "Review · 2" })).toBeVisible();
   }
   const viewer = await openViewer(page, testInfo, id, "server/checkout.go");
 

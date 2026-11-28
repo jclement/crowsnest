@@ -55,11 +55,12 @@ export function Tabs<T extends string>({ id, label, items, value, onChange, clas
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(item.value)}
             className={cn(
-              "inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded px-3 text-xs font-medium transition-colors md:min-h-7",
+              // Below sm the icons go and the padding narrows, so four tabs fit 390 px (R10 Opus F21).
+              "inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded px-2 text-xs font-medium transition-colors sm:px-3 md:min-h-7",
               selected ? "bg-surface text-heading shadow-sm ring-1 ring-border" : "text-muted hover:text-heading",
             )}
           >
-            {item.icon && <item.icon className="h-3.5 w-3.5" aria-hidden />}
+            {item.icon && <item.icon className="hidden h-3.5 w-3.5 sm:block" aria-hidden />}
             {item.label}
           </button>
         );

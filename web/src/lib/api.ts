@@ -8,6 +8,7 @@
 // without a server. `?fixtures=0` turns it off. The choice is kept for the tab's lifetime
 // (sessionStorage) because client-side navigation drops the query string.
 import type { SpendGroup, SpendPeriod, SpendReport } from "./spend";
+import { trackRequest } from "./pending";
 import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types";
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
@@ -100,6 +101,8 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const headers: Record<string, string> = { Accept: "application/json", "X-Crowsnest": "1" };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   let response: Response;
+  // Tracked so the heartbeat can tell a server that stopped answering (lib/pending.ts).
+  const settled = trackRequest();
   try {
     response = await fetch(API_BASE + path, {
       method: options.method ?? "GET",
@@ -111,6 +114,8 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError(0, "NETWORK_ERROR", "Cannot reach crowsnest. Check the connection.");
+  } finally {
+    settled();
   }
   const payload = await readJSON(response);
   if (!response.ok) {
@@ -484,7 +489,13 @@ async function uploadAudio(audio: Blob): Promise<{ text: string }> {
     const error = (payload as { error?: { code?: string; message?: string } } | null)?.error;
     throw new ApiError(response.status, error?.code ?? "HTTP_" + response.status, error?.message ?? response.statusText);
   }
-  return (payload as { data: { text: string } }).data;
+  // A body without its text (a proxy's HTML page, a truncated reply) is a failure the recorder
+  // can show, not a TypeError that left "Transcribing…" up for good (R10 Fable).
+  const data = (payload as { data?: { text?: unknown } } | null)?.data;
+  if (!data || typeof data.text !== "string") {
+    throw new ApiError(response.status, "BAD_RESPONSE", "The transcription came back unreadable. Try again.");
+  }
+  return { text: data.text };
 }
 
 /** The terminal WebSockets (lib/termSocket.ts opens them). */

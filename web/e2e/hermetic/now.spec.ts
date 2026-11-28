@@ -155,11 +155,12 @@ test("answering from Now: a question's option and a low approval, in place", asy
   const review = questionRow.getByRole("button", { name: "Review the decision" });
   const options = questionRow.getByRole("list", { name: "Options" });
   await expect(review.or(options)).toBeVisible();
-  // A question whose words grant something ("Apply the fleet cache refactor?": apply is a granting
-  // word since R9-S10) asks for a second tap before it is answered.
+  // A question whose words grant a permission (allow, merge, push…) asks for a second tap before
+  // it is answered; an everyday word such as "apply" no longer does (R10 Opus F4). After a packet
+  // answer the next item shows what was answered, or Now comes back.
   const confirmIfAsked = async () => {
     const confirm = page.getByRole("group", { name: "Confirm the choice" });
-    await expect(confirm.or(questionRow).first()).toBeVisible();
+    await expect(confirm.or(questionRow).or(page.getByTestId("answered-notice")).or(page.locator("[data-now-summary]")).first()).toBeVisible();
     if (await confirm.isVisible()) await confirm.getByRole("button", { name: /^Yes, / }).click();
   };
   if (await review.isVisible()) {

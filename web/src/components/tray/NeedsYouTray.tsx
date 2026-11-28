@@ -24,7 +24,7 @@ import { cn } from "../../lib/cn";
 import { DESKTOP_QUERY, WIDE_QUERY } from "../../lib/media";
 import { relativeTime } from "../../lib/format";
 import { FOCUS_TRAY_EVENT, trayTitle, type TrayItem } from "../../lib/needsYou";
-import { isBlocking, itemLink, kindLabel, labelOf, labelWords, plainPreview, whereLine } from "../../lib/attention";
+import { isBlocking, itemLink, kindAfterLabel, labelOf, labelWords, plainPreview, whereLine } from "../../lib/attention";
 
 /** The label's ink on a row. */
 const labelTextClass = { danger: "text-danger", warning: "text-warning", neutral: "text-body" } as const;
@@ -292,7 +292,6 @@ export function TrayRow({
   useEffect(() => {
     if (open && item.kind === "approval") cardRef.current?.focus();
   }, [open, item.kind]);
-  const who = item.item.agent;
   return (
     // Blocking rows carry an edge in the needs-you colour (the word says it too): the eye finds
     // what stops an agent before what can wait.
@@ -309,18 +308,19 @@ export function TrayRow({
           {rowIcon(item)}
           <span className="min-w-0 flex-1">
             <span className="line-clamp-2 break-words text-sm font-medium text-heading">{trayTitle(item)}</span>
+            {/* The label leads, so a phone's truncation cuts the job title, never "Dangerous" or
+                "Blocking" (R10 Fable F7, Opus F1); the kind only when it adds to the label, and no
+                pane name (the job is the one id a row needs: Opus F2). */}
             <span className="block truncate pt-0.5 text-xs text-muted">
+              <span className={cn("font-semibold", labelTextClass[labelWords[labelOf(item.item)].tone])} data-label={labelOf(item.item)}>
+                {labelWords[labelOf(item.item)].text}
+              </span>
+              {kindAfterLabel(item.item) && ` · ${kindAfterLabel(item.item)}`}
+              {" · "}
               <span className="text-body" data-where>
                 {whereLine(item.item)}
               </span>
-              {" · "}
-              <span className={cn("font-medium", labelTextClass[labelWords[labelOf(item.item)].tone])} data-label={labelOf(item.item)}>
-                {labelWords[labelOf(item.item)].text}
-              </span>
-              {" · "}
-              {kindLabel(item.item)}
-              {who && ` · ${who}`}
-              {item.at && ` · waiting ${relativeTime(item.at).replace(/ ago$/, "")}`}
+              {item.at && ` · ${relativeTime(item.at).replace(/ ago$/, "")}`}
             </span>
           </span>
         </button>

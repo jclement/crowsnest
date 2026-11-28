@@ -66,7 +66,9 @@ test("a question's decision packet from a push link: brief first, the bar in rea
   await page.screenshot({ path: `screenshots/phone-decide-question-${width(testInfo)}.png` });
   await expectAccessible(page, testInfo, "decision packet");
 
-  // The note survives a reload, a rotation and a trip to the background.
+  // The note survives a reload, a rotation and a trip to the background. It is folded behind
+  // "Add a note" until wanted (R10 Fable F6), and stays open once it has text.
+  await page.getByTestId("answer-bar").getByRole("button", { name: "Add a note" }).click();
   const note = page.getByTestId("answer-bar").getByLabel(/Note/);
   await note.fill("only after the backup");
   await page.reload();
@@ -142,6 +144,13 @@ test("rescue a stuck agent with buttons, not a terminal", async ({ page }, testI
   await page.goto(`/jobs?job=${stuck!.job_id}`);
   const panel = page.getByTestId("rescue-panel");
   await expect(panel).toBeVisible();
+  // An agent that said something leads with its words and the reply box; the rescue buttons are
+  // folded under them as "Other ways to get it moving" (R10 Fable F2, Opus F3).
+  const other = panel.getByRole("button", { name: "Other ways to get it moving" });
+  if (await other.isVisible()) {
+    await expect(page.getByRole("form", { name: "Message the agent" })).toBeVisible();
+    await other.click();
+  }
   const actions = panel.getByRole("list", { name: "Rescue actions" });
   await expect(actions).toBeVisible();
   // axe first: it waits for the job sheet's slide-in to finish, so the picture is not mid-fade.
@@ -167,4 +176,73 @@ test("the phone terminal: every key bar key on screen", async ({ page }, testInf
     expect(box && box.x >= 0 && box.x + box.width <= 391 && box.height >= 44, `key ${index} at ${JSON.stringify(box)}`).toBe(true);
   }
   await page.screenshot({ path: `screenshots/phone-terminal-keys-${width(testInfo)}.png` });
+});
+
+// R10 Opus B1: after an answer the packet moves to the next decision at once. A reflex double tap
+// (or a tap one beat late) must not answer the next item, whose buttons sit where the first were.
+test("a double tap answers one decision: the next one's choices are held, and it says what was answered", async ({ page }, testInfo) => {
+  await sizeFor(page, testInfo);
+  await page.goto("/");
+  const low = (await items(page)).find((item) => item.kind === "approval" && item.approval?.risk === "low");
+  expect(low, "the demo has a routine approval").toBeDefined();
+  await page.goto(`/decide?item=${encodeURIComponent(low!.id)}`);
+  const allow = page.getByTestId("answer-bar").getByRole("button", { name: /^Allow once$/ });
+  await expect(allow).toBeVisible();
+  const box = (await allow.boundingBox())!;
+  const before = (await items(page)).map((item) => item.id);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page).not.toHaveURL(new RegExp(encodeURIComponent(low!.id)));
+  // The second tap of the double tap, on the same spot, on the item that just appeared.
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByTestId("answered-notice")).toContainText("Allowed");
+  await expect(page.getByRole("group", { name: /Confirm/ })).toHaveCount(0);
+  await page.waitForTimeout(1_000);
+  const after = (await items(page)).map((item) => item.id);
+  expect(before.filter((id) => !after.includes(id))).toEqual([low!.id]);
+  await expect(page.getByTestId("answer-bar")).toHaveAttribute("data-armed", "true");
+});
+
+// R10 Opus B6: a decision that cannot load (the browser offline: TanStack pauses the query, which
+// left a skeleton for good) says so and offers Retry.
+test("a decision that cannot load says so and offers Retry", async ({ page, context }, testInfo) => {
+  await sizeFor(page, testInfo);
+  await page.goto("/");
+  const question = (await items(page)).find((item) => item.kind === "question");
+  expect(question).toBeDefined();
+  const ref = question!.id.split(":")[1];
+  await expect(page.locator("[data-now-summary]")).toBeVisible();
+  await context.setOffline(true);
+  // In-app navigation: a page load would fail outright while offline.
+  await page.evaluate((id) => {
+    window.history.pushState({}, "", `/decide?item=${encodeURIComponent(id)}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, question!.id);
+  const alert = page.getByRole("alert").filter({ hasText: ref! });
+  await expect(alert).toContainText("offline", { timeout: 10_000 });
+  await expect(alert.getByRole("button", { name: "Retry" })).toBeVisible();
+  // Back online, the paused fetch resumes by itself and the decision appears.
+  await context.setOffline(false);
+  await expect(page.getByTestId("answer-bar")).toBeVisible({ timeout: 15_000 });
+});
+
+// R10 Fable B2: in the job's own Review tab (the sheet a phone lands on), selecting a line shows
+// the Comment bar on screen, not under the file pager or below the fold.
+test("a line selected in a job's Review tab shows its Comment bar on screen", async ({ page }, testInfo) => {
+  await sizeFor(page, testInfo);
+  await page.goto("/");
+  const jobs = ((await (await page.request.get("/api/v1/jobs")).json()) as { data: Array<{ id: string; worktree_branch?: string }> }).data;
+  const job = jobs.find((candidate) => candidate.worktree_branch === "job/120-checkout-redesign");
+  expect(job, "the demo has the checkout redesign").toBeDefined();
+  await page.goto(`/jobs?job=${job!.id}`);
+  await page.getByRole("tab", { name: /^Review/ }).first().click();
+  const line = page.getByRole("button", { name: /^Line \d+, (old|new) side/ }).first();
+  await line.click();
+  const bar = page.getByRole("status", { name: "Selected lines" });
+  const comment = bar.getByRole("button", { name: /^Comment/ });
+  await expect(comment).toBeVisible();
+  const box = (await comment.boundingBox())!;
+  const height = page.viewportSize()!.height;
+  expect(box.y + box.height, `Comment at ${JSON.stringify(box)} in a ${height}px viewport`).toBeLessThanOrEqual(height);
+  await comment.click();
+  await expect(page.getByRole("textbox").filter({ hasText: "" }).last()).toBeVisible();
 });

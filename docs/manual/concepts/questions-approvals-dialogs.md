@@ -106,8 +106,11 @@ the agent and the folder named, what trusting means, **Trust this folder** and *
 Some questions are crowsnest's own gates: "land this job?", "start this job outside its
 directory?", a scheduled task file to approve, or any question whose title or options use a
 granting word: allow, approve, approval, merge, land, push, deploy, delete, grant or permit. These are **never answerable from a notification** (no
-buttons, and the server refuses one), and the decision screen asks "This widens what agents may
-do… Yes, <label>" before it answers. See [Safety](../safety.md).
+buttons, and the server refuses one). On the decision screen crowsnest's own gates, and a question
+whose title or chosen option uses a permission word (allow, approve, merge, land, push, deploy,
+delete, publish, grant, permit), take a second tap before they answer; "apply", "accept", "confirm"
+and "proceed" keep a question off notifications and rows but answer in one tap there, where the
+evidence is on screen. See [Safety](../safety.md).
 
 ## What can go wrong
 

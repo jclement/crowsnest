@@ -48,7 +48,8 @@ export function NowView() {
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 p-3 md:p-4">
       <NowHeader />
       <Hint id="now" topic="start-here">
-        New here? Keep a weather eye on Needs you: it is all that waits on you. Your projects follow, and any ? explains what it sits by.
+        {/* Short, and true on a phone too, where the projects are below, not beside (R10 Opus polish). */}
+        New here? Needs you is what waits on you; Projects is what each one is doing.
       </Hint>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
         <QueueSection />
@@ -122,9 +123,7 @@ function QueueSection() {
           Could not load what needs you: {attention.error.message}
         </Banner>
       ) : items.length === 0 ? (
-        <EmptyState icon={CheckCheck} title="Nothing needs you">
-          Every agent is working, waiting on something else, or done.
-        </EmptyState>
+        <QueueZero />
       ) : (
         <>
           <TrayList items={shown} fresh={new Set()} />
@@ -232,6 +231,7 @@ function ProjectRow({ row }: { row: NowRow }) {
             {row.kind !== "orchestrator" && (
               <>
                 <Figure state={row.counts.running > 0 ? "running" : "idle"} value={row.counts.running} unit="running" />
+                {(row.counts.queued ?? 0) > 0 && <Figure state="held" value={row.counts.queued ?? 0} unit="queued" />}
                 <Figure state="done" value={row.counts.done_today} unit="done today" />
                 {row.counts.failed_today > 0 && <Figure state="needs" value={row.counts.failed_today} unit="failed today" danger />}
               </>
@@ -258,6 +258,20 @@ function ProjectRow({ row }: { row: NowRow }) {
       {/* Beside the row's button, not in it: a link inside a button is not allowed. */}
       <OpenInClaude status={remote} variant="icon" noFallback className="shrink-0 py-2.5 pr-2" />
     </li>
+  );
+}
+
+/**
+ * The queue emptied: the state the day works towards, said once with what is still moving
+ * (R10 Fable Delight 2, Opus "the empty moment").
+ */
+function QueueZero() {
+  const now = useNow();
+  const running = (now.data?.rows ?? []).reduce((sum, row) => sum + row.counts.running, 0);
+  return (
+    <EmptyState icon={CheckCheck} title="Nothing needs you">
+      {running > 0 ? `${running} job${running === 1 ? "" : "s"} still running; this fills when one needs you.` : "Every agent is waiting on something else, or done."}
+    </EmptyState>
   );
 }
 
@@ -291,11 +305,15 @@ function SinceSection() {
       setMarking(false);
     }
   };
-  const events = since.data?.events ?? [];
+  // A question still open is in Needs you already, above: listed here too it was said twice
+  // (R10 Fable, Opus F16). It shows here once it is answered.
+  const attention = useAttention();
+  const open = new Set((attention.data?.items ?? []).map((item) => item.id));
+  const events = (since.data?.events ?? []).filter((event) => !(event.kind === "asked" && event.ref && open.has(`question:${event.ref}`)));
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const [all, setAll] = useState(false);
   const shown = desktop || all ? events : events.slice(0, PHONE_SINCE_EVENTS);
-  const open = (event: SinceEvent) => {
+  const openEvent = (event: SinceEvent) => {
     if ((event.kind === "asked" || event.kind === "answered") && event.ref) void navigate({ to: "/inbox", search: { q: event.ref } });
     else if (event.job_id) void navigate({ to: "/jobs", search: { job: event.job_id } });
   };
@@ -324,7 +342,7 @@ function SinceSection() {
               const Icon = sinceIcons[event.kind];
               return (
                 <li key={`${event.kind}:${event.job_id ?? ""}:${event.ref ?? ""}:${event.at}`}>
-                  <button type="button" onClick={() => open(event)} className="flex w-full min-h-11 items-start gap-2 px-3 py-2 text-left hover:bg-hover">
+                  <button type="button" onClick={() => openEvent(event)} className="flex w-full min-h-11 items-start gap-2 px-3 py-2 text-left hover:bg-hover">
                     <Icon
                       className={cn("mt-0.5 h-4 w-4 shrink-0", event.kind === "done" ? "text-success" : event.kind === "failed" ? "text-danger" : event.kind === "asked" ? "text-accent" : "text-warning")}
                       aria-hidden

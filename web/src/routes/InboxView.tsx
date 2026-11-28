@@ -23,7 +23,7 @@ import { cn } from "../lib/cn";
 import { relativeTime } from "../lib/format";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { notificationState, requestNotifications, type NotificationState } from "../lib/notifications";
-import { activeItems, countsSentence, itemLink, kindLabel, labelOf, labelWords, snoozedItems, whereLine, type AttentionItem } from "../lib/attention";
+import { activeItems, countsSentence, itemLink, kindAfterLabel, labelOf, labelWords, snoozedItems, whereLine, type AttentionItem } from "../lib/attention";
 import { useAgentScreen, useApproval, useApprovals, useAttention, useAttentionAction, useFleet, useQuestions } from "../lib/queries";
 import { outcome, requester, riskLabels, type Approval } from "../lib/approvals";
 import { ApprovalCard } from "../components/approvals/ApprovalCard";
@@ -196,13 +196,12 @@ function AttentionRow({ item, selected, onOpen }: { item: AttentionItem; selecte
           <span className={cn("min-w-0 flex-1 break-words text-sm font-medium text-heading", item.kind === "approval" && "font-mono text-xs")}>{item.title}</span>
           <span className="shrink-0 text-2xs text-muted">{relativeTime(item.since)}</span>
         </span>
-        <span className="block w-full truncate text-xs text-body">{whereLine(item)}</span>
-        <span className="flex flex-wrap items-center gap-1">
+        <span className="flex w-full min-w-0 items-center gap-1">
           <Chip tone={labelWords[labelOf(item)].tone}>{labelWords[labelOf(item)].text}</Chip>
-          <Chip>{kindLabel(item)}</Chip>
-          {item.agent && <Chip mono>{item.agent}</Chip>}
-          {item.detail && <span className="min-w-0 truncate text-xs text-muted">{item.detail}</span>}
+          {kindAfterLabel(item) && <Chip>{kindAfterLabel(item)}</Chip>}
+          <span className="min-w-0 truncate text-xs text-body">{whereLine(item)}</span>
         </span>
+        {item.detail && <span className="block w-full truncate text-xs text-muted">{item.detail}</span>}
       </button>
     </li>
   );

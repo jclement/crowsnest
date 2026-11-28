@@ -57,13 +57,14 @@ const summary = (scope: string) => ({
   scopes: ["all", "committed", "uncommitted", "since_viewed"].map((name) => ({ name, label: name, files: 2, added: 6, deleted: 2 })),
 });
 
-function render(review: ReviewView = view) {
+function render(review: ReviewView = view, landRefusal?: string) {
   const calls = stubApi((call) => {
     const changes = /^\/changes\/jobs\/j_1\?scope=(\w+)/.exec(call.path);
     if (changes) return { body: { data: summary(changes[1] ?? "all") } };
     if (call.path.startsWith("/changes/jobs/j_1/file")) return { body: { data: { path: "store.go", status: "modified", hash: "store.go-h", diff: "@@ -1,1 +1,1 @@\n-old\n+new\n", binary: false, too_large: false, cut: false, old_text: "old\n", new_text: "new\n", since: false, context: 0 } } };
     if (call.path === "/jobs/j_1/review") return { body: { data: review } };
     if (call.path.startsWith("/jobs/j_1/review/diff")) return { body: { data: { path: "retry.go", diff: "@@ -1,1 +1,2 @@\n-old\n+new\n+more\n", binary: false, cut: false } } };
+    if (call.path === "/jobs/j_1/land" && landRefusal) return { status: 409, body: { error: { code: "LAND_REFUSED", message: landRefusal } } };
     if (call.path === "/jobs/j_1/land") return { body: { data: { action: "merge", detail: "Merged into main", torn_down: true } } };
     return undefined;
   });
@@ -87,18 +88,30 @@ describe("ReviewPanel", () => {
   it("embeds the live diff viewer and says how many committed files are not viewed", async () => {
     render();
     expect(await screen.findByRole("region", { name: "Changes: j_1: Retry" })).toBeInTheDocument();
-    expect(await screen.findByText("1 of 2 files not viewed")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 2 committed files not viewed")).toBeInTheDocument();
   });
 
   it("lands only after a confirmation that says what will happen", async () => {
     const calls = render();
     await userEvent.click(await screen.findByRole("button", { name: "Merge" }));
     const dialog = screen.getByRole("alertdialog", { name: "Confirm Merge" });
+    // Short lines first (R10 Fable F9); the server's exact sentence under "Exactly what happens".
+    expect(dialog).toHaveTextContent("Merges job/1-retry into main.");
     expect(dialog).toHaveTextContent("Merge job/1-retry into main with a merge commit.");
-    expect(dialog).toHaveTextContent("1 of 2 files are not marked viewed.");
+    expect(dialog).toHaveTextContent("1 of 2 committed files are not marked viewed.");
     expect(calls.some((call) => call.path === "/jobs/j_1/land")).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: "Yes, merge" }));
     await waitFor(() => expect(calls.find((call) => call.path === "/jobs/j_1/land")?.body).toEqual({ action: "merge", confirm: true }));
+  });
+
+  it("a refused land says why in the card, with Try again, not only in a toast (R10 Opus B7)", async () => {
+    render(view, "the main checkout (/w) has uncommitted changes (README.md); commit or stash them there first. Nothing was merged");
+    await userEvent.click(await screen.findByRole("button", { name: "Merge" }));
+    await userEvent.click(within(screen.getByRole("alertdialog", { name: "Confirm Merge" })).getByRole("button", { name: "Yes, merge" }));
+    const refused = await screen.findByTestId("land-refused");
+    expect(refused).toHaveTextContent("Merge refused: the main checkout (/w) has uncommitted changes (README.md)");
+    await userEvent.click(within(refused).getByRole("button", { name: "Try again" }));
+    expect(screen.getByRole("alertdialog", { name: "Confirm Merge" })).toBeInTheDocument();
   });
 
   it("says why an action is closed", async () => {
