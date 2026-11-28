@@ -265,8 +265,8 @@ func (s *Service) adoptFixes(ctx context.Context) {
 			if _, reserved := branchOpOf(*r); reserved == fix.ID {
 				return errSkip
 			}
-			if r.BranchOp != "" && r.BranchOp != branchLand {
-				return errSkip // another fix holds it: that one settles first
+			if r.BranchOp != "" && (r.BranchOp != branchLand || r.BranchOpOwner == s.instance) {
+				return errSkip // another fix, or a land of this process, holds it: that one settles first
 			}
 			kind := branchRebase
 			if strings.HasPrefix(fix.BriefMD, commentsFixBrief) {
