@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -48,5 +49,17 @@ func TestHooksIncludeApprovalAndGuard(t *testing.T) {
 	}
 	if _, ok := ClaudeSettings("/bin/crowsnest", "/tmp/s.sock", "", "", "", false)["hooks"].(map[string]any)["PreToolUse"]; ok {
 		t.Fatal("no rules file, no guard hook")
+	}
+}
+
+// TestCodexSandboxArgsKeepTheNetworkOff (R10 new-M2): the one builder of a Codex agent's sandbox
+// arguments says the network is off, whatever the approval.
+func TestCodexSandboxArgsKeepTheNetworkOff(t *testing.T) {
+	for _, approval := range []string{"never", "on-request"} {
+		got := strings.Join(CodexSandboxArgs(approval), " ")
+		want := "--ask-for-approval " + approval + " --sandbox workspace-write -c sandbox_workspace_write.network_access=false"
+		if got != want {
+			t.Errorf("got  %s\nwant %s", got, want)
+		}
 	}
 }

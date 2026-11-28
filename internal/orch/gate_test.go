@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/agentcfg"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
 )
 
@@ -126,6 +127,10 @@ func TestCodexEngine(t *testing.T) {
 	}
 	if status.Engine != EngineCodex {
 		t.Errorf("status engine %q", status.Engine)
+	}
+	// R10 new-M2: the same sandbox arguments as a Codex job, the network explicitly off.
+	if joined := strings.Join(start.Args, " "); !strings.Contains(joined, strings.Join(agentcfg.CodexSandboxArgs("never"), " ")) {
+		t.Errorf("the orchestrator's sandbox network is not explicitly off: %s", joined)
 	}
 	prompts := f.Prompts()
 	if len(prompts) == 0 || !strings.Contains(prompts[len(prompts)-1].Text, "CROWSNEST.md") {
