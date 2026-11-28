@@ -107,6 +107,37 @@ export interface Job {
   /** What the agent said when it last ended a turn. */
   last_message?: string;
   last_message_at?: string | null;
+  /**
+   * The human's request for changes on a finished job (R9-C1): "requested" while a fix job makes
+   * them, "fix_failed" when it did not finish, "made" when it did; Land refuses all three until
+   * the human accepts the changes or sets the request aside. fix_job is the fix job working now.
+   */
+  changes_state?: ChangesState;
+  fix_job?: string;
+  /** The job's holds, strongest first (DESIGN.md 6.20); the chip shows the first (R9-C10). */
+  holds?: Hold[];
+  /** What waits to be typed to the agent: findings, or the human's comments (R9-C3). */
+  feedback?: WaitingFeedback[];
+}
+
+export type ChangesState = "" | "requested" | "fix_failed" | "made";
+
+/** Hold kinds, strongest first (internal/jobs/holdset.go holdOrder). */
+export type HoldKind = "approval" | "checking" | "reviewing" | "budget" | "check" | "review" | "approval_tool" | "questions" | "usage_limit";
+
+export interface Hold {
+  kind: HoldKind;
+  lift: "human" | "crowsnest";
+  why: string;
+  since?: string;
+  from?: string;
+}
+
+export interface WaitingFeedback {
+  kind: "check" | "review" | "comments";
+  count?: number;
+  sending: boolean;
+  since: string;
 }
 
 export interface JobEvent {
@@ -236,7 +267,7 @@ export function nextOwnerText(owner: NextOwner): string {
 
 /** The fields nextStep reads: the job's state and everything that qualifies it. */
 export type NextStepInput = Pick<Job, "state" | "stuck" | "cause" | "cause_detail" | "worktree_branch"> &
-  Partial<Pick<Job, "accept_state" | "land_state" | "torn_down_at" | "review_of" | "wake_kind">>;
+  Partial<Pick<Job, "accept_state" | "land_state" | "torn_down_at" | "review_of" | "wake_kind" | "changes_state" | "fix_job" | "holds">>;
 
 // The hold reasons a queued, held job carries (internal/jobs/holds.go and holdset.go).
 const PAUSED_HOLD = "crowsnest's automation is paused";
@@ -260,6 +291,14 @@ export function nextStep(job: NextStepInput): NextStep {
       return { label: "Failed", tone: "danger", owner: "you" };
     case "done":
       return finishedStep(job);
+  }
+  // A live job's strongest hold decides what happens next before anything its state says (R9-C10):
+  // a blocked job whose timer is due still waits for the usage limit to reset, a running job
+  // whose tool call waits for approval waits on you.
+  const strongest = job.holds?.[0];
+  const held = strongest ? holdStep(job, strongest.kind) : null;
+  if (held) return held;
+  switch (job.state) {
     case "queued":
       return queuedStep(job);
     case "in_review":
@@ -276,11 +315,39 @@ export function nextStep(job: NextStepInput): NextStep {
   }
 }
 
+/** The chip a live job's strongest hold gives (the holds are internal/jobs/holdset.go's, in its order). */
+export function holdStep(job: NextStepInput, kind: HoldKind): NextStep {
+  switch (kind) {
+    case "approval":
+      return { label: "Approve to start", tone: "danger", owner: "you" };
+    case "checking":
+      return { label: "Checking", tone: "accent", owner: "crowsnest" };
+    case "reviewing":
+      return { label: "In review", tone: "accent", owner: "reviewer" };
+    case "budget":
+      return { label: "Held: budget", tone: "danger", owner: "you" };
+    case "check":
+      return { label: "Check failed", tone: "danger", owner: "you" };
+    case "review":
+      return job.worktree_branch && !job.review_of ? { label: "Review objects", tone: "danger", owner: "you" } : { label: "Waiting on you", tone: "danger", owner: "you" };
+    case "approval_tool":
+    case "questions":
+      return { label: "Waiting on you", tone: "danger", owner: "you" };
+    case "usage_limit":
+      return { label: "Held: usage limit", tone: "neutral", owner: "crowsnest" };
+  }
+}
+
 function finishedStep(job: NextStepInput): NextStep {
   if (job.land_state === "merged") return { label: "Merged", tone: "success", owner: "nobody" };
   if (job.land_state === "pr") return { label: "PR open", tone: "success", owner: "nobody" };
   if (job.land_state === "discarded") return { label: "Discarded", tone: "neutral", owner: "nobody" };
   if (!job.worktree_branch || job.review_of || job.torn_down_at) return { label: "Done", tone: "success", owner: "nobody" };
+  // The human's request for changes holds it from landing (R9-C1), whatever its old evidence says.
+  if (job.changes_state === "requested") return { label: "Changes requested", tone: "warning", owner: "agent" };
+  if (job.changes_state === "fix_failed") return { label: "Fix failed", tone: "danger", owner: "you" };
+  if (job.changes_state === "made" && (!job.accept_state || job.accept_state === "accepted" || job.accept_state === "unverified"))
+    return { label: "Review the changes", tone: "warning", owner: "you" };
   switch (job.accept_state) {
     case "needs_rebase":
       return { label: "Needs rebase", tone: "warning", owner: "you" };
@@ -570,7 +637,8 @@ export function hasReview(job: Pick<Job, "worktree_branch" | "review_of">): bool
 }
 
 /** True when a finished job's worktree still waits to be landed or discarded. */
-export function readyToLand(job: Pick<Job, "worktree_branch" | "review_of" | "state" | "land_state" | "torn_down_at" | "cause">): boolean {
-  if (!hasReview(job) || job.torn_down_at || job.land_state) return false;
+export function readyToLand(job: Pick<Job, "worktree_branch" | "review_of" | "state" | "land_state" | "torn_down_at" | "cause" | "changes_state">): boolean {
+  // Requested changes hold it from landing until the human accepts them (R9-C1).
+  if (!hasReview(job) || job.torn_down_at || job.land_state || job.changes_state) return false;
   return job.state === "done" || (job.state === "needs_you" && job.cause === "review");
 }

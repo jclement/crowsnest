@@ -4,6 +4,7 @@
 //
 //	POST /api/v1/jobs/{id}/recheck            run crowsnest's check of the job again
 //	POST /api/v1/jobs/{id}/rebase             start a job that brings the branch up to date with its base
+//	POST /api/v1/jobs/{id}/changes/resolve    accept the changes you asked for (or set the request aside): it may land again (R9-C1)
 //	PUT  /api/v1/jobs/{id}/budget             {usd?, tokens?, minutes?, turns?}: change (raise) the job's budget
 //	POST /api/v1/jobs/{id}/budget/finish-step a job at its budget may finish the step it is in
 //	POST /api/v1/jobs/{id}/wake               wake a blocked job now
@@ -35,6 +36,9 @@ func (s *Server) registerAcceptRoutes(mux *http.ServeMux) {
 	}))
 	mux.Handle("POST /api/v1/jobs/{id}/rebase", action(func(ctx context.Context, service *jobs.Service, id string) (jobs.Job, error) {
 		return service.AskRebase(ctx, id)
+	}))
+	mux.Handle("POST /api/v1/jobs/{id}/changes/resolve", action(func(ctx context.Context, service *jobs.Service, id string) (jobs.Job, error) {
+		return service.ResolveChanges(ctx, id)
 	}))
 	mux.Handle("POST /api/v1/jobs/{id}/budget/finish-step", action(func(ctx context.Context, service *jobs.Service, id string) (jobs.Job, error) {
 		return service.BudgetFinishStep(ctx, id)

@@ -559,7 +559,7 @@ export function useSetProjectAccept(id: number) {
   });
 }
 
-export type GuardAction = "recheck" | "rebase" | "finish-step" | "wake";
+export type GuardAction = "recheck" | "rebase" | "finish-step" | "wake" | "resolve-changes";
 
 /** The job view's acceptance, budget and wake-up actions. */
 export function useJobGuard(id: string) {
@@ -573,6 +573,8 @@ export function useJobGuard(id: string) {
           return endpoints.rebase(id);
         case "finish-step":
           return endpoints.finishStep(id);
+        case "resolve-changes":
+          return endpoints.resolveChanges(id);
         default:
           return endpoints.wake(id);
       }

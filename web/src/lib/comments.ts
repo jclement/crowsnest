@@ -6,7 +6,7 @@
 import type { DiffFile, DiffLine } from "./changes";
 
 export type CommentSide = "old" | "new" | "file";
-export type CommentStatus = "draft" | "sent" | "outdated";
+export type CommentStatus = "draft" | "sent" | "outdated" | "waiting";
 
 export interface DiffComment {
   id: number;
@@ -24,8 +24,12 @@ export interface DiffComment {
   created_at: string;
   updated_at: string;
   sent_at?: string;
-  /** It goes with the next send: a draft, or an outdated note not sent since. */
+  /** It goes with the next send: a draft, an outdated note not sent since, or one edited since it was sent. */
   pending: boolean;
+  /** A send holds it and has not delivered it yet (the job may not continue yet, R9-C3). */
+  waiting?: boolean;
+  /** A send of it may or may not have arrived (crowsnest stopped mid-send): due again, your call (R9-C5). */
+  uncertain?: boolean;
 }
 
 export interface CommentList {
@@ -38,6 +42,8 @@ export interface CommentList {
   drafts: number;
   sent: number;
   outdated: number;
+  /** Notes in a send that waits to be typed. */
+  waiting?: number;
   last_sent_at?: string;
 }
 
@@ -163,7 +169,7 @@ export function whereText(comment: Pick<DiffComment, "side" | "line_start" | "li
   return comment.side === "old" ? `${lines} (removed side)` : lines;
 }
 
-export const statusText: Record<CommentStatus, string> = { draft: "draft", sent: "sent", outdated: "outdated" };
+export const statusText: Record<CommentStatus, string> = { draft: "draft", sent: "sent", outdated: "outdated", waiting: "waiting to be typed" };
 
 /** What a send did, for a toast. */
 export function sentText(result: SendResult): string {

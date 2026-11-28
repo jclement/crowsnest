@@ -79,7 +79,7 @@ export function CommentEditor({ initial = "", where, onSave, onCancel, busy, sav
 
 // ---- One note -----------------------------------------------------------------------------------
 
-const statusTone = { draft: "accent", sent: "success", outdated: "warning" } as const;
+const statusTone = { draft: "accent", sent: "success", outdated: "warning", waiting: "neutral" } as const;
 
 export function CommentCard({ comment, who, showPath, showQuote, className }: {
   comment: DiffComment;
@@ -122,13 +122,18 @@ export function CommentCard({ comment, who, showPath, showQuote, className }: {
         <span className="text-2xs text-muted">{where}</span>
         <Chip tone={statusTone[comment.status]}>{statusText[comment.status]}</Chip>
         {comment.status === "outdated" && comment.pending && <Chip tone="accent">goes with the next send</Chip>}
+        {comment.uncertain && (
+          <Chip tone="warning" title="crowsnest stopped while sending it: it may or may not have reached the agent. Send it again if the agent did not get it.">
+            may not have arrived
+          </Chip>
+        )}
         {comment.sent_at && <span className="text-2xs text-muted">sent {new Date(comment.sent_at).toLocaleString()}</span>}
         <span className="ml-auto flex items-center">
           {comment.pending && <IconButton icon={Pencil} label={`Edit the comment on ${where}`} onClick={() => setEditing(true)} />}
           {comment.pending && (
             <IconButton icon={Trash2} label={`Delete the comment on ${where}`} onClick={() => actions.remove.mutate(comment.id, { onError: fail("Could not delete it") })} />
           )}
-          {!comment.pending && (
+          {!comment.pending && !comment.waiting && (
             <Button compact variant="ghost" icon={RotateCcw} onClick={() => actions.resend.mutate(comment.id, { onError: fail("Could not re-send it") })}>
               Re-send
             </Button>
@@ -239,9 +244,18 @@ export function SendForm({ who, list, compact }: { who: DiffWho; list: CommentLi
         <MessageSquarePlus className="h-4 w-4 text-muted" aria-hidden />
         <span>
           {list.drafts} to send · {list.sent} sent{list.outdated > 0 ? ` · ${list.outdated} outdated` : ""}
+          {(list.waiting ?? 0) > 0 ? ` · ${list.waiting} waiting to be typed` : ""}
         </span>
         {list.last_sent_at && <span className="text-2xs text-muted">Last sent {new Date(list.last_sent_at).toLocaleString()}</span>}
       </div>
+      {list.drafts === 0 && (list.waiting ?? 0) > 0 && who.kind === "job" && (
+        <p className="flex flex-wrap items-center gap-1.5 text-2xs text-muted">
+          They are typed when the job may continue, never over a draft someone left in its input box.
+          <Button compact variant="ghost" disabled={actions.send.isPending} onClick={() => send(true)}>
+            Let them type over a draft
+          </Button>
+        </p>
+      )}
       {list.drafts > 0 && (
         <>
           {!compact && (

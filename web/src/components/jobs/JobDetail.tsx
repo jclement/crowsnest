@@ -11,7 +11,7 @@ import { useFleet, useJob, useJobAction, useJobGuard, useJobs, useProjects, useS
 import { ReviewPanel } from "./ReviewPanel";
 import { useComments } from "../../lib/comments-queries";
 import { EmbeddedDiff } from "../changes/JobChanges";
-import { BudgetCard, EvidenceCard, LastMessage, WaitLine } from "./AcceptPanels";
+import { BudgetCard, ChangesCard, EvidenceCard, LastMessage, WaitLine } from "./AcceptPanels";
 import { acceptChip } from "../../lib/accept";
 import { AgentConversation } from "../agent/AgentConversation";
 import { JobRulesCard } from "../approvals/JobRulesCard";
@@ -53,7 +53,10 @@ export function JobDetail({ id }: { id: string }) {
 /** The job's header and tabs; the Review (or Land) tab counts the diff comments waiting to be sent. */
 function JobView({ job, tab, setTab }: { job: Detail; tab: DetailTab; setTab: (tab: DetailTab) => void }) {
   const drafts = useComments({ kind: "job", id: job.id }, hasReview(job) && !job.land_state && !job.torn_down_at).data?.drafts ?? 0;
-  const reviewLabel = (readyToLand(job) ? "Land" : "Review") + (drafts > 0 ? ` · ${drafts} comment${drafts === 1 ? "" : "s"} to send` : "");
+  const reviewLabel =
+    (readyToLand(job) ? "Land" : "Review") +
+    (job.changes_state === "requested" || job.changes_state === "fix_failed" ? " · changes requested" : job.changes_state === "made" ? " · changes made" : "") +
+    (drafts > 0 ? ` · ${drafts} comment${drafts === 1 ? "" : "s"} to send` : "");
   return (
     <article aria-label={job.title} className="flex min-h-full max-w-4xl flex-col gap-3 p-3 md:p-4">
       <JobHeader job={job} />
@@ -202,6 +205,7 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
         </Banner>
       )}
       {job.state === "blocked" && <Banner tone="warning">Blocked: {job.blocked_reason}</Banner>}
+      <ChangesCard job={job} />
       <EvidenceCard job={job} />
       <BudgetCard job={job} />
       {job.state === "done" && <Result job={job} />}
