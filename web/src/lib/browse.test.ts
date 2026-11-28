@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { factsSummary, filterEntries, folderWarnings, hostNote, isPathInput, refusesFolder, tildePath, type BrowseEntry, type FolderFacts } from "./browse";
+import { factsSummary, filterEntries, folderWarnings, hostNote, isPathInput, middlePath, refusesFolder, tildePath, type BrowseEntry, type FolderFacts } from "./browse";
 
 function entry(name: string, extra: Partial<BrowseEntry> = {}): BrowseEntry {
   return { name, path: `/h/${name}`, dir: true, git: false, symlink: false, hidden: false, mtime: "", readable: true, ...extra };
@@ -93,5 +93,13 @@ describe("refusesFolder", () => {
 
   it("refuses nothing for a job, which may run anywhere it is pointed", () => {
     expect(refusesFolder(facts({ is_home: true }), "job")).toBe(false);
+  });
+});
+
+describe("middlePath", () => {
+  it("keeps the start and the last two folders of a long path", () => {
+    expect(middlePath("/tmp/claude-501/r10/crowsnest-demo-2921922139/state/demo-src/website")).toBe("/tmp/…/demo-src/website");
+    expect(middlePath("~/Developer/crowsnest")).toBe("~/Developer/crowsnest");
+    expect(middlePath("~/Work/clients/acme/projects/storefront-api", 20)).toBe("~/…/projects/storefront-api");
   });
 });

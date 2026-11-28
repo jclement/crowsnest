@@ -243,3 +243,17 @@ export function tildePath(path: string, home: string | undefined): string {
   if (path === home) return "~";
   return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
 }
+
+/**
+ * A long path cut in the middle, keeping where it starts and its last two folders (R10, Fable
+ * polish: a list cut the tail and kept "/tmp/claude-501/r10/crowsnest-demo-…", which tells one
+ * project from another by nothing). Short paths are left whole; the title should carry the rest.
+ */
+export function middlePath(path: string, max = 36): string {
+  if (path.length <= max) return path;
+  const parts = path.split("/");
+  const tail = parts.slice(-2).join("/");
+  const head = path.startsWith("/") ? `/${parts[1] ?? ""}` : (parts[0] ?? "");
+  const cut = `${head}/…/${tail}`;
+  return cut.length < path.length ? cut : path;
+}

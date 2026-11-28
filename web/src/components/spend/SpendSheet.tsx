@@ -46,7 +46,12 @@ export function SpendButton({ onOpen }: { onOpen: () => void }) {
           visible text whole (axe's label-in-name rule). */}
       <span className="font-mono">
         <span className="sr-only">Spend: </span>
-        {money(data?.today)} <span className="text-muted">today</span> · {money(data?.week)} <span className="text-muted">wk</span>
+        {money(data?.today)} <span className="text-muted">today</span>
+        {/* The week is one tap away in the sheet; on a phone its room keeps the board's toolbar to two rows (R10 F-F13). */}
+        <span className="hidden sm:inline">
+          {" "}
+          · {money(data?.week)} <span className="text-muted">wk</span>
+        </span>
         <span className="sr-only"> (estimates)</span>
       </span>
     </Button>

@@ -71,6 +71,11 @@ export function JobsView() {
           <span className="mr-auto">
             <SpendButton onOpen={() => setSpendOpen(true)} />
           </span>
+          {/* Icons with their names (R10 F-F13): with New job and spend on the first row and the counts on the second, the toolbar is
+              two rows on a phone, not three. */}
+          <IconButton icon={CalendarClock} label="Schedule" onClick={() => setScheduleOpen(true)} />
+          <IconButton icon={NotebookText} label="Journal" onClick={() => setJournalOpen(true)} />
+          <HelpButton topic="concepts/jobs#states" what="job states" inline={false} />
           {queue.data && (
             <Button compact variant="ghost" icon={Gauge} onClick={() => void navigate({ to: "/settings", hash: "limits" })} title="Running-job limit, load hold and heavy slots: Settings → Limits">
               <span className={queue.data.paused || queue.data.load_hold ? "text-warning" : undefined}>{queueText(queue.data)}</span>
@@ -81,10 +86,6 @@ export function JobsView() {
               {lingering} to land
             </Button>
           )}
-          {/* Icons with their names (R10 F-F13): the toolbar is two rows on a phone, not three. */}
-          <IconButton icon={CalendarClock} label="Schedule" onClick={() => setScheduleOpen(true)} />
-          <IconButton icon={NotebookText} label="Journal" onClick={() => setJournalOpen(true)} />
-          <HelpButton topic="concepts/jobs#states" what="job states" inline={false} />
         </div>
         <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />
         <SweepSheet

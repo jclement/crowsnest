@@ -6,7 +6,8 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys } from "../../lib/api";
 import type { ProjectInput, ProjectView } from "../../lib/projects";
-import { useCreateProject, useUpdateProject } from "../../lib/queries";
+import { useBrowsePlaces, useCreateProject, useUpdateProject } from "../../lib/queries";
+import { tildePath } from "../../lib/browse";
 import { Button } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
 import { useToast } from "../ui/toast-context";
@@ -22,12 +23,14 @@ interface NewProjectSheetProps {
 
 export function NewProjectSheet({ open, onClose, onCreated, browse }: NewProjectSheetProps) {
   const create = useCreateProject();
+  // The folder as the picker showed it: ~ for home (R10: three lines of temporary path in a toast).
+  const home = useBrowsePlaces(open).data?.home;
   const toast = useToast();
   const queryClient = useQueryClient();
   const submit = (input: ProjectInput, extras: ProjectExtras) =>
     create.mutate({ ...input, trust_folder: extras.trustFolder, ...(extras.trustFolder && extras.codexFingerprint !== undefined ? { codex_fingerprint: extras.codexFingerprint } : {}) }, {
       onSuccess: (project) => {
-        toast.show({ tone: "success", title: `Project ${project.name} created`, description: project.dir });
+        toast.show({ tone: "success", title: `Project ${project.name} created`, description: tildePath(project.dir, home) });
         const trustProblem = (project.trust ?? []).find((result) => result.status === "failed" || (result.status === "skipped" && result.agent === "claude"));
         if (trustProblem) {
           toast.show({

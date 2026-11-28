@@ -47,9 +47,11 @@ test("a job's Spend section is one figure; Details breaks it down, charts its ca
   await expect(detailRegion(page, testInfo, "Selected job").getByText(/Counted on the orchestrator's line/)).toBeVisible();
 });
 
-test("the header's totals open one figure by job or day; Details adds by model, tokens and CSV", async ({ page }) => {
+test("the header's totals open one figure by job or day; Details adds by model, tokens and CSV", async ({ page }, testInfo) => {
   await openBoard(page);
-  const button = page.getByRole("button", { name: /^Spend: \$\S+ today · \$\S+ wk \(estimates\)$/ });
+  // A phone shows today only (R10 F-F13: the week is in the sheet; the toolbar keeps two rows).
+  const name = isPhone(testInfo) ? /^Spend: \$\S+ today \(estimates\)$/ : /^Spend: \$\S+ today · \$\S+ wk \(estimates\)$/;
+  const button = page.getByRole("button", { name });
   await expect(button).toBeVisible();
   await button.click();
   const sheet = page.getByRole("dialog", { name: "Spend (estimated)" });

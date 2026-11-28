@@ -63,7 +63,9 @@ func newProjectWiring(cfg config.Config, db *store.Store, events *hub.Hub) *proj
 	home, _ := os.UserHomeDir()
 	var otherHomes []string
 	if cfg.Demo {
-		otherHomes = []string{demoBrowseHome(cfg)}
+		// The demo's ~ is the picker's throwaway home (a typed ~/Developer/acme-api is the folder
+		// the picker showed, not one on this machine), and the machine's own home is refused too.
+		home, otherHomes = demoBrowseHome(cfg), []string{home}
 	}
 	return &projectWiring{service: projects.New(projects.Options{Store: db, Hub: events, Roles: roles.Has, Home: home, OtherHomes: otherHomes})}
 }

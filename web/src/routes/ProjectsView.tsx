@@ -14,6 +14,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { SkeletonRows } from "../components/ui/Skeleton";
 import { useToast } from "../components/ui/toast-context";
 import { cn } from "../lib/cn";
+import { middlePath } from "../lib/browse";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { leadChip, leadRunning, type ProjectView } from "../lib/projects";
 import { useLeadAction, useProjects } from "../lib/queries";
@@ -150,7 +151,7 @@ function ProjectRow({ project, selected }: { project: ProjectView; selected: boo
           <Chip tone={chip.tone}>{chip.label}</Chip>
         </span>
         <span className="truncate font-mono text-2xs text-muted" title={project.dir}>
-          {project.dir}
+          {middlePath(project.dir)}
         </span>
         <span className="flex flex-wrap gap-1 text-2xs text-muted">
           {project.counts.needs_you > 0 && <Chip tone="danger">{project.counts.needs_you} need you</Chip>}
