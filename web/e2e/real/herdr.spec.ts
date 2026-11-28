@@ -164,7 +164,8 @@ test.describe("real herdr with the login on", () => {
     await page.getByLabel("Username").fill(LOGIN.username);
     await page.getByLabel("Password").fill(LOGIN.password);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(/\/terminal$/);
+    // /terminal is the old door: it redirects to the session terminal in the Agents view.
+    await expect(page).toHaveURL(/\/agents\?session=true$/);
     await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible({ timeout: 15_000 });
   });
 });
