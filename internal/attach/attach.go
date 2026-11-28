@@ -131,9 +131,9 @@ type Options struct {
 	// StateDir is crowsnest's state directory, under which every agent copy is made (Layout's
 	// inboxes). A recorded copy outside it is never removed (R10 new-H1); "" skips that check.
 	StateDir string
-	Limits Limits
-	Logger *slog.Logger
-	Now    func() time.Time
+	Limits   Limits
+	Logger   *slog.Logger
+	Now      func() time.Time
 	// Changed, when set, is told an owner's files changed ("job:j_3", "question:q_7",
 	// "orchestrator:", "pending:"), so the web app can refetch. It must not block.
 	Changed func(owner string)

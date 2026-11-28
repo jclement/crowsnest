@@ -330,3 +330,29 @@ func TestViewedGateIsInEveryLand(t *testing.T) {
 		t.Fatal("discard asked the Viewed gate")
 	}
 }
+
+// TestTeardownRemovesOnlyTheJobsOwnWorktree (R10 new-H1): the workspace a teardown asks herdr to
+// remove comes from the job's record, which a restored backup can point at any workspace. herdr
+// is asked only when that workspace is open on the job's own worktree; otherwise the other
+// worktree stays and the timeline says why.
+func TestTeardownRemovesOnlyTheJobsOwnWorktree(t *testing.T) {
+	r := newLandRig(t, LandingOptions{MergeMode: "merge"}, nil)
+	ctx := context.Background()
+	repo := landRepo(t)
+	job := landedJob(t, r, repo)
+	other := r.create(CreateInput{Brief: "Something else", Dir: repo})
+	r.edit(job.ID, func(rec *store.JobRecord) { rec.WorkspaceID = r.record(other.ID).WorkspaceID })
+	result, err := r.svc.Land(ctx, job.ID, LandMerge, "you")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TornDown || len(r.fake.Removed()) != 0 {
+		t.Fatalf("a worktree was removed through another job's workspace: %+v removed %v", result, r.fake.Removed())
+	}
+	if _, err := os.Stat(other.WorkDir); err != nil {
+		t.Fatalf("the other job's worktree is gone: %v", err)
+	}
+	if !hasEvent(r.get(job.ID), EventLand, "not on the job's worktree") {
+		t.Fatalf("the refusal is not on the timeline: %s", timelineText(r.get(job.ID)))
+	}
+}
