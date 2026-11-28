@@ -181,6 +181,13 @@ func (s *Service) landBlocked(job Job, action string, produced *landing.Produced
 		return "the job was already " + landWord(job.LandState) + "; its teardown can be retried from the sweep"
 	case job.ReviewOf != "":
 		return "this is a reviewer job; land the job it reviews"
+	case job.FixJob != "":
+		// R9-C1/C2: a fix job works in this worktree; landing or removing it now would take its
+		// branch from under it.
+		return "fix job " + job.FixJob + " is working in this job's worktree; wait for it to finish, or cancel it"
+	}
+	if why := changesBlock(job); why != "" && action != LandDiscard {
+		return why
 	}
 	landable := job.State == StateDone || (job.State == StateNeedsYou && job.Cause == CauseReview)
 	if action == LandDiscard {
@@ -321,6 +328,14 @@ func (s *Service) LandWith(ctx context.Context, id, action, by string, flags Lan
 	if why := s.landBlocked(job, action, nil); why != "" {
 		return LandResult{}, invalid("%s", why)
 	}
+	// R9-C2: the branch is reserved for this land, so no fix job or check starts on it meanwhile
+	// (and none is running: takeLand refuses then). The requested-changes state is read again
+	// under the same lock.
+	release, err := s.takeLand(ctx, job.ID, action)
+	if err != nil {
+		return LandResult{}, err
+	}
+	defer release()
 	if action == LandDiscard {
 		return s.discard(ctx, job, by)
 	}

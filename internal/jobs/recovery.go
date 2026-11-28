@@ -79,7 +79,13 @@ func (s *Service) Tick(ctx context.Context) {
 	s.DispatchStanding(ctx)
 	s.ReconcileLandRequests(ctx) // R5-C09: requests sit on finished jobs, which the live pass skips
 	s.reconcileFixes(ctx)        // R6-C11: a finished rebase whose parent never took it in
-	s.reconcileBudgetHolds(ctx)  // R7-C02: the holds below an exhausted budget, from its own hold
+	s.adoptFixes(ctx)            // R9-C2: a live fix job whose parent's reservation was never saved
+	if reserved, err := s.opts.Store.ListBranchOps(ctx, superviseBatch); err == nil {
+		for _, record := range reserved {
+			s.reconcileBranchOps(ctx, record) // R9-C2: a land a dead crowsnest left
+		}
+	}
+	s.reconcileBudgetHolds(ctx) // R7-C02: the holds below an exhausted budget, from its own hold
 	// The review gate's own states (R5-C05): in_review is not a live state of the pass below.
 	if err := s.eachLive(ctx, []State{StateInReview}, func(record store.JobRecord) { s.reconcileReview(ctx, record) }); err != nil && ctx.Err() == nil {
 		s.opts.Logger.Warn("supervisor: listing jobs in review", "err", err)
@@ -137,8 +143,8 @@ func (s *Service) tickJob(ctx context.Context, r store.JobRecord) {
 		return
 	}
 	s.renotifyQuestions(ctx, r)
-	if r.PendingFeedback != "" {
-		s.deliverFeedback(ctx, id) // a check's finding held by the pause or a hold (R6-C07)
+	if hasFeedback(r) {
+		s.deliverFeedback(ctx, id) // findings or comments held by the pause or a hold (R6-C07, R9-C3)
 	}
 	s.tickBlocked(ctx, r)      // a wake-up that is due, or a job waited on that settled (6.18)
 	s.checkGraceExpiry(ctx, r) // "finish the step" is bounded in time too (R7-C03)

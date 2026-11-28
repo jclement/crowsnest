@@ -323,7 +323,7 @@ func (s *Service) sendBackForChanges(ctx context.Context, parent Detail, reviewe
 			text = fmt.Sprintf("[crowsnest review %s] The reviewer asked for changes (round %d of %d); job_get shows its findings. Address each one, commit, and call done again.",
 				reviewer.ID, r.ReviewRound, maxReviewRounds)
 		}
-		r.PendingFeedback = text
+		queueFinding(r, FeedbackReview, text, s.opts.Now())
 		c.event(EventReview, fmt.Sprintf("Changes requested by %s (round %d of %d); the findings go to the agent", reviewer.ID, r.ReviewRound, maxReviewRounds),
 			map[string]any{"reviewer": reviewer.ID, "findings": path})
 		return nil

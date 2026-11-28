@@ -174,6 +174,19 @@ func (s *Store) ListUnappliedFixes(ctx context.Context, limit int) ([]JobRecord,
 		ORDER BY id LIMIT ?`, limit)
 }
 
+// ListLiveFixJobs returns fix jobs still at work, oldest first, whose parent is done and not
+// landed (R9-C2: recovery adopts one its parent holds no reservation for).
+func (s *Store) ListLiveFixJobs(ctx context.Context, limit int) ([]JobRecord, error) {
+	return s.queryJobs(ctx, jobSelect+` WHERE fix_of != 0 AND state NOT IN ('done', 'failed', 'cancelled')
+		AND EXISTS (SELECT 1 FROM jobs p WHERE p.id = jobs.fix_of AND p.state = 'done' AND p.land_state = '')
+		ORDER BY id LIMIT ?`, limit)
+}
+
+// ListBranchOps returns jobs holding a branch reservation (R9-C2), oldest first.
+func (s *Store) ListBranchOps(ctx context.Context, limit int) ([]JobRecord, error) {
+	return s.queryJobs(ctx, jobSelect+` WHERE branch_op != '' ORDER BY id LIMIT ?`, limit)
+}
+
 // ListAcceptedJobs returns finished jobs whose evidence matters to Land (accept_state set) and
 // that are not torn down, oldest first: the jobs whose evidence can go stale.
 func (s *Store) ListAcceptedJobs(ctx context.Context, limit int) ([]JobRecord, error) {

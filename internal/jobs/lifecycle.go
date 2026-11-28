@@ -26,6 +26,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jclement/crowsnest/internal/orch"
@@ -241,11 +242,22 @@ func (s *Service) resolveStaleLocked(r *store.JobRecord, c *change) {
 	case opRetry, opNudge:
 		c.event(EventLaunch, "A "+op+" interrupted by a crowsnest restart may or may not have been typed; it stays counted", map[string]any{"step": op})
 	case opFeedback:
-		// R7-C05: the findings may have been typed; typing them again would start a second turn
-		// on the same findings. They stay readable (job_get: the check's output, the review).
-		r.PendingFeedback = ""
+		// R7-C05, R9-C4: the batch being typed may have arrived; typing it again would start a
+		// second turn on it. Only that batch is settled: anything queued behind it stays due.
+		batch, ok := sendingFeedback(*r)
+		if !ok {
+			return
+		}
+		takeFeedback(r, batch.ID)
+		if batch.Kind == FeedbackComments {
+			// The human's notes go back to them, marked as may-or-may-not-have-arrived, to send again or not.
+			c.settleComments(batch, FeedbackUncertain, "crowsnest stopped while typing them")
+			c.event(EventReview, fmt.Sprintf("crowsnest stopped while typing your %d review comment%s; they may or may not have arrived, so they are not typed again. "+
+				"The diff shows them as unsent; send them again if the agent did not get them", batch.Count, plural(batch.Count)), map[string]any{"step": op})
+			return
+		}
 		c.event(EventAccept, "crowsnest stopped while typing the findings to the agent; they may or may not have arrived, so they are not typed again "+
-			"(job_get shows them; send a message if the agent did not get them)", map[string]any{"step": op})
+			"(job_get shows the check's output and the review; send a message if the agent did not get them)", map[string]any{"step": op})
 	default:
 		c.event(EventLaunch, "A step interrupted by a crowsnest restart was dropped: "+op, map[string]any{"step": op})
 	}

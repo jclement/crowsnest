@@ -748,7 +748,7 @@ func (s *Service) checkFinished(ctx context.Context, id string, record store.Che
 			}
 			// Kept until it is typed (R6-C07): sending it starts a builder turn, which waits for
 			// the pause to end and for any hold to be lifted (deliverFeedback).
-			r.PendingFeedback = message
+			queueFinding(r, FeedbackCheck, message, s.opts.Now())
 		default: // error: it could not run at all; rounds are not the agent's fault
 			liftHoldLocked(r, c, HoldChecking, LiftCrowsnest, nil)
 			r.State, r.AcceptState = string(StateRunning), AcceptFailed
@@ -847,6 +847,10 @@ func (s *Service) Recheck(ctx context.Context, id string) (Job, error) {
 		if r.AcceptState == AcceptChecking {
 			return invalid("job %s's check is already running", FormatID(r.ID))
 		}
+		if why := branchBusy(*r); why != "" {
+			// R9-C2: a fix job at work, or a land, owns the branch; a check now would test a moving tree.
+			return invalid("job %s: %s", FormatID(r.ID), why)
+		}
 		// The same prerequisite as done (R6-C02): only committed work is checked.
 		if snap, err := landing.Snap(ctx, workDirOf(*r), "", ""); err != nil {
 			return invalid("job %s's worktree could not be read: %v", FormatID(r.ID), err)
@@ -900,21 +904,6 @@ func (s *Service) AskRebase(ctx context.Context, id string) (Job, error) {
 		return Job{}, invalid("crowsnest does not know the branch job %s started from", job.ID)
 	}
 	numeric, _ := ParseID(job.ID)
-	applied := int64(0)
-	if record, err := s.opts.Store.GetJob(ctx, numeric); err == nil {
-		applied = record.FixApplied
-	}
-	if fixes, err := s.opts.Store.ListFixJobs(ctx, numeric); err == nil {
-		for _, fix := range fixes {
-			if !State(fix.State).Terminal() {
-				return Job{}, invalid("job %s is already being rebased by %s", job.ID, FormatID(fix.ID))
-			}
-			if fix.ID > applied {
-				// R6-C11: a finished rebase whose result is not applied yet; the tick applies it.
-				return Job{}, invalid("job %s's rebase by %s has finished and is being checked; wait for that result", job.ID, FormatID(fix.ID))
-			}
-		}
-	}
 	off := false
 	brief := fmt.Sprintf("Bring job %s's branch up to date with %s.\n\n"+
 		"You are in the job's own worktree (%s, branch %s). %s has moved on since the branch started. "+
@@ -923,13 +912,9 @@ func (s *Service) AskRebase(ctx context.Context, id string) (Job, error) {
 		"Do not push, and do not switch branches. crowsnest runs the check again when you are done.\n\n"+
 		"## The job's brief\n\n%s", job.ID, job.BaseBranch, job.WorkDir, job.WorktreeBranch, job.BaseBranch, job.BaseBranch, job.WorktreeBranch,
 		job.BaseBranch, indent(job.BriefMD))
-	fix, err := s.Create(ctx, CreateInput{Brief: brief, Dir: job.WorkDir, Role: "builder", Engine: job.Engine, Model: job.Model, Isolate: &off,
-		Reviewer: ReviewerOff, fixOf: numeric}, job.ID)
-	if err != nil {
-		return Job{}, err
-	}
-	_ = s.Journal(ctx, job.ID, EventAccept, "Rebase asked of "+fix.ID+": merge "+job.BaseBranch+" in, then check again", map[string]any{"fix": fix.ID})
-	return fix, nil
+	input := CreateInput{Brief: brief, Dir: job.WorkDir, Role: "builder", Engine: job.Engine, Model: job.Model, Isolate: &off, Reviewer: ReviewerOff, fixOf: numeric}
+	// One operation on the branch at a time (R9-C2): reserved with the fix job's insertion.
+	return s.startFix(ctx, job.ID, branchRebase, input, "Rebase asked of {fix}: merge "+job.BaseBranch+" in, then check again")
 }
 
 // fixSettled runs when a fix job finishes: its parent is checked again.
@@ -943,8 +928,12 @@ func (s *Service) fixSettled(ctx context.Context, fix Job) {
 			return errSkip // already taken in (the tick's replay and the callback can both arrive)
 		}
 		r.FixApplied = fixID
+		kind, _ := branchOpOf(*r)
+		releaseFixLocked(r, c, fix) // R9-C1/C2: the branch is free again; requested changes move on
 		if fix.State != StateDone {
-			c.event(EventAccept, "The rebase by "+fix.ID+" did not finish ("+string(fix.State)+"); the job still needs one", nil)
+			if kind != branchChanges {
+				c.event(EventAccept, "The rebase by "+fix.ID+" did not finish ("+string(fix.State)+"); the job still needs one", nil)
+			}
 			return nil
 		}
 		if r.AcceptState == AcceptNone || r.AcceptState == AcceptUnverified {
@@ -1106,63 +1095,105 @@ func (s *Service) SetProjectAccept(ctx context.Context, projectID int64, input P
 	return s.opts.Store.DeleteKV(ctx, store.RestoredPrepareKey(projectID))
 }
 
-// deliverFeedback types a job's pending findings (a check's failure, R6-C07, or a review's
-// changes) to its agent. It is a lifecycle step (opFeedback, lifecycle.go), so exactly one caller
-// owns a delivery: the check's callback, the review's and the tick can all call it, and the claim
-// on the row lets one through (R7-C05). It passes the continuation gate before the claim and again
+// deliverFeedback types the first batch of a job's feedback queue (feedback.go: a check's
+// failure, R6-C07, a review's changes, or the human's deferred review comments) to its agent. It
+// is a lifecycle step (opFeedback, lifecycle.go), so exactly one caller owns a delivery: the
+// check's callback, the review's and the tick can all call it, and the claim on the row lets one
+// through (R7-C05). The claim marks the one batch it types (sending), and the outcome settles that
+// batch by its id and nothing else (R9-C4): a batch queued meanwhile waits its turn, never merged
+// into this one or replayed with it. It passes the continuation gate before the claim and again
 // just before typing (R7-C04): not while paused, not under any hold, not while a budget above the
-// job or the fleet's usage limit holds it. The message is cleared only when it was (or may have
-// been) typed, and only if it is still the one typed; a crowsnest that stopped mid-send leaves a
-// stale claim, which is settled as "may have arrived, not typed again" (resolveStaleLocked), never
-// replayed blindly. A send that typed nothing is journalled (at most every few minutes) and tried
-// again by the tick.
+// job or the fleet's usage limit holds it. Findings go to a running job; the human's comments also
+// to a blocked one (R9-C3), typed as the human's message would be, its wait left to the agent. A
+// batch of comments types over a draft in the input box only if its send said so (R9-C14). A
+// crowsnest that stopped mid-send leaves a stale claim, settled for the sending batch alone
+// (resolveStaleLocked). A send that typed nothing puts the batch back, is journalled (at most
+// every few minutes) and is tried again by the tick.
 func (s *Service) deliverFeedback(ctx context.Context, id string) {
 	if why := s.continuationRefusal(ctx, id); why != "" {
 		s.noteHeldContinuation(ctx, id, "the findings for the agent", why)
 		return
 	}
-	var message, paneID, agent string
+	var batch feedbackBatch
+	var paneID, agent string
 	cl, err := s.claimStep(ctx, id, opFeedback, func(r *store.JobRecord, c *change) error {
-		if r.PendingFeedback == "" || r.PaneID == "" || State(r.State) != StateRunning || len(effectiveHolds(*r, c.questions)) > 0 {
+		next, ok := nextFeedback(*r)
+		if !ok || r.PaneID == "" || len(effectiveHolds(*r, c.questions)) > 0 || !feedbackDeliverable(State(r.State), next) {
 			return errSkip
 		}
-		message, paneID, agent = r.PendingFeedback, r.PaneID, r.AgentName
+		markFeedback(r, next.ID, feedbackSending)
+		batch, paneID, agent = next, r.PaneID, r.AgentName
 		return nil
 	})
 	if err != nil {
 		return
 	}
+	putBack := func(rec *store.JobRecord, _ *change) { markFeedback(rec, batch.ID, feedbackPending) }
 	if why := s.continuationRefusal(ctx, id); why != "" {
-		s.finishQuietly(ctx, cl, nil)
+		s.finishQuietly(ctx, cl, putBack)
 		s.noteHeldContinuation(ctx, id, "the findings for the agent", why)
 		return
 	}
 	var result orch.PromptResult
 	var sendErr error
+	force := batch.Kind != FeedbackComments || batch.Force
 	if err := s.effect(ctx, cl, paneID, func(ctx context.Context) {
-		result, sendErr = orch.Prompt(ctx, s.opts.Herdr, paneID, orch.PromptRequest{Text: message, ForceOverDraft: true, ExpectAgent: agent})
+		result, sendErr = orch.Prompt(ctx, s.opts.Herdr, paneID, orch.PromptRequest{Text: batch.Text, ForceOverDraft: force, ExpectAgent: agent})
 	}); err != nil {
 		return
 	}
-	outcome := typedOutcome(result, sendErr)
-	watch := s.watchOf(id)
+	s.settleFeedback(ctx, cl, batch, typedOutcome(result, sendErr), sendErr)
+}
+
+// feedbackDeliverable reports whether a batch may be typed to a job in state: findings to a
+// running job only (they answer its done), the human's comments to a blocked one too.
+func feedbackDeliverable(state State, batch feedbackBatch) bool {
+	switch state {
+	case StateRunning:
+		return true
+	case StateBlocked:
+		return batch.Kind == FeedbackComments
+	}
+	return false
+}
+
+// settleFeedback records what became of the batch deliverFeedback typed.
+func (s *Service) settleFeedback(ctx context.Context, cl claim, batch feedbackBatch, outcome typed, sendErr error) {
+	watch := s.watchOf(cl.id)
+	what := "The findings"
+	if batch.Kind == FeedbackComments {
+		what = fmt.Sprintf("Your %d review comment%s", batch.Count, plural(batch.Count))
+	}
 	s.finishQuietly(ctx, cl, func(rec *store.JobRecord, c *change) {
-		switch {
-		case outcome == typedNo:
+		if outcome == typedNo {
+			markFeedback(rec, batch.ID, feedbackPending)
+			var draft *orch.DraftError
+			if batch.Kind == FeedbackComments && errors.As(sendErr, &draft) {
+				// R9-C14: the human's draft is left alone; Send anyway from the diff says type over it.
+				if now := s.opts.Now(); now.Sub(watch.feedbackAt) > 5*time.Minute {
+					watch.feedbackAt = now
+					c.event(EventReview, what+" wait: someone left a draft in the agent's input box. Send anyway from the diff types over it", nil)
+				}
+				return
+			}
 			if now := s.opts.Now(); now.Sub(watch.feedbackAt) > 5*time.Minute {
 				watch.feedbackAt = now
-				c.event(EventAccept, "The findings could not be typed to the agent yet: "+oneLine(sendErr.Error(), 160)+"; crowsnest tries again", nil)
+				c.event(EventAccept, what+" could not be typed to the agent yet: "+oneLine(sendErr.Error(), 160)+"; crowsnest tries again", nil)
 			}
-		case rec.PendingFeedback != message:
-			// Replaced while it was typed (a newer check or review): the newer one is still due.
-		default:
-			rec.PendingFeedback = ""
-			if outcome == typedMaybe {
-				c.event(EventAccept, "crowsnest lost track of typing the findings; counted as delivered, not typed again", nil)
-			} else {
-				c.event(EventAccept, "The findings reached the agent", nil)
-			}
+			return
 		}
+		taken, ok := takeFeedback(rec, batch.ID)
+		if !ok {
+			return // settled already (the job finished meanwhile and handed it back)
+		}
+		rec.NudgeStreak = 0
+		if outcome == typedMaybe {
+			c.settleComments(taken, FeedbackUncertain, "crowsnest lost track of typing them")
+			c.event(EventAccept, what+": crowsnest lost track of typing them; counted as delivered, not typed again", nil)
+			return
+		}
+		c.settleComments(taken, FeedbackDelivered, "")
+		c.event(EventAccept, what+" reached the agent", nil)
 	})
 }
 

@@ -21,7 +21,7 @@ func (s *Service) BackstopJobs(ctx context.Context) ([]orch.BackstopJob, error) 
 	var out []orch.BackstopJob
 	err := s.eachLive(ctx, []State{StateRunning}, func(r store.JobRecord) {
 		recovering := r.Stuck && (Cause(r.Cause) == CauseLimit || Cause(r.Cause) == CauseServerError || Cause(r.Cause) == CauseExited)
-		if r.PaneID == "" || r.Waiting || !r.BriefSent || recovering || r.PendingFeedback != "" || s.claimLive(r) {
+		if r.PaneID == "" || r.Waiting || !r.BriefSent || recovering || hasFeedback(r) || s.claimLive(r) {
 			return
 		}
 		out = append(out, orch.BackstopJob{ID: FormatID(r.ID), PaneID: r.PaneID, LastStopAt: r.LastStopAt})

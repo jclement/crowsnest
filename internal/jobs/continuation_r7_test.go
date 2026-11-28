@@ -72,8 +72,8 @@ func TestReviewFindingsWaitForALatentBudgetHold(t *testing.T) {
 		t.Fatalf("the findings were typed into a job held by its budget (%d)", n)
 	}
 	rec := r.record(job.ID)
-	if rec.PendingFeedback == "" || State(rec.State) != StateNeedsYou {
-		t.Fatalf("after the verdict: %s, pending %q", rec.State, rec.PendingFeedback)
+	if !hasFeedback(rec) || State(rec.State) != StateNeedsYou {
+		t.Fatalf("after the verdict: %s, pending %q", rec.State, rec.FeedbackJSON)
 	}
 	big := 100.0
 	if _, err := r.svc.SetJobBudget(ctx, job.ID, BudgetInput{USD: &big}); err != nil {
@@ -83,8 +83,8 @@ func TestReviewFindingsWaitForALatentBudgetHold(t *testing.T) {
 	if n := promptsContaining(r, "asked for changes"); n != 1 {
 		t.Fatalf("after the raise the findings were typed %d times, want 1", n)
 	}
-	if rec := r.record(job.ID); rec.PendingFeedback != "" {
-		t.Fatalf("delivered findings still pending: %q", rec.PendingFeedback)
+	if rec := r.record(job.ID); hasFeedback(rec) {
+		t.Fatalf("delivered findings still pending: %q", rec.FeedbackJSON)
 	}
 }
 
@@ -137,7 +137,9 @@ func TestFindingsHaveOneOwner(t *testing.T) {
 	r := newRig(t, nil)
 	ctx := context.Background()
 	job := r.create(CreateInput{Brief: "Build it", Dir: t.TempDir()})
-	r.edit(job.ID, func(rec *store.JobRecord) { rec.PendingFeedback = "[crowsnest check] FINDINGS-ONE" })
+	r.edit(job.ID, func(rec *store.JobRecord) {
+		queueFinding(rec, FeedbackCheck, "[crowsnest check] FINDINGS-ONE", r.clock.Now())
+	})
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)
@@ -153,7 +155,9 @@ func TestFindingsHaveOneOwner(t *testing.T) {
 
 	// A claim from a crowsnest that died while typing.
 	r.edit(job.ID, func(rec *store.JobRecord) {
-		rec.PendingFeedback = "[crowsnest check] FINDINGS-TWO"
+		queueFinding(rec, FeedbackCheck, "[crowsnest check] FINDINGS-TWO", r.clock.Now())
+		next, _ := nextFeedback(*rec)
+		markFeedback(rec, next.ID, feedbackSending) // the claim marks the batch it types (R9-C4)
 		rec.LifecycleOp, rec.LifecycleOwner, rec.LifecycleAt = opFeedback, "a-dead-process", r.clock.Now().Add(-time.Minute)
 	})
 	r.svc.Tick(ctx)
@@ -161,7 +165,7 @@ func TestFindingsHaveOneOwner(t *testing.T) {
 	if n := promptsContaining(r, "FINDINGS-TWO"); n != 0 {
 		t.Fatalf("findings that may have arrived were typed again (%d)", n)
 	}
-	if rec := r.record(job.ID); rec.PendingFeedback != "" || rec.LifecycleOp != "" {
-		t.Fatalf("the stale delivery was not settled: pending %q, op %q", rec.PendingFeedback, rec.LifecycleOp)
+	if rec := r.record(job.ID); hasFeedback(rec) || rec.LifecycleOp != "" {
+		t.Fatalf("the stale delivery was not settled: pending %q, op %q", rec.FeedbackJSON, rec.LifecycleOp)
 	}
 }

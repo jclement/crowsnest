@@ -15,6 +15,11 @@
 //     crowsnest checks the job again (fixSettled). Queued like any job, so the pause, throttle and
 //     budgets hold it as they hold any other;
 //   - a job crowsnest is checking or reviewing (in_review) is refused until that ends.
+//
+// What the human sees as "sent" follows what really happened (R9-C3, C4, C5, C14): a waiting
+// message is a batch of the job's feedback queue (feedback.go) holding the send's claim on its
+// notes, which are marked sent only when that batch is delivered; it keeps the send's draft
+// protection; and a finished job's request for changes holds it from landing (changes.go).
 
 package jobs
 
@@ -73,41 +78,72 @@ func (s *Service) PlanReviewComments(ctx context.Context, id string) (CommentPla
 	return CommentPlan{Route: "message"}, nil
 }
 
-// SendReviewComments delivers a composed review message (count notes) to job id by the route
-// PlanReviewComments gives. body is the message without a header; for the message paths it may
-// already point at an attached file.
-func (s *Service) SendReviewComments(ctx context.Context, id, body string, count int, force bool) (CommentDelivery, error) {
+// CommentSend is one send of review comments to a job: the composed message (without a header;
+// for the message paths it may point at an attached file), how many notes it carries, whether it
+// may type over a draft in the agent's input box, and Ref, the send that holds the notes
+// (internal/changes' claim): a deferred batch carries it so the notes are marked sent only when
+// the batch was delivered (R9-C5).
+type CommentSend struct {
+	Body  string
+	Count int
+	Force bool
+	Ref   string
+}
+
+// SendReviewComments delivers a composed review message to job id by the route
+// PlanReviewComments gives.
+func (s *Service) SendReviewComments(ctx context.Context, id string, send CommentSend) (CommentDelivery, error) {
 	plan, err := s.PlanReviewComments(ctx, id)
 	if err != nil {
 		return CommentDelivery{}, err
 	}
 	if plan.Route == CommentFixJob {
-		fix, err := s.AskChanges(ctx, id, body, count)
+		fix, err := s.AskChanges(ctx, id, send.Body, send.Count)
 		if err != nil {
 			return CommentDelivery{}, err
 		}
 		return CommentDelivery{How: CommentFixJob, FixJob: fix.ID}, nil
 	}
 	// The human's send is what lifts a final review's objection, so that hold does not count here.
-	if why := s.continuationRefusal(ctx, id, HoldReview); why != "" {
-		return s.holdComments(ctx, id, body, count, why)
+	// A job waiting on a wake-up, or with other feedback queued, takes the comments behind it.
+	if why := s.commentsWait(ctx, id); why != "" {
+		return s.holdComments(ctx, id, send, why)
 	}
-	result, err := s.Message(ctx, id, MessageInput{Text: body, ForceOverDraft: force})
+	result, err := s.Message(ctx, id, MessageInput{Text: send.Body, ForceOverDraft: send.Force})
 	if err != nil {
 		return CommentDelivery{}, err
 	}
-	_ = s.Journal(ctx, id, EventReview, fmt.Sprintf("You sent %d review comment%s from the diff", count, plural(count)), map[string]any{"comments": count})
+	if result.Uncertain {
+		_ = s.Journal(ctx, id, EventReview, fmt.Sprintf("crowsnest lost track of typing your %d review comment%s; they may or may not have arrived", send.Count, plural(send.Count)), nil)
+		return CommentDelivery{}, ErrMaybeTyped
+	}
+	_ = s.Journal(ctx, id, EventReview, fmt.Sprintf("You sent %d review comment%s from the diff", send.Count, plural(send.Count)), map[string]any{"comments": send.Count})
 	if result.Queued {
 		return CommentDelivery{How: CommentQueued}, nil
 	}
 	return CommentDelivery{How: CommentTyped}, nil
 }
 
-// holdComments keeps the message as the job's pending feedback (after any finding already
-// waiting), lifting a final review's objection as a message would, and lets deliverFeedback type
-// it when nothing holds the job.
-func (s *Service) holdComments(ctx context.Context, id, body string, count int, why string) (CommentDelivery, error) {
-	text := fmt.Sprintf("[crowsnest review comments %s] %s", id, body)
+// commentsWait is why comments to job id wait in its feedback queue instead of being typed now:
+// the continuation gate refuses (pause, a hold other than a final review's, the usage limit), or
+// something is queued already and they must not jump ahead of it ("" when they go now).
+func (s *Service) commentsWait(ctx context.Context, id string) string {
+	if why := s.continuationRefusal(ctx, id, HoldReview); why != "" {
+		return why
+	}
+	numeric, _ := ParseID(id)
+	if record, err := s.opts.Store.GetJob(ctx, numeric); err == nil && hasFeedback(record) {
+		return "earlier feedback is still waiting to be typed"
+	}
+	return ""
+}
+
+// holdComments queues the message as a new batch of the job's feedback (behind anything waiting,
+// never merged into it), lifting a final review's objection as a message would, and lets
+// deliverFeedback type it when nothing holds the job. The batch keeps the send's draft protection
+// (R9-C14) and its Ref (R9-C5).
+func (s *Service) holdComments(ctx context.Context, id string, send CommentSend, why string) (CommentDelivery, error) {
+	text := fmt.Sprintf("[crowsnest review comments %s] %s", id, send.Body)
 	_, err := s.mutate(ctx, id, func(r *store.JobRecord, c *change) error {
 		if State(r.State).Terminal() || State(r.State) == StateInReview {
 			return invalid("job %s is %s now; the comments were not sent", id, r.State)
@@ -115,86 +151,50 @@ func (s *Service) holdComments(ctx context.Context, id, body string, count int, 
 		if liftHoldLocked(r, c, HoldReview, LiftHuman, nil) {
 			c.event(EventReview, "You sent it back to the builder after its review", nil)
 		}
-		if r.PendingFeedback != "" {
-			text = r.PendingFeedback + "\n\n" + text
-		}
-		r.PendingFeedback = text
+		queueComments(r, text, send.Count, send.Ref, send.Force, s.opts.Now())
 		r.NudgeStreak = 0
-		c.event(EventReview, fmt.Sprintf("You sent %d review comment%s from the diff; they wait until the job may continue (%s)", count, plural(count), oneLine(why, 160)),
-			map[string]any{"comments": count})
+		c.event(EventReview, fmt.Sprintf("You sent %d review comment%s from the diff; they wait until the job may continue (%s)", send.Count, plural(send.Count), oneLine(why, 160)),
+			map[string]any{"comments": send.Count})
 		return nil
 	})
 	if err != nil {
 		return CommentDelivery{}, err
 	}
 	s.deliverFeedback(ctx, id) // refused while held; the tick types it later
-	numeric, _ := ParseID(id)
-	if record, err := s.opts.Store.GetJob(ctx, numeric); err == nil && record.PendingFeedback == "" {
-		return CommentDelivery{How: CommentTyped}, nil
-	}
 	if now := s.continuationRefusal(ctx, id); now != "" {
 		why = now
 	}
 	return CommentDelivery{How: CommentWaiting, Why: why}, nil
 }
 
+// commentsFixBrief starts every fix job's brief for review comments (recovery tells it from a
+// rebase by it).
+const commentsFixBrief = "Make the changes the human asked for in review comments on job "
+
 // AskChanges starts a fix job in a finished job's worktree that makes the changes the human's
-// review comments ask for. When it is done, crowsnest checks the job again (fixSettled), exactly
-// as after a rebase.
+// review comments ask for, and marks the job's changes requested (R9-C1): Land refuses it until
+// the fix is done and the human accepts the changes (or sets them aside). When the fix is done,
+// crowsnest checks the job again (fixSettled), exactly as after a rebase.
 func (s *Service) AskChanges(ctx context.Context, id, comments string, count int) (Job, error) {
 	detail, err := s.Get(ctx, id)
 	if err != nil {
 		return Job{}, err
 	}
 	job := detail.Job
-	switch {
-	case job.WorktreeBranch == "" || job.WorkDir == "" || job.TornDownAt != nil:
+	if job.WorktreeBranch == "" || job.WorkDir == "" || job.TornDownAt != nil {
 		return Job{}, invalid("job %s has no worktree for a fix job", job.ID)
-	case job.State != StateDone:
-		return Job{}, invalid("job %s is %s; only a finished job gets a fix job", job.ID, job.State)
-	case job.LandState != "":
-		return Job{}, invalid("job %s was already %s", job.ID, landWord(job.LandState))
 	}
 	numeric, _ := ParseID(job.ID)
-	if err := s.fixInFlight(ctx, job.ID, numeric); err != nil {
-		return Job{}, err
-	}
 	off := false
-	brief := fmt.Sprintf("Make the changes the human asked for in review comments on job %s.\n\n"+
+	brief := fmt.Sprintf(commentsFixBrief+"%s.\n\n"+
 		"You are in the job's own worktree (%s, branch %s). The human reviewed its diff and left the comments below, each on a file "+
 		"and lines with the code quoted. Address each one, run the project's checks (through `crowsnest heavy`), commit, and call done "+
 		"saying what you changed for each comment. Do not push, and do not switch branches. crowsnest runs the check again when you are done.\n\n"+
 		"## The comments\n\n%s\n\n## The job's brief\n\n%s", job.ID, job.WorkDir, job.WorktreeBranch, comments, indent(job.BriefMD))
-	fix, err := s.Create(ctx, CreateInput{Brief: brief, Dir: job.WorkDir, Role: "builder", Engine: job.Engine, Model: job.Model, Isolate: &off,
-		Reviewer: ReviewerOff, fixOf: numeric}, job.ID)
-	if err != nil {
-		return Job{}, err
-	}
-	_ = s.Journal(ctx, job.ID, EventReview, fmt.Sprintf("You requested changes: %d review comment%s from the diff went to %s, a fix job in this worktree; the job is checked again when it is done",
-		count, plural(count), fix.ID), map[string]any{"fix": fix.ID, "comments": count})
-	return fix, nil
-}
-
-// fixInFlight refuses a second fix job while one is running on the job, or while a finished
-// one's result is not applied yet (R6-C11).
-func (s *Service) fixInFlight(ctx context.Context, id string, numeric int64) error {
-	applied := int64(0)
-	if record, err := s.opts.Store.GetJob(ctx, numeric); err == nil {
-		applied = record.FixApplied
-	}
-	fixes, err := s.opts.Store.ListFixJobs(ctx, numeric)
-	if err != nil {
-		return nil //nolint:nilerr // as AskRebase: an unreadable list does not block the human
-	}
-	for _, fix := range fixes {
-		if !State(fix.State).Terminal() {
-			return invalid("job %s already has a fix job running (%s); wait for it to finish", id, FormatID(fix.ID))
-		}
-		if fix.ID > applied {
-			return invalid("job %s's fix job %s has finished and is being checked; wait for that result", id, FormatID(fix.ID))
-		}
-	}
-	return nil
+	input := CreateInput{Brief: brief, Dir: job.WorkDir, Role: "builder", Engine: job.Engine, Model: job.Model, Isolate: &off, Reviewer: ReviewerOff, fixOf: numeric}
+	journal := fmt.Sprintf("You requested changes: %d review comment%s from the diff went to {fix}, a fix job in this worktree. "+
+		"The job does not land until the changes are made and you accept them", count, plural(count))
+	return s.startFix(ctx, job.ID, branchChanges, input, journal)
 }
 
 func plural(n int) string {

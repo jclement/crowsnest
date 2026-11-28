@@ -224,6 +224,8 @@ type Server struct {
 	terminalSlots chan struct{}
 	// pushTests limits POST /push/test (internal/httpd/push.go).
 	pushTests *ratelimit.Limiter
+	// commentSends remembers recent comment sends by the browser's id (comments.go, R9-C5).
+	commentSends sendResults
 
 	// stopping is closed when shutdown begins, so long-lived SSE handlers return promptly
 	// instead of holding Shutdown open until its grace period runs out.

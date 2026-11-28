@@ -469,7 +469,7 @@ func (s *Service) Done(ctx context.Context, id string, input DoneInput) (Job, er
 				"but done is refused until the human lands it, discards it or sends it back with a message", FormatID(r.ID), oneLine(r.CauseDetail, 160))
 		}
 		s.markProgressLocked(r)
-		r.PendingFeedback = "" // the agent called done again: the old finding is answered
+		dropFindings(r) // the agent called done again: the old finding is answered (the human's comments are not)
 		r.State, r.ResultMD = string(StateDone), result
 		if walkthrough != "" {
 			r.WalkthroughMD = walkthrough
