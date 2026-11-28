@@ -10,6 +10,7 @@ import type { TrustPrompt } from "./types";
 // push, the tray, Now and the Inbox all link to the same packet: `/decide?item=<id>`.
 import type { Approval } from "./approvals";
 import { riskLabels } from "./approvals";
+import { shortPath } from "./format";
 import type { AttentionItem } from "./attention";
 import type { Question } from "./questions";
 
@@ -255,7 +256,8 @@ function defaultConsequence(question: Question, key: string): string {
 
 /** An approval's brief: allow or deny and what each does, with the risk in words. */
 export function approvalBrief(approval: Approval): DecisionBrief {
-  const where = approval.cwd ? ` in ${approval.cwd}` : "";
+  // The folder's last two parts: the whole absolute path filled three lines on a phone (R10 Fable).
+  const where = approval.cwd ? ` in ${shortPath(approval.cwd)}` : "";
   const allowWords =
     approval.risk === "dangerous"
       ? `It runs now${where}. This is dangerous: ${approval.risk_reasons.join("; ") || "see the reasons"}.`

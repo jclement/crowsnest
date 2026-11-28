@@ -5,7 +5,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Ban, CheckCircle2, FileDiff, CircleSlash, GitCompareArrows, MessageSquare, Play, RefreshCw, SquareTerminal, Zap } from "lucide-react";
 import { useState } from "react";
-import { relativeTime } from "../../lib/format";
+import { relativeTime, shortPath } from "../../lib/format";
 import { actionFor, actionLabels, askedInProse, causeHelpTopic, childrenOf, hasReview, isFinished, jobAnswerText, nextStep, ownershipChain, readyToLand, retryLabel, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
 import { useFleet, useJob, useJobAction, useJobGuard, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
 import { ReviewPanel } from "./ReviewPanel";
@@ -185,12 +185,6 @@ function verdictBeside(job: Detail, step: string): ReturnType<typeof acceptChip>
   return step.toLowerCase().includes(accept.label.toLowerCase()) ? null : accept;
 }
 
-/** "/a/b/c/.worktrees/job-120" as ".worktrees/job-120": the last two parts of a path. */
-export function shortPath(path: string | undefined): string {
-  if (!path) return "";
-  const parts = path.split("/").filter(Boolean);
-  return parts.length <= 2 ? path : `…/${parts.slice(-2).join("/")}`;
-}
 
 // ---- Overview ------------------------------------------------------------------------------
 
@@ -348,7 +342,7 @@ function StuckBanner({ job, openTerminal, openReview }: { job: Detail; openTermi
       ) : (
         <>
           <strong className="font-semibold">{job.cause_text}</strong>
-          {job.cause_detail && <span>: {job.cause_detail}</span>}
+          {job.cause_detail && <span>: {job.cause_detail.replace(/\.\s*$/, "")}</span>}
           {reply && <span>. Nudged {job.nudges} times already: say what it should do.</span>}
         </>
       )}

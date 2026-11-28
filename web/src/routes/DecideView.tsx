@@ -8,7 +8,7 @@
 // localStorage (lib/decision.ts) so rotation and backgrounding never lose it.
 import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 import { ArrowLeft, CheckCircle2, ChevronRight, Clock, ExternalLink, Inbox, RefreshCw, ShieldCheck, Star } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AttachmentList } from "../components/attach/AttachmentList";
 import { CallBody } from "../components/approvals/ApprovalCard";
 import { AnswerBar } from "../components/decide/AnswerBar";
@@ -165,6 +165,12 @@ function Packet({ itemId, item, brief, jobId, since, stale, paneId, bar, childre
   const next = () => {
     void navigate(following ? { to: "/decide", search: { item: following.id } } : { to: "/" });
   };
+  // Arriving after an answer, focus moves to the new ask, so a keyboard or a screen reader is told
+  // what is now on screen (R10 Opus B1, F22: focus fell to the body).
+  const askRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (arrival.answered) askRef.current?.focus();
+  }, [arrival.answered]);
   return (
     <div className="flex min-h-full flex-col" data-testid="decision-packet" data-item={itemId}>
       <article aria-labelledby="decision-ask" className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 p-3 md:p-4">
@@ -177,7 +183,7 @@ function Packet({ itemId, item, brief, jobId, since, stale, paneId, bar, childre
           </p>
         )}
         <Where item={item} jobId={jobId} since={since} kind={brief.kind} position={index >= 0 ? { at: index + 1, of: decisions.length } : null} onSkip={following ? () => void navigate({ to: "/decide", search: { item: following.id } }) : undefined} />
-        <h1 id="decision-ask" className="break-words text-base font-semibold leading-snug text-heading">
+        <h1 id="decision-ask" ref={askRef} tabIndex={-1} className="break-words outline-none text-base font-semibold leading-snug text-heading">
           {brief.ask}
         </h1>
         {stale ? (
@@ -220,6 +226,17 @@ function Where({ item, jobId, since, kind, position, onSkip }: WhereProps) {
   const router = useRouter();
   // Back goes where the person came from (the Inbox, a job, Now), and to Now on a cold start.
   const back = () => (window.history.length > 1 ? router.history.back() : void router.navigate({ to: "/" }));
+  // Esc does the same from anywhere but a field or an open sheet (R10 Fable F10).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target as Element | null;
+      if (target?.closest?.("input, textarea, select, [role=dialog]")) return;
+      back();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   return (
     <nav aria-label="Where this belongs" className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
       <button type="button" onClick={back} className="inline-flex min-h-9 items-center gap-1 rounded px-1 text-muted hover:bg-hover hover:text-heading md:min-h-6" aria-label="Back">

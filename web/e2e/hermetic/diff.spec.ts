@@ -72,9 +72,20 @@ test("a running job's diff: mark a file viewed, hide it, it changes, it comes ba
   await expect(cart.getByRole("table", { name: "Diff of web/src/cart.ts" })).toContainText("item.quantity");
   await shot(page, testInfo, "running");
 
-  await viewer.getByRole("checkbox", { name: "Viewed: web/src/cart.ts" }).first().check();
-  await expect(viewer.getByText("1 of 10 viewed")).toBeVisible();
-  if (!isPhone(testInfo)) await expect(cart.getByRole("table")).toHaveCount(0); // viewed collapses it
+  if (isPhone(testInfo)) {
+    // On a phone ticking Viewed moves on to the next file not viewed (R10 Fable F11); Previous
+    // comes back. The view options are folded behind "View options" (F1).
+    await viewer.getByRole("checkbox", { name: "Viewed: web/src/cart.ts" }).first().click();
+    await expect(viewer.getByText("1 of 10 viewed")).toBeVisible();
+    await expect(viewer.getByRole("checkbox", { name: "Viewed: web/src/cart.ts" })).toHaveCount(0);
+    await viewer.getByRole("navigation", { name: "Files" }).getByRole("button", { name: "Previous" }).click();
+    await expect(viewer.getByRole("checkbox", { name: "Viewed: web/src/cart.ts" }).first()).toBeChecked();
+    await viewer.getByRole("button", { name: "View options" }).click();
+  } else {
+    await viewer.getByRole("checkbox", { name: "Viewed: web/src/cart.ts" }).first().check();
+    await expect(viewer.getByText("1 of 10 viewed")).toBeVisible();
+    await expect(cart.getByRole("table")).toHaveCount(0); // viewed collapses it
+  }
   await viewer.getByRole("button", { name: "Hide viewed" }).click();
   if (!isPhone(testInfo)) await expect(viewer.getByRole("list", { name: "Files" })).not.toContainText("web/src/cart.ts");
 

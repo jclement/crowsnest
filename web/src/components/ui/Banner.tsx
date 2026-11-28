@@ -26,10 +26,12 @@ export function Banner({ tone = "info", icon, action, role = "status", className
   const style = toneStyles[tone];
   const Icon = icon ?? style.icon;
   return (
-    <div role={role} className={cn("flex min-h-9 items-center gap-2 border px-3 py-1 text-xs", style.className, className)}>
+    // Below sm the action goes under the text instead of squeezing it to a five-line column
+    // beside a button (R10 Fable polish: the stuck, trust and first-run banners on a phone).
+    <div role={role} className={cn("flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 border px-3 py-1 text-xs sm:flex-nowrap", style.className, className)}>
       <Icon className="h-4 w-4 shrink-0" aria-hidden />
-      <div className="min-w-0 flex-1">{children}</div>
-      {action && <div className="shrink-0">{action}</div>}
+      <div className="min-w-0 flex-1 basis-[calc(100%-1.5rem)] sm:basis-0">{children}</div>
+      {action && <div className="ml-6 shrink-0 sm:ml-0">{action}</div>}
     </div>
   );
 }

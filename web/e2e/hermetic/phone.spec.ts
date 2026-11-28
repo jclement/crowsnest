@@ -146,10 +146,10 @@ test("rescue a stuck agent with buttons, not a terminal", async ({ page }, testI
   await expect(panel).toBeVisible();
   // An agent that said something leads with its words and the reply box; the rescue buttons are
   // folded under them as "Other ways to get it moving" (R10 Fable F2, Opus F3).
-  const lastWords = page.getByRole("note", { name: "What the agent last said" });
-  if (await lastWords.isVisible()) {
+  const other = panel.getByRole("button", { name: "Other ways to get it moving" });
+  if (await other.isVisible()) {
     await expect(page.getByRole("form", { name: "Message the agent" })).toBeVisible();
-    await panel.getByRole("button", { name: "Other ways to get it moving" }).click();
+    await other.click();
   }
   const actions = panel.getByRole("list", { name: "Rescue actions" });
   await expect(actions).toBeVisible();

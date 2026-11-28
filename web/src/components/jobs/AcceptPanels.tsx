@@ -291,6 +291,10 @@ export function BudgetCard({ job }: { job: Detail }) {
 export function WaitLine({ job }: { job: Job }) {
   const guard = useGuard(job.id);
   if (isFinished(job.state) || !job.wake) return null;
+  // Said elsewhere or saying nothing: a stuck job's banner already names the wait, and a running
+  // agent waiting on its own next turn is just working (R10 Fable: "Waits on job-24: its next turn
+  // (an undeclared stop is refused)" above the fold of every running job).
+  if (job.stuck || (job.state === "running" && job.wait_owner === job.agent_name)) return null;
   return (
     <p className="flex flex-wrap items-center gap-1.5 text-xs text-body" aria-label="Who it waits on">
       <AlarmClock className="h-3.5 w-3.5 text-muted" aria-hidden />

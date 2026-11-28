@@ -377,7 +377,9 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       // Floating, so it appearing never moves the rows under a pointer that is still dragging.
       className={cn(
         "z-20 flex flex-wrap items-center gap-2 border border-accent/40 bg-surface-raised px-2 py-1 text-xs text-body shadow-lg",
-        phone ? "border-x-0 border-b-0" : "absolute bottom-3 left-1/2 w-[min(42rem,calc(100%-1.5rem))] -translate-x-1/2 rounded",
+        // On the desktop it floats at the bottom of the window, not of the viewer: in a job's detail
+        // the viewer's own bottom is often below the fold (R10 Opus F14: "not in view at 1440").
+        phone ? "border-x-0 border-b-0" : "fixed bottom-4 left-1/2 w-[min(42rem,calc(100%-1.5rem))] -translate-x-1/2 rounded",
       )}
     >
       <span className="min-w-0 flex-1 truncate">
@@ -430,6 +432,12 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
       commentList={commentList}
       selection={selection}
       onLine={(side, line, extend) => {
+        // A second tap on the one selected line opens its comment, rather than clearing it: a
+        // line tap that only highlighted was a dead end (R10 Opus F14). Clear is in the bar.
+        if (selection && selection.path === file.path && selection.side === side && selection.anchor === line && selection.end === line) {
+          commentOnSelection();
+          return;
+        }
         setEditor(null);
         setSelection((now) => clickLine(now, file.path, side, line, extend));
       }}
@@ -569,7 +577,8 @@ function Toolbar(props: ToolbarProps) {
           </Button>
         )}
         {!phone && <IconButton icon={props.listShown ? PanelLeftClose : PanelLeftOpen} label={props.listShown ? "Hide the file list" : "Show the file list"} onClick={props.onToggleList} />}
-        <div role="radiogroup" aria-label="Which changes" className="flex flex-wrap gap-1">
+        {/* One row on a phone: the scopes scroll sideways beside Files instead of wrapping (R10 Fable F1). */}
+        <div role="radiogroup" aria-label="Which changes" className={cn("flex gap-1", phone ? "min-w-0 flex-1 flex-nowrap overflow-x-auto" : "flex-wrap")}>
           {summary.scopes.map((info) => (
             <button
               key={info.name}
@@ -579,7 +588,7 @@ function Toolbar(props: ToolbarProps) {
               title={`${info.label}: ${info.files} files, +${info.added} −${info.deleted}`}
               onClick={() => setScope(info.name)}
               className={cn(
-                "min-h-11 rounded border px-2 text-xs md:min-h-7",
+                "min-h-11 shrink-0 whitespace-nowrap rounded border px-2 text-xs md:min-h-7",
                 scope === info.name ? "border-accent bg-accent/10 font-medium text-heading" : "border-border text-body hover:bg-hover",
               )}
             >

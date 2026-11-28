@@ -77,6 +77,8 @@ export function AnswerBar({ itemId, target, onAnswered, armedAt = 0 }: AnswerBar
   }, [itemId]);
   useDigitKeys(barRef, armed);
   const done = (answered: string) => {
+    // A short tick where the phone has one: the answer arrived (R10 Fable Delight 3).
+    navigator.vibrate?.(12);
     saveNote(itemId, "");
     noteAnswered(answered);
     onAnswered(answered);

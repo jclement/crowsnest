@@ -42,6 +42,16 @@ export function ReviewPanel({ job }: { job: JobDetail }) {
     <div className="flex min-w-0 flex-col gap-3">
       <ChangesCard job={job} />
       <LandCard job={job} view={view} />
+      {/* The guide before the code: read the walkthrough, then the diff (R10 Fable Delight 6). */}
+      {view.walkthrough_md && (
+        // Folded to one line, so the diff stays near the top (F1); open it to read the guide first.
+        <details className="rounded-md border border-border bg-surface">
+          <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm font-semibold text-heading md:min-h-9">Walkthrough</summary>
+          <div className="border-t border-border px-3 py-2">
+            <Markdown className="text-sm">{view.walkthrough_md}</Markdown>
+          </div>
+        </details>
+      )}
       {view.produced && <EmbeddedDiff who={{ kind: "job", id: job.id }} />}
       {view.produced && !view.land.state && <ReviewComments job={job} />}
       <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -50,11 +60,6 @@ export function ReviewPanel({ job }: { job: JobDetail }) {
         </div>
         <aside aria-label="The agent's account" className="flex min-w-0 flex-col gap-3">
           {view.reviews.length > 0 && <Reviews view={view} />}
-          {view.walkthrough_md && (
-            <Card title="Walkthrough">
-              <Markdown className="text-sm">{view.walkthrough_md}</Markdown>
-            </Card>
-          )}
           <Card title="Result">
             {view.result_md ? <Markdown className="text-sm">{view.result_md}</Markdown> : <p className="text-xs text-muted">No result yet.</p>}
             <EvidenceList title="Verified" items={view.verified} tone="text-success" />

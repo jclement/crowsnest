@@ -26,3 +26,10 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
     abs < 3600 ? [Math.round(abs / 60), "min"] : abs < 86_400 ? [Math.round(abs / 3600), "h"] : [Math.round(abs / 86_400), "d"];
   return seconds < 0 ? `${value} ${unit} ago` : `in ${value} ${unit}`;
 }
+
+/** "/a/b/c/.worktrees/job-120" as "…/.worktrees/job-120": the last two parts of a long path (the whole is the tooltip). */
+export function shortPath(path: string | undefined): string {
+  if (!path) return "";
+  const parts = path.split("/").filter(Boolean);
+  return parts.length <= 2 ? path : `…/${parts.slice(-2).join("/")}`;
+}
