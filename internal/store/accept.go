@@ -75,6 +75,34 @@ func (s *Store) FinishCheck(ctx context.Context, r CheckRecord) error {
 	return nil
 }
 
+// SetCheckWorkspace records the directory an isolated check makes its copy in ("" once removed),
+// before the copy exists, so start-up can remove one a crash left (migration 0023, R9-C7).
+func (s *Store) SetCheckWorkspace(ctx context.Context, id int64, dir string) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE job_checks SET workspace = ? WHERE id = ?`, dir, id); err != nil {
+		return fmt.Errorf("recording check %d's workspace: %w", id, err)
+	}
+	return nil
+}
+
+// CheckWorkspaces lists the isolated-check directories still recorded (id → directory).
+func (s *Store) CheckWorkspaces(ctx context.Context) (map[int64]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace FROM job_checks WHERE workspace != ''`)
+	if err != nil {
+		return nil, fmt.Errorf("listing check workspaces: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var dir string
+		if err := rows.Scan(&id, &dir); err != nil {
+			return nil, err
+		}
+		out[id] = dir
+	}
+	return out, rows.Err()
+}
+
 // checkMode is a check's mode as stored: "worktree" when none was given.
 func checkMode(mode string) string {
 	if mode == "" {

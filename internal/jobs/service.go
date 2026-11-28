@@ -194,6 +194,13 @@ type Service struct {
 
 	checksMu sync.Mutex
 	checks   map[string]bool // jobs whose check this process is running (accept.go)
+	// workspaces are the isolated copies this process's checks are using (checkspace.go);
+	// checkCtx is cancelled by StopChecks, checkRuns counts the checks running.
+	workspaces  map[string]bool
+	checkCtx    context.Context
+	checkCancel context.CancelFunc
+	checkRuns   sync.WaitGroup
+	reconciled  sync.Once // the first tick's clean-up of copies a crash left
 
 	landingMu  sync.Mutex
 	landingNow map[string]bool // jobs whose allowed land this process is running (landrequest.go)
@@ -223,7 +230,9 @@ func New(opts Options) *Service {
 	if opts.Notify == nil {
 		opts.Notify = func(string) {}
 	}
-	return &Service{opts: opts, instance: newInstance()}
+	s := &Service{opts: opts, instance: newInstance()}
+	s.checkCtx, s.checkCancel = context.WithCancel(context.Background())
+	return s
 }
 
 // Roles returns the role set.

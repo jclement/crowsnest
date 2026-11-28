@@ -6,20 +6,46 @@ package main
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/journal"
+	"github.com/jclement/crowsnest/internal/lifeline"
 	"github.com/jclement/crowsnest/internal/spend"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
-// acceptOptions turns acceptance on: the check runs through the heavy gate.
+// acceptOptions turns acceptance on: the check runs through the heavy gate, under crowsnest's
+// lifeline watchdog so it never outlives crowsnest (R9-C7).
 func acceptOptions(cfg config.Config, executable string) jobs.AcceptOptions {
-	return jobs.AcceptOptions{Enabled: true, Timeout: cfg.CheckTimeout, MaxRounds: cfg.CheckRounds, Heavy: []string{executable, "heavy", "--"}}
+	return jobs.AcceptOptions{Enabled: true, Timeout: cfg.CheckTimeout, MaxRounds: cfg.CheckRounds, Heavy: []string{executable, "heavy", "--"},
+		Watchdog: lifeline.Prefix(executable)}
+}
+
+// newCheckChildCommand is the watchdog a check runs under (internal/lifeline). Hidden: only
+// crowsnest itself runs it.
+func newCheckChildCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:                lifeline.ChildCommand + " -- <command> [args...]",
+		Short:              "internal: run a check exactly as long as crowsnest runs",
+		Hidden:             true,
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && args[0] == "--" {
+				args = args[1:]
+			}
+			if code := lifeline.RunChild(args, os.Stdin, os.Stdout, os.Stderr); code != 0 {
+				os.Exit(code)
+			}
+			return nil
+		},
+	}
 }
 
 // budgetOptions are Settings' budgets and ceilings.

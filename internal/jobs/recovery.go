@@ -77,9 +77,10 @@ func (s *Service) Tick(ctx context.Context) {
 		return
 	}
 	s.DispatchStanding(ctx)
-	s.ReconcileLandRequests(ctx) // R5-C09: requests sit on finished jobs, which the live pass skips
-	s.reconcileFixes(ctx)        // R6-C11: a finished rebase whose parent never took it in
-	s.adoptFixes(ctx)            // R9-C2: a live fix job whose parent's reservation was never saved
+	s.reconciled.Do(func() { s.reconcileCheckWorkspaces(ctx) }) // R9-C7: isolated copies a crash left
+	s.ReconcileLandRequests(ctx)                                // R5-C09: requests sit on finished jobs, which the live pass skips
+	s.reconcileFixes(ctx)                                       // R6-C11: a finished rebase whose parent never took it in
+	s.adoptFixes(ctx)                                           // R9-C2: a live fix job whose parent's reservation was never saved
 	if reserved, err := s.opts.Store.ListBranchOps(ctx, superviseBatch); err == nil {
 		for _, record := range reserved {
 			s.reconcileBranchOps(ctx, record) // R9-C2: a land a dead crowsnest left

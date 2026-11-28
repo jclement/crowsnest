@@ -41,6 +41,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/guard"
 	"github.com/jclement/crowsnest/internal/landing"
+	"github.com/jclement/crowsnest/internal/lifeline"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/store"
 )
@@ -91,6 +92,10 @@ type AcceptOptions struct {
 	// DefaultCommand is the check used when a project names none and the checkout has no mise
 	// check task (--demo and tests; empty: finished, unverified).
 	DefaultCommand string
+	// Watchdog is the argv prefix that runs a check under crowsnest's lifeline (internal/lifeline:
+	// ["/path/crowsnest", "check-child"]), so a check never outlives crowsnest (R9-C7). Empty runs
+	// it directly (tests).
+	Watchdog []string
 }
 
 func (o AcceptOptions) timeout() time.Duration {
@@ -300,6 +305,7 @@ type checkResult struct {
 	duration time.Duration
 	output   []byte // the last checkFileBytes
 	note     string // why it is an error, or a timeout
+	tree     string // an isolated run: the commit's tree, verified in the copy (R9-C6)
 }
 
 // startCheck runs a job's check in the background (once per job at a time).
@@ -313,20 +319,26 @@ func (s *Service) startCheck(ctx context.Context, id string) {
 		return
 	}
 	s.checks[id] = true
+	s.checkRuns.Add(1)
 	s.checksMu.Unlock()
+	// The run outlives the request that started it; StopChecks (a clean shutdown) cancels it,
+	// which kills its process group and removes its copy (R9-C7).
+	runCtx, cancel := s.checkContext(ctx)
 	run := func(ctx context.Context) {
 		defer func() {
+			cancel()
 			s.checksMu.Lock()
 			delete(s.checks, id)
 			s.checksMu.Unlock()
+			s.checkRuns.Done()
 		}()
 		s.runCheck(ctx, id)
 	}
 	if s.opts.Synchronous {
-		run(ctx)
+		run(runCtx)
 		return
 	}
-	go run(context.WithoutCancel(ctx))
+	go run(runCtx)
 }
 
 // checkRunning reports whether this process is running id's check.
@@ -389,7 +401,9 @@ func (s *Service) runCheck(ctx context.Context, id string) {
 	}
 	var result checkResult
 	if isolated {
-		result = s.execIsolatedCheck(ctx, id, dir, before.Head, prepare, command)
+		result = s.execIsolatedCheck(ctx, id, record.ID, dir, before.Head, prepare, command)
+		// The record names the tree that was verified in the copy before and after the run.
+		record.TreeBefore, record.TreeAfter = result.tree, result.tree
 	} else {
 		result = s.execWorktreeCheck(ctx, id, dir, command)
 	}
@@ -485,13 +499,29 @@ func (s *Service) execWorktreeCheck(ctx context.Context, id, dir, command string
 // execIsolatedCheck makes the isolated copy of commit, runs prepare (if any) and then the check in
 // it, and removes the copy. A copy that cannot be made, or a prepare command that fails, is the
 // run's result (an error with what happened); it never falls back to the job's checkout.
-func (s *Service) execIsolatedCheck(ctx context.Context, id, dir, commit, prepare, command string) checkResult {
-	copied, err := landing.IsolatedCheckout(ctx, dir, commit)
+func (s *Service) execIsolatedCheck(ctx context.Context, id string, checkID int64, dir, commit, prepare, command string) checkResult {
+	// The copy's directory is crowsnest's own and is recorded with the check before it is made, so
+	// start-up removes it if crowsnest dies before the copy is removed (R9-C7).
+	workspace, err := s.newCheckWorkspace(ctx, id, checkID)
 	if err != nil {
+		return checkResult{status: CheckError, exit: -1, note: "the isolated copy could not be given a directory, so nothing was checked: " + err.Error()}
+	}
+	copied, err := landing.IsolatedCheckout(ctx, dir, commit, workspace)
+	if err != nil {
+		s.clearCheckWorkspace(ctx, checkID)
 		return checkResult{status: CheckError, exit: -1, note: "the isolated copy of the commit could not be made, so nothing was checked: " + err.Error()}
 	}
-	defer copied.Remove(ctx)
+	defer func() {
+		copied.Remove(ctx)
+		s.clearCheckWorkspace(ctx, checkID)
+	}()
 	_ = s.Journal(ctx, id, EventAccept, "Checking an isolated copy of "+shortHash(commit), nil)
+	// R9-C6: what runs is exactly the commit's tracked tree, before the prepare command, after it
+	// and after the check; anything else is not evidence for the commit.
+	tree, why := verifiedTree(ctx, copied.Dir, commit, "after the checkout")
+	if why != "" {
+		return checkResult{status: CheckError, exit: -1, note: why}
+	}
 	if prepare != "" {
 		prepared := s.execCheck(ctx, copied.Dir, prepare)
 		if prepared.status != CheckPassed {
@@ -499,8 +529,30 @@ func (s *Service) execIsolatedCheck(ctx context.Context, id, dir, commit, prepar
 			prepared.note = strings.TrimSpace(fmt.Sprintf("the prepare command `%s` did not succeed (exit %d), so the check was not run. %s", oneLine(prepare, 120), prepared.exit, prepared.note))
 			return prepared
 		}
+		if _, why := verifiedTree(ctx, copied.Dir, commit, "after the prepare command `"+oneLine(prepare, 80)+"`"); why != "" {
+			prepared.status, prepared.note = CheckError, why+"; the check was not run"
+			return prepared
+		}
 	}
-	return s.execCheck(ctx, copied.Dir, command)
+	result := s.execCheck(ctx, copied.Dir, command)
+	result.tree = tree
+	if _, why := verifiedTree(ctx, copied.Dir, commit, "after the check"); why != "" && result.status != CheckError {
+		result.status, result.note = CheckError, why+"; this run is not evidence for the commit"
+	}
+	return result
+}
+
+// verifiedTree checks that dir holds exactly commit's tracked tree (landing.VerifyCheckout) and
+// returns the tree id, or why it does not (when names the moment).
+func verifiedTree(ctx context.Context, dir, commit, when string) (string, string) {
+	tree, err := landing.VerifyCheckout(ctx, dir, commit)
+	if errors.Is(err, landing.ErrNotTheCommit) {
+		return "", fmt.Sprintf("the isolated copy is no longer exactly %s %s: %v", shortHash(commit), when, err)
+	}
+	if err != nil {
+		return "", fmt.Sprintf("the isolated copy could not be verified as %s %s: %v", shortHash(commit), when, err)
+	}
+	return tree, ""
 }
 
 // checkingMarker is the file whose presence (with a deadline in it) holds the job's agent's tools
@@ -549,7 +601,7 @@ func (s *Service) execCheck(ctx context.Context, dir, command string) checkResul
 	opts := s.accept()
 	ctx, cancel := context.WithTimeout(ctx, opts.timeout())
 	defer cancel()
-	args := append(append([]string{}, opts.Heavy...), "sh", "-c", command)
+	args := lifeline.Command(opts.Watchdog, append(append([]string{}, opts.Heavy...), "sh", "-c", command))
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec // the project's own check command, set by the human
 	cmd.Dir = dir
 	cmd.Env = checkEnv(s.opts.Launch.ExtraEnv)
@@ -564,7 +616,7 @@ func (s *Service) execCheck(ctx context.Context, dir, command string) checkResul
 	out := &tailBuffer{limit: checkFileBytes}
 	cmd.Stdout, cmd.Stderr = out, out
 	started := time.Now()
-	err := cmd.Run()
+	err := runWithLifeline(cmd, len(opts.Watchdog) > 0)
 	result := checkResult{duration: time.Since(started), output: out.Bytes(), exit: -1}
 	var exitErr *exec.ExitError
 	switch {
@@ -1206,4 +1258,25 @@ func splitList(text string) []string {
 		}
 	}
 	return out
+}
+
+// runWithLifeline runs cmd; under the watchdog its stdin is the lifeline's read end and this
+// process holds the write end until the command is done, so a crowsnest that dies takes the
+// check's process group with it (R9-C7).
+func runWithLifeline(cmd *exec.Cmd, watched bool) error {
+	if !watched {
+		return cmd.Run()
+	}
+	read, write, err := lifeline.Pipe()
+	if err != nil {
+		return fmt.Errorf("making the check's lifeline: %w", err)
+	}
+	defer func() { _ = write.Close() }()
+	cmd.Stdin = read
+	if err := cmd.Start(); err != nil {
+		_ = read.Close()
+		return err
+	}
+	_ = read.Close() // the watchdog holds its own copy
+	return cmd.Wait()
 }
