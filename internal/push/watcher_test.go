@@ -15,6 +15,7 @@ import (
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/orch"
+	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/questions"
 )
 
@@ -252,8 +253,26 @@ func TestWatcherSpendsNoBudgetWithoutDevices(t *testing.T) {
 	if got := len(quiet.got()); got != 0 {
 		t.Fatalf("pushed %d notices to no device", got)
 	}
-	if ok, why := watcher.gate.allow("pane"); !ok {
+	if ok, why := watcher.gate.allow(Notice{Source: "pane", FromAgent: true}); !ok {
 		t.Fatalf("the budget was spent without a device: %s", why)
+	}
+}
+
+// R9-S6: agents asking question after question spend only the agents' budget; an approval from
+// the same pane, and another pane's dialog, are still pushed.
+func TestAgentQuestionsCannotSpendCrowsnestsPushBudget(t *testing.T) {
+	watcher, sender, _ := newTestWatcher()
+	for pane := 0; pane < 6; pane++ {
+		for i := 0; i < 5; i++ {
+			id := "q_" + strconv.Itoa(pane*10+i)
+			watcher.QuestionAsked(questions.Question{ID: id, Title: "Colour?", Kind: questions.KindChoice, Urgency: questions.UrgencyBlocking,
+				SourcePane: "w1:p" + strconv.Itoa(pane), Options: []questions.Option{{Key: "red", Label: "Red"}, {Key: "blue", Label: "Blue"}}})
+		}
+	}
+	before := len(sender.got())
+	watcher.ApprovalRequested(approvals.Approval{ID: "ap_1", Risk: "elevated", AgentName: "job-j_1", Summary: "git push", PaneID: "w1:p0"})
+	if got := sender.got(); len(got) != before+1 || got[len(got)-1].Kind != KindApproval {
+		t.Fatalf("crowsnest's approval was held back by the agents' questions (%d pushed before, %d after)", before, len(got))
 	}
 }
 

@@ -73,6 +73,9 @@ type Notice struct {
 	Urgency Urgency `json:"urgency"`
 	// Source is the rate-limit key (the asking pane, the job, the pane at a dialog); not sent.
 	Source string `json:"-"`
+	// FromAgent marks a notice an agent chose to raise (a question it asked, not one of
+	// crowsnest's gates): it is rate limited apart from crowsnest's own notices (R9-S6).
+	FromAgent bool `json:"-"`
 	// Actions are the notification's buttons (DESIGN.md 8.7): only a low-risk approval and a
 	// confirm or choice question carry them. ActionItem names the item they answer
 	// ("approval:ap_3"); the watcher mints a single-use token for it before delivery, and a
@@ -188,7 +191,7 @@ func QuestionActions(kind string, multi bool, options []NoticeAction) []NoticeAc
 // QuestionNotice is the notice for a newly asked question; ok is false for one that is not
 // pushed (low urgency).
 func QuestionNotice(id, title, kind, urgency, sourcePane string) (Notice, bool) {
-	notice := Notice{Kind: KindQuestion, Body: title, Tag: id, URL: "/inbox?q=" + url.QueryEscape(id), Source: "pane:" + sourcePane}
+	notice := Notice{Kind: KindQuestion, Body: title, Tag: id, URL: "/inbox?q=" + url.QueryEscape(id), Source: "pane:" + sourcePane, FromAgent: true}
 	if sourcePane == "" {
 		notice.Source = "unidentified"
 	}
@@ -296,12 +299,19 @@ func newGate(now func() time.Time) *gate {
 	return &gate{perSource: ratelimit.New(perSourceBurst, perSourceRefill, now), overall: ratelimit.New(overallBurst, overallRefill, now)}
 }
 
-// allow reports whether a notice from source may go now, and if not, which limit said no.
-func (g *gate) allow(source string) (bool, string) {
-	if ok, _ := g.perSource.Allow(source); !ok {
+// allow reports whether notice may go now, and if not, which limit said no. Agents' questions and
+// crowsnest's own notices (approvals, dialogs, gates, jobs) draw on separate buckets, per source
+// and overall (R9-S6): an agent asking question after question spends only the agents' budget,
+// and the approval its pane raises next, or another job's trust dialog, still reaches the phone.
+func (g *gate) allow(notice Notice) (bool, string) {
+	bucket := "crowsnest"
+	if notice.FromAgent {
+		bucket = "agents"
+	}
+	if ok, _ := g.perSource.Allow(bucket + "|" + notice.Source); !ok {
 		return false, "too many notices from one source"
 	}
-	if ok, _ := g.overall.Allow("all"); !ok {
+	if ok, _ := g.overall.Allow(bucket); !ok {
 		return false, "too many notices at once"
 	}
 	return true, ""

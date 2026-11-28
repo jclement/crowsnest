@@ -81,10 +81,16 @@ func TestReasonsMostSeriousFirst(t *testing.T) {
 	}
 }
 
-func TestNoJobRootNoOutsideCheck(t *testing.T) {
-	got := Default().Classify("Write", input(t, map[string]any{"file_path": "/tmp/x.txt", "content": "c"}), Context{})
-	if got.Level != Low {
-		t.Fatalf("without a job root a write is not 'outside': %+v", got)
+// R9-S7: with no job root (the orchestrator, a call with no job) a write cannot be checked
+// against a directory, so it is never low: an orchestrator writing ~/.zshrc must not get the
+// quiet label. (Before R9 this test asserted the opposite.) A read stays low.
+func TestNoJobRootWriteIsNotLow(t *testing.T) {
+	got := Default().Classify("Write", input(t, map[string]any{"file_path": "/Users/someone/.zshrc", "content": "c"}), Context{})
+	if got.Level != Elevated || !strings.Contains(strings.Join(got.Reasons, " "), "no job directory") {
+		t.Fatalf("without a job root a write must be elevated: %+v", got)
+	}
+	if read := Default().Classify("Read", input(t, map[string]any{"file_path": "/tmp/x.txt"}), Context{}); read.Level != Low {
+		t.Fatalf("a read with no job root: %+v", read)
 	}
 }
 

@@ -179,6 +179,7 @@ func (w *Watcher) QuestionAsked(question questions.Question) {
 		Kind: string(question.Kind), Multi: question.Multi, Urgency: string(attention.QuestionLabel(question, false)), Recommend: question.Recommend,
 		Options: options, Context: question.Context, HasFiles: len(question.Files) > 0 || question.FileCount > 0, BodyChars: len(question.BodyMD),
 	}, w.where(ctx, question.JobID, question.SourcePane))
+	notice.FromAgent = !questions.IsGate(question.Context) // crowsnest's own gates are its notices
 	w.notify(ctx, notice)
 }
 
@@ -300,7 +301,7 @@ func (w *Watcher) notify(ctx context.Context, notice Notice) {
 	if devices, ok := w.opts.Sender.(deviceLister); ok && !devices.HasDevices(ctx) {
 		return
 	}
-	if ok, why := w.gate.allow(notice.Source); !ok {
+	if ok, why := w.gate.allow(notice); !ok {
 		w.opts.Logger.Info("not pushing a notice: "+why, "kind", notice.Kind, "tag", notice.Tag)
 		return
 	}

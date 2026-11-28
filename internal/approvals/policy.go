@@ -496,10 +496,12 @@ func toolMatches(pattern, tool string) bool {
 // RuleAnswerable reports whether any rule the human could keep would ever allow this call: never a
 // dangerous one (the risk table wins), never a Bash line no rule can match (command or process
 // substitution, eval, a redirect to a file, bidi controls: SimpleCommands refuses it), never an
-// edit with no path; anything else a rule of its kind could match. The attention queue uses it to
-// keep the word "blocking" for what truly needs the human (R8): a call a rule could have allowed
-// is routine, the kind of tap a rule exists to save.
-func RuleAnswerable(level risk.Level, tool string, input json.RawMessage) bool {
+// edit outside root (the job's directory, as the real matcher sees it: insideRule, links resolved,
+// no climbing; R9-S7), and never an edit when there is no root at all (the orchestrator, a call
+// with no job), since no edit rule can then match; anything else a rule of its kind could match.
+// The attention queue uses it to keep the word "blocking" for what truly needs the human (R8): a
+// call a rule could have allowed is routine, the kind of tap a rule exists to save.
+func RuleAnswerable(level risk.Level, tool string, input json.RawMessage, root string) bool {
 	if level == risk.Dangerous {
 		return false
 	}
@@ -515,7 +517,7 @@ func RuleAnswerable(level risk.Level, tool string, input json.RawMessage) bool {
 		if path == "" {
 			path, _ = fields["notebook_path"].(string)
 		}
-		return path != ""
+		return insideRule(root, "", path)
 	}
 	return tool != ""
 }

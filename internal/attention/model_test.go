@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -275,10 +276,42 @@ func TestBuildOrdersByUrgencyRankAndWait(t *testing.T) {
 	}
 	got := ids(Build(src, testNow))
 	// Dangerous and blocking first, then the routine approval (a rule could have allowed it: R8),
-	// then what can wait.
-	want := []string{"approval:ap_danger", "question:q_block", "job:j_2", "approval:ap_low", "question:q_old", "question:q_new", "job:j_1"}
+	// then what can wait; within each, crowsnest's own items before agents' questions (R9-S6).
+	want := []string{"approval:ap_danger", "job:j_2", "question:q_block", "approval:ap_low", "job:j_1", "question:q_old", "question:q_new"}
 	if !equal(got, want) {
 		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
+// R9-S6: an agent asking three "blocking" questions cannot push crowsnest's own items (a folder
+// trust dialog, an elevated approval, a land request) out of the top three a tray or a phone shows.
+func TestAgentQuestionsCannotOutrankCrowsnestsItems(t *testing.T) {
+	land := question("q_land", "", "j_8", questions.UrgencyNormal, time.Minute)
+	land.Context = map[string]string{questions.ContextLandFor: "j_8", questions.ContextLandAction: "merge"}
+	src := Sources{
+		Approvals: []approvals.Approval{approval("ap_push", "w1:p2", "", risk.Elevated, time.Minute)},
+		Questions: []questions.Question{
+			question("q_1", "w2:p1", "", questions.UrgencyBlocking, time.Hour),
+			question("q_2", "w2:p1", "", questions.UrgencyBlocking, time.Hour),
+			question("q_3", "w2:p1", "", questions.UrgencyBlocking, time.Hour),
+			land,
+		},
+		Agents: []fleet.AgentEntry{dialogAgent("w3:p1", "lead-site")},
+	}
+	items := Build(src, testNow)
+	top := ids(items)[:3]
+	for _, want := range []string{"approval:ap_push", "dialog:w3:p1", "question:q_land"} {
+		if !slices.Contains(top, want) {
+			t.Errorf("%s is not in the top three %v (all: %v)", want, top, ids(items))
+		}
+	}
+	for _, item := range items {
+		if item.ID == "question:q_land" && item.Label != LabelBlocking {
+			t.Errorf("a land request is labelled %s, want blocking", item.Label)
+		}
+	}
+	if QuestionLabel(land, false) != LabelBlocking {
+		t.Error("the lock screen does not call a land request blocking")
 	}
 }
 
@@ -335,15 +368,20 @@ func TestLabelOf(t *testing.T) {
 	unmatchable.ToolInput = []byte(`{"command":"echo $(cat secrets)"}`)
 	elevated := approval("ap_3", "w1:p3", "", risk.Elevated, time.Minute)
 	dangerous := approval("ap_4", "w1:p4", "", risk.Dangerous, time.Minute)
+	root := t.TempDir()
 	edit := approval("ap_5", "w1:p5", "", risk.Low, time.Minute)
-	edit.ToolName, edit.ToolInput = "Edit", []byte(`{"file_path":"/src/app.go"}`)
+	edit.ToolName, edit.ToolInput = "Edit", []byte(`{"file_path":"`+root+`/src/app.go"}`)
+	outside := approval("ap_6", "w1:p6", "", risk.Low, time.Minute)
+	outside.ToolName, outside.ToolInput = "Write", []byte(`{"file_path":"/Users/someone/.zshrc"}`)
 	cases := []struct {
 		name string
 		item Item
 		want Label
 	}{
 		{"a routine low-risk call a rule could allow", Item{Kind: KindApproval, Urgency: Blocking, Approval: &low}, LabelApproval},
-		{"a low-risk edit a rule could allow", Item{Kind: KindApproval, Urgency: Blocking, Approval: &edit}, LabelApproval},
+		{"a low-risk edit a rule could allow", Item{Kind: KindApproval, Urgency: Blocking, Approval: &edit, ruleRoot: root}, LabelApproval},
+		{"an edit outside the job's root (R9-S7)", Item{Kind: KindApproval, Urgency: Blocking, Approval: &outside, ruleRoot: root}, LabelBlocking},
+		{"an edit with no root: the orchestrator's (R9-S7)", Item{Kind: KindApproval, Urgency: Blocking, Approval: &edit}, LabelBlocking},
 		{"a low-risk line no rule can match", Item{Kind: KindApproval, Urgency: Blocking, Approval: &unmatchable}, LabelBlocking},
 		{"an elevated call (rules allow it only when opted in)", Item{Kind: KindApproval, Urgency: Blocking, Approval: &elevated}, LabelBlocking},
 		{"a dangerous call, never allowed by a rule", Item{Kind: KindApproval, Urgency: Blocking, Approval: &dangerous}, LabelDangerous},

@@ -246,6 +246,12 @@ func (s *Service) Request(ctx context.Context, in RequestInput) (Approval, error
 	if s.opts.RiskContext != nil {
 		riskContext = s.opts.RiskContext(ctx, in.JobID)
 	}
+	if riskContext.JobRoot == "" {
+		// A lead's own call has no job but has its project's folder (the policy's scope): writes
+		// are judged against it. Only the orchestrator and an unknown caller are left with none,
+		// and then a write is not low (R9-S7).
+		riskContext.JobRoot = s.scopeOf(ctx, in.JobID, in.PaneID).Root
+	}
 	verdict := s.opts.Classifier.Classify(in.ToolName, json.RawMessage(input), riskContext)
 	reasons, _ := json.Marshal(verdict.Reasons)
 	now := s.opts.Now()

@@ -92,7 +92,7 @@ func LabelOf(item Item) Label {
 		switch {
 		case item.Approval.Risk == risk.Dangerous:
 			return LabelDangerous
-		case item.Approval.Risk == risk.Low && approvals.RuleAnswerable(item.Approval.Risk, item.Approval.ToolName, item.Approval.ToolInput):
+		case item.Approval.Risk == risk.Low && approvals.RuleAnswerable(item.Approval.Risk, item.Approval.ToolName, item.Approval.ToolInput, item.ruleRoot):
 			return LabelApproval
 		}
 		return LabelBlocking
@@ -100,7 +100,24 @@ func LabelOf(item Item) Label {
 	if item.Urgency == Blocking {
 		return LabelBlocking
 	}
+	// A crowsnest gate (a land request, a delegation, a task file to review) stops what it gates
+	// until the human answers, whatever urgency it was asked with (R9-S6).
+	if item.Kind == KindQuestion && item.Question != nil && questions.IsGate(item.Question.Context) {
+		return LabelBlocking
+	}
 	return LabelCanWait
+}
+
+// FromCrowsnest reports whether crowsnest itself raised the item (an approval, a dialog, a job or
+// agent state it found, a gate it asked) rather than an agent choosing to ask (R9-S6). Within a
+// band crowsnest's items come first: an agent decides its own questions' urgency, and must not be
+// able to push a trust dialog or an approval out of the few items a tray, a phone or a lock screen
+// shows. A gate question is crowsnest's: an agent cannot set the keys that mark one.
+func (item Item) FromCrowsnest() bool {
+	if item.Kind != KindQuestion {
+		return true
+	}
+	return item.Question != nil && questions.IsGate(item.Question.Context)
 }
 
 // QuestionLabel is the label an open question carries, given whether its job declared that it has
@@ -108,7 +125,7 @@ func LabelOf(item Item) Label {
 // push) that holds the question and not the queue.
 func QuestionLabel(question questions.Question, jobStopped bool) Label {
 	urgency, _ := questionUrgency(question, nil)
-	if urgency == Blocking || jobStopped {
+	if urgency == Blocking || jobStopped || questions.IsGate(question.Context) {
 		return LabelBlocking
 	}
 	return LabelCanWait
@@ -156,6 +173,11 @@ type Item struct {
 	Job       *jobs.Job           `json:"job,omitempty"`
 	Standing  *StandingAgent      `json:"standing,omitempty"`
 	Limit     *jobs.LimitState    `json:"limit,omitempty"`
+
+	// ruleRoot is the directory an approval's edit rules are relative to: its job's working
+	// directory, as the risk context and the policy use it ("" for the orchestrator or a call with
+	// no job, where no edit rule can match; R9-S7).
+	ruleRoot string
 }
 
 // StandingAgent is the orchestrator or a project's lead as the queue needs it.
@@ -257,13 +279,17 @@ func Build(src Sources, now time.Time) []Item {
 }
 
 // sortItems orders by the label's band (dangerous and blocking, then routine approvals, then what
-// can wait), then by rank, then the longest wait first, so the item that has held work up longest
-// is on top of its band (R4 Fable 1.9).
+// can wait), then crowsnest's own items before agents' questions (R9-S6: an agent chooses its
+// questions' urgency, so it must not outrank crowsnest's), then by rank, then the longest wait
+// first, so the item that has held work up longest is on top of its band (R4 Fable 1.9).
 func sortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, c := items[i], items[j]
 		if a.Label.band() != c.Label.band() {
 			return a.Label.band() < c.Label.band()
+		}
+		if a.FromCrowsnest() != c.FromCrowsnest() {
+			return a.FromCrowsnest()
 		}
 		if a.Rank != c.Rank {
 			return a.Rank > c.Rank
@@ -297,10 +323,28 @@ func (b *builder) addApprovals() map[string]bool {
 		item := Item{ID: "approval:" + approval.ID, Kind: KindApproval, Urgency: Blocking, Rank: rank, Since: approval.CreatedAt,
 			Title: approval.Summary, Detail: riskWords(approval), Agent: approval.AgentName, PaneID: approval.PaneID,
 			Action: Action{Kind: "decide", Label: "Allow or deny"}, Approval: &approval}
-		b.attachJob(&item, approval.JobID, approval.PaneID)
+		item.ruleRoot = b.ruleRoot(b.attachJob(&item, approval.JobID, approval.PaneID), approval.PaneID)
 		b.items = append(b.items, item)
 	}
 	return panes
+}
+
+// ruleRoot is the directory an approval's edit rules are relative to, as the policy's scope sees
+// it: its job's working directory, or a lead's project folder; "" for the orchestrator.
+func (b *builder) ruleRoot(job *jobs.Job, paneID string) string {
+	if job != nil {
+		if job.AgentName == jobs.OrchestratorName {
+			return ""
+		}
+		if job.WorkDir != "" {
+			return job.WorkDir
+		}
+		return job.Dir
+	}
+	if standing := b.standingByPane(paneID); standing != nil && standing.ProjectID != 0 {
+		return b.projects[standing.ProjectID].Dir
+	}
+	return ""
 }
 
 func riskWords(approval approvals.Approval) string {

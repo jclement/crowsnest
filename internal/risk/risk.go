@@ -252,9 +252,14 @@ func (c *Classifier) Classify(tool string, input json.RawMessage, ctx Context) R
 		}
 	}
 	paths := pathsIn(fields)
-	if !c.disabled[CheckOutsideDir] && ctx.JobRoot != "" && writes(tool) {
+	if !c.disabled[CheckOutsideDir] && writes(tool) {
+		if ctx.JobRoot == "" {
+			// R9-S7: with no job directory (the orchestrator, a call with no job) there is nothing to
+			// check the path against, so a write anywhere (~/.zshrc, a LaunchAgent) is not "low".
+			hits = append(hits, hit{Elevated, "Writes a file, with no job directory to check it against", false})
+		}
 		for _, path := range paths {
-			if !inside(ctx.JobRoot, path) {
+			if ctx.JobRoot != "" && !inside(ctx.JobRoot, path) {
 				hits = append(hits, hit{Elevated, "Writes outside the job's directory (" + ctx.JobRoot + ")", false})
 				break
 			}

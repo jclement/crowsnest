@@ -35,7 +35,10 @@ export function fixtureSnapshot(approvals: Approval[], questions: Question[]): A
     });
   }
   const band = (item: AttentionItem) => (item.label === "approval" ? 1 : item.label === "can_wait" ? 2 : 0);
-  items.sort((a, b) => band(a) - band(b) || b.rank - a.rank || a.since.localeCompare(b.since));
+  // As the server orders it (internal/attention sortItems): within a band crowsnest's own items
+  // (approvals, dialogs, jobs) come before agents' questions (R9-S6).
+  const agentAsked = (item: AttentionItem) => (item.kind === "question" ? 1 : 0);
+  items.sort((a, b) => band(a) - band(b) || agentAsked(a) - agentAsked(b) || b.rank - a.rank || a.since.localeCompare(b.since));
   const blocking = items.filter((item) => band(item) === 0).length;
   const approvalCount = items.filter((item) => band(item) === 1).length;
   const byProject: Record<string, number> = {};
