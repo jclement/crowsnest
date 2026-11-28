@@ -613,7 +613,7 @@ function Toolbar(props: ToolbarProps) {
             </select>
           </label>
         )}
-        <div className="ml-auto flex items-center gap-2" aria-live="polite">
+        <div className={cn("ml-auto flex items-center gap-2", phone && "w-full justify-end")} aria-live="polite">
           <CommentsButton comments={props.comments} onClick={props.onOpenComments} phone={phone} />
           <span className="text-xs text-body">{viewedText(summary.viewed, summary.total)}</span>
           {phone && (
