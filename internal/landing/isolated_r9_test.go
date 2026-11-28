@@ -148,6 +148,8 @@ func TestOnlyACheckCopyIsEverRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Not a direct child: a marked directory one level down, and the same named through "..".
+	// Every case is under the test's own temporary directory: a regression must never be able to
+	// remove anything else.
 	deeper := filepath.Join(root, "nested", "deeper")
 	write(t, deeper, isolatedMarker, deeper+"\n")
 	cases := map[string]string{
@@ -159,7 +161,6 @@ func TestOnlyACheckCopyIsEverRemoved(t *testing.T) {
 		"not a direct child":                 deeper,
 		"the checks directory itself":        root,
 		"a relative path":                    "home",
-		"the root of the filesystem":         "/",
 		"a path through a linked parent":     filepath.Join(linked, "keep.txt"),
 		"a checks directory that is missing": filepath.Join(base, "none", "x"),
 	}
