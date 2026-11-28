@@ -60,3 +60,33 @@ func TestGrantingTextSeesTheR9Spellings(t *testing.T) {
 		}
 	}
 }
+
+// R10-S10: digits and joiners inside a word, the Cyrillic and Greek capital I as an l, the slashed
+// o, and enable and execute. A version or a count is not a word, and "OK" and "run" stay plain.
+func TestGrantingTextSeesTheR10Spellings(t *testing.T) {
+	cases := map[string]bool{
+		"A11ow":                    true,
+		"appr0ve":                  true,
+		"Al.low":                   true,
+		"a-l-l-o-w":                true,
+		"AІІow":          true, // Cyrillic capital I
+		"AΙΙow":          true, // Greek capital iota
+		"AӀӀow":          true, // palochka
+		"Allow":                    true,
+		"Prøceed":             true,
+		"Enable the hook":          true,
+		"Execute it":               true,
+		"go-ahead":                 true,
+		"Upgrade to 1.4.0?":        false,
+		"Keep 10 or 30 retries?":   false,
+		"Is it OK?":                false,
+		"Run the tests again?":     false,
+		"Idle or busy?":            false,
+		"Use the e-mail template?": false,
+	}
+	for text, want := range cases {
+		if got := GrantingText(text); got != want {
+			t.Errorf("GrantingText(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

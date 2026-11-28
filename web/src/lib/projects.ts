@@ -138,6 +138,8 @@ export interface ProjectInput {
 /** POST /projects: a project, and whether its agents may work in its folder without asking. */
 export interface ProjectCreateInput extends ProjectInput {
   trust_folder?: boolean;
+  /** The folder's .codex/ as the form showed it ("" for none): a change since stops the trust (R10 S5a). */
+  codex_fingerprint?: string;
 }
 
 /** The lead actions the server offers (POST /projects/{ref}/lead/{action}). */

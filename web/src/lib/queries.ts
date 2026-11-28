@@ -344,7 +344,7 @@ export function useCreateProject() {
 export function useTrustProject(ref: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => endpoints.trustProject(ref),
+    mutationFn: (shown: string) => endpoints.trustProject(ref, shown),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
   });
 }

@@ -4,7 +4,7 @@
 //	POST /projects                       create {name, dir, slug?, description?, default_role?, …}
 //	GET  /projects/{ref}                 one project (id, p_<id> or slug); opening it applies lead_start=open
 //	PUT  /projects/{ref}                 edit, archive ({archived: true}) or unarchive
-//	POST /projects/{ref}/trust           record the agents' folder trust for its folder (8.2.1)
+//	POST /projects/{ref}/trust           record the agents' folder trust for its folder (8.2.1) {codex_fingerprint?}
 //	POST /projects/{ref}/codex-config    allow the folder's own .codex/ for Codex jobs {fingerprint} (R9-S5)
 //	GET  /leads                          every running lead's status
 //	POST /projects/{ref}/lead/start      Start lead
@@ -67,6 +67,15 @@ type projectCreateRequest struct {
 	// ("Claude may work in this folder without asking"; the form's box, ticked by default). Left
 	// out it is false: an API client that does not ask gets no write.
 	TrustFolder *bool `json:"trust_folder"`
+	// CodexFingerprint is the folder's .codex/ as the form showed it (R10 S5a; "" when it showed
+	// none). Trusting the folder also marks that .codex/ seen, but only when it still matches.
+	CodexFingerprint *string `json:"codex_fingerprint"`
+}
+
+// projectTrustRequest is POST /projects/{ref}/trust's optional body: the .codex/ fingerprint the
+// page showed beside "Trust this folder" (R10 S5a).
+type projectTrustRequest struct {
+	CodexFingerprint *string `json:"codex_fingerprint"`
 }
 
 // projectsView is GET /projects.
@@ -195,7 +204,13 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	var trust []agenttrust.Result
 	if request.TrustFolder != nil && *request.TrustFolder {
-		trust = s.trustProjectFolder(r, project)
+		// The form listed the folder's .codex/ files beside the box: if they changed since, the
+		// human ticked it over something they have not seen, so nothing is trusted.
+		if changed := s.codexChanged(r.Context(), project.Dir, request.CodexFingerprint); changed != "" {
+			trust = []agenttrust.Result{{Agent: "claude", Status: agenttrust.StatusSkipped, Detail: changed + " Trust it from the project's page."}}
+		} else {
+			trust = s.trustProjectFolder(r, project, request.CodexFingerprint)
+		}
 	}
 	view := s.viewOf(r.Context(), project, nil)
 	view.Trust = trust
@@ -216,7 +231,20 @@ func (s *Server) handleProjectTrust(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, codeConflict, "Recording folder trust is turned off (Settings, Agents: \"Trust the folders of projects you create\"). Answer the trust question on the agent's card instead.")
 		return
 	}
-	trust := s.trustProjectFolder(r, project)
+	var request projectTrustRequest
+	if r.ContentLength != 0 {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxProjectBody))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeError(w, http.StatusBadRequest, codeValidation, "Send {codex_fingerprint}, the folder's .codex/ as the page showed it, or no body.")
+			return
+		}
+	}
+	if changed := s.codexChanged(r.Context(), project.Dir, request.CodexFingerprint); changed != "" {
+		writeError(w, http.StatusConflict, codeConflict, changed)
+		return
+	}
+	trust := s.trustProjectFolder(r, project, request.CodexFingerprint)
 	view := s.viewOf(r.Context(), project, nil)
 	view.Trust = trust
 	writeData(w, http.StatusOK, view)
@@ -225,7 +253,11 @@ func (s *Server) handleProjectTrust(w http.ResponseWriter, r *http.Request) {
 // trustProjectFolder records trust for a project's folder, as given and resolved. Only ever
 // reached from a signed-in human's request naming a project (create or POST …/trust): never
 // for a job's worktree (it inherits its checkout's trust) and never for a folder an agent chose.
-func (s *Server) trustProjectFolder(r *http.Request, project projects.Project) []agenttrust.Result {
+//
+// shown is the .codex/ fingerprint the page showed (nil: a client that sent none). The folder's
+// .codex/ is marked seen only when the page showed exactly what is there now (R10 S5a: it used to
+// be marked seen whatever the page had shown).
+func (s *Server) trustProjectFolder(r *http.Request, project projects.Project, shown *string) []agenttrust.Result {
 	if s.deps.FolderTrust == nil || !s.deps.FolderTrust.Enabled() {
 		return []agenttrust.Result{{Agent: "claude", Status: agenttrust.StatusSkipped, Detail: "recording folder trust is turned off in Settings"}}
 	}
@@ -238,15 +270,29 @@ func (s *Server) trustProjectFolder(r *http.Request, project projects.Project) [
 		s.deps.Logger.Info("project folder trust", "project", project.Slug, "agent", result.Agent, "status", result.Status, "detail", result.Detail)
 	}
 	// The form and the banner listed the folder's .codex files beside the trust ("these run when
-	// an agent starts"), so trusting it is seeing them (R9-S5).
-	if s.deps.Jobs != nil {
-		if state := s.deps.Jobs.CodexConfig(r.Context(), project.Dir); state.Fingerprint != "" && !state.Seen {
+	// an agent starts"), so trusting it is seeing them (R9-S5), as they were shown.
+	if s.deps.Jobs != nil && shown != nil {
+		if state := s.deps.Jobs.CodexConfig(r.Context(), project.Dir); state.Fingerprint != "" && !state.Seen && state.Fingerprint == *shown {
 			if _, err := s.deps.Jobs.SeeCodexConfig(r.Context(), project.Dir, state.Fingerprint); err != nil {
 				s.deps.Logger.Warn("recording a trusted folder's .codex/ as seen", "project", project.Slug, "err", err)
 			}
 		}
 	}
 	return results
+}
+
+// codexChanged says why a trust request must not go ahead (R10 S5a): the page sent the .codex/
+// fingerprint it showed and the folder's is different now (a pull, or a write into the folder),
+// so the human would be trusting files they have not seen. "" when it may go ahead: they match,
+// or the client sent none (older clients; nothing is then marked seen).
+func (s *Server) codexChanged(ctx context.Context, dir string, shown *string) string {
+	if shown == nil || s.deps.Jobs == nil {
+		return ""
+	}
+	if state := s.deps.Jobs.CodexConfig(ctx, dir); state.Fingerprint != *shown {
+		return "The folder's .codex/ changed since this page showed it, so nothing was trusted. Look at it again, then trust it."
+	}
+	return ""
 }
 
 // codexConfigRequest is POST /projects/{ref}/codex-config: the fingerprint the page showed.

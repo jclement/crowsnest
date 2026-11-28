@@ -25,7 +25,7 @@ export function NewProjectSheet({ open, onClose, onCreated, browse }: NewProject
   const toast = useToast();
   const queryClient = useQueryClient();
   const submit = (input: ProjectInput, extras: ProjectExtras) =>
-    create.mutate({ ...input, trust_folder: extras.trustFolder }, {
+    create.mutate({ ...input, trust_folder: extras.trustFolder, ...(extras.trustFolder && extras.codexFingerprint !== undefined ? { codex_fingerprint: extras.codexFingerprint } : {}) }, {
       onSuccess: (project) => {
         toast.show({ tone: "success", title: `Project ${project.name} created`, description: project.dir });
         const trustProblem = (project.trust ?? []).find((result) => result.status === "failed" || (result.status === "skipped" && result.agent === "claude"));

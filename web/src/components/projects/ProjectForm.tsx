@@ -36,6 +36,8 @@ export interface ProjectExtras {
   detectedCheck: string;
   /** "Agents may work in this folder without asking": record the agents' folder trust (8.2.1). */
   trustFolder: boolean;
+  /** The .codex/ the form's findings showed (R10 S5a); undefined when no facts were read. */
+  codexFingerprint?: string;
 }
 
 interface ProjectFormProps {
@@ -114,7 +116,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
       default_isolate: Number(isolate) as -1 | 0 | 1,
       permission_mode: permission,
       lead_start: leadStart,
-    }, { checkCommand: checkCommand.trim(), detectedCheck: facts?.check_command ?? "", trustFolder: creating && trustFolder });
+    }, { checkCommand: checkCommand.trim(), detectedCheck: facts?.check_command ?? "", trustFolder: creating && trustFolder, codexFingerprint: facts ? (facts.codex_fingerprint ?? "") : undefined });
   };
 
   const remembered = newProjectDirChoices(dirs.data ?? [], projects.data?.projects).slice(0, DIR_CHOICES);

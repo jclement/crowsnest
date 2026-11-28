@@ -261,8 +261,43 @@ func TestProjectAgentStartAndCodexConfig(t *testing.T) {
 		t.Fatalf("allow: %d %v", code, view["codex_config"])
 	}
 
-	code, view = call(http.MethodPost, "/api/v1/projects", fmt.Sprintf(`{"name":"Trusted","dir":%q,"trust_folder":true}`, trusted))
+	// The form sends the .codex/ it showed beside the box (R10 S5a); trusting is seeing exactly that.
+	shown, err := agenttrust.CodexConfigOf(trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, view = call(http.MethodPost, "/api/v1/projects", fmt.Sprintf(`{"name":"Trusted","dir":%q,"trust_folder":true,"codex_fingerprint":%q}`, trusted, shown.Fingerprint))
 	if after, _ := view["codex_config"].(map[string]any); code != http.StatusCreated || after["seen"] != true {
 		t.Fatalf("trusting the folder did not allow its listed .codex/: %d %v", code, view["codex_config"])
+	}
+
+	// R10 S5a: the .codex/ changed after the page was drawn. Creating with the box ticked trusts
+	// nothing and marks nothing seen; the project page's Trust this folder is refused (409); with
+	// what is there now it goes ahead. A client that sends no fingerprint trusts, but sees nothing.
+	stale := mk("stale")
+	before, _ := agenttrust.CodexConfigOf(stale)
+	if err := os.WriteFile(filepath.Join(stale, ".codex", "hooks.json"), []byte(`{"hooks": {"Stop": []}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asked := len(trust.asked)
+	code, view = call(http.MethodPost, "/api/v1/projects", fmt.Sprintf(`{"name":"Stale","dir":%q,"trust_folder":true,"codex_fingerprint":%q}`, stale, before.Fingerprint))
+	if after, _ := view["codex_config"].(map[string]any); code != http.StatusCreated || after["seen"] != false || len(trust.asked) != asked {
+		t.Fatalf("a changed .codex/ must stop the trust: %d %v asked %d→%d", code, view["codex_config"], asked, len(trust.asked))
+	}
+	if code, _ := call(http.MethodPost, "/api/v1/projects/stale/trust", fmt.Sprintf(`{"codex_fingerprint":%q}`, before.Fingerprint)); code != http.StatusConflict || len(trust.asked) != asked {
+		t.Fatalf("Trust this folder over a changed .codex/: %d", code)
+	}
+	now, _ := agenttrust.CodexConfigOf(stale)
+	code, view = call(http.MethodPost, "/api/v1/projects/stale/trust", fmt.Sprintf(`{"codex_fingerprint":%q}`, now.Fingerprint))
+	if after, _ := view["codex_config"].(map[string]any); code != http.StatusOK || after["seen"] != true || len(trust.asked) != asked+1 {
+		t.Fatalf("Trust this folder with what is there: %d %v", code, view["codex_config"])
+	}
+	quiet := mk("quiet") // its own .codex/ (seen is per fingerprint, and the others were seen)
+	if err := os.WriteFile(filepath.Join(quiet, ".codex", "hooks.json"), []byte(`{"hooks": {"PreToolUse": []}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, view = call(http.MethodPost, "/api/v1/projects", fmt.Sprintf(`{"name":"Quiet","dir":%q,"trust_folder":true}`, quiet))
+	if after, _ := view["codex_config"].(map[string]any); code != http.StatusCreated || after["seen"] != false || len(trust.asked) != asked+2 {
+		t.Fatalf("no fingerprint sent: trusted, nothing seen: %d %v", code, view["codex_config"])
 	}
 }

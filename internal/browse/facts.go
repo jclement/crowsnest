@@ -59,6 +59,9 @@ type Facts struct {
 	// AgentStart lists what the folder carries that an agent runs or reads the moment it starts
 	// there (R9-S4). The project form leaves its trust box unticked when any of it runs.
 	AgentStart []agenttrust.Finding `json:"agent_start"`
+	// CodexFingerprint is the folder's .codex/ as listed in AgentStart ("" for none): New project
+	// sends it back with the trust box, so a change in between is caught (R10 S5a).
+	CodexFingerprint string `json:"codex_fingerprint,omitempty"`
 	// ClaudeTrusted is nil when it could not be told.
 	ClaudeTrusted *bool `json:"claude_trusted,omitempty"`
 	// IsHome is set for the home directory, IsFilesystemRoot for /: both refused as projects.
@@ -99,6 +102,7 @@ func (s *Service) Facts(ctx context.Context, path string) (Facts, error) {
 		facts.AgentsMD = s.isFile(filepath.Join(resolved, "AGENTS.md"))
 		facts.ClaudeMD = s.isFile(filepath.Join(resolved, "CLAUDE.md")) || s.isFile(filepath.Join(resolved, ".claude", "CLAUDE.md"))
 		facts.AgentStart = s.agentStart(resolved)
+		facts.CodexFingerprint = s.codexFingerprint(resolved)
 		if s.opts.CheckCommand != nil {
 			facts.CheckCommand = s.opts.CheckCommand(resolved)
 		}
@@ -121,6 +125,16 @@ func (s *Service) agentStart(dir string) []agenttrust.Finding {
 		found = []agenttrust.Finding{}
 	}
 	return found
+}
+
+// codexFingerprint is dir's .codex/ fingerprint ("" for none, or none readable): a real disk only,
+// as agentStart.
+func (s *Service) codexFingerprint(dir string) string {
+	if _, real := s.opts.FS.(OS); !real {
+		return ""
+	}
+	config, _ := agenttrust.CodexConfigOf(dir)
+	return config.Fingerprint
 }
 
 func (s *Service) isFile(path string) bool {

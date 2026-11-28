@@ -183,3 +183,28 @@ describe("grantingText: the R9 spellings", () => {
     expect(grantingText(text)).toBe(want);
   });
 });
+
+// R10-S10: the same cases as questions.TestGrantingTextSeesTheR10Spellings.
+describe("grantingText: the R10 spellings", () => {
+  it.each([
+    ["A11ow", true],
+    ["appr0ve", true],
+    ["Al.low", true],
+    ["a-l-l-o-w", true],
+    ["AІІow", true],
+    ["AΙΙow", true],
+    ["AӀӀow", true],
+    ["Prøceed", true],
+    ["Enable the hook", true],
+    ["Execute it", true],
+    ["go-ahead", true],
+    ["Upgrade to 1.4.0?", false],
+    ["Keep 10 or 30 retries?", false],
+    ["Is it OK?", false],
+    ["Run the tests again?", false],
+    ["Idle or busy?", false],
+    ["Use the e-mail template?", false],
+  ])("%s → %s", (text, want) => {
+    expect(grantingText(text)).toBe(want);
+  });
+});

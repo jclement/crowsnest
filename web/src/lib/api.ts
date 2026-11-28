@@ -330,7 +330,9 @@ export const endpoints = {
   /** One project by id or slug; `opened` when the human opens it (applies lead_start=open). */
   project: (ref: string, opened = false) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}${opened ? "?open=1" : ""}`),
   createProject: (input: ProjectCreateInput) => api<ProjectView>("/projects", { method: "POST", body: input }),
-  trustProject: (ref: string) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}/trust`, { method: "POST" }),
+  /** shown is the .codex/ fingerprint the page showed ("" for none): the server refuses if it changed (R10 S5a). */
+  trustProject: (ref: string, shown: string) =>
+    api<ProjectView>(`/projects/${encodeURIComponent(ref)}/trust`, { method: "POST", body: { codex_fingerprint: shown } }),
   /** Allows the project folder's own .codex/ for Codex jobs, as the page showed it (R9-S5). */
   allowCodexConfig: (ref: string, fingerprint: string) =>
     api<ProjectView>(`/projects/${encodeURIComponent(ref)}/codex-config`, { method: "POST", body: { fingerprint } }),

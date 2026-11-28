@@ -88,6 +88,8 @@ export interface FolderFacts {
   claude_md: boolean;
   /** What the folder carries that an agent runs or reads at its start (R9-S4). */
   agent_start?: AgentStartFinding[];
+  /** The folder's .codex/ fingerprint (absent for none), sent back with the trust box (R10 S5a). */
+  codex_fingerprint?: string;
   claude_trusted?: boolean;
   is_home: boolean;
   is_filesystem_root: boolean;

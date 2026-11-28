@@ -109,7 +109,7 @@ function TrustFolderBanner({ project }: { project: ProjectView }) {
   const trust = useTrustProject(project.slug);
   const toast = useToast();
   const press = () =>
-    trust.mutate(undefined, {
+    trust.mutate(project.codex_config?.fingerprint ?? "", {
       onSuccess: (saved) => {
         const problem = (saved.trust ?? []).find((result) => result.status === "failed" || result.status === "skipped");
         if (saved.folder_trusted) toast.show({ tone: "success", title: `Agents may work in ${project.name}'s folder`, description: project.dir });

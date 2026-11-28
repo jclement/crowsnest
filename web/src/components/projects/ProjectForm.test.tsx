@@ -39,7 +39,8 @@ describe("ProjectForm: the folder", () => {
     await userEvent.clear(screen.getByLabelText(/Check command/));
     await userEvent.type(screen.getByLabelText(/Check command/), "make test");
     await userEvent.click(screen.getByRole("button", { name: "Create project" }));
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ dir: "/h/billing-api", name: "Billing api" }), { checkCommand: "make test", detectedCheck: "mise run check", trustFolder: true });
+    // The .codex/ the facts showed goes back with the trust box ("" here: none), R10 S5a.
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ dir: "/h/billing-api", name: "Billing api" }), { checkCommand: "make test", detectedCheck: "mise run check", trustFolder: true, codexFingerprint: "" });
   });
 
   it("asks to trust a folder that carries nothing for agents by default, and not once unticked", async () => {

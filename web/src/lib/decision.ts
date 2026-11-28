@@ -87,7 +87,8 @@ const GRANTING_WORDS = new Set(
   landing push pushes pushed pushing deploy deploys deployed deploying deployment delete deletes deleted deleting deletion
   grant grants granted granting permit permits permitted permitting proceed proceeds proceeded proceeding authorize authorizes
   authorized authorizing authorise authorises authorised authorising authorization authorisation accept accepts accepted
-  accepting confirm confirms confirmed confirming publish publishes published publishing apply applies applied applying`.split(/\s+/),
+  accepting confirm confirms confirmed confirming publish publishes published publishing apply applies applied applying
+  enable enables enabled enabling execute executes executed executing goahead`.split(/\s+/),
 );
 const GRANTING_PHRASES = ["go ahead"];
 
@@ -95,10 +96,10 @@ const GRANTING_PHRASES = ["go ahead"];
 const CONFUSABLES = new Map<number, string>([
   [0x0430, "a"], [0x0435, "e"], [0x043e, "o"], [0x0440, "p"], [0x0441, "c"], [0x0443, "y"], [0x0445, "x"], [0x0456, "i"],
   [0x0458, "j"], [0x0455, "s"], [0x0501, "d"], [0x04cf, "l"], [0x0261, "g"], [0x0251, "a"], [0x0410, "a"], [0x0415, "e"],
-  [0x041e, "o"], [0x0420, "p"], [0x0421, "c"], [0x0425, "x"], [0x0406, "i"], [0x0408, "j"], [0x0405, "s"], [0x041c, "m"],
+  [0x041e, "o"], [0x0420, "p"], [0x0421, "c"], [0x0425, "x"], [0x0406, "I"], [0x0408, "j"], [0x0405, "s"], [0x041c, "m"],
   [0x041d, "h"], [0x0422, "t"], [0x0412, "b"], [0x041a, "k"], [0x03bf, "o"], [0x03b1, "a"], [0x03b5, "e"], [0x03b9, "i"],
   [0x03ba, "k"], [0x03bd, "v"], [0x03c1, "p"], [0x03c4, "t"], [0x03c5, "u"], [0x039f, "o"], [0x0391, "a"], [0x0392, "b"],
-  [0x0395, "e"], [0x0397, "h"], [0x0399, "i"], [0x039a, "k"], [0x039c, "m"], [0x039d, "n"], [0x03a1, "p"], [0x03a4, "t"],
+  [0x0395, "e"], [0x0397, "h"], [0x0399, "I"], [0x039a, "k"], [0x039c, "m"], [0x039d, "n"], [0x03a1, "p"], [0x03a4, "t"],
   [0x03a7, "x"], [0x0131, "i"],
   // R9-S10: Latin small capitals, Cherokee look-alikes, and the letters that read as l and w.
   [0x1d00, "a"], [0x0299, "b"], [0x1d04, "c"], [0x1d05, "d"], [0x1d07, "e"], [0xa730, "f"], [0x0262, "g"], [0x029c, "h"],
@@ -108,18 +109,44 @@ const CONFUSABLES = new Map<number, string>([
   [0x13e7, "j"], [0x13e6, "k"], [0x13de, "l"], [0x13b7, "m"], [0x13be, "o"], [0x13e2, "p"], [0x13a1, "r"], [0x13da, "s"],
   [0x13a2, "t"], [0x13d9, "v"], [0x13b3, "w"], [0x13bd, "y"], [0x13c3, "z"],
   [0x0142, "l"], [0x0141, "l"], [0x03c9, "w"], [0x051d, "w"], [0x051c, "w"], [0x0461, "w"],
+  // R10-S10: the Cyrillic and Greek capital I fold to a Latin I (an l between letters); the
+  // palochka too; the slashed o has no decomposition.
+  [0x04c0, "I"], [0x00f8, "o"], [0x00d8, "o"],
 ]);
+
+/** Digits that stand for letters inside a word (A11ow, appr0ve, R10-S10). */
+const DIGIT_LETTERS = new Map<string, string>([["0", "o"], ["1", "l"], ["3", "e"], ["4", "a"], ["5", "s"], ["7", "t"]]);
+/** Joiners dropped between two letters (Al.low, a-l-l-o-w, R10-S10). */
+const WORD_JOINERS = ".-_·'’";
+
+/** A digit beside a letter read as its letter, a joiner between letters dropped: as questions.joinDisguisedWords. */
+function joinDisguisedWords(chars: string[]): string[] {
+  const isLetter = (i: number) => i >= 0 && i < chars.length && /\p{L}/u.test(chars[i]!);
+  const out: string[] = [];
+  chars.forEach((char, i) => {
+    const letter = DIGIT_LETTERS.get(char);
+    if (letter && (isLetter(i - 1) || isLetter(i + 1))) {
+      chars[i] = letter;
+      out.push(letter);
+      return;
+    }
+    if (WORD_JOINERS.includes(char) && isLetter(i - 1) && isLetter(i + 1)) return;
+    out.push(char);
+  });
+  return out;
+}
 
 /**
  * Text as grantingText reads it: NFKD, format characters and combining marks removed, look-alikes
  * folded, a capital I after a letter read as l (AIIow), lowercased, split into words.
  */
 function normalisedWords(text: string): string[] {
-  const folded: string[] = [];
+  const raw: string[] = [];
   for (const char of text.normalize("NFKD")) {
     if (/\p{Cf}|\p{Mn}/u.test(char)) continue;
-    folded.push(CONFUSABLES.get(char.codePointAt(0) ?? 0) ?? char);
+    raw.push(CONFUSABLES.get(char.codePointAt(0) ?? 0) ?? char);
   }
+  const folded = joinDisguisedWords(raw);
   return folded
     .map((char, i) => (char === "I" && i > 0 && /\p{L}/u.test(folded[i - 1]!) ? "l" : char))
     .join("")

@@ -64,7 +64,8 @@ func IsGate(context map[string]string) bool {
 // keys, option labels or title use one is treated as a gate for notification purposes, because an
 // agent can word any question to look like one (R3-I4, R6-S9): one tap on a lock screen must never
 // look like it grants anything. "go ahead" reads as a grant too (R7-S6); "ship" does not, since
-// "Ship?" is the plain confirm of many ordinary questions.
+// "Ship?" is the plain confirm of many ordinary questions. R10-S10 added enable and execute; ok and
+// run stay out for the same reason as ship ("Is it OK?", "Run the tests again?" are plain).
 var grantingWords = map[string]bool{}
 
 func init() {
@@ -74,7 +75,7 @@ func init() {
 		permitted permitting proceed proceeds proceeded proceeding authorize authorizes authorized authorizing
 		authorise authorises authorised authorising authorization authorisation accept accepts accepted accepting
 		confirm confirms confirmed confirming publish publishes published publishing apply applies applied
-		applying`) {
+		applying enable enables enabled enabling execute executes executed executing goahead`) {
 		grantingWords[word] = true
 	}
 }
@@ -88,11 +89,11 @@ var grantingPhrases = []string{"go ahead"}
 var confusables = map[rune]rune{
 	'\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
 	'\u0456': 'i', '\u0458': 'j', '\u0455': 's', '\u0501': 'd', '\u04cf': 'l', '\u0261': 'g', '\u0251': 'a',
-	'\u0410': 'a', '\u0415': 'e', '\u041e': 'o', '\u0420': 'p', '\u0421': 'c', '\u0425': 'x', '\u0406': 'i',
+	'\u0410': 'a', '\u0415': 'e', '\u041e': 'o', '\u0420': 'p', '\u0421': 'c', '\u0425': 'x', '\u0406': 'I',
 	'\u0408': 'j', '\u0405': 's', '\u041c': 'm', '\u041d': 'h', '\u0422': 't', '\u0412': 'b', '\u041a': 'k',
 	'\u03bf': 'o', '\u03b1': 'a', '\u03b5': 'e', '\u03b9': 'i', '\u03ba': 'k', '\u03bd': 'v', '\u03c1': 'p',
 	'\u03c4': 't', '\u03c5': 'u', '\u039f': 'o', '\u0391': 'a', '\u0392': 'b', '\u0395': 'e', '\u0397': 'h',
-	'\u0399': 'i', '\u039a': 'k', '\u039c': 'm', '\u039d': 'n', '\u03a1': 'p', '\u03a4': 't', '\u03a7': 'x',
+	'\u0399': 'I', '\u039a': 'k', '\u039c': 'm', '\u039d': 'n', '\u03a1': 'p', '\u03a4': 't', '\u03a7': 'x',
 	'\u0131': 'i',
 	// R9-S10: Latin small capitals, the Cherokee letters that draw as Latin capitals, and the
 	// stroked and Greek or Cyrillic letters that read as l and w.
@@ -104,14 +105,25 @@ var confusables = map[rune]rune{
 	'\u13a5': 'i', '\u13e7': 'j', '\u13e6': 'k', '\u13de': 'l', '\u13b7': 'm', '\u13be': 'o', '\u13e2': 'p',
 	'\u13a1': 'r', '\u13da': 's', '\u13a2': 't', '\u13d9': 'v', '\u13b3': 'w', '\u13bd': 'y', '\u13c3': 'z',
 	'\u0142': 'l', '\u0141': 'l', '\u03c9': 'w', '\u051d': 'w', '\u051c': 'w', '\u0461': 'w',
+	// R10-S10: the Cyrillic and Greek capital I above fold to a Latin capital I (read as l between
+	// letters, as I is); the palochka too; the slashed o has no decomposition.
+	'\u04c0': 'I', '\u00f8': 'o', '\u00d8': 'o',
 }
+
+// digitLetters are the digits that stand for letters inside a word (A11ow, appr0ve, R10-S10).
+var digitLetters = map[rune]rune{'0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's', '7': 't'}
+
+// wordJoiners join the letters on either side of them into one word (Al.low, a-l-l-o-w, R10-S10):
+// one of these between two letters is a disguise more often than a word break.
+const wordJoiners = ".-_·'’"
 
 // normalisedWords is text as GrantingText reads it (R7-S6, R9-S10): compatibility-normalised and
 // decomposed (NFKD, so full-width and styled letters are plain and an accent is a mark of its
 // own), with every format character (zero-width space and joiners, bidi controls, soft hyphen)
 // and every combining mark (`Allów`) removed so neither can split or disguise a word, look-alike
-// letters folded onto Latin ones, a capital I read as an l where it sits between letters (`AIIow`:
-// a sans-serif I and l look the same), lowercased and split into words of letters.
+// letters folded onto Latin ones, digits beside letters read as letters and joiners between
+// letters dropped (R10-S10: `A11ow`, `Al.low`), a capital I read as an l where it sits between
+// letters (`AIIow`: a sans-serif I and l look the same), lowercased and split into words of letters.
 func normalisedWords(text string) []string {
 	var folded []rune
 	for _, r := range norm.NFKD.String(text) {
@@ -123,6 +135,7 @@ func normalisedWords(text string) []string {
 		}
 		folded = append(folded, r)
 	}
+	folded = joinDisguisedWords(folded)
 	var b strings.Builder
 	for i, r := range folded {
 		if r == 'I' && i > 0 && unicode.IsLetter(folded[i-1]) {
@@ -131,6 +144,26 @@ func normalisedWords(text string) []string {
 		b.WriteRune(unicode.ToLower(r))
 	}
 	return strings.FieldsFunc(b.String(), func(r rune) bool { return !unicode.IsLetter(r) })
+}
+
+// joinDisguisedWords reads a digit beside a letter as the letter it stands for, and drops a joiner
+// (wordJoiners) between two letters, so "A11ow" and "Al.low" are the word they spell (R10-S10).
+// A digit with no letter beside it (a version, a count) is left to split words as before.
+func joinDisguisedWords(runes []rune) []rune {
+	isLetter := func(i int) bool { return i >= 0 && i < len(runes) && unicode.IsLetter(runes[i]) }
+	out := make([]rune, 0, len(runes))
+	for i, r := range runes {
+		if letter, ok := digitLetters[r]; ok && (isLetter(i-1) || isLetter(i+1)) {
+			runes[i] = letter
+			out = append(out, letter)
+			continue
+		}
+		if strings.ContainsRune(wordJoiners, r) && isLetter(i-1) && isLetter(i+1) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // GrantingText reports whether text uses a granting word or phrase (whole words, any case, after
