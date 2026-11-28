@@ -82,7 +82,7 @@ Home Screen install.
 ## Using it on a phone
 
 - The bottom bar is **Now**, **Projects**, **Inbox**, **Chat** and **More** (Jobs, Agents,
-  Help, System).
+  Help, Settings, System).
 - Questions, approvals and dialogs open as a [decision packet](answer.md#the-decision-packet)
   with the answer bar under your thumb.
 - A stuck job has **Rescue** buttons so you rarely need the terminal: [Rescue a stuck

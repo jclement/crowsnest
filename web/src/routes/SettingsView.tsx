@@ -36,18 +36,24 @@ import { useMe, useSettingsPage } from "../lib/queries";
 import { browserPushEnvironment } from "../lib/push";
 import { settingsGroups, type SettingsSectionId } from "../lib/settingsSections";
 import type { SettingsPage } from "../lib/system";
+import { scrollToTop } from "../lib/scrollTo";
 
 export function SettingsView() {
   const { hash } = useLocation();
   const me = useMe();
   const voice = !!me.data?.features.voice;
-  const groups = settingsGroups(voice);
+  const groups = settingsGroups();
+  const navigate = useNavigate();
 
   // A link to a section (#limits) scrolls to it, now and whenever the hash changes; again a moment
   // later, since the sections above it load their data and grow after the first paint.
   useEffect(() => {
     if (!hash) return;
-    const scroll = () => document.getElementById(`settings-${hash}`)?.scrollIntoView({ block: "start" });
+    const scroll = () => {
+      const section = document.getElementById(`settings-${hash}`);
+      // Below md the section picker sticks to the top: land under it, not behind it.
+      if (section) scrollToTop(section, { margin: window.matchMedia("(min-width: 768px)").matches ? 12 : 72 });
+    };
     scroll();
     const timers = [150, 500, 1200].map((ms) => window.setTimeout(scroll, ms));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
@@ -61,18 +67,18 @@ export function SettingsView() {
           Settings
           <HelpButton topic="reference/settings" what="every setting and flag" className="self-center" />
         </h1>
-        <ul className="flex flex-wrap gap-x-3 gap-y-1 md:flex-col md:gap-0">
+        <ul className="hidden md:flex md:flex-col md:gap-0">
           {groups.map((group) => (
             <li key={group.title} className="md:mb-2">
-              <p className="hidden px-2 pb-0.5 text-2xs font-semibold uppercase tracking-wide text-muted md:block">{group.title}</p>
-              <ul className="flex flex-wrap gap-x-3 md:flex-col md:gap-0">
+              <p className="px-2 pb-0.5 text-2xs font-semibold uppercase tracking-wide text-muted">{group.title}</p>
+              <ul className="flex flex-col gap-0">
                 {group.sections.map((section) => (
                   <li key={section.id}>
                     <Link
                       to="/settings"
                       hash={section.id}
                       data-current={hash === section.id || undefined}
-                      className="inline-flex min-h-11 items-center rounded px-2 text-sm text-accent hover:bg-hover data-[current]:font-medium md:min-h-7 md:text-body md:data-[current]:bg-selected md:data-[current]:text-heading"
+                      className="inline-flex min-h-7 items-center rounded px-2 text-sm text-body hover:bg-hover data-[current]:bg-selected data-[current]:font-medium data-[current]:text-heading"
                     >
                       {section.title}
                     </Link>
@@ -83,13 +89,35 @@ export function SettingsView() {
           ))}
         </ul>
       </nav>
+      {/* On a phone the page is many screens long (R10 F-F8, O-F11): one picker that stays at
+          the top while the sections scroll under it, instead of fifteen links at the top only. */}
+      <label className="sticky top-0 z-10 -mx-3 flex items-center gap-2 border-b border-border bg-surface px-3 py-1.5 text-xs text-muted md:hidden">
+        Section
+        <select
+          aria-label="Go to a section"
+          value={hash || ""}
+          onChange={(event) => void navigate({ to: "/settings", hash: event.target.value })}
+          className="h-11 min-w-0 flex-1 rounded border border-border bg-surface px-2 text-sm text-heading"
+        >
+          {!hash && <option value="">Choose…</option>}
+          {groups.map((group) => (
+            <optgroup key={group.title} label={group.title}>
+              {group.sections.map((section) => (
+                <option key={section.id} value={section.id}>
+                  {section.title}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
       <div className="flex min-w-0 flex-1 flex-col gap-6">
         {groups.map((group) => (
           <div key={group.title} className="flex flex-col gap-4">
             <h2 className="border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-muted">{group.title}</h2>
             {group.sections.map((section) => (
               <SettingsSection key={section.id} id={section.id} title={section.title} help={section.help}>
-                <SectionBody id={section.id} />
+                <SectionBody id={section.id} voice={voice} />
               </SettingsSection>
             ))}
           </div>
@@ -114,14 +142,14 @@ function SettingsSection({ id, title, help, children }: { id: SettingsSectionId;
 }
 
 /** What each section shows. */
-function SectionBody({ id }: { id: SettingsSectionId }) {
+function SectionBody({ id, voice }: { id: SettingsSectionId; voice: boolean }) {
   switch (id) {
     case "appearance":
       return <AppearanceBody />;
     case "notifications":
       return <NotificationSettingsBody env={browserPushEnvironment()} />;
     case "voice":
-      return <VoiceSettingsBody />;
+      return voice ? <VoiceSettingsBody /> : <VoiceOff />;
     case "account":
       return <AccountSection />;
     case "limits":
@@ -181,6 +209,22 @@ function ServerBody({ page, sections, network, titled }: { page: SettingsPage; s
       <ServerSettings page={page} sections={sections} titled={titled} />
       {network && <NetworkSettings page={page} />}
     </>
+  );
+}
+
+/** Voice when talk mode is off (R10 O-F9): what it is and the one way to turn it on. */
+function VoiceOff() {
+  const palette = usePaletteMaybe();
+  return (
+    <div className="flex flex-col gap-2 text-xs text-body">
+      <p>
+        Talk mode is off. Start crowsnest with an ElevenLabs key (<span className="font-mono">ELEVENLABS_API_KEY</span>, or{" "}
+        <span className="font-mono">--elevenlabs-api-key-file</span>) to talk to the orchestrator and hear its replies.
+      </p>
+      <Button compact className="self-start" onClick={() => palette?.openHelp("how-to/voice#turn-it-on")}>
+        How to turn it on
+      </Button>
+    </div>
   );
 }
 

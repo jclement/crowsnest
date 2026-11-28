@@ -31,13 +31,16 @@ export interface SettingsGroup {
   sections: SettingsSection[];
 }
 
-/** The groups and their sections, in order; Voice only with talk mode on. */
-export function settingsGroups(voice: boolean): SettingsGroup[] {
+/**
+ * The groups and their sections, in order. Voice is always there (R10 O-F9): with talk mode off it
+ * says how to turn it on, so a link to /settings#voice never lands on the wrong section.
+ */
+export function settingsGroups(): SettingsGroup[] {
   const device: SettingsSection[] = [
     { id: "appearance", title: "Appearance", help: { topic: "how-to/appearance", what: "themes and modes" } },
     { id: "notifications", title: "Notifications", help: { topic: "how-to/phone#turn-on-notifications", what: "notifications" } },
+    { id: "voice", title: "Voice", help: { topic: "how-to/voice#speak-mode-vs-the-mic", what: "speak mode and the mic" } },
   ];
-  if (voice) device.push({ id: "voice", title: "Voice", help: { topic: "how-to/voice#speak-mode-vs-the-mic", what: "speak mode and the mic" } });
   return [
     { title: "This device", sections: device },
     {
@@ -70,9 +73,24 @@ export function settingsGroups(voice: boolean): SettingsGroup[] {
   ];
 }
 
-/** True when id names a section of the Settings view (Voice included, which needs talk mode). */
+/** Words a palette search for a section may use besides its title (lib/palette.ts). */
+export const settingsKeywords: Partial<Record<SettingsSectionId, string[]>> = {
+  account: ["name", "login", "password", "user"],
+  limits: ["throttle", "running", "slots", "concurrency", "heavy", "review"],
+  instance: ["budget", "upkeep", "compact", "attachments", "notices", "bind", "acceptance"],
+  backups: ["backup", "restore", "storage", "disk", "retention"],
+  tailnet: ["tailscale", "publish", "serve", "remote", "phone"],
+  system: ["doctor", "health"],
+  agents: ["model", "engine", "codex", "claude", "permission", "remote control"],
+  schedules: ["cron", "every"],
+  approvals: ["rules", "allow", "permissions"],
+  guard: ["protected", "hosts", "branches", "production"],
+  pause: ["dnd", "quiet", "do not disturb", "pause"],
+};
+
+/** True when id names a section of the Settings view. */
 export function isSettingsSection(id: string): id is SettingsSectionId {
-  return settingsGroups(true).some((group) => group.sections.some((section) => section.id === id));
+  return settingsGroups().some((group) => group.sections.some((section) => section.id === id));
 }
 
 /** The sheets that were doors to configuration, and the section each now lands on. */

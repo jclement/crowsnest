@@ -32,7 +32,7 @@ func ManualSettingsMarkdown() string {
 		"The [Settings concept](../concepts/budgets-limits-pause.md) and [how-to pages](../README.md) explain what the important ones are for.\n\n")
 
 	b.WriteString("## Changeable in the app\n\n")
-	b.WriteString("These appear in the **Settings** view (account menu → Settings), under the headings below, each in the view's section for it (Limits, Budgets, upkeep and notices, Backups and storage, Tailnet, Agent settings, Protected hosts and branches).\n\n")
+	b.WriteString("These appear in the **Settings** view (More, the rail, `g s` or the account menu), under the headings below, each in the view's section for it (Limits, Budgets, upkeep and notices, Backups and storage, Tailnet, Agent settings, Protected hosts and branches).\n\n")
 	section := ""
 	for _, setting := range editable {
 		if setting.Section != section {

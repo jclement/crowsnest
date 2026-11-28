@@ -169,7 +169,7 @@ function ThemeCard({
           )}
         </span>
         <span className="px-1 text-xs text-muted">{theme.description}</span>
-        <span className="grid w-full gap-2 sm:grid-cols-2">
+        <span className="grid w-full grid-cols-2 gap-2">
           <ThemePreview theme={theme.id} dark={false} />
           <ThemePreview theme={theme.id} dark />
         </span>
@@ -222,7 +222,7 @@ export function ThemePreview({ theme, dark, className }: { theme: string; dark: 
           <span key={row.state} className={cn("flex items-center gap-2 px-2 py-1", index === 2 && "bg-selected")}>
             <StateMark state={row.state} />
             <span className="min-w-0 flex-1 truncate text-2xs text-heading">{row.title}</span>
-            <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted">{row.meta}</span>
+            <span className="hidden shrink-0 font-mono text-[10px] tabular-nums text-muted sm:inline">{row.meta}</span>
           </span>
         ))}
       </span>

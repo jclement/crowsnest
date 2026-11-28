@@ -10,6 +10,7 @@ import { Sheet } from "../components/ui/Sheet";
 import { SkeletonRows } from "../components/ui/Skeleton";
 import { cn } from "../lib/cn";
 import { CONTENTS_ID, helpPath, neighbours, partOf, searchManual, type Manual, type SearchEntry } from "../lib/manual";
+import { scrollToTop } from "../lib/scrollTo";
 import { useManual } from "../lib/manual-queries";
 
 export function HelpView({ pageId }: { pageId?: string }) {
@@ -26,7 +27,7 @@ export function HelpView({ pageId }: { pageId?: string }) {
     if (!page) return;
     const frame = requestAnimationFrame(() => {
       const target = hash ? document.getElementById(decodeURIComponent(hash)) : null;
-      if (target) target.scrollIntoView({ block: "start" });
+      if (target) scrollToTop(target);
       else articleRef.current?.closest("main")?.scrollTo({ top: 0 });
     });
     return () => cancelAnimationFrame(frame);

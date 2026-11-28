@@ -15,13 +15,14 @@ import { cardLine, isFinished, nextStep, stateLabels, type Job } from "./jobs";
 import { kindLabels, type Question } from "./questions";
 import { leadAgentName, leadChip, leadRunning, type ProjectView } from "./projects";
 import type { SearchHit } from "./manual";
+import { settingsGroups, settingsKeywords, type SettingsSectionId } from "./settingsSections";
 import type { ThemeChoice } from "./theme";
 import type { AgentStatus, Fleet } from "./types";
 import type { ChipTone } from "../components/ui/Chip";
 
 // ---- Commands -------------------------------------------------------------------------------
 
-export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/agents" | "/system" | "/help" | "/diff";
+export type ViewPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/decide" | "/agents" | "/system" | "/settings" | "/help" | "/diff";
 /** The sheets the palette (and the manual's "open" buttons) can open. */
 export const PALETTE_SHEETS = ["appearance", "journal", "notifications", "shortcuts", "voice", "schedule", "spend", "instructions", "settings", "digests", "worktrees", "limits", "pause"] as const;
 export type PaletteSheet = (typeof PALETTE_SHEETS)[number];
@@ -194,7 +195,11 @@ const views: Array<{ to: ViewPath; label: string; icon: PaletteIcon; keywords: s
   { to: "/inbox", label: "Inbox", icon: "inbox", keywords: ["questions", "dialogs", "answer"], key: "i" },
   { to: "/agents", label: "Agents", icon: "fleet", keywords: ["fleet", "terminal", "workspaces", "panes", "herdr", "tui", "shell"], key: "a" },
   { to: "/help", label: "Help", icon: "help", keywords: ["manual", "docs", "documentation", "guide", "how", "concepts"], key: "m" },
+  // R10 F-F8: Settings is a view with a g key, under More and on the rail, not only in the account menu.
+  { to: "/settings", label: "Settings", icon: "settings", keywords: ["preferences", "model", "poke", "engine", "permission", "configuration"], key: "s" },
 ];
+
+const sectionsWithOwnRow = new Set<SettingsSectionId>(["appearance", "notifications", "instructions", "voice"]);
 
 /** The g-sequence for each view (g j, g c, …), for the shortcuts sheet and lib/hotkeys.ts. */
 export const viewKeys: Array<{ key: string; to: ViewPath; label: string }> = views.map(({ key, to, label }) => ({ key, to, label }));
@@ -476,7 +481,23 @@ export function buildItems(sources: PaletteSources): PaletteItem[] {
   items.push(sheet("spend", "Spend", "spend", ["cost", "tokens", "usage", "money", "budget", "price"]));
   items.push(sheet("instructions", "Instructions", "instructions", ["settings", "roles", "global", "layers", "prompt", "claude.md", "agents.md"]));
   items.push(sheet("shortcuts", "Keyboard shortcuts", "keyboard", ["help", "keys", "?"]));
-  items.push(sheet("settings", "Settings", "settings", ["preferences", "model", "poke", "engine", "permission", "configuration"]));
+  // Each section of Settings is its own row (R10 F-F4), so "tailnet" or "backup" finds its section
+  // rather than offering a job named after the search.
+  for (const group of settingsGroups()) {
+    for (const section of group.sections) {
+      // Appearance, Notifications, Instructions and Voice already have rows of their own.
+      if (sectionsWithOwnRow.has(section.id) && (section.id !== "voice" || sources.voiceSettings)) continue;
+      items.push({
+        id: `settings:${section.id}`,
+        group: "navigate",
+        title: `Settings: ${section.title}`,
+        keywords: ["settings", ...(settingsKeywords[section.id] ?? [])],
+        icon: "settings",
+        command: { kind: "navigate", to: "/settings", hash: section.id },
+        verb: "Open",
+      });
+    }
+  }
   items.push({
     id: "nav:/system",
     group: "navigate",

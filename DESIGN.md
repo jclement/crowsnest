@@ -3700,8 +3700,8 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 | **Agents** (`/agents`; R8 merged the Fleet and Terminal views into it) | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal; a **Session terminal** row at the top opens the herdr TUI full screen (`?session=true`) with the key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Tree at left; at right the selected agent with Conversation/Terminal toggle, or with nothing selected the session terminal, full height, font size in the status line |
 
 Since R4 (section 22) the nav has four primary destinations, Now, Projects, Inbox and Chat, which
-are the phone's bottom bar, plus **More** (a sheet: Jobs, Agents, Help, System); the
-desktop rail shows the same order with Jobs, Agents and Help under a "More" heading
+are the phone's bottom bar, plus **More** (a sheet: Jobs, Agents, Help, Settings, System); the
+desktop rail shows the same order with Jobs, Agents, Help and Settings under a "More" heading (R10: Settings joined them, with `g s`)
 (`components/nav.ts` is the one list; Help is the manual, 12.11). Now is the default route (`/`, `g h`); a link made before it (`/?job=j_12`,
 `/?project=<slug>`) is redirected to the board at `/jobs` (`g j`); the others are `/projects`
 (`/projects/<slug>` a project), `/chat` (`?target=lead-<slug>` a project's lead), `/inbox` and `/agents` (`g a`;
@@ -3962,8 +3962,13 @@ Every old door still lands: `PaletteProvider.openSheet` sends the palette's `set
 `app:sheet/<name>` buttons, which go through it) to their sections (`SHEET_SECTIONS`); the manual
 links a section directly with `app:/settings#<id>` (`appTarget` accepts a hash only for a real
 section); the Jobs board's running count opens `#limits`. The section list sits at the left from
-`md` and wraps at the top on a phone; a hash scrolls to its section, again as the sections above
-it load. The account menu is now System, Settings, the **Pause automation** and **Do not disturb**
+`md`; on a phone it is one **Section** select that sticks to the top of the view (R10: fifteen
+wrapped links at the top only were lost 19 screens later). A hash scrolls to its section, again as
+the sections above it load, by scrolling `<main>` only (`lib/scrollTo.ts`): `scrollIntoView` also
+scrolled the document past the fixed frame and cut the header off (R10 F-B1). Voice is always a
+section: with talk mode off it says how to turn it on. Each section other than the ones with a
+palette row of their own is a palette row, `Settings: <section>`. A switch shows its value in
+words beside its source chip ("Off (default)"). The account menu is now System, Settings, the **Pause automation** and **Do not disturb**
 switches (`menuitemcheckbox`, showing their state: on asks its reason or end time in the old
 small sheet, off is one tap) and Sign out. Each server setting row: the control (text, switch, choice, write-only password
 field), its source chip (default, config file, set here, environment, command line), when it

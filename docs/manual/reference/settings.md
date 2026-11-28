@@ -10,7 +10,7 @@ Open the Settings view: [Open Settings](app:/settings). The [Settings concept](.
 
 ## Changeable in the app
 
-These appear in the **Settings** view (account menu → Settings), under the headings below, each in the view's section for it (Limits, Budgets, upkeep and notices, Backups and storage, Tailnet, Agent settings, Protected hosts and branches).
+These appear in the **Settings** view (More, the rail, `g s` or the account menu), under the headings below, each in the view's section for it (Limits, Budgets, upkeep and notices, Backups and storage, Tailnet, Agent settings, Protected hosts and branches).
 
 ### Agents
 

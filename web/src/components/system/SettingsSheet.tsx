@@ -102,6 +102,7 @@ function SettingRow({ setting, engineNow }: { setting: SettingView; engineNow?: 
       </div>
       <div className="flex min-w-0 items-center gap-2">
         <SettingInput id={id} setting={setting} value={draft} disabled={locked || save.isPending} onChange={setDraft} onToggle={(value) => commit(value)} />
+        {setting.kind === "bool" && <span className="text-xs text-heading">{effectiveLabel(setting, draft)}</span>}
         {setting.kind !== "bool" && setting.kind !== "choice" && !locked && (
           <Button type="submit" compact disabled={!dirty || save.isPending}>
             Save
@@ -154,6 +155,15 @@ function RestoredSetting({ setting, disabled, onUse, onKeep }: { setting: Settin
       </div>
     </div>
   );
+}
+
+/**
+ * What a switch is set to, in words (R10 O-F11): "Publish to your tailnet" beside a "default" chip
+ * did not say whether it was on. "Off (default)" does.
+ */
+export function effectiveLabel(setting: SettingView, value: string): string {
+  const on = setting.invert ? value !== "true" : value === "true";
+  return `${on ? "On" : "Off"}${setting.source === "default" ? " (default)" : ""}`;
 }
 
 interface SettingInputProps {
@@ -215,7 +225,7 @@ function SettingInput({ id, setting, value, disabled, onChange, onToggle }: Sett
       inputMode={setting.kind === "int" ? "numeric" : undefined}
       autoCapitalize="none"
       spellCheck={false}
-      placeholder={setting.default ? `default: ${setting.default}` : setting.kind === "list" ? "comma-separated" : "empty"}
+      placeholder={setting.default ? `default: ${setting.default}` : setting.kind === "list" ? "comma-separated" : "not set"}
       value={value}
       disabled={disabled}
       onChange={(event) => onChange(event.target.value)}

@@ -9,6 +9,7 @@ import { expect, expectAccessible, expectNoSidewaysScroll, isPhone, test } from 
 const sections = [
   "Appearance",
   "Notifications",
+  "Voice",
   "Account and name",
   "Limits",
   "Budgets, upkeep and notices",
@@ -26,7 +27,8 @@ const sections = [
 async function palette(page: Page, query: string, option: RegExp) {
   await page.getByRole("button", { name: "Search or run…" }).click();
   await page.getByRole("combobox", { name: "Search or run a command" }).fill(query);
-  await page.getByRole("option", { name: option }).first().click();
+  // Visible only: the Settings view's phone section picker has options of its own.
+  await page.getByRole("option", { name: option }).filter({ visible: true }).first().click();
 }
 
 test("the account menu is System, Settings and two switches; Settings has every section", async ({ page }, testInfo) => {
@@ -48,8 +50,10 @@ test("the account menu is System, Settings and two switches; Settings has every 
 
 test("every old door lands on its section", async ({ page }) => {
   await page.goto("/");
+  // The palette's Settings is the view itself now (R10 F-F8: g s, More and the rail too).
+  await palette(page, "settings", /^Settings$/);
+  await expect(page).toHaveURL(/\/settings$/);
   for (const [query, option, hash] of [
-    ["settings", /^Settings/, "instance"],
     ["appearance", /^Appearance/, "appearance"],
     ["notifications", /^Notifications/, "notifications"],
     ["instructions", /^Instructions/, "instructions"],
@@ -91,4 +95,44 @@ test("Do not disturb is a switch: on with a time, off with one tap", async ({ pa
   await expect(page.getByRole("menuitemcheckbox", { name: "Do not disturb" })).toHaveAttribute("aria-checked", "true");
   await page.getByRole("menuitemcheckbox", { name: "Do not disturb" }).click();
   await expect(page.getByText("Do not disturb is off")).toBeVisible();
+});
+
+// R10 F-B1 / O-B5: a section link scrolled the document as well as the view, so the header
+// (search, account) was cut off and a blank band showed under the tab bar.
+test("a section link scrolls the view, never the app's frame", async ({ page }) => {
+  await page.goto("/settings#tailnet");
+  await expect(page.locator("#settings-tailnet")).toBeInViewport();
+  await page.waitForTimeout(1300); // the view scrolls again as the sections above it load
+  expect(await page.evaluate(() => document.scrollingElement?.scrollTop)).toBe(0);
+  expect(await page.locator("header").first().evaluate((header) => header.getBoundingClientRect().top)).toBe(0);
+  await expect(page.locator("#settings-tailnet")).toBeInViewport();
+});
+
+test("Settings is reachable from More or the rail and g s; Voice says how to turn it on", async ({ page }, testInfo) => {
+  await page.goto("/");
+  if (isPhone(testInfo)) {
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("dialog", { name: "More" }).getByRole("link", { name: "Settings" }).click();
+  } else {
+    await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name: "Settings" }).click();
+  }
+  await expect(page).toHaveURL(/\/settings$/);
+  if (!isPhone(testInfo)) {
+    await page.goto("/");
+    await page.keyboard.press("g");
+    await page.keyboard.press("s");
+    await expect(page).toHaveURL(/\/settings$/);
+  }
+  // The demo runs without an ElevenLabs key: the section is there and says how to turn voice on.
+  await page.goto("/settings#voice");
+  const voice = page.getByRole("region", { name: "Voice", exact: true });
+  await expect(voice).toBeInViewport();
+  await expect(voice.getByText(/Talk mode is off/)).toBeVisible();
+  if (isPhone(testInfo)) {
+    await page.getByLabel("Go to a section").selectOption("tailnet");
+    await expect(page).toHaveURL(/\/settings#tailnet$/);
+    await expect(page.locator("#settings-tailnet")).toBeInViewport();
+  }
+  // A switch says what it is set to, not only where the value came from (R10 O-F11).
+  await expect(page.getByRole("region", { name: "Tailnet" }).getByText("Off (default)")).toBeVisible();
 });

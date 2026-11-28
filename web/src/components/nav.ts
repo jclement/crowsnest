@@ -4,10 +4,10 @@
 // are one tap further: on a phone under "More" (a sheet), on the desktop rail below a divider
 // in the same order. The Jobs board stays a view of its own; Agents (the herdr tree and the session
 // terminal) is the recovery and debugging tool, reachable from any agent's "Open terminal" as well. Help (the
-// manual) is last.
-import { FolderKanban, Gauge, Inbox, LifeBuoy, ListTodo, MessageSquare, Ship, type LucideIcon } from "lucide-react";
+// manual) and Settings are last.
+import { FolderKanban, Gauge, Inbox, LifeBuoy, ListTodo, MessageSquare, Settings, Ship, type LucideIcon } from "lucide-react";
 
-export type NavPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/agents" | "/help";
+export type NavPath = "/" | "/jobs" | "/projects" | "/chat" | "/inbox" | "/agents" | "/help" | "/settings";
 
 export interface NavItem {
   to: NavPath;
@@ -32,6 +32,8 @@ export const moreNav: NavItem[] = [
   { to: "/agents", label: "Agents", icon: Ship },
   // The built-in manual (docs/manual): how crowsnest works and how to do things with it.
   { to: "/help", label: "Help", icon: LifeBuoy },
+  // R10 F-F8 / O-F8: Settings was only behind the account icon; it is the last of More.
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 /** Every view, in order. */

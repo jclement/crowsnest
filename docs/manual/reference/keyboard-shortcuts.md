@@ -20,6 +20,7 @@ The `g` sequences and `?` do nothing while you type in a field or a terminal, so
 | `g` then `i` | `g` then `i` | Go to Inbox |
 | `g` then `a` | `g` then `a` | Go to Agents |
 | `g` then `m` | `g` then `m` | Go to Help |
+| `g` then `s` | `g` then `s` | Go to Settings |
 | `g` then `n` | `g` then `n` | Focus the needs-you tray (then y or n answers the approval you open) |
 
 ## In the palette

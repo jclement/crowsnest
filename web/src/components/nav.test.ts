@@ -13,7 +13,7 @@ describe("nav", () => {
   });
 
   it("keeps the board and the tools under More, in the same order on every screen", () => {
-    expect(moreNav.map((item) => item.to)).toEqual(["/jobs", "/agents", "/help"]);
+    expect(moreNav.map((item) => item.to)).toEqual(["/jobs", "/agents", "/help", "/settings"]);
     expect(navItems).toEqual([...primaryNav, ...moreNav]);
   });
 
@@ -21,6 +21,7 @@ describe("nav", () => {
     expect(inMore("/jobs")).toBe(true);
     expect(inMore("/agents")).toBe(true);
     expect(inMore("/help/concepts/jobs")).toBe(true);
+    expect(inMore("/settings")).toBe(true);
     expect(inMore("/")).toBe(false);
     expect(inMore("/projects/crowsnest")).toBe(false);
   });

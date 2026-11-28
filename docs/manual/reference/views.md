@@ -1,7 +1,7 @@
 # Every view
 
 On a phone the bottom bar is **Now**, **Projects**, **Inbox**, **Chat** and **More**; More holds
-**Jobs**, **Agents**, **Help** and **System**. On a desktop the left rail shows the
+**Jobs**, **Agents**, **Help**, **Settings** and **System**. On a desktop the left rail shows the
 same, with the More views under a heading. The account menu (top right) holds **System**,
 **Settings**, and two switches, **Pause automation** and **Do not disturb** (and **Sign out** with a login).
 
@@ -106,10 +106,11 @@ checks](../troubleshooting/doctor.md).
 `/settings` · [Open Settings](app:/settings)
 
 The one place to configure crowsnest (it replaced the separate Settings, Appearance, Account,
-Notifications, Voice, Instructions and Limits sheets). A section list at the left (at the top on a
-phone), then four groups:
+Notifications, Voice, Instructions and Limits sheets): under **More** on a phone, on the rail on a
+desktop, `g` then `s`, or the account menu. A section list at the left (on a phone, a **Section**
+picker that stays at the top as you scroll), then four groups:
 
-- **This device**: **Appearance** (theme and mode), **Notifications**, **Voice** (with talk mode).
+- **This device**: **Appearance** (theme and mode), **Notifications**, **Voice** (with talk mode off, how to turn it on).
 - **This instance**: **Account and name**, **Limits** (running jobs, load, heavy slots, and the
   throttling and review settings), **Budgets, upkeep and notices**, **Backups and storage**
   (**Download backup**, **Clean up now…**), **Tailnet** (publish to your tailnet, sign in with
@@ -120,7 +121,9 @@ phone), then four groups:
   do not disturb** (switches in the account menu).
 
 Each section has its own link, `/settings#<section>` (for example `/settings#limits`); the palette's
-Settings, Appearance, Notifications, Instructions, Voice and Limits items land on theirs.
+Appearance, Notifications, Instructions, Voice and Limits items land on theirs, and every other
+section has a palette row of its own (**Settings: Tailnet**, **Settings: Backups and storage**, …).
+A switch says what it is set to (**Off (default)**), beside where the value comes from.
 
 ## Sheets
 
