@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ageText, nextClock, parseUnified, pauseLine, queueText, verdictText } from "./landing";
+import { ageText, nextClock, parseUnified, pauseLine, queueText, verdictText, landable } from "./landing";
 
 describe("parseUnified", () => {
   it("keeps hunks, numbers the lines and drops the file headers", () => {
@@ -38,5 +38,12 @@ describe("words", () => {
     expect(ageText(3 * 86400)).toBe("3 d");
     expect(verdictText("approve")).toBe("Approved");
     expect(verdictText("")).toBe("Reviewing");
+  });
+});
+
+describe("landable (R10 Opus B3)", () => {
+  it("leaves out a job whose changes were requested: its worktree is the fix job's", () => {
+    const item = (id: string, changes_state?: string) => ({ job: { id, title: id, state: "done", worktree_branch: "b", work_dir: "w", land_state: "", land_detail: "", changes_state }, age_seconds: 1, dirty: false });
+    expect(landable([item("j_18", "requested"), item("j_25")]).map((entry) => entry.job.id)).toEqual(["j_25"]);
   });
 });

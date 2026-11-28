@@ -202,19 +202,25 @@ test("a double tap answers one decision: the next one's choices are held, and it
   await expect(page.getByTestId("answer-bar")).toHaveAttribute("data-armed", "true");
 });
 
-// R10 Opus B6: a decision whose fetch fails says so with Retry instead of a skeleton for good.
-test("a decision that cannot load says so and offers Retry", async ({ page }, testInfo) => {
+// R10 Opus B6: a decision that cannot load (the browser offline: TanStack pauses the query, which
+// left a skeleton for good) says so and offers Retry.
+test("a decision that cannot load says so and offers Retry", async ({ page, context }, testInfo) => {
   await sizeFor(page, testInfo);
   await page.goto("/");
   const question = (await items(page)).find((item) => item.kind === "question");
   expect(question).toBeDefined();
   const ref = question!.id.split(":")[1];
-  let blocked = true;
-  await page.route(`**/api/v1/questions/${ref}`, (route) => (blocked ? route.abort("failed") : route.continue()));
-  await page.goto(`/decide?item=${encodeURIComponent(question!.id)}`);
+  await expect(page.locator("[data-now-summary]")).toBeVisible();
+  await context.setOffline(true);
+  // In-app navigation: a page load would fail outright while offline.
+  await page.evaluate((id) => {
+    window.history.pushState({}, "", `/decide?item=${encodeURIComponent(id)}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, question!.id);
   const alert = page.getByRole("alert").filter({ hasText: ref! });
-  await expect(alert).toBeVisible({ timeout: 15_000 });
-  blocked = false;
-  await alert.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByTestId("answer-bar")).toBeVisible();
+  await expect(alert).toContainText("offline", { timeout: 10_000 });
+  await expect(alert.getByRole("button", { name: "Retry" })).toBeVisible();
+  // Back online, the paused fetch resumes by itself and the decision appears.
+  await context.setOffline(false);
+  await expect(page.getByTestId("answer-bar")).toBeVisible({ timeout: 15_000 });
 });
