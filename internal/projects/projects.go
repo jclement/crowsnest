@@ -109,7 +109,7 @@ type Options struct {
 	// OtherHomes are refused exactly as Home is. Under --demo the folder picker's home is a
 	// throwaway tree (<state>/demo-home), and a project on it claimed every job (R10 O-B2).
 	OtherHomes []string
-	Now   func() time.Time
+	Now        func() time.Time
 }
 
 // Service holds the projects. Lookups by directory are served from a cache refreshed on every

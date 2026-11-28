@@ -161,7 +161,7 @@ function RestoredSetting({ setting, disabled, onUse, onKeep }: { setting: Settin
  * What a switch is set to, in words (R10 O-F11): "Publish to your tailnet" beside a "default" chip
  * did not say whether it was on. "Off (default)" does.
  */
-export function effectiveLabel(setting: SettingView, value: string): string {
+function effectiveLabel(setting: SettingView, value: string): string {
   const on = setting.invert ? value !== "true" : value === "true";
   return `${on ? "On" : "Off"}${setting.source === "default" ? " (default)" : ""}`;
 }

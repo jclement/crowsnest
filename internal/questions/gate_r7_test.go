@@ -69,11 +69,11 @@ func TestGrantingTextSeesTheR10Spellings(t *testing.T) {
 		"appr0ve":                  true,
 		"Al.low":                   true,
 		"a-l-l-o-w":                true,
-		"AІІow":          true, // Cyrillic capital I
-		"AΙΙow":          true, // Greek capital iota
-		"AӀӀow":          true, // palochka
+		"A\u0406\u0406ow":          true, // Cyrillic capital I
+		"A\u0399\u0399ow":          true, // Greek capital iota
+		"A\u04c0\u04c0ow":          true, // palochka
 		"Allow":                    true,
-		"Prøceed":             true,
+		"Pr\u00f8ceed":             true,
 		"Enable the hook":          true,
 		"Execute it":               true,
 		"go-ahead":                 true,

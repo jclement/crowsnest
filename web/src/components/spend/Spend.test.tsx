@@ -90,7 +90,9 @@ describe("the Spend sheet", () => {
         <SpendPanel />
       </>,
     );
-    expect(await screen.findByRole("button", { name: /^Spend: ?\$1\.50 today · \$12\.44 wk ?\(estimates\)$/ })).toBeInTheDocument();
+    // The week is drawn from sm up (R10 F-F13); jsdom applies the CSS at no width, so it reads as a phone.
+    const button = await screen.findByRole("button", { name: /^Spend: ?\$1\.50 today( · \$12\.44 wk)? ?\(estimates\)$/ });
+    expect(button).toHaveTextContent("$12.44 wk");
     expect(await screen.findByText("≥ $3.69 est.")).toBeInTheDocument();
     expect(calls.some((call) => call.path === "/spend?group=job&from=2026-11-23&to=2026-11-26")).toBe(true);
     // One figure per job or per day: the by-model breakdown, the token columns and the CSV are
