@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +19,14 @@ import (
 // commentHarness is a diff (j_1 resolves to a repository whose commit adds func A to a.go) and a
 // jobs service whose j_1 is a running job in that repository, over the fake herdr.
 func commentHarness(t *testing.T) (*harness, *fake.Fake, *http.Cookie) {
+	t.Helper()
+	h, f, cookie, _ := commentHarnessAt(t, t.TempDir())
+	return h, f, cookie
+}
+
+// commentHarnessAt is commentHarness with the attachment layout's state directory named, so a
+// test can look into a job's inbox; it also returns the job service.
+func commentHarnessAt(t *testing.T, stateDir string) (*harness, *fake.Fake, *http.Cookie, *jobs.Service) {
 	t.Helper()
 	dir := changesRepo(t)
 	db, err := store.OpenMemory(context.Background())
@@ -37,8 +46,8 @@ func commentHarness(t *testing.T) (*harness, *fake.Fake, *http.Cookie) {
 		t.Fatal(err)
 	}
 	service := changes.New(changes.Options{Store: db, Resolver: oneJob{root: dir}})
-	h := newHarness(t, harnessOptions{changes: service, jobs: jobService, herdr: f, attachments: attachments, attachLayout: attach.Layout{StateDir: t.TempDir()}})
-	return h, f, h.login()
+	h := newHarness(t, harnessOptions{changes: service, jobs: jobService, herdr: f, attachments: attachments, attachLayout: attach.Layout{StateDir: stateDir}})
+	return h, f, h.login(), jobService
 }
 
 func fileHash(t *testing.T, h *harness, cookie *http.Cookie) string {
@@ -160,6 +169,36 @@ func TestALongReviewGoesAsAnAttachedFile(t *testing.T) {
 	prompts := f.Prompts()[before:]
 	if len(prompts) != 1 || !strings.Contains(prompts[0].Text, "in the attached file") || strings.Contains(prompts[0].Text, note) {
 		t.Fatalf("typed = %+v", prompts)
+	}
+}
+
+// R9-S12: a long review whose send is refused (the agent sits at a dialog, so nothing is typed)
+// takes its attached file back out of the job's inbox (a shadowed variable used to leave it).
+func TestARefusedLongReviewTakesItsFileBack(t *testing.T) {
+	stateDir := t.TempDir()
+	h, f, cookie, jobService := commentHarnessAt(t, stateDir)
+	hash := fileHash(t, h, cookie)
+	note := strings.Repeat("Please say more about this. ", 200)
+	body, _ := json.Marshal(map[string]any{"path": "a.go", "scope": "committed", "side": "file", "body": note, "hash": hash})
+	if response := h.do(withCookie(request(http.MethodPost, "/api/v1/changes/jobs/j_1/comments", string(body)), cookie)); response.Code != http.StatusCreated {
+		t.Fatalf("add = %d %s", response.Code, response.Body)
+	}
+	job, err := jobService.Get(context.Background(), "j_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetScreen(job.PaneID, dialogScreen, dialogScreen); err != nil {
+		t.Fatal(err)
+	}
+	if response := h.do(withCookie(request(http.MethodPost, "/api/v1/changes/jobs/j_1/comments/send", `{}`), cookie)); response.Code == http.StatusOK {
+		t.Fatalf("a send over a dialog went through: %s", response.Body)
+	}
+	inbox := attach.Layout{StateDir: stateDir}.JobDir("j_1")
+	entries, _ := os.ReadDir(inbox)
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "review-comments") {
+			t.Fatalf("the refused send left %s in the inbox", entry.Name())
+		}
 	}
 }
 

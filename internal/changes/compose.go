@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/jclement/crowsnest/internal/termtext"
 )
@@ -49,7 +50,8 @@ func Compose(comments []Comment, overall string) Composed {
 		out.WriteString("\nOverall: " + indentRest(report.reveal(note), "  ") + "\n")
 	}
 	for i, comment := range ordered {
-		out.WriteString("\n" + strconv.Itoa(i+1) + ". " + report.reveal(comment.Path) + ", " + where(comment) + ":\n")
+		// A path is one line: a newline in a file's name would lay out as forged entries (R9-S12).
+		out.WriteString("\n" + strconv.Itoa(i+1) + ". " + report.revealLine(comment.Path) + ", " + where(comment) + ":\n")
 		if comment.Status == StatusOutdated {
 			out.WriteString("   (written on an earlier version of this file, which has changed since)\n")
 		}
@@ -105,13 +107,19 @@ type hiddenTally struct {
 
 // reveal returns text with every invisible character written as ⟨U+XXXX⟩, and notes words that
 // mix scripts. Line breaks stay (the caller lays the lines out); tabs and spaces stay.
-func (t *hiddenTally) reveal(text string) string {
+func (t *hiddenTally) reveal(text string) string { return t.revealText(text, true) }
+
+// revealLine is reveal for text that must stay on one line (a file's path): a line break in it is
+// written out too.
+func (t *hiddenTally) revealLine(text string) string { return t.revealText(text, false) }
+
+func (t *hiddenTally) revealText(text string, keepLines bool) string {
 	var out strings.Builder
 	for _, r := range text {
-		if r == '\r' {
+		if r == '\r' && keepLines {
 			continue // a CRLF file's line ends: not hidden content, and the terminal path drops them anyway
 		}
-		if r != '\n' && r != '\t' && invisibleRune(r) {
+		if (r == '\n' && !keepLines) || (r != '\n' && r != '\t' && invisibleRune(r)) {
 			t.count++
 			fmt.Fprintf(&out, "⟨U+%04X⟩", r)
 			continue
@@ -131,13 +139,15 @@ func (t *hiddenTally) reveal(text string) string {
 // invisibleRune mirrors web/src/lib/hidden.ts: Unicode's format characters (bidi controls,
 // zero-width characters, BOM, soft hyphen, tags), the line and paragraph separators, the fillers
 // that render as nothing, the combining grapheme joiner; plus the controls a terminal would act
-// on. Emoji variation selectors are not format characters and stay.
+// on, and what the terminal path would drop without a word (R9-S12): private-use characters and
+// bytes that are not UTF-8 (read as U+FFFD). Emoji variation selectors are not format characters
+// and stay.
 func invisibleRune(r rune) bool {
 	switch r {
-	case 0x2028, 0x2029, 0x115F, 0x1160, 0x3164, 0xFFA0, 0x180E, 0x034F:
+	case 0x2028, 0x2029, 0x115F, 0x1160, 0x3164, 0xFFA0, 0x180E, 0x034F, utf8.RuneError:
 		return true
 	}
-	return unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Cc, r)
+	return unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Co, r)
 }
 
 func mixesScripts(word string) bool {

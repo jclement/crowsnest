@@ -114,6 +114,28 @@ func TestRootsAreNotWidenedLater(t *testing.T) {
 	}
 }
 
+// R9-S11: a project's folder is a root only while it resolves where it did when the project was
+// made; swapped for a link to another tree, it widens nothing.
+func TestProjectRootsAreNotWidenedLater(t *testing.T) {
+	tr := newTree(t)
+	project := filepath.Join(tr.home, "proj")
+	mkdir(t, project)
+	resolved, err := filepath.EvalSymlinks(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := []Place{{Path: project, Kind: KindProject, Resolved: resolved}}
+	service := tr.service(Options{Sources: func(context.Context) []Place { return sources }})
+	ctx := context.Background()
+	if err := os.Remove(project); err != nil {
+		t.Fatal(err)
+	}
+	link(t, tr.outside, project)
+	if _, err := service.List(ctx, filepath.Join(tr.outside, "secret"), ListOptions{}); !errors.Is(err, ErrOutside) {
+		t.Fatalf("the project's swapped link widened the roots: %v", err)
+	}
+}
+
 // TestDisclosureDetails is R7-S12: a link out of the roots says neither where it points nor
 // whether that is a folder; a path under a file answers like a missing one; and a remote's query
 // and an scp-like password are not shown.

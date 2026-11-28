@@ -76,6 +76,9 @@ type Place struct {
 	Kind  string `json:"kind"`
 	// Git is set on favourites: the directory holds a .git.
 	Git bool `json:"git,omitempty"`
+	// Resolved is, for a project, the folder as it resolved when the project was made (its
+	// RootDir): the root is used only while it still resolves there (R9-S11).
+	Resolved string `json:"-"`
 }
 
 // Options configure a Service. Home is required.
@@ -185,6 +188,8 @@ func (s *Service) roots(ctx context.Context) []root {
 //   - a remembered directory is stored resolved, precisely so that a link swapped in later
 //     cannot widen it: it must still resolve to itself (an agent that replaces ~/Work/p with a
 //     link to /etc does not make /etc a root);
+//   - a project's folder must still resolve where it did when the project was made (R9-S11: an
+//     agent that replaces its project's directory with a link to /etc does not make /etc a root);
 //   - none may be the home directory's ancestor (a directory above home once approved does not
 //     make every user's home browsable).
 func (s *Service) safeSourceRoot(place Place, cleaned, resolved, homeResolved string) bool {
@@ -192,6 +197,9 @@ func (s *Service) safeSourceRoot(place Place, cleaned, resolved, homeResolved st
 		return true
 	}
 	if place.Kind == KindRemembered && resolved != cleaned {
+		return false
+	}
+	if place.Kind == KindProject && place.Resolved != "" && resolved != place.Resolved {
 		return false
 	}
 	return homeResolved == "" || resolved == homeResolved || !within(homeResolved, resolved)

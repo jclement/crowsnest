@@ -71,7 +71,10 @@ func init() {
 	for _, word := range strings.Fields(`allow allows allowed allowing approve approves approved approving approval
 		merge merges merged merging land lands landed landing push pushes pushed pushing deploy deploys deployed
 		deploying deployment delete deletes deleted deleting deletion grant grants granted granting permit permits
-		permitted permitting`) {
+		permitted permitting proceed proceeds proceeded proceeding authorize authorizes authorized authorizing
+		authorise authorises authorised authorising authorization authorisation accept accepts accepted accepting
+		confirm confirms confirmed confirming publish publishes published publishing apply applies applied
+		applying`) {
 		grantingWords[word] = true
 	}
 }
@@ -91,20 +94,39 @@ var confusables = map[rune]rune{
 	'\u03c4': 't', '\u03c5': 'u', '\u039f': 'o', '\u0391': 'a', '\u0392': 'b', '\u0395': 'e', '\u0397': 'h',
 	'\u0399': 'i', '\u039a': 'k', '\u039c': 'm', '\u039d': 'n', '\u03a1': 'p', '\u03a4': 't', '\u03a7': 'x',
 	'\u0131': 'i',
+	// R9-S10: Latin small capitals, the Cherokee letters that draw as Latin capitals, and the
+	// stroked and Greek or Cyrillic letters that read as l and w.
+	'\u1d00': 'a', '\u0299': 'b', '\u1d04': 'c', '\u1d05': 'd', '\u1d07': 'e', '\ua730': 'f', '\u0262': 'g',
+	'\u029c': 'h', '\u026a': 'i', '\u1d0a': 'j', '\u1d0b': 'k', '\u029f': 'l', '\u1d0d': 'm', '\u0274': 'n',
+	'\u1d0f': 'o', '\u1d18': 'p', '\u0280': 'r', '\ua731': 's', '\u1d1b': 't', '\u1d1c': 'u', '\u1d20': 'v',
+	'\u1d21': 'w', '\u028f': 'y', '\u1d22': 'z',
+	'\u13aa': 'a', '\u13f4': 'b', '\u13df': 'c', '\u13a0': 'd', '\u13ac': 'e', '\u13c0': 'g', '\u13bb': 'h',
+	'\u13a5': 'i', '\u13e7': 'j', '\u13e6': 'k', '\u13de': 'l', '\u13b7': 'm', '\u13be': 'o', '\u13e2': 'p',
+	'\u13a1': 'r', '\u13da': 's', '\u13a2': 't', '\u13d9': 'v', '\u13b3': 'w', '\u13bd': 'y', '\u13c3': 'z',
+	'\u0142': 'l', '\u0141': 'l', '\u03c9': 'w', '\u051d': 'w', '\u051c': 'w', '\u0461': 'w',
 }
 
-// normalisedWords is text as GrantingText reads it (R7-S6): compatibility-normalised (NFKC, so
-// full-width and styled letters are plain), with every format character (zero-width space and
-// joiners, bidi controls, soft hyphen) removed so it cannot split a word, look-alike letters
-// folded onto Latin ones, lowercased and split into words of letters.
+// normalisedWords is text as GrantingText reads it (R7-S6, R9-S10): compatibility-normalised and
+// decomposed (NFKD, so full-width and styled letters are plain and an accent is a mark of its
+// own), with every format character (zero-width space and joiners, bidi controls, soft hyphen)
+// and every combining mark (`Allów`) removed so neither can split or disguise a word, look-alike
+// letters folded onto Latin ones, a capital I read as an l where it sits between letters (`AIIow`:
+// a sans-serif I and l look the same), lowercased and split into words of letters.
 func normalisedWords(text string) []string {
-	var b strings.Builder
-	for _, r := range norm.NFKC.String(text) {
-		if unicode.Is(unicode.Cf, r) {
+	var folded []rune
+	for _, r := range norm.NFKD.String(text) {
+		if unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Mn, r) {
 			continue
 		}
 		if latin, ok := confusables[r]; ok {
 			r = latin
+		}
+		folded = append(folded, r)
+	}
+	var b strings.Builder
+	for i, r := range folded {
+		if r == 'I' && i > 0 && unicode.IsLetter(folded[i-1]) {
+			r = 'l'
 		}
 		b.WriteRune(unicode.ToLower(r))
 	}

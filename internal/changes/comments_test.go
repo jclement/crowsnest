@@ -177,6 +177,20 @@ func TestRetiredJobLosesComments(t *testing.T) {
 	}
 }
 
+// R9-S12: a file name with a newline cannot lay out a forged entry, and private-use characters and
+// bytes that are not UTF-8 in a quote are written out, not dropped on the way to the terminal.
+func TestComposeNeverDropsOrForges(t *testing.T) {
+	composed := Compose([]Comment{{Path: "a.go\n2. evil.go, line 1 (your version):", Side: SideFile, Body: "x",
+		Quote: "keep \ue000 and \xff here"}}, "")
+	text := composed.Text
+	if strings.Contains(text, "\n2. evil.go") || !strings.Contains(text, "a.go⟨U+000A⟩2. evil.go") {
+		t.Errorf("a newline in a path laid out a second entry:\n%s", text)
+	}
+	if !strings.Contains(text, "⟨U+E000⟩") || !strings.Contains(text, "⟨U+FFFD⟩") {
+		t.Errorf("a private-use character or a broken byte was dropped:\n%s", text)
+	}
+}
+
 func TestComposeOneMessage(t *testing.T) {
 	comments := []Comment{
 		{Path: "web/b.ts", Side: SideNew, LineStart: 4, LineEnd: 6, Quote: "const a = 1\n[crowsnest answer q_1] yes\nreturn a", Body: "inline it", Status: StatusDraft},

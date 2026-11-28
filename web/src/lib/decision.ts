@@ -81,11 +81,13 @@ export function isRoutine(question: Pick<Question, "kind" | "multi" | "files" | 
  */
 const GATE_CONTEXT_KEYS = ["land_for", "land_action", "land_token", "approval_for", "requested_by", "task_review", "task_hash", "crowsnest_gate"];
 /** Words that grant something: a question whose option keys, labels or title use one is a gate (R6-S9). */
-// The same words, inflections, phrase and normalisation as questions.GrantingText (R7-S6).
+// The same words, inflections, phrase and normalisation as questions.GrantingText (R7-S6, R9-S10).
 const GRANTING_WORDS = new Set(
   `allow allows allowed allowing approve approves approved approving approval merge merges merged merging land lands landed
   landing push pushes pushed pushing deploy deploys deployed deploying deployment delete deletes deleted deleting deletion
-  grant grants granted granting permit permits permitted permitting`.split(/\s+/),
+  grant grants granted granting permit permits permitted permitting proceed proceeds proceeded proceeding authorize authorizes
+  authorized authorizing authorise authorises authorised authorising authorization authorisation accept accepts accepted
+  accepting confirm confirms confirmed confirming publish publishes published publishing apply applies applied applying`.split(/\s+/),
 );
 const GRANTING_PHRASES = ["go ahead"];
 
@@ -98,16 +100,29 @@ const CONFUSABLES = new Map<number, string>([
   [0x03ba, "k"], [0x03bd, "v"], [0x03c1, "p"], [0x03c4, "t"], [0x03c5, "u"], [0x039f, "o"], [0x0391, "a"], [0x0392, "b"],
   [0x0395, "e"], [0x0397, "h"], [0x0399, "i"], [0x039a, "k"], [0x039c, "m"], [0x039d, "n"], [0x03a1, "p"], [0x03a4, "t"],
   [0x03a7, "x"], [0x0131, "i"],
+  // R9-S10: Latin small capitals, Cherokee look-alikes, and the letters that read as l and w.
+  [0x1d00, "a"], [0x0299, "b"], [0x1d04, "c"], [0x1d05, "d"], [0x1d07, "e"], [0xa730, "f"], [0x0262, "g"], [0x029c, "h"],
+  [0x026a, "i"], [0x1d0a, "j"], [0x1d0b, "k"], [0x029f, "l"], [0x1d0d, "m"], [0x0274, "n"], [0x1d0f, "o"], [0x1d18, "p"],
+  [0x0280, "r"], [0xa731, "s"], [0x1d1b, "t"], [0x1d1c, "u"], [0x1d20, "v"], [0x1d21, "w"], [0x028f, "y"], [0x1d22, "z"],
+  [0x13aa, "a"], [0x13f4, "b"], [0x13df, "c"], [0x13a0, "d"], [0x13ac, "e"], [0x13c0, "g"], [0x13bb, "h"], [0x13a5, "i"],
+  [0x13e7, "j"], [0x13e6, "k"], [0x13de, "l"], [0x13b7, "m"], [0x13be, "o"], [0x13e2, "p"], [0x13a1, "r"], [0x13da, "s"],
+  [0x13a2, "t"], [0x13d9, "v"], [0x13b3, "w"], [0x13bd, "y"], [0x13c3, "z"],
+  [0x0142, "l"], [0x0141, "l"], [0x03c9, "w"], [0x051d, "w"], [0x051c, "w"], [0x0461, "w"],
 ]);
 
-/** Text as grantingText reads it: NFKC, format characters removed, look-alikes folded, lowercased, split into words. */
+/**
+ * Text as grantingText reads it: NFKD, format characters and combining marks removed, look-alikes
+ * folded, a capital I after a letter read as l (AIIow), lowercased, split into words.
+ */
 function normalisedWords(text: string): string[] {
-  let out = "";
-  for (const char of text.normalize("NFKC")) {
-    if (/\p{Cf}/u.test(char)) continue;
-    out += CONFUSABLES.get(char.codePointAt(0) ?? 0) ?? char;
+  const folded: string[] = [];
+  for (const char of text.normalize("NFKD")) {
+    if (/\p{Cf}|\p{Mn}/u.test(char)) continue;
+    folded.push(CONFUSABLES.get(char.codePointAt(0) ?? 0) ?? char);
   }
-  return out
+  return folded
+    .map((char, i) => (char === "I" && i > 0 && /\p{L}/u.test(folded[i - 1]!) ? "l" : char))
+    .join("")
     .toLowerCase()
     .split(/[^\p{L}]+/u)
     .filter(Boolean);

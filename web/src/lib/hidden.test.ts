@@ -40,3 +40,13 @@ describe("hidden characters (R7-S3)", () => {
     expect(revealHidden("plain")).toEqual([{ kind: "text", text: "plain" }]);
   });
 });
+
+// R9-S11: a word written wholly in Cyrillic letters that look Latin is marked too; ordinary
+// Cyrillic text with letters that do not look Latin is not.
+describe("look-alike words with no Latin letter", () => {
+  it("marks an all-Cyrillic file name and leaves a Russian word alone", () => {
+    expect(findHidden("рауроӏ.go").mixedWords).toEqual(["рауроӏ"]);
+    expect(findHidden("привет world").mixedWords).toEqual([]);
+    expect(findHidden("о").mixedWords).toEqual([]);
+  });
+});

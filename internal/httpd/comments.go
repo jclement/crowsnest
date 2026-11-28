@@ -219,11 +219,14 @@ func (s *Server) sendCommentsToJob(ctx context.Context, w http.ResponseWriter, r
 	text := out.Body
 	var delivered []attach.Attachment
 	if plan.Route != jobs.CommentFixJob && len(text) > maxInlineComments {
-		if delivered, ok := s.attachComments(ctx, w, r, out, s.inboxForJob(ctx, id), result); ok {
-			text = attachedCommentsText(len(out.IDs), delivered)
-		} else {
+		// Assigned, not declared (R9-S12: a shadowed variable left a failed send's attachment in
+		// the inbox, since takeBack below saw none).
+		attached, ok := s.attachComments(ctx, w, r, out, s.inboxForJob(ctx, id), result)
+		if !ok {
 			return false
 		}
+		delivered = attached
+		text = attachedCommentsText(len(out.IDs), delivered)
 	}
 	delivery, err := service.SendReviewComments(ctx, id, text, len(out.IDs), force)
 	if err != nil {

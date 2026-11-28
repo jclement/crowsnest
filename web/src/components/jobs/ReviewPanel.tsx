@@ -24,6 +24,7 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { AcceptedMeans } from "./AcceptPanels";
 import { Chip } from "../ui/Chip";
+import { Revealed } from "../ui/Revealed";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
 import { HelpButton } from "../help/HelpButton";
@@ -168,7 +169,7 @@ function LandCard({ job, view }: { job: JobDetail; view: ReviewView }) {
       onError: (error) => toast.show({ tone: "danger", title: `${landLabels[action]} refused`, description: error.message }),
     });
   return (
-    <Card title="Land" actions={<span className="font-mono text-2xs text-muted">{options.branch} → {options.base || "?"}</span>}>
+    <Card title="Land" actions={<span className="font-mono text-2xs text-muted"><Revealed text={options.branch} /> → <Revealed text={options.base || "?"} /></span>}>
       {options.request && (
         <Banner tone="warning">An agent asked to {options.request === "pr" ? "push it and open a pull request" : options.request + " it"}; answer in the Inbox, or land it here.</Banner>
       )}
@@ -273,7 +274,7 @@ function Summary({ view }: { view: ReviewView }) {
   return (
     <Card title="What it produced" actions={<GitBranch className="h-4 w-4 text-muted" aria-hidden />}>
       <div className="flex flex-wrap gap-1.5 text-xs">
-        <Chip mono>{produced.branch}</Chip>
+        <Chip mono><Revealed text={produced.branch} /></Chip>
         <Chip>{produced.ahead} commit{produced.ahead === 1 ? "" : "s"} ahead of {produced.base || "base"}</Chip>
         {produced.behind > 0 && <Chip tone="warning">{produced.behind} behind</Chip>}
         <Chip>
@@ -286,7 +287,7 @@ function Summary({ view }: { view: ReviewView }) {
         <ul aria-label="Commits" className="mt-2 flex flex-col gap-0.5 text-xs">
           {produced.commits.map((commit) => (
             <li key={commit.hash} className="truncate">
-              <span className="font-mono text-muted">{commit.hash.slice(0, 8)}</span> {commit.subject}
+              <span className="font-mono text-muted">{commit.hash.slice(0, 8)}</span> <Revealed text={commit.subject} />
             </li>
           ))}
         </ul>

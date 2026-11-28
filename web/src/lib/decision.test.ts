@@ -5,6 +5,7 @@ import {
   approvalStale,
   decisionLink,
   dialogBrief,
+  grantingText,
   grants,
   isGate,
   isRoutine,
@@ -163,5 +164,22 @@ describe("lastAssistantText", () => {
     expect(lastAssistantText(messages)).toBe("second");
     expect(lastAssistantText([{ kind: "assistant", text: "x".repeat(20) }], 10)).toBe("xxxxxxxxx…");
     expect(lastAssistantText([])).toBeNull();
+  });
+});
+
+// R9-S10: the web's rule sees the same spellings and verbs as questions.GrantingText.
+describe("grantingText: the R9 spellings", () => {
+  it.each([
+    ["AIIow", true],
+    ["All\u00f3w", true],
+    ["\u1d00\u029f\u029f\u1d0f\u1d21", true],
+    ["\u13aa\u13de\u13de\u13be\u13b3", true],
+    ["A\u0142\u0142ow", true],
+    ["Proceed with the rewrite", true],
+    ["Apply the patch", true],
+    ["Is it OK?", false],
+    ["Idle or busy?", false],
+  ])("%s → %s", (text, want) => {
+    expect(grantingText(text)).toBe(want);
   });
 });

@@ -55,7 +55,7 @@ func (s browserSources) places(ctx context.Context) []browse.Place {
 	if s.projects != nil {
 		if list, err := s.projects.List(ctx, false); err == nil {
 			for _, project := range list {
-				out = append(out, browse.Place{Path: project.Dir, Label: project.Name, Kind: browse.KindProject})
+				out = append(out, browse.Place{Path: project.Dir, Label: project.Name, Kind: browse.KindProject, Resolved: project.RootDir})
 			}
 			for _, project := range list {
 				out = append(out, browse.Place{Path: filepath.Dir(project.Dir), Kind: browse.KindProjectParent})

@@ -32,3 +32,31 @@ func TestGrantingTextSeesThroughSpellings(t *testing.T) {
 		}
 	}
 }
+
+// R9-S10: the review's spellings and verbs are seen; ordinary words with an I or an accent are not
+// turned into grants.
+func TestGrantingTextSeesTheR9Spellings(t *testing.T) {
+	cases := map[string]bool{
+		"AIIow":                         true, // capital I for l
+		"Allów":                         true, // an accent NFKC would have kept
+		"ᴀʟʟᴏᴡ":                         true, // Latin small capitals
+		"ᎪᏞᏞᎾᎳ":                         true, // Cherokee
+		"Ałłow":                         true,
+		"Alloω":                         true,
+		"Alloԝ":                         true,
+		"Proceed with the rewrite":      true,
+		"Authorize it":                  true,
+		"Accept the change?":            true,
+		"Confirm":                       true,
+		"Publish now":                   true,
+		"Apply the patch":               true,
+		"Is it OK?":                     false,
+		"Idle or busy?":                 false,
+		"Café colour, or the dark one?": false,
+	}
+	for text, want := range cases {
+		if got := GrantingText(text); got != want {
+			t.Errorf("GrantingText(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

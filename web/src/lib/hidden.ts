@@ -30,8 +30,20 @@ export interface HiddenReport {
 /** A piece of text for display: plain text, one invisible character (drawn as a chip), or a mixed-script word. */
 export type HiddenPiece = { kind: "text"; text: string } | { kind: "invisible"; text: string; code: string } | { kind: "mixed"; text: string };
 
+/**
+ * Cyrillic and Greek letters that draw as Latin ones (the same set as questions.GrantingText's
+ * confusables). A word written only in these reads as a Latin word that is not one: `рауроl`.
+ */
+const LATIN_LOOKALIKES = /^[аеорсухіјѕԁӏАЕОРСХІЈЅМНТВКοαεικνρτυΟΑΒΕΗΙΚΜΝΡΤΧ]+$/u;
+
+/**
+ * True for a word that mixes Latin with Cyrillic, Greek or Armenian letters, or one written wholly
+ * in Cyrillic or Greek letters that look Latin (R9-S11: an all-Cyrillic `раураl` has no Latin
+ * letter to mix with, and reads as a Latin file name all the same).
+ */
 function mixesScripts(word: string): boolean {
-  return LATIN.test(word) && OTHER_SCRIPTS.test(word);
+  if (LATIN.test(word)) return OTHER_SCRIPTS.test(word);
+  return word.length > 1 && LATIN_LOOKALIKES.test(word);
 }
 
 /** The code point of a one-character string as U+XXXX. */
@@ -68,7 +80,7 @@ export function describeHidden(report: HiddenReport): string {
   }
   if (report.mixedWords.length > 0) {
     const n = report.mixedWords.length;
-    parts.push(`${n} word${n === 1 ? "" : "s"} mixing Latin with look-alike letters from another alphabet (${report.mixedWords.slice(0, 3).join(", ")})`);
+    parts.push(`${n} word${n === 1 ? "" : "s"} written with look-alike letters from another alphabet (${report.mixedWords.slice(0, 3).join(", ")})`);
   }
   return parts.join("; ");
 }
