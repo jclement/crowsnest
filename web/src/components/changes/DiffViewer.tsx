@@ -16,7 +16,8 @@
 // with the app's chrome hidden, so it can be opened in its own tab and deep-linked. Entering and
 // leaving it keeps the scope, the file and the scroll position (sessionStorage).
 import {
-  Check,
+  CheckCheck,
+  ChevronUp,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
@@ -36,6 +37,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
+  SlidersHorizontal,
   Rows3,
   Space,
   TriangleAlert,
@@ -463,21 +465,37 @@ export function DiffViewer({ who, fullscreen, initialScope, initialFile, initial
         <SwipeArea className="min-h-0 flex-1 overflow-y-auto" onSwipe={(by) => goToFile(files[step(position, by, files.length)]?.path)}>
           {file ? section(file) : empty}
         </SwipeArea>
+        {/* The selection bar rides with the file pager at the bottom: in the job sheet it sat in the
+            flow below a long file, under the pager, so a line comment could not be started (R10
+            Fable B2). */}
+        <div className="sticky bottom-0 z-10 flex flex-col">
         {selectionBar}
         {file && (
-          <nav aria-label="Files" className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-border bg-surface-raised px-2 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
+          <nav aria-label="Files" className="flex items-center gap-2 border-t border-border bg-surface-raised px-2 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
             <Button compact icon={ChevronRight} className="[&>svg]:rotate-180" disabled={position <= 0} onClick={() => goToFile(files[position - 1]?.path)}>
               Previous
             </Button>
             <span className="min-w-0 flex-1 text-center text-2xs text-muted">
               {position + 1} / {files.length}
             </span>
-            <ViewedBox file={file} onToggle={() => toggleViewed(file)} big />
+            <ViewedBox
+              file={file}
+              onToggle={() => {
+                // Ticking Viewed moves on to the next file not viewed: one tap a file, not two (R10 Fable F11).
+                const marking = !file.viewed;
+                toggleViewed(file);
+                if (!marking) return;
+                const next = [...files.slice(position + 1), ...files.slice(0, position)].find((candidate) => !candidate.viewed);
+                if (next) goToFile(next.path);
+              }}
+              big
+            />
             <Button compact icon={ChevronRight} disabled={position >= files.length - 1} onClick={() => goToFile(files[position + 1]?.path)}>
               Next
             </Button>
           </nav>
         )}
+        </div>
         <Sheet open={listSheet} onClose={() => setListSheet(false)} title={`Files · ${viewedText(summary.viewed, summary.total)}`}>
           {list}
         </Sheet>
@@ -533,6 +551,9 @@ interface ToolbarProps {
 
 function Toolbar(props: ToolbarProps) {
   const { summary, scope, setScope, prefs, setPrefs, wide, phone, fullscreen } = props;
+  // On a phone the second row (view options, marks, refresh, help, new tab) is folded behind
+  // "View options", so the diff starts near the top (R10 Fable F1).
+  const [more, setMore] = useState(false);
   const percent = summary.total === 0 ? 0 : Math.round((summary.viewed / summary.total) * 100);
   const newTab = () => {
     const search = new URLSearchParams({ ...whoSearch(props.who), scope });
@@ -586,11 +607,18 @@ function Toolbar(props: ToolbarProps) {
         <div className="ml-auto flex items-center gap-2" aria-live="polite">
           <CommentsButton comments={props.comments} onClick={props.onOpenComments} phone={phone} />
           <span className="text-xs text-body">{viewedText(summary.viewed, summary.total)}</span>
-          <div className="h-1.5 w-20 overflow-hidden rounded bg-surface-sunken" role="progressbar" aria-label="Files viewed" aria-valuemin={0} aria-valuemax={summary.total} aria-valuenow={summary.viewed}>
+          {phone && (
+            <>
+              {props.canFullscreen && <IconButton icon={fullscreen ? Minimize2 : Maximize2} label={fullscreen ? "Leave full screen (Esc)" : "Full screen (f)"} onClick={props.onFullscreen} />}
+              <IconButton icon={more ? ChevronUp : SlidersHorizontal} label={more ? "Hide view options" : "View options"} aria-expanded={more} onClick={() => setMore(!more)} />
+            </>
+          )}
+          <div className={cn("h-1.5 w-20 overflow-hidden rounded bg-surface-sunken", phone && "hidden")} role="progressbar" aria-label="Files viewed" aria-valuemin={0} aria-valuemax={summary.total} aria-valuenow={summary.viewed}>
             <div className="h-full bg-success" style={{ width: `${percent}%` }} />
           </div>
         </div>
       </div>
+      {(!phone || more) && (
       <div className="flex flex-wrap items-center gap-0.5">
         <Toggle on={prefs.hideViewed} icon={prefs.hideViewed ? EyeOff : Eye} label="Hide viewed" onClick={() => setPrefs({ hideViewed: !prefs.hideViewed })} />
         {wide && <Toggle on={prefs.split} icon={prefs.split ? Columns2 : Rows3} label={prefs.split ? "Split" : "Unified"} onClick={() => setPrefs({ split: !prefs.split })} pressedLabel="Split view" />}
@@ -602,21 +630,13 @@ function Toolbar(props: ToolbarProps) {
             <IconButton icon={ChevronsDownUp} label="Collapse all files" onClick={() => props.onExpandAll(false)} />
           </>
         )}
-        {phone ? (
-          <>
-            <IconButton icon={Check} label="Mark all viewed" onClick={props.onMarkAll} disabled={summary.total === 0 || summary.viewed === summary.total} />
-            <IconButton icon={X} label="Clear marks" onClick={props.onClearMarks} disabled={summary.viewed === 0} />
-          </>
-        ) : (
-          <>
-            <Button compact variant="ghost" icon={Check} onClick={props.onMarkAll} disabled={summary.total === 0 || summary.viewed === summary.total}>
-              Mark all viewed
-            </Button>
-            <Button compact variant="ghost" icon={X} onClick={props.onClearMarks} disabled={summary.viewed === 0}>
-              Clear marks
-            </Button>
-          </>
-        )}
+        {/* Words, not a bare ✓ and ✕ that read as accept and reject (R10 Fable F12). */}
+        <Button compact variant="ghost" icon={CheckCheck} onClick={props.onMarkAll} disabled={summary.total === 0 || summary.viewed === summary.total}>
+          Mark all viewed
+        </Button>
+        <Button compact variant="ghost" icon={X} onClick={props.onClearMarks} disabled={summary.viewed === 0}>
+          Clear marks
+        </Button>
         <span className="ml-auto flex items-center">
           <span className="mr-1 hidden text-2xs text-muted md:inline" title={summary.base ? `base ${summary.base.slice(0, 10)}` : undefined}>
             {summary.base_label ? `vs ${summary.base_label}` : ""}
@@ -624,9 +644,10 @@ function Toolbar(props: ToolbarProps) {
           <IconButton icon={RefreshCw} label="Refresh" onClick={props.onRefresh} className={cn(props.refreshing && "[&>svg]:animate-spin")} />
           <HelpButton topic="how-to/review-changes" what="the diff viewer and Viewed marks" inline={false} />
           {!fullscreen && <IconButton icon={ExternalLink} label="Open in a new tab" onClick={newTab} />}
-          {props.canFullscreen && <IconButton icon={fullscreen ? Minimize2 : Maximize2} label={fullscreen ? "Leave full screen (Esc)" : "Full screen (f)"} onClick={props.onFullscreen} />}
+          {props.canFullscreen && !phone && <IconButton icon={fullscreen ? Minimize2 : Maximize2} label={fullscreen ? "Leave full screen (Esc)" : "Full screen (f)"} onClick={props.onFullscreen} />}
         </span>
       </div>
+      )}
       {summary.truncated && <p className="text-2xs text-warning">Only the first 1,500 files are listed.</p>}
     </div>
   );

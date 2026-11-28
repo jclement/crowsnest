@@ -161,7 +161,7 @@ export class PushToTalkController {
       .stop()
       .then((audio) => endpoints.transcribe(audio))
       .then(
-        (result) => this.dispatch({ type: "transcribed", text: result.text }),
+        (result) => this.dispatch({ type: "transcribed", text: typeof result?.text === "string" ? result.text : "" }),
         (error: unknown) => this.dispatch({ type: "uploadFailed", message: errorText(error, "Could not transcribe that.") }),
       );
   }

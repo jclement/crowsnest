@@ -87,15 +87,17 @@ describe("ReviewPanel", () => {
   it("embeds the live diff viewer and says how many committed files are not viewed", async () => {
     render();
     expect(await screen.findByRole("region", { name: "Changes: j_1: Retry" })).toBeInTheDocument();
-    expect(await screen.findByText("1 of 2 files not viewed")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 2 committed files not viewed")).toBeInTheDocument();
   });
 
   it("lands only after a confirmation that says what will happen", async () => {
     const calls = render();
     await userEvent.click(await screen.findByRole("button", { name: "Merge" }));
     const dialog = screen.getByRole("alertdialog", { name: "Confirm Merge" });
+    // Short lines first (R10 Fable F9); the server's exact sentence under "Exactly what happens".
+    expect(dialog).toHaveTextContent("Merges job/1-retry into main.");
     expect(dialog).toHaveTextContent("Merge job/1-retry into main with a merge commit.");
-    expect(dialog).toHaveTextContent("1 of 2 files are not marked viewed.");
+    expect(dialog).toHaveTextContent("1 of 2 committed files are not marked viewed.");
     expect(calls.some((call) => call.path === "/jobs/j_1/land")).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: "Yes, merge" }));
     await waitFor(() => expect(calls.find((call) => call.path === "/jobs/j_1/land")?.body).toEqual({ action: "merge", confirm: true }));

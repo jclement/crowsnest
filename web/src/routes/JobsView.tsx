@@ -32,6 +32,7 @@ import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Sheet } from "../components/ui/Sheet";
 import { SkeletonRows } from "../components/ui/Skeleton";
+import { landable } from "../lib/landing";
 import { boardSections, sectionLabels, type BoardSection, type Job } from "../lib/jobs";
 import { DESKTOP_QUERY, useMediaQuery } from "../lib/media";
 import { filterJobs, filterProjectId, filterToParam, projectsById, type ProjectFilter, type ProjectView } from "../lib/projects";
@@ -54,7 +55,7 @@ export function JobsView() {
   const [sweepOpen, setSweepOpen] = useState(false);
   const queue = useQueue();
   const sweep = useSweep();
-  const lingering = sweep.data?.length ?? 0;
+  const lingering = landable(sweep.data).length;
   const scheduleProject = filterProjectId(filter, projects.data?.projects);
 
   return (

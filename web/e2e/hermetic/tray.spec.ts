@@ -130,7 +130,7 @@ test("a dangerous approval needs a second confirmation", async ({ page }, testIn
   const card = tray.locator("[data-approval=ap_3]");
   await expect(card.getByText("Dangerous", { exact: true })).toBeVisible();
   await expect(card.getByRole("button", { name: "Allow once" })).toHaveCount(0);
-  await card.getByRole("button", { name: "Allow…" }).click();
+  await card.getByRole("button", { name: "Allow once…" }).click();
   const confirm = card.getByRole("alertdialog");
   await expect(confirm).toContainText("This is dangerous");
   await expect(confirm).toContainText("Force push");

@@ -75,7 +75,7 @@ describe("ApprovalCard", () => {
     const calls = stubDecide();
     renderWithClient(<ApprovalCard approval={dangerous} />);
     expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Allow…" }));
+    await user.click(screen.getByRole("button", { name: "Allow once…" }));
     expect(decides(calls)).toEqual([]);
     expect(screen.getByRole("alertdialog")).toHaveTextContent(/This is dangerous/);
     expect(screen.getByRole("alertdialog")).toHaveTextContent(/Force push/);

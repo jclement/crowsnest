@@ -232,6 +232,7 @@ function ProjectRow({ row }: { row: NowRow }) {
             {row.kind !== "orchestrator" && (
               <>
                 <Figure state={row.counts.running > 0 ? "running" : "idle"} value={row.counts.running} unit="running" />
+                {(row.counts.queued ?? 0) > 0 && <Figure state="held" value={row.counts.queued ?? 0} unit="queued" />}
                 <Figure state="done" value={row.counts.done_today} unit="done today" />
                 {row.counts.failed_today > 0 && <Figure state="needs" value={row.counts.failed_today} unit="failed today" danger />}
               </>

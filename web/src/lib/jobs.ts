@@ -358,7 +358,8 @@ function finishedStep(job: NextStepInput): NextStep {
     case "checking":
       return { label: "Checking", tone: "accent", owner: "crowsnest" };
     case "unverified":
-      return { label: "Ready to land", tone: "warning", owner: "you" };
+      // The project has no check: say so on the chip itself (R10 Opus F15).
+      return { label: "Ready to land (not checked)", tone: "warning", owner: "you" };
     default:
       return { label: "Ready to land", tone: "success", owner: "you" };
   }
@@ -634,6 +635,17 @@ export function landedWord(state: string): string {
 /** True when the job has a worktree whose Review tab is worth showing. */
 export function hasReview(job: Pick<Job, "worktree_branch" | "review_of">): boolean {
   return !!job.worktree_branch && !job.review_of;
+}
+
+/**
+ * True when an agent's last message asks something in prose (a question mark ends its last
+ * sentence, or a line near its end): a stuck job that did this "said why", so the answer is a
+ * reply from the human, not another nudge (R10 Fable F2, Opus F3).
+ */
+export function askedInProse(message: string | undefined): boolean {
+  if (!message) return false;
+  const tail = message.trim().slice(-400);
+  return tail.endsWith("?") || tail.split("\n").some((line) => /\?\s*$/.test(line.trim()) && line.trim().length > 8);
 }
 
 /** True when a finished job's worktree still waits to be landed or discarded. */

@@ -225,6 +225,8 @@ export function plainPreview(markdown: string): string {
 
 export interface RowCounts {
   running: number;
+  /** Waiting for a slot: not running (R10 Opus B4). Absent from a server before R10. */
+  queued?: number;
   waiting: number;
   done_today: number;
   failed_today: number;

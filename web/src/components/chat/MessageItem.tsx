@@ -13,10 +13,12 @@ import { cn } from "../../lib/cn";
 import type { Message, MessageTag } from "../../lib/conversation";
 import { player } from "../../lib/voice/player";
 import { splitSay } from "../../lib/voice/say";
+import { crowsnestHeader, systemLine, withoutHeaders } from "../../lib/protocol";
 import { AttachmentList } from "../attach/AttachmentList";
 import { Markdown } from "../Markdown";
 import { Chip, type ChipTone } from "../ui/Chip";
 import { PokeRow } from "./PokeRow";
+import { SystemRow } from "./SystemRow";
 import { ToolCard } from "./ToolCard";
 
 const tagLabels: Record<MessageTag, { label: string; tone: ChipTone }> = {
@@ -30,8 +32,12 @@ const tagLabels: Record<MessageTag, { label: string; tone: ChipTone }> = {
  * speaker names the agent in the now-playing strip ("orchestrator", "lead-<slug>"). */
 export function MessageItem({ message, playTarget, speaker }: { message: Message; playTarget?: string; speaker?: string }) {
   switch (message.kind) {
-    case "user":
-      return message.tag === "poke" ? <PokeRow text={message.text ?? ""} /> : <UserMessage message={message} />;
+    case "user": {
+      if (message.tag === "poke") return <PokeRow text={message.text ?? ""} />;
+      const header = crowsnestHeader(message.text ?? "");
+      const line = header && systemLine(header);
+      return line ? <SystemRow line={line} text={message.text ?? ""} /> : <UserMessage message={message} />;
+    }
     case "assistant":
       return <AssistantMessage id={message.id} text={message.text ?? ""} playTarget={playTarget} speaker={speaker} />;
     case "tool":
@@ -68,7 +74,7 @@ function AssistantMessage({ id, text, playTarget, speaker }: { id: string; text:
           <span className="min-w-0 break-words">{spoken}</span>
         </p>
       )}
-      {body.trim() && <Markdown>{body}</Markdown>}
+      {body.trim() && <Markdown>{withoutHeaders(body)}</Markdown>}
     </article>
   );
 }
@@ -109,7 +115,10 @@ function UserMessage({ message }: { message: Message }) {
   const tag = message.tag ? tagLabels[message.tag] : undefined;
   // Files sent with the message were typed as "Attached: <path> (type, size)" lines; they show
   // as pictures and chips through the attachment API, not as paths (DESIGN.md 8.6).
-  const { text, refs } = parseAttachedLines(message.tag === "voice" ? withoutHeader(message.text ?? "") : (message.text ?? ""));
+  // A job message ("[crowsnest message j_3] …") is the human's own words: a bubble without the header.
+  const header = crowsnestHeader(message.text ?? "");
+  const shown = message.tag === "voice" ? withoutHeader(message.text ?? "") : header?.kind === "message" ? header.rest : (message.text ?? "");
+  const { text, refs } = parseAttachedLines(shown);
   return (
     <div className="flex min-w-0 flex-col items-end gap-1">
       {tag && <Chip tone={tag.tone}>{tag.label}</Chip>}

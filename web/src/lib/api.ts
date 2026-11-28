@@ -487,7 +487,13 @@ async function uploadAudio(audio: Blob): Promise<{ text: string }> {
     const error = (payload as { error?: { code?: string; message?: string } } | null)?.error;
     throw new ApiError(response.status, error?.code ?? "HTTP_" + response.status, error?.message ?? response.statusText);
   }
-  return (payload as { data: { text: string } }).data;
+  // A body without its text (a proxy's HTML page, a truncated reply) is a failure the recorder
+  // can show, not a TypeError that left "Transcribing…" up for good (R10 Fable).
+  const data = (payload as { data?: { text?: unknown } } | null)?.data;
+  if (!data || typeof data.text !== "string") {
+    throw new ApiError(response.status, "BAD_RESPONSE", "The transcription came back unreadable. Try again.");
+  }
+  return { text: data.text };
 }
 
 /** The terminal WebSockets (lib/termSocket.ts opens them). */

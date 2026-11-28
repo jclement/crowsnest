@@ -28,7 +28,8 @@ const (
 
 // RowCounts are a row's figures.
 type RowCounts struct {
-	Running     int `json:"running"`    // live and moving (running, blocked, in review, queued; not stuck)
+	Running     int `json:"running"`    // live and moving (running, blocked, in review; not stuck, not queued)
+	Queued      int `json:"queued"`     // waiting for a slot (R10 Opus B4: 13 queued read as "32 running")
 	Waiting     int `json:"waiting"`    // attention items for this row: the queue's own count
 	DoneToday   int `json:"done_today"` // reached done since local midnight
 	FailedToday int `json:"failed_today"`
@@ -151,6 +152,8 @@ func fillRow(row *Row, list []jobs.Job, src OverviewSources, midnight time.Time,
 			row.Counts.DoneToday++
 		case job.State == jobs.StateFailed && job.SettledAt != nil && !job.SettledAt.Before(midnight):
 			row.Counts.FailedToday++
+		case job.State == jobs.StateQueued:
+			row.Counts.Queued++
 		case !job.State.Terminal() && !job.Stuck && job.State != jobs.StateNeedsYou:
 			row.Counts.Running++
 			moving = append(moving, job)

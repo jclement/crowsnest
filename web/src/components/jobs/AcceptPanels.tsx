@@ -4,6 +4,7 @@
 // Let it finish this step and Stop; who owns the wait and what ends it, with Wake it; and what
 // the agent last said when it ended a turn.
 import { AlarmClock, Gauge, GitMerge, MessageSquareQuote, RefreshCw, ShieldCheck, Square, StepForward } from "lucide-react";
+import { quotedReply } from "../../lib/protocol";
 import { useState } from "react";
 import { acceptChip, budgetRows, checkedIn, durationText, type Evidence } from "../../lib/accept";
 import { relativeTime } from "../../lib/format";
@@ -32,7 +33,9 @@ export function EvidenceCard({ job }: { job: Detail }) {
   const chip = acceptChip(job);
   if (!job.accept_state) return null;
   const evidence = job.evidence;
-  const canRecheck = (job.state === "done" || (job.state === "needs_you" && job.cause === "check")) && job.accept_state !== "checking" && !job.torn_down_at;
+  // Unverified means the project has no check command: there is nothing to run again (R10 Fable).
+  const canRecheck =
+    (job.state === "done" || (job.state === "needs_you" && job.cause === "check")) && job.accept_state !== "checking" && job.accept_state !== "unverified" && !job.torn_down_at;
   return (
     <Card
       aria-label="crowsnest's check"
@@ -305,7 +308,8 @@ export function WaitLine({ job }: { job: Job }) {
 
 /** What the agent last said when it ended a turn: on stuck and waiting jobs, so the human sees it. */
 export function LastMessage({ job, clamp }: { job: Job; clamp?: boolean }) {
-  if (!job.last_message) return null;
+  const said = job.last_message ? quotedReply(job.last_message) : "";
+  if (!said) return null;
   const waiting = job.stuck || job.state === "needs_you" || job.state === "blocked";
   if (!waiting) return null;
   return (
@@ -313,7 +317,7 @@ export function LastMessage({ job, clamp }: { job: Job; clamp?: boolean }) {
     <span role="note" aria-label="What the agent last said" className="flex gap-1.5 border-l-2 border-border-strong pl-2 text-xs text-body">
       <MessageSquareQuote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" aria-hidden />
       <span className={clamp ? "line-clamp-2 break-words" : "whitespace-pre-wrap break-words"}>
-        {job.last_message}
+        {said}
         {job.last_message_at && !clamp && <span className="text-2xs text-muted"> · {relativeTime(job.last_message_at)}</span>}
       </span>
     </span>

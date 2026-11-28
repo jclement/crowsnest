@@ -180,8 +180,9 @@ export const ApprovalCard = forwardRef<HTMLElement, ApprovalCardProps>(function 
               />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant={dangerous ? "warning" : "primary"} icon={Check} disabled={decide.isPending} onClick={allow}>
-                {dangerous ? "Allow…" : "Allow once"}
+              <Button variant={dangerous ? "danger" : "primary"} icon={Check} disabled={decide.isPending} onClick={allow}>
+                {/* The same words as the decision packet's bar (R10 Fable F5: one approval, one set of words). */}
+                {dangerous ? "Allow once…" : "Allow once"}
               </Button>
               {!dangerous && approval.remember && approval.job_id && (
                 <Button variant="secondary" icon={BookmarkPlus} disabled={decide.isPending} onClick={() => setRemembering(true)}>

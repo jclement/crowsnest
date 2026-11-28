@@ -6,7 +6,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Ban, CheckCircle2, FileDiff, CircleSlash, GitCompareArrows, MessageSquare, Play, RefreshCw, SquareTerminal, Zap } from "lucide-react";
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
-import { actionFor, actionLabels, causeHelpTopic, childrenOf, hasReview, isFinished, jobAnswerText, ownershipChain, readyToLand, retryLabel, stateChip, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
+import { actionFor, actionLabels, askedInProse, causeHelpTopic, childrenOf, hasReview, isFinished, jobAnswerText, nextStep, ownershipChain, readyToLand, retryLabel, type JobDetail as Detail, type JobEvent } from "../../lib/jobs";
 import { useFleet, useJob, useJobAction, useJobGuard, useJobs, useProjects, useStartAnyway } from "../../lib/queries";
 import { ReviewPanel } from "./ReviewPanel";
 import { useComments } from "../../lib/comments-queries";
@@ -53,10 +53,9 @@ export function JobDetail({ id }: { id: string }) {
 /** The job's header and tabs; the Review (or Land) tab counts the diff comments waiting to be sent. */
 function JobView({ job, tab, setTab }: { job: Detail; tab: DetailTab; setTab: (tab: DetailTab) => void }) {
   const drafts = useComments({ kind: "job", id: job.id }, hasReview(job) && !job.land_state && !job.torn_down_at).data?.drafts ?? 0;
-  const reviewLabel =
-    (readyToLand(job) ? "Land" : "Review") +
-    (job.changes_state === "requested" || job.changes_state === "fix_failed" ? " · changes requested" : job.changes_state === "made" ? " · changes made" : "") +
-    (drafts > 0 ? ` · ${drafts} comment${drafts === 1 ? "" : "s"} to send` : "");
+  // One name whatever the state (R10 Fable "one tab, three names", Opus F21): the state is the
+  // header's chip; only the comments waiting to be sent are counted here.
+  const reviewLabel = drafts > 0 ? `Review · ${drafts}` : "Review";
   return (
     <article aria-label={job.title} className="flex min-h-full max-w-4xl flex-col gap-3 p-3 md:p-4">
       <JobHeader job={job} />
@@ -92,30 +91,32 @@ function hasChanges(job: Detail): boolean {
 }
 
 function JobHeader({ job }: { job: Detail }) {
-  const chip = stateChip(job);
-  const accept = acceptChip(job);
+  // The board's own chip leads (lib/jobs.ts nextStep), so the card, the detail and the counts say
+  // one thing (R10 Opus B3, F15; Fable "a job chip and its detail disagree"). The acceptance verdict
+  // follows only when it adds to that and nothing has overtaken it (comments sent back, a merge).
+  const chip = nextStep(job);
+  const accept = verdictBeside(job, chip.label);
   return (
     <header className="flex flex-col gap-1.5">
       <h2 className="break-words text-base font-semibold leading-snug text-heading">{job.title}</h2>
       <div className="flex flex-wrap items-center gap-1.5">
         <Chip tone={chip.tone}>{chip.label}</Chip>
-        {accept && job.state !== "in_review" && (
+        {accept && (
           <Chip tone={accept.tone} title={accept.title}>
             {accept.label}
           </Chip>
         )}
         <Chip mono>{job.id}</Chip>
-        <Chip>{job.role}</Chip>
         {job.engine !== "claude" && <Chip>{job.engine}</Chip>}
         {job.model && <Chip mono>{job.model}</Chip>}
-        {job.agent_name && <Chip mono>{job.agent_name}</Chip>}
         {job.nudges > 0 && <Chip tone="warning">{job.nudges} nudges</Chip>}
         {job.restarts > 0 && <Chip tone="warning">{job.restarts} restarts</Chip>}
       </div>
       <Ownership job={job} />
       <EngineNote engine={job.engine} />
-      <p className="break-all font-mono text-2xs text-muted">
-        {job.work_dir || job.dir || (job.project_id ? "the project's lead" : "orchestrator")}
+      {/* One line: the folder's last two parts and the branch; the whole path is the tooltip (R10 Fable: three lines of mono on every header). */}
+      <p className="truncate font-mono text-2xs text-muted" title={job.work_dir || job.dir || undefined}>
+        {shortPath(job.work_dir || job.dir) || (job.project_id ? "the project's lead" : "orchestrator")}
         {job.worktree_branch && ` · ${job.worktree_branch}`}
       </p>
       {!isFinished(job.state) && job.doing_now && (
@@ -154,7 +155,8 @@ function Ownership({ job }: { job: Detail }) {
                 {link.label}
               </button>
             ) : (
-              <span className={link.jobId ? "font-mono text-heading" : undefined}>{link.label}</span>
+              // The job itself: its role (its id is in the header already: R10 Fable "one id, four times").
+              <span className="text-heading">{link.jobId === job.id ? job.role : link.label}</span>
             )}
           </span>
         ))}
@@ -175,20 +177,49 @@ function Ownership({ job }: { job: Detail }) {
   );
 }
 
+/** The acceptance verdict as a second chip, or null when the next-step chip already says it or something overtook it. */
+function verdictBeside(job: Detail, step: string): ReturnType<typeof acceptChip> {
+  const accept = acceptChip(job);
+  if (!accept || job.state === "in_review" || job.changes_state || job.land_state) return null;
+  if (job.accept_state === "unverified" && step.includes("not checked")) return null;
+  return step.toLowerCase().includes(accept.label.toLowerCase()) ? null : accept;
+}
+
+/** "/a/b/c/.worktrees/job-120" as ".worktrees/job-120": the last two parts of a path. */
+export function shortPath(path: string | undefined): string {
+  if (!path) return "";
+  const parts = path.split("/").filter(Boolean);
+  return parts.length <= 2 ? path : `…/${parts.slice(-2).join("/")}`;
+}
+
 // ---- Overview ------------------------------------------------------------------------------
 
 function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal: () => void; openReview: () => void }) {
   const open = job.questions.filter((question) => question.status === "open");
   const settled = job.questions.filter((question) => question.status !== "open");
+  // Rescue buttons for a job's own agent; a standing agent (a lead, the orchestrator) has its own
+  // controls, and restart-agent refuses its jobs.
+  const rescuable = !isFinished(job.state) && !!job.pane_id && !job.agent_name.startsWith("lead-") && job.agent_name !== "orchestrator" && job.accept_state !== "checking";
+  const talkable = !isFinished(job.state) && !!job.pane_id;
+  // A waiting agent that said something: its words and the reply box come first, the rescue
+  // buttons folded under them (R10 Fable F2, Opus F3: the one sentence the agent said, and the
+  // answer to it, were 1.5 screens down under eight buttons of equal weight).
+  const replyFirst = talkable && !!job.last_message && (job.stuck || job.state === "needs_you" || job.state === "blocked");
   return (
     <>
       <StuckBanner job={job} openTerminal={openTerminal} openReview={openReview} />
-      {/* Rescue buttons for a job's own agent; a standing agent (a lead, the orchestrator) has
-          its own controls, and restart-agent refuses its jobs. */}
-      {!isFinished(job.state) && job.pane_id && !job.agent_name.startsWith("lead-") && job.agent_name !== "orchestrator" && job.accept_state !== "checking" && (
-        <RescuePanel job={job} defaultOpen={job.stuck || job.state === "needs_you"} />
+      {replyFirst ? (
+        <>
+          <LastMessage job={job} />
+          <JobMessageBox job={job} />
+          {rescuable && <RescuePanel job={job} title="Other ways to get it moving" />}
+        </>
+      ) : (
+        <>
+          {rescuable && <RescuePanel job={job} defaultOpen={job.stuck || job.state === "needs_you"} />}
+          <LastMessage job={job} />
+        </>
       )}
-      <LastMessage job={job} />
       {job.state === "in_review" && job.accept_state === "checking" && (
         <Banner tone="info" icon={GitCompareArrows}>
           The agent said it is done; crowsnest is checking before it believes it: {job.accept_detail}
@@ -224,7 +255,7 @@ function Overview({ job, openTerminal, openReview }: { job: Detail; openTerminal
           <QuestionDetail id={question.id} />
         </Card>
       ))}
-      {!isFinished(job.state) && job.pane_id && <JobMessageBox job={job} />}
+      {talkable && !replyFirst && <JobMessageBox job={job} />}
       <Card title="Brief">
         <Markdown className="text-sm">{job.brief_md}</Markdown>
         {job.done_when && <p className="mt-2 text-xs text-muted">Done when: {job.done_when}</p>}
@@ -262,7 +293,16 @@ function StuckBanner({ job, openTerminal, openReview }: { job: Detail; openTermi
   const toast = useToast();
   if (!action || (!job.stuck && job.state !== "needs_you" && job.cause !== "held")) return null;
   const retry = retryLabel(job);
+  // Never recommend the nudge that already failed, nor a nudge to an agent that asked a question:
+  // the one action is a reply (R10 Fable F2, Opus F3).
+  const asked = askedInProse(job.last_message);
+  const reply = action === "nudge" && !!job.pane_id && !isFinished(job.state) && (asked || job.nudges >= 2);
   const press = () => {
+    if (reply) {
+      const box = document.querySelector<HTMLTextAreaElement>('form[aria-label="Message the agent"] textarea');
+      box?.scrollIntoView({ block: "center" });
+      return box?.focus();
+    }
     if (action === "terminal") return openTerminal();
     if (action === "review") return openReview();
     if (action === "budget") return document.querySelector('[aria-label="Budget"]')?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -292,16 +332,26 @@ function StuckBanner({ job, openTerminal, openReview }: { job: Detail; openTermi
         <Button
           compact
           variant="warning"
-          icon={action === "terminal" ? SquareTerminal : action === "nudge" ? Zap : action === "start" ? Play : action === "review" ? GitCompareArrows : RefreshCw}
+          icon={reply ? MessageSquare : action === "terminal" ? SquareTerminal : action === "nudge" ? Zap : action === "start" ? Play : action === "review" ? GitCompareArrows : RefreshCw}
           onClick={press}
           disabled={run.isPending || startAnyway.isPending || guard.isPending}
         >
-          {actionLabels[action]}
+          {reply ? "Reply" : actionLabels[action]}
         </Button>
       }
     >
-      <strong className="font-semibold">{job.cause_text}</strong>
-      {job.cause_detail && <span>: {job.cause_detail}</span>}
+      {asked ? (
+        <>
+          <strong className="font-semibold">It asked something in its message</strong>
+          <span>: answer it below ({job.cause_text.charAt(0).toLowerCase() + job.cause_text.slice(1)})</span>
+        </>
+      ) : (
+        <>
+          <strong className="font-semibold">{job.cause_text}</strong>
+          {job.cause_detail && <span>: {job.cause_detail}</span>}
+          {reply && <span>. Nudged {job.nudges} times already: say what it should do.</span>}
+        </>
+      )}
       <HelpButton topic={causeHelpTopic(job.cause)} what={`why: ${job.cause_text}`} className="ml-1 align-middle" />
       {retry && <span className="block text-xs">{retry} (attempt {job.retry_count + 1})</span>}
     </Banner>

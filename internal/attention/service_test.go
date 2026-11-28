@@ -234,9 +234,11 @@ func TestRows(t *testing.T) {
 	old := job("j_3", 1, "", jobs.StateDone, false, "")
 	old.SettledAt = &doneYesterday
 	stuck := job("j_4", 2, "w2:p1", jobs.StateRunning, true, jobs.CauseLimit)
+	// R10 Opus B4: a job waiting for a slot is queued, not running.
+	queued := job("j_5", 1, "", jobs.StateQueued, false, "")
 	rows := Rows(OverviewSources{
 		Projects: []projects.Project{site, crow},
-		Jobs:     []jobs.Job{running, finished, old, stuck},
+		Jobs:     []jobs.Job{running, finished, old, stuck, queued},
 		Standing: []StandingAgent{{Name: "lead-crowsnest", State: "idle", ProjectID: 1}, {Name: "orchestrator", State: "working"}},
 		Spend:    map[string]float64{"j_1": 1.5, "lead:crowsnest": 0.5, "orchestrator": 2},
 		Waiting:  map[string]int{"2": 1},
@@ -249,7 +251,7 @@ func TestRows(t *testing.T) {
 	if crowRow.Owner != OwnerLead || siteRow.Owner != OwnerNoLead || siteRow.Lead.State != "off" {
 		t.Errorf("owners %q / %q", crowRow.Owner, siteRow.Owner)
 	}
-	if crowRow.Counts.Running != 1 || crowRow.Counts.DoneToday != 1 || crowRow.Counts.Waiting != 0 || *crowRow.SpendTodayUSD != 2 {
+	if crowRow.Counts.Running != 1 || crowRow.Counts.Queued != 1 || crowRow.Counts.DoneToday != 1 || crowRow.Counts.Waiting != 0 || *crowRow.SpendTodayUSD != 2 {
 		t.Errorf("crowsnest row %+v spend %v", crowRow.Counts, *crowRow.SpendTodayUSD)
 	}
 	if crowRow.Doing != "j_1 Job j_1: Writing tests" {

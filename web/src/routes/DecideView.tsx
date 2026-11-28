@@ -38,6 +38,7 @@ import {
   type DecisionBrief,
 } from "../lib/decision";
 import { relativeTime } from "../lib/format";
+import { quotedReply } from "../lib/protocol";
 import { useAgentScreen, useApproval, useAttention, useQuestion } from "../lib/queries";
 import type { Question } from "../lib/questions";
 import type { AgentScreen } from "../lib/types";
@@ -321,7 +322,9 @@ function ApprovalEvidence({ approval }: { approval: Approval }) {
 
 function LastMessage({ paneId }: { paneId: string }) {
   const messages = useAgentMessages(paneId);
-  const text = lastAssistantText(messages.data?.messages);
+  // Without the SAY line and crowsnest's quoted headers: the agent's words only (R10 Fable).
+  const raw = lastAssistantText(messages.data?.messages);
+  const text = raw ? quotedReply(raw) : "";
   if (!text) return null;
   return (
     <Section title="The agent's last message">

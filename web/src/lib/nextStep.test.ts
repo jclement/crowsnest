@@ -15,7 +15,7 @@ const cases: Array<[string, Partial<NextStepInput>, string, string]> = [
   ["crowsnest is running the check", { state: "in_review", accept_state: "checking" }, "Checking", "crowsnest"],
   ["a reviewer has it", { state: "in_review" }, "In review", "reviewer"],
   ["a done worktree job, accepted", { state: "done", worktree_branch: "job/j_1", accept_state: "accepted" }, "Ready to land", "you"],
-  ["a done worktree job with no check", { state: "done", worktree_branch: "job/j_1", accept_state: "unverified" }, "Ready to land", "you"],
+  ["a done worktree job with no check", { state: "done", worktree_branch: "job/j_1", accept_state: "unverified" }, "Ready to land (not checked)", "you"],
   ["a done worktree job behind its base", { state: "done", worktree_branch: "job/j_1", accept_state: "needs_rebase" }, "Needs rebase", "you"],
   ["evidence older than the branch", { state: "done", worktree_branch: "job/j_1", accept_state: "stale" }, "Re-check to land", "you"],
   ["merged", { state: "done", worktree_branch: "job/j_1", land_state: "merged" }, "Merged", "nobody"],

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeBoard, makeJob } from "./jobFixtures";
-import { actionFor, boardSections, cardLine, childrenOf, jobAnswerText, ownershipChain, retryLabel, sectionOf, stateChip, type Job } from "./jobs";
+import { actionFor, askedInProse, boardSections, cardLine, childrenOf, jobAnswerText, ownershipChain, retryLabel, sectionOf, stateChip, type Job } from "./jobs";
 
 describe("the board", () => {
   const now = new Date("2026-11-26T12:00:00Z");
@@ -87,5 +87,14 @@ describe("ownershipChain", () => {
 
   it("lists a job's children", () => {
     expect(childrenOf(child, [lead, child, grandchild]).map((job) => job.id)).toEqual(["j_3"]);
+  });
+});
+
+describe("askedInProse (R10 Fable F2, Opus F3)", () => {
+  it("finds a question at the end of the message or on a line near it", () => {
+    expect(askedInProse("I'm not sure how to proceed without changing herdr's event shape. Should I?")).toBe(true);
+    expect(askedInProse("Two ways to go:\nShould I change the event shape?\nOr wait for herdr 0.9.")).toBe(true);
+    expect(askedInProse("Done with the profile; nothing else to do.")).toBe(false);
+    expect(askedInProse(undefined)).toBe(false);
   });
 });

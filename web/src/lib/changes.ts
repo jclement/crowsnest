@@ -513,12 +513,25 @@ export interface ViewerPrefs {
 const PREFS_KEY = "crowsnest-diff-prefs";
 export const defaultPrefs: ViewerPrefs = { split: true, wrap: false, ignoreWhitespace: false, hideViewed: false, listOpen: true };
 
-export function loadPrefs(storage: Pick<Storage, "getItem"> | undefined = globalThis.localStorage): ViewerPrefs {
+/**
+ * The remembered preferences, else the defaults; on a phone wrapping starts on, since a long line
+ * cut at the screen's edge needs a sideways scroll there (R10 Fable F11).
+ */
+export function loadPrefs(storage: Pick<Storage, "getItem"> | undefined = globalThis.localStorage, narrow: boolean = narrowScreen()): ViewerPrefs {
+  const initial = narrow ? { ...defaultPrefs, wrap: true } : defaultPrefs;
   try {
     const raw = storage?.getItem(PREFS_KEY);
-    return raw ? { ...defaultPrefs, ...(JSON.parse(raw) as Partial<ViewerPrefs>) } : defaultPrefs;
+    return raw ? { ...initial, ...(JSON.parse(raw) as Partial<ViewerPrefs>) } : initial;
   } catch {
-    return defaultPrefs;
+    return initial;
+  }
+}
+
+function narrowScreen(): boolean {
+  try {
+    return typeof window !== "undefined" && !!window.matchMedia?.("(max-width: 767px)").matches;
+  } catch {
+    return false;
   }
 }
 

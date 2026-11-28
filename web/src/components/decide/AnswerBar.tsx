@@ -400,9 +400,11 @@ function ApprovalChoices({ approval, note, press, sendingKey, armed, onDone }: C
   if (confirming) {
     return (
       <div className="flex flex-col gap-1.5" role="group" aria-label="Confirm a dangerous allow">
-        <p className="flex items-start gap-1.5 text-xs font-medium text-danger">
+        <p className="flex items-start gap-1.5 text-xs text-danger">
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
-          This is dangerous ({approval.risk_reasons.join("; ") || "see the reasons"}). Allow it anyway?
+          <span>
+            <span className="font-semibold">This is dangerous. Allow it anyway?</span> {(approval.risk_reasons.join(". ") || "It matched a dangerous rule") + ". It runs as you, now, once."}
+          </span>
         </p>
         <div className="grid grid-cols-2 gap-1.5">
           <BarButton danger choice onPress={() => send(true, true)} disabled={busy} sending={sendingKey === "allow"} icon={<ShieldCheck className="h-4 w-4" aria-hidden />}>

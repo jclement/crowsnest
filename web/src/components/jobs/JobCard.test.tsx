@@ -52,7 +52,9 @@ describe("JobCard: acceptance, budgets and waits (DESIGN.md 6.15 to 6.18)", () =
         <JobCard job={makeJob({ id: "j_3", state: "running", accept_state: "failed", check_rounds: 1 })} onSelect={vi.fn()} />
       </ul>,
     );
-    expect(screen.getAllByText("Ready to land")).toHaveLength(2);
+    // A job with no check says so on the chip itself (R10 Opus F15).
+    expect(screen.getAllByText(/^Ready to land/)).toHaveLength(2);
+    expect(screen.getByText("Ready to land (not checked)")).toBeInTheDocument();
     expect(screen.getAllByText("Ready to land")[0]).toHaveAttribute("title", "Next: Ready to land. Waiting on you.");
     expect(screen.getByText("Fixing check")).toBeInTheDocument();
     // The facts (Accepted, Unverified, the round) are the detail's, not the card's.
