@@ -5,6 +5,7 @@ package changes
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -79,7 +80,7 @@ func TestAnEditDuringASendStaysDue(t *testing.T) {
 	if err := f.svc.EditComment(ctx, job1, note.ID, "text C"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.st.ClaimDiffComments(ctx, "j_1", "send:two", read.notes, f.now); err != store.ErrClaimConflict {
+	if err := f.st.ClaimDiffComments(ctx, "j_1", "send:two", read.notes, f.now); !errors.Is(err, store.ErrClaimConflict) {
 		t.Fatalf("a claim of a version that changed: %v", err)
 	}
 }

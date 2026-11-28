@@ -65,7 +65,8 @@ func TestTheGroupEndsWhenCrowsnestGoes(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
-	case <-done:
+	case waitErr := <-done:
+		_ = waitErr // the watchdog's status after a stop is not what is tested
 	case <-time.After(15 * time.Second):
 		t.Fatal("the watchdog did not end after the lifeline closed")
 	}
