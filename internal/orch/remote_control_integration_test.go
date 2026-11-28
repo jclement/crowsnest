@@ -33,8 +33,13 @@ func TestIntegrationClaudeRemoteControl(t *testing.T) {
 			t.Skipf("%s is not installed", tool)
 		}
 	}
+	// Registered before the session, so it runs after the agents are gone: they record their
+	// folders in the user's own files, and the test removes exactly its own (DESIGN 15).
+	var forgetDir string
+	t.Cleanup(func() { forgetScratch(t, forgetDir) })
 	session := startSession(t)
 	dir, err := filepath.Abs("e2e-rc-" + randomSuffix(t))
+	forgetDir = dir
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,9 +13,12 @@
 //	    once, not after the herdr backstop's idle wait) and goes on;
 //	(c) a write outside the workspace needs escalation from Codex's sandbox; the request reaches
 //	    the browser as a structured approval through the PermissionRequest hook; allowed through
-//	    the API, it runs, and the job ends done. (Network is on in a hooked Codex job's sandbox:
-//	    it is how the shell reaches crowsnest's socket, so no protocol call needs approval.)
+//	    the API, it runs, and the job ends done.
 //	(d) a command naming a protected host is refused by the PreToolUse guard, with no approval.
+//	(e) the sandbox's network is off (R9-S1): a command that reaches the internet needs escalation,
+//	    and the request reaches the browser as an approval instead of running; denied, the job
+//	    still reports through crowsnest's MCP server (which Codex runs outside the sandbox) and
+//	    ends done. No protocol call needs approval in any case: the job's MCP tools need none.
 //
 // Codex's own folder-trust prompt, if the scratch repository meets one, is answered the way the
 // browser's card answers it: the screen's dialog.trust option, sent through POST /keys, which must
@@ -76,6 +79,7 @@ func TestIntegrationCodex(t *testing.T) {
 	t.Run("b_undeclared_stop_is_refused", r.testUndeclaredStop)
 	t.Run("c_approval_through_the_browser", r.testApproval)
 	t.Run("d_guard_refuses_a_protected_host", r.testGuard)
+	t.Run("e_network_is_off", r.testNetworkOff)
 	if path := os.Getenv("CROWSNEST_CODEX_TEST_OUT"); path != "" {
 		_ = os.WriteFile(path, []byte(r.out.String()), 0o600)
 	}
@@ -92,8 +96,13 @@ func newCodexRig(t *testing.T) *codexRig {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(short) })
 	binary := buildCrowsnest(t, short)
+	// Registered before the session, so it runs after the agents are gone: they record their
+	// folders in the user's own files, and the test removes exactly its own (DESIGN 15).
+	var forgetDir string
+	t.Cleanup(func() { forgetScratch(t, forgetDir) })
 	session := startSession(t)
 	scratch, err := filepath.Abs("e2e-codex-" + randomSuffix(t))
+	forgetDir = scratch
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +240,7 @@ func (r *codexRig) answerTrustCard(t *testing.T, d jobs.Detail) bool {
 }
 
 func (r *codexRig) testDone(t *testing.T) {
-	job := r.create(t, "Use the shell to run exactly: echo beta > b.txt\nThen declare the job done with the crowsnest command your brief file describes, with a one-line result.")
+	job := r.create(t, "Use the shell to run exactly: echo beta > b.txt\nThen declare the job done with crowsnest's done tool, as your brief file describes, with a one-line result.")
 	detail := r.waitFor(t, job.ID, 5*time.Minute, false, func(d jobs.Detail) bool {
 		r.noProtocolApprovals(t, d.ID)
 		return d.State.Terminal()
@@ -279,7 +288,7 @@ func (r *codexRig) testDone(t *testing.T) {
 }
 
 func (r *codexRig) testUndeclaredStop(t *testing.T) {
-	job := r.create(t, "Use the shell to run exactly: echo alpha > a.txt\nThen end your turn and wait. Do not run any crowsnest command.")
+	job := r.create(t, "Use the shell to run exactly: echo alpha > a.txt\nThen end your turn and wait. Do not call any crowsnest tool.")
 	detail := r.waitFor(t, job.ID, 4*time.Minute, true, func(d jobs.Detail) bool {
 		return d.Nudges >= 1 || d.State.Terminal()
 	})
@@ -300,7 +309,7 @@ func (r *codexRig) testApproval(t *testing.T) {
 	}
 	target := filepath.Join(outside, "escalated.txt")
 	job := r.create(t, "Use the shell to run exactly: echo escalated > "+target+"\nThat file is outside your workspace, so your sandbox will refuse the write: request escalated permission for exactly that command. "+
-		"When it has run, declare the job done with the crowsnest command your brief file describes, with a one-line result.")
+		"When it has run, declare the job done with crowsnest's done tool, as your brief file describes, with a one-line result.")
 	var approval approvals.Approval
 	r.waitFor(t, job.ID, 4*time.Minute, false, func(d jobs.Detail) bool {
 		var pending []approvals.Approval
@@ -338,8 +347,43 @@ func (r *codexRig) testApproval(t *testing.T) {
 	}
 }
 
+func (r *codexRig) testNetworkOff(t *testing.T) {
+	job := r.create(t, "Use the shell to run exactly: curl -sS -m 15 -o /dev/null https://example.com && echo NET-OK\n"+
+		"If your sandbox refuses network access, request escalated permission for exactly that command. "+
+		"Whatever happens, then declare the job done with crowsnest's done tool, as your brief file describes, with a one-line result saying whether NET-OK was printed.")
+	var asked approvals.Approval
+	detail := r.waitFor(t, job.ID, 5*time.Minute, false, func(d jobs.Detail) bool {
+		var pending []approvals.Approval
+		r.call(http.MethodGet, "/api/v1/approvals?status=pending", nil, &pending)
+		for _, a := range pending {
+			if a.JobID != job.ID {
+				continue
+			}
+			if strings.Contains(string(a.ToolInput), "example.com") {
+				asked = a
+				r.decide(t, a.ID, "deny", "no network for this test")
+			} else {
+				t.Logf("other approval %s: %s (allowed)", a.ID, a.Summary)
+				r.decide(t, a.ID, "allow", "")
+			}
+		}
+		return d.State.Terminal()
+	})
+	r.record(t, "(e) codex network off", detail)
+	if asked.ID == "" {
+		t.Fatalf("the network call never reached the browser as an approval: the sandbox's network is on? %+v", detail.Job)
+	}
+	t.Logf("network approval %s: %s, risk %s %v", asked.ID, asked.Summary, asked.Risk, asked.RiskReasons)
+	if detail.State != jobs.StateDone {
+		t.Fatalf("the job did not report done through its MCP tools after the denial: %+v", detail.Job)
+	}
+	if strings.Contains(detail.ResultMD, "NET-OK was printed") && !strings.Contains(strings.ToLower(detail.ResultMD), "not") {
+		t.Errorf("the job says the network call succeeded: %q", detail.ResultMD)
+	}
+}
+
 func (r *codexRig) testGuard(t *testing.T) {
-	job := r.create(t, "Use the shell to run exactly: ssh "+protectedTestHost+" true\nIf it is refused, do not retry it: declare the job done with the crowsnest command your brief file describes, with the refusal message as the result.")
+	job := r.create(t, "Use the shell to run exactly: ssh "+protectedTestHost+" true\nIf it is refused, do not retry it: declare the job done with crowsnest's done tool, as your brief file describes, with the refusal message as the result.")
 	detail := r.waitFor(t, job.ID, 4*time.Minute, false, func(d jobs.Detail) bool {
 		for _, event := range d.Timeline {
 			if strings.Contains(strings.ToLower(event.Summary), "guard") {
@@ -368,8 +412,8 @@ func (r *codexRig) testGuard(t *testing.T) {
 	_, _ = r.jobs.Cancel(context.Background(), job.ID)
 }
 
-// noProtocolApprovals fails if a crowsnest protocol call asked for approval: a hooked Codex job's
-// shell reaches the agent socket without escalation.
+// noProtocolApprovals fails if a crowsnest protocol call asked for approval: a supervised Codex
+// job reports through its MCP tools, which need none (and its shell cannot reach the socket).
 func (r *codexRig) noProtocolApprovals(t *testing.T, jobID string) {
 	t.Helper()
 	var pending []approvals.Approval

@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/jclement/crowsnest/internal/agenttrust"
 	"io"
 	"net"
 	"net/http"
@@ -124,6 +125,19 @@ func TestIntegrationClaudeProjectLead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Registered before the lead's session: it runs after the agents are gone, and removes exactly
+	// this scratch folder's records from the user's own agent files (DESIGN 15).
+	t.Cleanup(func() {
+		home, _ := os.UserHomeDir()
+		// The repository, and the folder herdr keeps its job worktrees in (named after it).
+		for _, dir := range []string{repo, filepath.Join(home, ".herdr", "worktrees", filepath.Base(repo))} {
+			if note, err := agenttrust.ForgetScratch(dir); err != nil {
+				t.Errorf("removing the scratch folder's agent records: %v", err)
+			} else {
+				t.Log(note)
+			}
+		}
+	})
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}

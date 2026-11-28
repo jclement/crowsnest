@@ -67,7 +67,7 @@ hooks = true
 }
 
 func TestForgetUnderRefusesWideFolders(t *testing.T) {
-	for _, root := range []string{"/", "/Users", "/Users/x", "relative/path/deep/enough"} {
+	for _, root := range []string{"/", "/Users", "/tmp", "/Users/x", "relative/path/deep/enough"} {
 		if _, _, err := ForgetUnder(Paths{}, root, "/Users/x"); err == nil {
 			t.Errorf("%s was accepted", root)
 		}

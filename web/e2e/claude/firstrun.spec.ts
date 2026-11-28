@@ -9,13 +9,14 @@
 // Safety: a throwaway crowsnest-test-* herdr session (stopped and deleted at the end), a throwaway
 // data directory, every HERDR_* variable removed from the child. Claude's login lives in the real
 // HOME, so (as in claude.spec.ts) the real HOME is used: answering the trust question records the
-// scratch folder in ~/.claude.json, the one trace this test leaves.
+// scratch folder in ~/.claude.json, and the test removes exactly that record at the end.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { scrubbedEnv, startInstance, type Instance } from "../support/instance";
 import { completeSetup } from "../support/setup";
+import { forgetScratch } from "./rig";
 
 const MODEL = process.env.CROWSNEST_E2E_MODEL ?? "haiku";
 const missing = ["herdr", "claude"].filter((tool) => spawnSync("sh", ["-c", `command -v ${tool}`], { env: scrubbedEnv() }).status !== 0);
@@ -34,7 +35,11 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await instance?.stop();
-  if (scratch) rmSync(scratch, { recursive: true, force: true });
+  if (scratch) {
+    // Claude records the folder as /tmp/… and as /private/tmp/…: both are this run's own.
+    forgetScratch(scratch, realpathSync(scratch));
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("first run: setup link → password → checklist → Start → trust answered on the checklist → Chat with a reply", async ({ page }) => {

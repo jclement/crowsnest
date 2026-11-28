@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -23,8 +24,9 @@ import (
 )
 
 // minForgetDepth is the fewest path elements a forgotten folder may have: a scratch folder is
-// always deep (/Users/x/…/e2e-stop-…), and a slip that names / or /Users never reaches the files.
-const minForgetDepth = 3
+// /tmp/cnfr-… or deeper, and a slip that names / or /Users never reaches the files (home and its
+// ancestors are refused as well).
+const minForgetDepth = 2
 
 // ForgetUnder removes, from both agents' files, every folder record at or under root (a test's
 // own scratch folder, absolute), and returns how many entries each lost. home is refused, as is
@@ -174,4 +176,16 @@ func trimBlankTail(lines []string) []string {
 		lines = append(lines, "\n")
 	}
 	return lines
+}
+
+// ForgetScratch is ForgetUnder over the user's own agent files (from $HOME, $CLAUDE_CONFIG_DIR and
+// $CODEX_HOME): what a real-agent test calls at teardown for its one scratch folder. It reports
+// what it removed, for the test's log.
+func ForgetScratch(dir string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	claude, codex, err := ForgetUnder(DefaultPaths(home, os.Getenv), dir, home)
+	return fmt.Sprintf("removed %d Claude and %d Codex folder record(s) under %s", claude, codex, dir), err
 }

@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from "node:f
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { scrubbedEnv, startInstance, type Instance } from "../support/instance";
+import { BINARY, scrubbedEnv, startInstance, type Instance } from "../support/instance";
 
 export const MODEL = process.env.CROWSNEST_E2E_MODEL ?? "haiku";
 
@@ -72,6 +72,10 @@ export function removeScratch(scratch: Scratch | undefined) {
     // the repository is already gone
   }
   rmSync(scratch.dir, { recursive: true, force: true });
+  // Real Claude records every folder it runs in (and its trust answers) in the user's own
+  // ~/.claude.json: remove exactly this run's, under the scratch folder and the job worktrees'
+  // folder (both unique to this run), with crowsnest's careful update (internal/agenttrust).
+  forgetScratch(scratch.dir, join(homedir(), ".herdr", "worktrees", basename(scratch.repo)));
   // herdr keeps a repository's worktrees under ~/.herdr/worktrees/<repo name>/ and leaves that
   // directory behind, empty, when the last one goes: remove it, only if empty (the name is this
   // run's own).
@@ -80,6 +84,12 @@ export function removeScratch(scratch: Scratch | undefined) {
   } catch {
     // not there, or not empty
   }
+}
+
+/** Runs `crowsnest forget-scratch` (hidden) for these folders; a failure is logged, not thrown. */
+export function forgetScratch(...dirs: string[]) {
+  const result = spawnSync(BINARY, ["forget-scratch", ...dirs], { env: scrubbedEnv(), encoding: "utf8" });
+  console.log(`forget-scratch: ${(result.stdout || result.stderr || "").trim() || `exit ${result.status}`}`);
 }
 
 export interface RealOptions {

@@ -36,7 +36,10 @@ async function createProject(page: Page, dir: string, name: string, trust: boole
   await form.getByLabel(/Directory/).fill(dir);
   await form.getByLabel("Name", { exact: true }).fill(name);
   const box = form.getByRole("checkbox", { name: /Agents may work in this folder without asking/ });
-  await expect(box).toBeChecked(); // on by default
+  // On by default once the folder's facts say it carries nothing an agent runs or reads at its
+  // start (R9-S4); the scratch repository holds only a README.
+  await expect(box).toBeChecked();
+  await expect(form.getByText(/Nothing in this folder runs when an agent starts/)).toBeVisible();
   if (!trust) await box.uncheck();
   await settled(page);
   await page.screenshot({ path: `screenshots/trust-project-form-${trust ? "ticked" : "unticked"}-390.png` });

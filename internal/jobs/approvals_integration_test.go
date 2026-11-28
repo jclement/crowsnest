@@ -83,8 +83,13 @@ func newApprovalRig(t *testing.T) *approvalRig {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(short) })
 	binary := buildCrowsnest(t, short)
+	// Registered before the session, so it runs after the agents are gone: they record their
+	// folders in the user's own files, and the test removes exactly its own (DESIGN 15).
+	var forgetDir string
+	t.Cleanup(func() { forgetScratch(t, forgetDir) })
 	session := startSession(t)
 	scratch, err := filepath.Abs("e2e-appr-" + randomSuffix(t))
+	forgetDir = scratch
 	if err != nil {
 		t.Fatal(err)
 	}
