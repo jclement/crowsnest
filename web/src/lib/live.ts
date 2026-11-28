@@ -3,6 +3,7 @@
 // The mapping lives here as data so it is tested without a browser and later milestones extend
 // one table instead of adding handlers across the app.
 import { useQueryClient, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import { noteBeat } from "./pending";
 import { useMemo } from "react";
 import { queryKeys } from "./api";
 import type { ApprovalEvent } from "./approvals";
@@ -138,6 +139,7 @@ export function useLiveQueries(): StreamState {
         Object.entries(invalidations).map(([name, keys]) => [
           name,
           (data: unknown) => {
+            noteBeat();
             window.dispatchEvent(new Event(BEAT_EVENT));
             if (name === "sys") {
               if (isSample(data)) queryClient.setQueryData<SysStats>(sysKeys.stats, (previous) => appendSample(previous, data));

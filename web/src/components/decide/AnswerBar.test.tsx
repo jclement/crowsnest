@@ -37,6 +37,8 @@ describe("AnswerBar", () => {
     });
     const user = userEvent.setup();
     const first = renderWithClient(<AnswerBar itemId="question:q_7" jobId="j_12" target={{ kind: "question", question }} onAnswered={() => {}} />);
+    // The note is folded behind a link until wanted (R10 Fable F6); once it has text it stays open.
+    await user.click(screen.getByRole("button", { name: "Add a note" }));
     await user.type(screen.getByLabelText(/Note/), "only after the backup");
     first.unmount();
 
@@ -48,7 +50,8 @@ describe("AnswerBar", () => {
     await waitFor(() => expect(onAnswered).toHaveBeenCalled());
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({ answer_value: "no", answer_note: "only after the backup" });
     expect(localStorage.getItem("crowsnest-note:question:q_7")).toBeNull();
-    expect(screen.getByRole("link", { name: /Open the full job \(j_12\)/ })).toBeInTheDocument();
+    // The job link lives in the packet's header now, not twice (R10 Fable F6).
+    expect(screen.queryByRole("link", { name: /Open the full job/ })).toBeNull();
   });
 
   it("a 409 refetches (the packet turns stale) and keeps the note instead of showing an error", async () => {
@@ -60,6 +63,7 @@ describe("AnswerBar", () => {
     const user = userEvent.setup();
     const onAnswered = vi.fn();
     renderWithClient(<AnswerBar itemId="question:q_7" target={{ kind: "question", question }} onAnswered={onAnswered} />);
+    await user.click(screen.getByRole("button", { name: "Add a note" }));
     await user.type(screen.getByLabelText(/Note/), "keep me");
     await user.click(screen.getByRole("button", { name: /Ship it/ }));
     await waitFor(() => expect(calls.some((call) => call.method === "GET" && call.path === "/questions/q_7")).toBe(true));
@@ -90,7 +94,7 @@ describe("AnswerBar", () => {
     renderWithClient(<AnswerBar itemId="question:q_8" target={{ kind: "question", question: gate }} onAnswered={onAnswered} />);
     await user.click(screen.getByRole("button", { name: /Allow: merge it/ }));
     expect(calls.some((call) => call.method === "POST")).toBe(false);
-    await user.click(screen.getByRole("button", { name: /Yes, Allow: merge it/ }));
+    await user.click(screen.getByRole("button", { name: /Yes, allow: merge it/ }));
     await waitFor(() => expect(onAnswered).toHaveBeenCalled());
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({ answer_value: "allow" });
   });
@@ -122,5 +126,100 @@ describe("AnswerBar", () => {
     await user.click(screen.getByRole("button", { name: /Yes, allow it/ }));
     await waitFor(() => expect(onAnswered).toHaveBeenCalled());
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({ decision: "allow", confirm: true });
+  });
+
+  it("an everyday word (apply) answers in one tap: the second tap is for granting words only (R10 Opus F4)", async () => {
+    const apply = makeQuestion({
+      id: "q_9",
+      title: "Apply the fleet cache refactor?",
+      kind: "confirm",
+      recommend: "yes",
+      options: [
+        { key: "yes", label: "Apply it" },
+        { key: "no", label: "Not yet" },
+      ],
+    });
+    const calls = stubApi((call) => {
+      if (call.method === "POST") return { body: { data: { ...apply, status: "answered" } } };
+      if (call.path === "/questions/q_9") return { body: { data: apply } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const onAnswered = vi.fn();
+    renderWithClient(<AnswerBar itemId="question:q_9" target={{ kind: "question", question: apply }} onAnswered={onAnswered} />);
+    await user.click(screen.getByRole("button", { name: /Apply it/ }));
+    await waitFor(() => expect(onAnswered).toHaveBeenCalledWith("Answered “Apply the fleet cache refactor?”"));
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({ answer_value: "yes" });
+    expect(screen.queryByText(/widens what agents may do/)).toBeNull();
+  });
+
+  it("says Sending at once, and a failed send says so in the bar with Retry, which sends again (R10 Fable B3)", async () => {
+    let attempts = 0;
+    stubApi((call) => {
+      if (call.method === "POST") {
+        attempts++;
+        if (attempts === 1) return { status: 502, body: { error: { message: "Bad gateway", code: "HTTP_502" } } };
+        return { body: { data: { ...question, status: "answered" } } };
+      }
+      if (call.path === "/questions/q_7") return { body: { data: question } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const onAnswered = vi.fn();
+    renderWithClient(<AnswerBar itemId="question:q_7" target={{ kind: "question", question }} onAnswered={onAnswered} />);
+    await user.click(screen.getByRole("button", { name: /Ship it/ }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Not sent: “Ship it”. Bad gateway");
+    expect(onAnswered).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(onAnswered).toHaveBeenCalled());
+    expect(attempts).toBe(2);
+  });
+
+  it("shows Sending… on the pressed choice while the answer is on its way", async () => {
+    let release: () => void = () => {};
+    stubApi((call) => {
+      if (call.method === "POST") return new Promise((resolve) => (release = () => resolve({ body: { data: { ...question, status: "answered" } } })));
+      if (call.path === "/questions/q_7") return { body: { data: question } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderWithClient(<AnswerBar itemId="question:q_7" target={{ kind: "question", question }} onAnswered={() => {}} />);
+    await user.click(screen.getByRole("button", { name: /Ship it/ }));
+    expect(await screen.findByRole("button", { name: /Sending…/ })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("Sending “Ship it”…");
+    release();
+  });
+
+  it("ignores a tap while the auto-advance guard holds, then answers (R10 Opus B1)", async () => {
+    const calls = stubApi((call) => {
+      if (call.method === "POST") return { body: { data: { ...question, status: "answered" } } };
+      if (call.path === "/questions/q_7") return { body: { data: question } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const onAnswered = vi.fn();
+    renderWithClient(<AnswerBar itemId="question:q_7" target={{ kind: "question", question }} onAnswered={onAnswered} armedAt={Date.now() + 400} />);
+    const ship = screen.getByRole("button", { name: /Ship it/ });
+    expect(ship).toHaveAttribute("aria-disabled", "true");
+    await user.click(ship);
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+    await waitFor(() => expect(ship).not.toHaveAttribute("aria-disabled"), { timeout: 2000 });
+    await user.click(ship);
+    await waitFor(() => expect(onAnswered).toHaveBeenCalled());
+  });
+
+  it("presses the choices with the number keys", async () => {
+    const calls = stubApi((call) => {
+      if (call.method === "POST") return { body: { data: { ...question, status: "answered" } } };
+      if (call.path === "/questions/q_7") return { body: { data: question } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const onAnswered = vi.fn();
+    renderWithClient(<AnswerBar itemId="question:q_7" target={{ kind: "question", question }} onAnswered={onAnswered} />);
+    await user.keyboard("2");
+    await waitFor(() => expect(onAnswered).toHaveBeenCalled());
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({ answer_value: "no" });
   });
 });

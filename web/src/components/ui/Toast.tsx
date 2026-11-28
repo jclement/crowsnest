@@ -1,5 +1,7 @@
-// Toasts for mutation results. Newest at the bottom, three at most, each gone after a few
-// seconds (failures stay longer). On mobile they sit above the bottom nav.
+// Toasts for mutation results. Three at most, each gone after a few seconds (failures stay
+// longer). On a phone they sit at the top, under the header: at the bottom they covered the
+// thumb's next target (the decision packet's answer bar, the job box's Give job, a row's
+// buttons; R10 Opus F6, Fable F6). From md they sit at the bottom right, beside the content.
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
@@ -37,7 +39,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div
         aria-live="polite"
-        className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+4rem)] z-50 flex flex-col items-center gap-2 px-3 md:inset-x-auto md:bottom-4 md:right-4 md:items-end"
+        className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3rem)] z-50 flex flex-col items-center gap-2 px-3 md:inset-x-auto md:top-auto md:bottom-4 md:right-4 md:items-end"
       >
         {toasts.map((toast) => (
           <Toast key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />

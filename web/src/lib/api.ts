@@ -8,6 +8,7 @@
 // without a server. `?fixtures=0` turns it off. The choice is kept for the tab's lifetime
 // (sessionStorage) because client-side navigation drops the query string.
 import type { SpendGroup, SpendPeriod, SpendReport } from "./spend";
+import { trackRequest } from "./pending";
 import type { AgentScreen, Fleet, KeysResponse, SendKeysRequest } from "./types";
 import type { MessagePage, OrchestratorStatus, PromptRequest, PromptResult } from "./conversation";
 import type { AnswerRequest, InboxSummary, Question } from "./questions";
@@ -100,6 +101,8 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const headers: Record<string, string> = { Accept: "application/json", "X-Crowsnest": "1" };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   let response: Response;
+  // Tracked so the heartbeat can tell a server that stopped answering (lib/pending.ts).
+  const settled = trackRequest();
   try {
     response = await fetch(API_BASE + path, {
       method: options.method ?? "GET",
@@ -111,6 +114,8 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError(0, "NETWORK_ERROR", "Cannot reach crowsnest. Check the connection.");
+  } finally {
+    settled();
   }
   const payload = await readJSON(response);
   if (!response.ok) {

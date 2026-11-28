@@ -23,6 +23,11 @@ export interface Choice {
   /** What happens when this is chosen, in a line. */
   consequence: string;
   recommended: boolean;
+  /**
+   * True when the consequence says something beyond the choice's own label ("The agent is told you
+   * chose this" does not): the packet shows "If you choose" only when some choice has (R10).
+   */
+  said: boolean;
 }
 
 /** The packet's words. */
@@ -155,6 +160,72 @@ export function grants(key: string): boolean {
   return !REFUSING_KEYS.has(key.toLowerCase());
 }
 
+/**
+ * Words that hand an agent a permission or reach outside its worktree. GRANTING_WORDS also holds
+ * everyday ones (apply, accept, confirm, proceed, "go ahead"); those still make a question
+ * gate-shaped for notifications and rows (isGate, the server's GateShaped), but on their own they
+ * no longer cost a second tap in the packet, where the evidence is on screen (R10 Opus F4: "Apply
+ * the fleet cache refactor?" asked to confirm that it "widens what agents may do", and a confirm
+ * that is always there teaches the second tap to be automatic).
+ */
+const PERMISSION_WORDS = new Set(
+  `allow allows allowed allowing approve approves approved approving approval merge merges merged merging land lands landed
+  landing push pushes pushed pushing deploy deploys deployed deploying deployment delete deletes deleted deleting deletion
+  grant grants granted granting permit permits permitted permitting authorize authorizes authorized authorizing authorise
+  authorises authorised authorising authorization authorisation publish publishes published publishing`.split(/\s+/),
+);
+
+/**
+ * True when pressing this option in the packet takes the second, deliberate tap: never for a
+ * refusing key; always on crowsnest's own gates (land, delegation, task review); otherwise only
+ * when the question's title or the option itself uses a permission word (allow, approve, merge,
+ * push, deploy, delete, grant, publish, …).
+ */
+export function needsSecondTap(question: Pick<Question, "context" | "options"> & { title?: string }, key: string): boolean {
+  if (!grants(key)) return false;
+  if (GATE_CONTEXT_KEYS.some((contextKey) => contextKey in (question.context ?? {}))) return true;
+  const option = question.options.find((candidate) => candidate.key === key);
+  const texts = [question.title ?? "", key, option?.label ?? ""];
+  return texts.some((text) => normalisedWords(text).some((word) => PERMISSION_WORDS.has(word)));
+}
+
+/** "Apply it" as the end of a sentence: "apply it" (an all-capital word such as "PR" is kept). */
+export function inSentence(label: string): string {
+  const first = label.split(/\s/)[0] ?? "";
+  if (first.length > 1 && first === first.toUpperCase()) return label;
+  return label.charAt(0).toLowerCase() + label.slice(1);
+}
+
+// ---- The auto-advance guard -------------------------------------------------------------------
+
+/**
+ * After an answer the packet moves to the next decision at once (a phone run through the queue).
+ * The next item's buttons then sit where the last tap was, so a reflex double tap or a tap one beat
+ * late would answer something nobody read (R10 Opus B1). For this long after an advance the new
+ * item's choices are inert, and the packet says what was answered and what is next.
+ */
+export const ADVANCE_GUARD_MS = 700;
+
+let lastAnswer: { at: number; title: string } | null = null;
+
+/** Records an answer just sent from the packet (what it was, for the next item's notice). */
+export function noteAnswered(title: string, now: number = Date.now()): void {
+  lastAnswer = { at: now, title };
+}
+
+/**
+ * The answer that brought the packet here, when it was sent within the guard's reach (a couple of
+ * seconds: the next item loads first), else null. Read by the next packet as it mounts.
+ */
+export function recentAnswer(now: number = Date.now(), within = 3_000): { at: number; title: string } | null {
+  return lastAnswer && now - lastAnswer.at <= within ? lastAnswer : null;
+}
+
+/** Forgets the last answer (tests). */
+export function forgetAnswer(): void {
+  lastAnswer = null;
+}
+
 // ---- Briefs ----------------------------------------------------------------------------------
 
 /** A question's brief: its options with their details as consequences, the agent's pick. */
@@ -164,6 +235,7 @@ export function questionBrief(question: Question, blocking: boolean): DecisionBr
     label: option.label,
     consequence: option.detail?.trim() || defaultConsequence(question, option.key),
     recommended: option.key === question.recommend,
+    said: !!option.detail?.trim(),
   }));
   const recommended = question.options.find((option) => option.key === question.recommend);
   return {
@@ -193,8 +265,8 @@ export function approvalBrief(approval: Approval): DecisionBrief {
     ref: approval.id,
     ask: `Allow ${approval.summary}?`,
     choices: [
-      { key: "allow", label: approval.risk === "dangerous" ? "Allow (confirm)" : "Allow once", consequence: allowWords, recommended: false },
-      { key: "deny", label: "Deny", consequence: "It does not run; the agent is told, with your note, and carries on.", recommended: false },
+      { key: "allow", label: approval.risk === "dangerous" ? "Allow (confirm)" : "Allow once", consequence: allowWords, recommended: false, said: approval.risk !== "low" },
+      { key: "deny", label: "Deny", consequence: "It does not run; the agent is told, with your note, and carries on.", recommended: false, said: approval.risk !== "low" },
     ],
     recommendation: approval.risk === "low" ? `${riskLabels.low}: a routine call (${approval.risk_reasons.join("; ") || "nothing risky found"}).` : null,
     blocking: "The agent is waiting for this answer.",
@@ -213,6 +285,7 @@ export function dialogBrief(paneID: string, title: string, options: { key: strin
       label: option.label,
       consequence: option.warning ? `Careful: ${option.warning}` : option.key ? `Presses ${option.key} in the agent's terminal.` : "Picks it in the agent's terminal.",
       recommended: false,
+      said: !!option.warning,
     })),
     recommendation: null,
     blocking: "The agent is stopped at this dialog.",
@@ -236,12 +309,14 @@ export function trustBrief(paneID: string, title: string, trust: TrustPrompt): D
         label: "Trust this folder",
         consequence: `${engine} may read, edit and run files in ${folder}, and the folder's own agent settings and hooks run. It remembers the answer for this folder. To spare every new job this question, trust the project's own folder (the project page offers it).`,
         recommended: false,
+        said: true,
       },
       {
         key: "deny",
         label: "Don't trust",
         consequence: trust.engine === "codex" ? "Codex goes back to its own launcher; the job waits." : "Claude exits; the job waits.",
         recommended: false,
+        said: true,
       },
     ],
     recommendation: null,

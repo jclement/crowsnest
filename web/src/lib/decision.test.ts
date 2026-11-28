@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { fixtureApprovals } from "./approvalFixtures";
 import {
+  inSentence,
+  needsSecondTap,
   approvalBrief,
   approvalStale,
   decisionLink,
@@ -181,5 +183,30 @@ describe("grantingText: the R9 spellings", () => {
     ["Idle or busy?", false],
   ])("%s → %s", (text, want) => {
     expect(grantingText(text)).toBe(want);
+  });
+});
+
+describe("the packet's second tap (R10 Opus F4)", () => {
+  const ask = (title: string, options: { key: string; label: string }[], context: Record<string, string> = {}) => ({ title, options, context });
+  it("is not asked for an everyday word, even though the question stays gate-shaped for rows and pushes", () => {
+    const apply = ask("Apply the fleet cache refactor?", [
+      { key: "yes", label: "Apply it" },
+      { key: "no", label: "Not yet" },
+    ]);
+    expect(isGate(apply)).toBe(true);
+    expect(needsSecondTap(apply, "yes")).toBe(false);
+  });
+  it("is asked for a permission word in the title or the option, and on crowsnest's own gates", () => {
+    expect(needsSecondTap(ask("Push the branch?", [{ key: "yes", label: "Yes" }]), "yes")).toBe(true);
+    expect(needsSecondTap(ask("Ready?", [{ key: "ok", label: "Merge it" }]), "ok")).toBe(true);
+    expect(needsSecondTap(ask("Ready?", [{ key: "ok", label: "Fine" }], { land_for: "j_3" }), "ok")).toBe(true);
+    expect(needsSecondTap(ask("Ready?", [{ key: "ok", label: "ΑIIow it" }]), "ok")).toBe(true);
+  });
+  it("is never asked for a refusing key", () => {
+    expect(needsSecondTap(ask("Merge it?", [{ key: "no", label: "No" }], { land_for: "j_3" }), "no")).toBe(false);
+  });
+  it("words the confirm as a sentence", () => {
+    expect(inSentence("Apply it")).toBe("apply it");
+    expect(inSentence("PR it")).toBe("PR it");
   });
 });

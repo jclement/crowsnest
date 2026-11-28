@@ -22,7 +22,9 @@ export interface Call {
   body: unknown;
 }
 
-type Route = (call: Call) => { status?: number; body: unknown } | undefined;
+type Answer = { status?: number; body: unknown } | undefined;
+/** A route may answer later (a promise), to hold a request open. */
+type Route = (call: Call) => Answer | Promise<Answer>;
 
 /**
  * Stubs fetch with a router: each call goes to `route`, which returns a status and JSON body.
@@ -39,7 +41,7 @@ export function stubApi(route: Route): Call[] {
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       };
       calls.push(call);
-      const answer = route(call) ?? { status: 599, body: { error: { code: "UNROUTED", message: `${call.method} ${call.path}` } } };
+      const answer = (await route(call)) ?? { status: 599, body: { error: { code: "UNROUTED", message: `${call.method} ${call.path}` } } };
       return new Response(JSON.stringify(answer.body), {
         status: answer.status ?? 200,
         headers: { "Content-Type": "application/json" },

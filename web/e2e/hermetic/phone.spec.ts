@@ -66,7 +66,9 @@ test("a question's decision packet from a push link: brief first, the bar in rea
   await page.screenshot({ path: `screenshots/phone-decide-question-${width(testInfo)}.png` });
   await expectAccessible(page, testInfo, "decision packet");
 
-  // The note survives a reload, a rotation and a trip to the background.
+  // The note survives a reload, a rotation and a trip to the background. It is folded behind
+  // "Add a note" until wanted (R10 Fable F6), and stays open once it has text.
+  await page.getByTestId("answer-bar").getByRole("button", { name: "Add a note" }).click();
   const note = page.getByTestId("answer-bar").getByLabel(/Note/);
   await note.fill("only after the backup");
   await page.reload();
@@ -167,4 +169,45 @@ test("the phone terminal: every key bar key on screen", async ({ page }, testInf
     expect(box && box.x >= 0 && box.x + box.width <= 391 && box.height >= 44, `key ${index} at ${JSON.stringify(box)}`).toBe(true);
   }
   await page.screenshot({ path: `screenshots/phone-terminal-keys-${width(testInfo)}.png` });
+});
+
+// R10 Opus B1: after an answer the packet moves to the next decision at once. A reflex double tap
+// (or a tap one beat late) must not answer the next item, whose buttons sit where the first were.
+test("a double tap answers one decision: the next one's choices are held, and it says what was answered", async ({ page }, testInfo) => {
+  await sizeFor(page, testInfo);
+  await page.goto("/");
+  const low = (await items(page)).find((item) => item.kind === "approval" && item.approval?.risk === "low");
+  expect(low, "the demo has a routine approval").toBeDefined();
+  await page.goto(`/decide?item=${encodeURIComponent(low!.id)}`);
+  const allow = page.getByTestId("answer-bar").getByRole("button", { name: /^Allow once$/ });
+  await expect(allow).toBeVisible();
+  const box = (await allow.boundingBox())!;
+  const before = (await items(page)).map((item) => item.id);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page).not.toHaveURL(new RegExp(encodeURIComponent(low!.id)));
+  // The second tap of the double tap, on the same spot, on the item that just appeared.
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByTestId("answered-notice")).toContainText("Allowed");
+  await expect(page.getByRole("group", { name: /Confirm/ })).toHaveCount(0);
+  await page.waitForTimeout(1_000);
+  const after = (await items(page)).map((item) => item.id);
+  expect(before.filter((id) => !after.includes(id))).toEqual([low!.id]);
+  await expect(page.getByTestId("answer-bar")).toHaveAttribute("data-armed", "true");
+});
+
+// R10 Opus B6: a decision whose fetch fails says so with Retry instead of a skeleton for good.
+test("a decision that cannot load says so and offers Retry", async ({ page }, testInfo) => {
+  await sizeFor(page, testInfo);
+  await page.goto("/");
+  const question = (await items(page)).find((item) => item.kind === "question");
+  expect(question).toBeDefined();
+  const ref = question!.id.split(":")[1];
+  let blocked = true;
+  await page.route(`**/api/v1/questions/${ref}`, (route) => (blocked ? route.abort("failed") : route.continue()));
+  await page.goto(`/decide?item=${encodeURIComponent(question!.id)}`);
+  const alert = page.getByRole("alert").filter({ hasText: ref! });
+  await expect(alert).toBeVisible({ timeout: 15_000 });
+  blocked = false;
+  await alert.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByTestId("answer-bar")).toBeVisible();
 });

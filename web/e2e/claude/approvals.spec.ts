@@ -72,7 +72,10 @@ async function settle(page: Page, jobId: string, decision: "Allow once" | "Deny"
         test.info().annotations.push({ type: `follow-up approval (${decision})`, description: approval.summary });
         await page.goto(`${instance.baseURL}/decide?item=${encodeURIComponent(`approval:${approval.id}`)}`);
         const bar = page.getByTestId("answer-bar");
-        if (note) await bar.getByLabel(/Note/).fill(note);
+        if (note) {
+          await bar.getByRole("button", { name: /Add a note/ }).click();
+          await bar.getByLabel(/Note/).fill(note);
+        }
         await bar.getByRole("button", { name: decision, exact: true }).click();
         await expect.poll(async () => (await apiGet<Approval>(page, instance, `/approvals/${approval.id}`)).status).not.toBe("pending");
       }
