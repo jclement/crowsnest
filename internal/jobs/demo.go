@@ -68,6 +68,7 @@ func SeedDemo(ctx context.Context, s *Service, panes DemoPanes) error {
 		if panes.ProjectOf != nil && item.record.Dir != "" {
 			if projectID, dir := panes.ProjectOf(item.record.Dir); projectID != 0 {
 				item.record.ProjectID, item.record.Dir = projectID, dir
+				item.record.WorkDir = demoRealWorktree(dir, item.record.WorktreeBranch, item.record.WorkDir)
 			}
 		}
 		id, err := s.opts.Store.InsertJob(ctx, item.record)

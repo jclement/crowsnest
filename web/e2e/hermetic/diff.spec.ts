@@ -135,10 +135,10 @@ test("a lead's uncommitted changes, from the project page, in light and dark", a
   await expect(viewer.getByText(/of 2 viewed/)).toBeVisible();
   await expect(viewer.getByRole("table", { name: "Diff of NOTES.md" })).toContainText("Lead's notes");
   if (!isPhone(testInfo)) {
-    await expect(viewer.getByRole("table", { name: "Diff of README.md" })).toContainText("Push to main; the site rebuilds in a minute.");
+    await expect(viewer.getByRole("table", { name: "Diff of DEPLOY.md" })).toContainText("Push to main; the site rebuilds in a minute.");
   } else {
     await viewer.getByRole("navigation", { name: "Files" }).getByRole("button", { name: "Next" }).click();
-    await expect(viewer.getByRole("table", { name: "Diff of README.md" })).toContainText("Push to main; the site rebuilds in a minute.");
+    await expect(viewer.getByRole("table", { name: "Diff of DEPLOY.md" })).toContainText("Push to main; the site rebuilds in a minute.");
   }
   await expectAccessible(page, testInfo, "diff-light");
   await shot(page, testInfo, "lead-light");
@@ -158,4 +158,21 @@ test("the palette opens a job's changes", async ({ page }, testInfo) => {
   await page.getByRole("option", { name: /Changes: Redesign the checkout/ }).click();
   await expect(page).toHaveURL(/\/diff\?job=j_\d+/);
   await expect(page.getByRole("region", { name: /^Changes: / })).toBeVisible();
+});
+
+// R10 O-B7 (the demo's half): the lead's uncommitted work in Website's main checkout was a README
+// edit, so Land refused the demo's ready Website job every time. The lead's edits are new files
+// now, and the job merges.
+test("the demo's ready Website job can land beside the lead's uncommitted notes", async ({ page, baseURL }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chromium", "one run is enough: it merges for real");
+  const id = await jobId(page.request, "job/121-price-rounding");
+  // What the Review tab shows is what lands: send its head, as the Merge button does.
+  const review = ((await (await page.request.get(`/api/v1/jobs/${id}/review`)).json()) as { data: { land: { head?: string } } }).data;
+  const response = await page.request.post(`/api/v1/jobs/${id}/land`, {
+    headers: { Origin: baseURL!, "X-Crowsnest": "1", "Content-Type": "application/json" },
+    data: { action: "merge", confirm: true, expected_head: review.land.head },
+  });
+  const body = await response.text();
+  expect(response.status(), body).toBeLessThan(300);
+  expect(body).not.toContain("uncommitted changes");
 });

@@ -5248,7 +5248,15 @@ repositories in this round.
 `--demo` tells one morning across five projects, seeded in throwaway directories under its
 state directory: Crowsnest (`lead_start=job`), Website and Mobile (`lead_start=open`), whose
 leads run on the fake herdr and answer prompts with the demo orchestrator's canned replies, and
-Infra (manual) and Handbook (`lead_start=job`), whose leads are off. Two app schedules
+Infra (manual) and Handbook (`lead_start=job`), whose leads are off. Every project folder is a real git
+repository (Website's is the diff demo's, with worktrees; the others one commit with a README,
+`jobs.SeedDemoRepo`; the running worktree job's made-up `~/.herdr/worktrees/…` becomes a real
+worktree) and is trusted in the demo's own agent config, so the first project page opens on no
+warning (R8 H13, R10). The Website lead's uncommitted work is new files only (`NOTES.md`,
+`DEPLOY.md`), so its ready job can land (Land refuses a main checkout with tracked changes).
+The question rotation skips a scripted question that is still open, so an unattended demo
+settles instead of growing its queue; the approval rotation already held at most three pending.
+The agent socket falls back to `/tmp` when the temporary directory is too deep (R10 F-B4). Two app schedules
 (`evening-review` to the Crowsnest lead, `link-check` a job for Website) and edited instruction
 layers (global, the builder role, the Crowsnest project) come with them.
 

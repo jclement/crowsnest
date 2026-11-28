@@ -65,7 +65,10 @@ func (panes DemoPanes) caller(agent string) Caller {
 	return Caller{PaneID: asker.PaneID, JobID: asker.JobID}
 }
 
-// RunDemo asks one question from the rotation every interval until ctx ends.
+// RunDemo asks one question from the rotation every interval until ctx ends. A question whose
+// title is still open is skipped (R10: the queue grew from 16 to 29 in 25 minutes as the same
+// questions were asked again, four copies of one), so each scripted question has at most one
+// open copy and an unattended demo settles.
 func RunDemo(ctx context.Context, service *Service, panes DemoPanes, interval time.Duration, logger *slog.Logger) {
 	if interval <= 0 {
 		interval = DefaultDemoAskInterval
@@ -73,17 +76,41 @@ func RunDemo(ctx context.Context, service *Service, panes DemoPanes, interval ti
 	rotation := demoRotation()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for next := 0; ; next++ {
+	for next := 0; ; {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
-		seed := rotation[next%len(rotation)]
+		seed, ok := nextUnasked(ctx, service, rotation, &next)
+		if !ok {
+			continue
+		}
 		if _, err := service.Ask(ctx, seed.input, panes.caller(seed.agent)); err != nil && ctx.Err() == nil {
 			logger.Warn("demo: asking a question", "err", err)
 		}
 	}
+}
+
+// nextUnasked returns the rotation's next question that has no open copy, moving next past it;
+// false when every one is open (or the list cannot be read), and then nothing is asked.
+func nextUnasked(ctx context.Context, service *Service, rotation []demoSeed, next *int) (demoSeed, bool) {
+	open, err := service.List(ctx, string(StatusOpen))
+	if err != nil {
+		return demoSeed{}, false
+	}
+	asked := map[string]bool{}
+	for _, question := range open {
+		asked[question.Title] = true
+	}
+	for range rotation {
+		seed := rotation[*next%len(rotation)]
+		*next++
+		if !asked[seed.input.Title] {
+			return seed, true
+		}
+	}
+	return demoSeed{}, false
 }
 
 // demoSeed is one scripted question and the demo agent that asks it.

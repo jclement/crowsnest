@@ -47,6 +47,50 @@ func demoWrite(dir, name, body string) error {
 	return os.WriteFile(path, []byte(body), 0o600)
 }
 
+// SeedDemoRepo makes dir a git repository on main with files in one commit, unless it is one
+// already. Without git it does nothing. --demo's project folders use it, so a project page does
+// not open on "not in a git repository" (R8 H13, R10).
+func SeedDemoRepo(dir string, files map[string]string) error {
+	if !gitInstalled() {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return nil
+	}
+	if err := demoGit(dir, "init", "-q", "-b", "main"); err != nil {
+		return err
+	}
+	for name, body := range files {
+		if err := demoWrite(dir, name, body); err != nil {
+			return err
+		}
+	}
+	if err := demoGit(dir, "add", "."); err != nil {
+		return err
+	}
+	return demoGit(dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "First version")
+}
+
+// demoRealWorktree makes a made-up worktree (herdr's "~/.herdr/worktrees/…", which the story
+// names) a real one of repo, beside the diff demo's, and returns its path; otherwise workDir as
+// it was. A made-up path read as "is not in a git repository" on the first project page (R10).
+func demoRealWorktree(repo, branch, workDir string) string {
+	if branch == "" || !strings.HasPrefix(workDir, "~/.herdr/worktrees/") || !gitInstalled() {
+		return workDir
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		return workDir
+	}
+	path := worktreePath(repo, branch)
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	if err := demoGit(repo, "worktree", "add", "-q", "-b", branch, path); err != nil {
+		return workDir
+	}
+	return path
+}
+
 // SeedDemoLanding adds the landing demo under root (the demo's state directory). worktrees is
 // the fake herdr's switch to real git (fake.RealGitWorktrees), called before anything is made.
 func SeedDemoLanding(ctx context.Context, s *Service, root string, worktrees func()) error {

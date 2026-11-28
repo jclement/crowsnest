@@ -34,6 +34,9 @@ func newFolderTrust(cfg config.Config, live func() config.Config) *folderTrust {
 	if cfg.Demo {
 		dir := filepath.Join(cfg.StateDir, "demo-agent-config")
 		paths = agenttrust.Paths{ClaudeConfig: filepath.Join(dir, ".claude.json"), CodexConfig: filepath.Join(dir, "codex", "config.toml")}
+		// Made here: trusting a folder takes a lock file beside the config, and a missing
+		// directory surfaced as a Go error in a toast (R10 O-B10).
+		_ = os.MkdirAll(filepath.Join(dir, "codex"), 0o700)
 	}
 	return &folderTrust{enabled: func() bool { return live().TrustProjectFolders }, paths: paths}
 }

@@ -104,8 +104,10 @@ func buildDemoDiffs(ctx context.Context, s *Service, repo string, running, done 
 	if err := demoGit(repo, "commit", "-q", "-m", "Storefront: first version"); err != nil {
 		return err
 	}
-	// The lead's own uncommitted edits in the main checkout.
-	if err := demoWrite(repo, "README.md", strings.Replace(storefrontBase()["README.md"], "## Running", "## Deploying\n\nPush to main; the site rebuilds in a minute.\n\n## Running", 1)); err != nil {
+	// The lead's own uncommitted edits in the main checkout: new files only. Land refuses a main
+	// checkout with changes to tracked files, and the demo's ready Website job must be able to
+	// land (R10 O-B7: a README edit here made it refuse every time).
+	if err := demoWrite(repo, "DEPLOY.md", "# Deploying\n\nPush to main; the site rebuilds in a minute.\n"); err != nil {
 		return err
 	}
 	if err := demoWrite(repo, "NOTES.md", "# Lead's notes\n\n- Checkout redesign is j_running; review the cart once it settles.\n"); err != nil {

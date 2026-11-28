@@ -15,9 +15,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jclement/crowsnest/internal/agenttrust"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/demostory"
 	"github.com/jclement/crowsnest/internal/instructions"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/schedule"
 )
@@ -52,12 +54,21 @@ func demoProjectList() []demoProject {
 // from the demo jobs' directories to them.
 func seedDemoProjects(ctx context.Context, cfg config.Config, w *projectWiring, logger *slog.Logger) func(string) (int64, string) {
 	byFake := map[string]projects.Project{}
+	var dirs []string
 	for _, seed := range demoProjectList() {
 		dir := filepath.Join(cfg.StateDir, "demo-src", strings.TrimPrefix(seed.fakeDir, "~/src/"))
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			logger.Warn("making a demo project directory", "err", err)
 			continue
 		}
+		// Website's repository is the diff demo's (jobs.SeedDemoDiffs makes it, with worktrees).
+		if *seed.input.Slug != demostory.Website {
+			readme := "# " + *seed.input.Name + "\n\n" + *seed.input.Description + "\n"
+			if err := jobs.SeedDemoRepo(dir, map[string]string{"README.md": readme}); err != nil {
+				logger.Warn("making a demo project a git repository", "err", err)
+			}
+		}
+		dirs = append(dirs, dir)
 		seed.input.Dir = &dir
 		project, err := w.service.Create(ctx, seed.input)
 		if err != nil {
@@ -69,6 +80,13 @@ func seedDemoProjects(ctx context.Context, cfg config.Config, w *projectWiring, 
 			}
 		}
 		byFake[seed.fakeDir] = project
+	}
+	// The demo's folders are crowsnest's own made-up ones: trusted in the demo's agent config
+	// (never the user's), so the first project page does not open on a trust warning.
+	for _, result := range newFolderTrust(cfg, func() config.Config { return cfg }).Trust(dirs) {
+		if result.Status == agenttrust.StatusFailed {
+			logger.Debug("trusting a demo project folder", "agent", result.Agent, "detail", result.Detail)
+		}
 	}
 	return func(dir string) (int64, string) {
 		if project, ok := byFake[dir]; ok {
