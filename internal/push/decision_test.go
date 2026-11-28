@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jclement/crowsnest/internal/approvals"
+	"github.com/jclement/crowsnest/internal/attention"
 	"github.com/jclement/crowsnest/internal/questions"
 	"github.com/jclement/crowsnest/internal/risk"
 )
@@ -123,5 +124,24 @@ func TestGateShaped(t *testing.T) {
 	}
 	if GateShaped(map[string]string{"repo": "be"}, []string{"yes", "no"}) {
 		t.Fatal("an ordinary confirm is not a gate")
+	}
+}
+
+// TestAStoppedJobsQuestionIsPushedAsBlocking (R9-C12): an ordinary question of a job that has
+// stopped on its questions is blocking in the queue, so the push says so too; the same question of
+// a job still working is not.
+func TestAStoppedJobsQuestionIsPushedAsBlocking(t *testing.T) {
+	for _, stopped := range []bool{true, false} {
+		watcher, sender, _, _ := approvalWatcher()
+		watcher.opts.Describe = func(context.Context, string, string) Where {
+			return Where{Project: "Website", JobID: "j_15", JobTitle: "Homepage hero", JobStopped: stopped}
+		}
+		question := questions.Question{ID: "q_9", Title: "Which colour?", Kind: questions.KindManual, Urgency: questions.UrgencyNormal, JobID: "j_15", SourcePane: "w5:p1"}
+		watcher.QuestionAsked(question)
+		got := sender.got()[0]
+		want := attention.QuestionLabel(question, stopped) == attention.LabelBlocking
+		if blocking := strings.Contains(got.Title, "blocking question"); blocking != want || blocking != stopped {
+			t.Errorf("stopped=%v: title %q (the queue says blocking=%v)", stopped, got.Title, want)
+		}
 	}
 }

@@ -103,9 +103,16 @@ func LabelOf(item Item) Label {
 	return LabelCanWait
 }
 
-// QuestionLabel is the label an open question carries, given whether its job declared that it has
-// stopped on its questions: the same rule LabelOf applies to a question's item, for a surface (a
-// push) that holds the question and not the queue.
+// JobStoppedOnQuestions is the one rule for whether a job has stopped on its questions (it said
+// nothing is left that they do not block): the queue's question urgency, the header and Now (which
+// read the queue's counts) and a push's label all use it, so they agree (R9-C12).
+func JobStoppedOnQuestions(job *jobs.Job) bool {
+	return job != nil && job.State == jobs.StateNeedsYou && job.Cause == jobs.CauseQuestions
+}
+
+// QuestionLabel is the label an open question carries, given whether its job has stopped on its
+// questions (JobStoppedOnQuestions, read when the label is given): the same rule LabelOf applies to
+// a question's item, for a surface (a push) that holds the question and not the queue.
 func QuestionLabel(question questions.Question, jobStopped bool) Label {
 	urgency, _ := questionUrgency(question, nil)
 	if urgency == Blocking || jobStopped {
@@ -331,7 +338,7 @@ func (b *builder) addQuestions() {
 // questionUrgency: a question blocks when its asker said so (urgency blocking, or it waits on the
 // answer), or when its job declared that nothing is left the questions do not block.
 func questionUrgency(question questions.Question, job *jobs.Job) (Urgency, int) {
-	stopped := job != nil && job.State == jobs.StateNeedsYou && job.Cause == jobs.CauseQuestions
+	stopped := JobStoppedOnQuestions(job)
 	switch {
 	case question.Urgency == questions.UrgencyBlocking:
 		return Blocking, rankBlockingQ

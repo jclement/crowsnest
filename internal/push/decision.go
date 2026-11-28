@@ -30,6 +30,9 @@ type Where struct {
 	Project  string
 	JobID    string
 	JobTitle string
+	// JobStopped: the job has stopped on its questions now (attention.JobStoppedOnQuestions), so a
+	// question of it is blocking, as the queue says (R9-C12).
+	JobStopped bool
 }
 
 // Describer finds where an item belongs from its job id or, failing that, the pane that asked.
