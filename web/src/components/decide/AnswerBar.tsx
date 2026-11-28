@@ -156,18 +156,22 @@ function useSending(): Sending {
   const [failed, setFailed] = useState<Sending["failed"]>(null);
   const key = current?.key ?? null;
   useEffect(() => {
-    setLate(false);
     if (!key) return;
     const timer = setTimeout(() => setLate(true), LATE_REQUEST_MS);
     return () => clearTimeout(timer);
   }, [key]);
   const run = (press: Press) => {
     setFailed(null);
+    setLate(false);
     setCurrent({ key: press.key, label: press.label });
     press.task().then(
-      () => setCurrent(null),
+      () => {
+        setCurrent(null);
+        setLate(false);
+      },
       (failure: unknown) => {
         setCurrent(null);
+        setLate(false);
         setFailed({ label: press.label, message: failure instanceof Error ? failure.message : String(failure), retry: () => run(press) });
       },
     );
@@ -212,16 +216,15 @@ function SendStatus({ sending, notice }: { sending: Sending; notice: string | nu
   );
 }
 
-/** False until armedAt (the auto-advance guard), then true; re-renders when it passes. */
+/**
+ * False until armedAt (the auto-advance guard), then true; re-renders when it passes. armedAt is
+ * fixed for a bar's life: the packet is keyed by its item, so each item gets a bar of its own.
+ */
 function useArmed(armedAt: number): boolean {
   const [armed, setArmed] = useState(() => Date.now() >= armedAt);
   useEffect(() => {
     const wait = armedAt - Date.now();
-    if (wait <= 0) {
-      setArmed(true);
-      return;
-    }
-    setArmed(false);
+    if (wait <= 0) return;
     const timer = setTimeout(() => setArmed(true), wait);
     return () => clearTimeout(timer);
   }, [armedAt]);
