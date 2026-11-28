@@ -93,8 +93,16 @@ func TestACopyACrashLeftIsRemovedAtStart(t *testing.T) {
 	if _, err := isolatedCheckoutForTest(ctx, job.WorkDir, commit, workspace); err != nil {
 		t.Fatal(err)
 	}
+	// One no row names but carrying crowsnest's marker (an older copy): removed. One without the
+	// marker: not provably crowsnest's, so left (R10 new-H1).
 	stray := filepath.Join(r.svc.checksDir(), job.ID+"-0-stray")
-	if err := os.MkdirAll(stray, 0o700); err != nil {
+	unmarked := filepath.Join(r.svc.checksDir(), job.ID+"-0-unmarked")
+	for _, dir := range []string{stray, unmarked} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(stray, "crowsnest-check-repo"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(gitIn(t, job.WorkDir, "worktree", "list"), workspace) {
@@ -105,6 +113,9 @@ func TestACopyACrashLeftIsRemovedAtStart(t *testing.T) {
 		if _, err := os.Stat(dir); err == nil {
 			t.Fatalf("%s was left behind", dir)
 		}
+	}
+	if _, err := os.Stat(unmarked); err != nil {
+		t.Fatalf("a directory without crowsnest's marker was removed: %v", err)
 	}
 	if strings.Contains(gitIn(t, job.WorkDir, "worktree", "list"), workspace) {
 		t.Fatal("git still lists the copy as a worktree")
@@ -119,9 +130,58 @@ func TestACopyACrashLeftIsRemovedAtStart(t *testing.T) {
 
 // isolatedCheckoutForTest makes a copy the way a check does.
 func isolatedCheckoutForTest(ctx context.Context, dir, commit, parent string) (string, error) {
-	copied, err := landing.IsolatedCheckout(ctx, dir, commit, parent)
+	copied, err := landing.IsolatedCheckout(ctx, dir, commit, filepath.Dir(parent), parent)
 	if err != nil {
 		return "", err
 	}
 	return copied.Dir, nil
+}
+
+// TestARecordedFolderOutsideTheChecksDirectoryIsNeverRemoved (R10 new-H1): a job_checks row naming
+// any other folder, as a restored backup's can, is left whole at the first tick, journalled, and
+// forgotten.
+func TestARecordedFolderOutsideTheChecksDirectoryIsNeverRemoved(t *testing.T) {
+	r := newAcceptRig(t, "true", LandingOptions{})
+	ctx := context.Background()
+	job := isolationJob(t, r, store.ProjectAccept{CheckCommand: "true", CheckIsolated: true})
+	commit := strings.TrimSpace(gitIn(t, job.WorkDir, "rev-parse", "HEAD"))
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Even a marker in it does not make it a copy: it is not inside the checks directory.
+	for _, name := range []string{"precious.txt", "crowsnest-check-repo"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte("mine\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(r.svc.checksDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(r.svc.checksDir(), job.ID+"-9-link")
+	if err := os.Symlink(home, linked); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{home, linked} {
+		checkID, err := r.db.InsertCheck(ctx, store.CheckRecord{JobID: mustParse(job.ID), Commit: commit, Command: "true", Status: CheckRunning, Owner: "a-backup"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.db.SetCheckWorkspace(ctx, checkID, dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.svc.Tick(ctx)
+	if _, err := os.Stat(filepath.Join(home, "precious.txt")); err != nil {
+		t.Fatalf("the recorded folder was removed: %v", err)
+	}
+	if _, err := os.Lstat(linked); err != nil {
+		t.Fatalf("a link in the checks directory was removed: %v", err)
+	}
+	if dirs, _ := r.db.CheckWorkspaces(ctx); len(dirs) != 0 {
+		t.Fatalf("the rows still name the folders: %v", dirs)
+	}
+	if !strings.Contains(timelineText(r.get(job.ID)), "Left alone, not removed") {
+		t.Fatalf("leaving it is not on the job's timeline: %s", timelineText(r.get(job.ID)))
+	}
 }

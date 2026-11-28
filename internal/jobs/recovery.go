@@ -71,6 +71,16 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
+// Recover settles, once at serve start, what a crowsnest that stopped left half done: decisions
+// recorded just before a restart (R2-H1), then the land reservations of the dead process (R10
+// new-M3), then agents' land requests (R5-C09). The order matters: an allowed land request whose
+// land was cut short would otherwise be refused by the dead process's reservation and dropped.
+func (s *Service) Recover(ctx context.Context) {
+	s.ReconcileApprovals(ctx)
+	s.ReconcileBranchOps(ctx)
+	s.ReconcileLandRequests(ctx)
+}
+
 // Tick runs one pass of the supervisor over every live job (all of them, a page at a time).
 func (s *Service) Tick(ctx context.Context) {
 	if s.opts.Herdr == nil {
@@ -78,15 +88,13 @@ func (s *Service) Tick(ctx context.Context) {
 	}
 	s.DispatchStanding(ctx)
 	s.reconciled.Do(func() { s.reconcileCheckWorkspaces(ctx) }) // R9-C7: isolated copies a crash left
-	s.ReconcileLandRequests(ctx)                                // R5-C09: requests sit on finished jobs, which the live pass skips
-	s.reconcileFixes(ctx)                                       // R6-C11: a finished rebase whose parent never took it in
-	s.adoptFixes(ctx)                                           // R9-C2: a live fix job whose parent's reservation was never saved
-	if reserved, err := s.opts.Store.ListBranchOps(ctx, superviseBatch); err == nil {
-		for _, record := range reserved {
-			s.reconcileBranchOps(ctx, record) // R9-C2: a land a dead crowsnest left
-		}
-	}
-	s.reconcileBudgetHolds(ctx) // R7-C02: the holds below an exhausted budget, from its own hold
+	// R10 new-M3: a land a dead crowsnest left is dropped before land requests are reconciled, or
+	// an allowed land would be refused by its own stale reservation and abandoned.
+	s.ReconcileBranchOps(ctx)
+	s.ReconcileLandRequests(ctx) // R5-C09: requests sit on finished jobs, which the live pass skips
+	s.reconcileFixes(ctx)        // R6-C11: a finished rebase whose parent never took it in
+	s.adoptFixes(ctx)            // R9-C2: a live fix job whose parent's reservation was never saved
+	s.reconcileBudgetHolds(ctx)  // R7-C02: the holds below an exhausted budget, from its own hold
 	// The review gate's own states (R5-C05): in_review is not a live state of the pass below.
 	if err := s.eachLive(ctx, []State{StateInReview}, func(record store.JobRecord) { s.reconcileReview(ctx, record) }); err != nil && ctx.Err() == nil {
 		s.opts.Logger.Warn("supervisor: listing jobs in review", "err", err)

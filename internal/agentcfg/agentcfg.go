@@ -170,6 +170,20 @@ func readRule(dir string) string {
 	return "Read(//" + strings.TrimPrefix(filepath.ToSlash(filepath.Clean(dir)), "/") + "/**)"
 }
 
+// CodexNetworkOff keeps a Codex agent's sandbox off the network (R9-S1, R10 new-M2). It is passed
+// on every start, never left to defaults: the user's own ~/.codex/config.toml may turn the network
+// on for their sessions, and a -c override beats that file.
+const CodexNetworkOff = "sandbox_workspace_write.network_access=false"
+
+// CodexSandboxArgs are the approval and sandbox arguments of every Codex agent crowsnest starts
+// (job agents with or without crowsnest's hooks, restarts, project leads and the orchestrator):
+// the workspace-write sandbox with its network off, and approval as given ("on-request" when a
+// request reaches the browser through crowsnest's hook, "never" otherwise). The one place they
+// are built, so no start path can drop the network override.
+func CodexSandboxArgs(approval string) []string {
+	return []string{"--ask-for-approval", approval, "--sandbox", "workspace-write", "-c", CodexNetworkOff}
+}
+
 // CodexScript is the body of a Codex job's crowsnest script (DESIGN.md 20.1): one line that runs
 // `crowsnest <subcommand> …` with the job's socket, id and token file appended, so each hook entry
 // and the MCP server on the command line name only the script and their subcommand (`hook stop`,

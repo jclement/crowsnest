@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -524,6 +525,12 @@ func (s *Service) teardown(ctx context.Context, job Job, deleteMerged, deleteUnm
 	if workspace == "" {
 		return false, s.teardownFailed(ctx, job.ID, "the job's herdr workspace cannot be found, so the worktree was not removed; remove it by hand")
 	}
+	// The workspace id comes from the job's record, and a restored backup's records are someone
+	// else's (R10 new-H1): herdr is asked to remove a worktree only when the workspace is open on a
+	// linked worktree whose checkout is this job's own directory.
+	if why := s.worktreeIsTheJobs(ctx, workspace, job); why != "" {
+		return false, s.teardownFailed(ctx, job.ID, why+", so it was not removed; remove it by hand")
+	}
 	removeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	_, err := s.opts.Herdr.WorktreeRemove(removeCtx, herdr.WorktreeRemoveParams{WorkspaceID: workspace})
 	cancel()
@@ -542,6 +549,44 @@ func (s *Service) teardown(ctx context.Context, job Job, deleteMerged, deleteUnm
 		return nil
 	})
 	return true, ""
+}
+
+// worktreeIsTheJobs says why herdr workspace ws is not open on job's own worktree ("" when it is).
+func (s *Service) worktreeIsTheJobs(ctx context.Context, ws string, job Job) string {
+	if job.WorkDir == "" {
+		return "the job records no worktree"
+	}
+	list, err := s.opts.Herdr.WorkspaceList(ctx)
+	if err != nil {
+		return "herdr's workspaces could not be read (" + oneLine(err.Error(), 160) + ")"
+	}
+	for _, candidate := range list {
+		if candidate.ID != ws {
+			continue
+		}
+		if candidate.Worktree == nil || !candidate.Worktree.IsLinked {
+			return "the herdr workspace " + ws + " is not open on a linked git worktree"
+		}
+		if !sameDir(candidate.Worktree.CheckoutPath, job.WorkDir) {
+			return "the herdr workspace " + ws + " is open on " + candidate.Worktree.CheckoutPath + ", not on the job's worktree " + job.WorkDir
+		}
+		return ""
+	}
+	return "the herdr workspace " + ws + " is not open"
+}
+
+// sameDir reports whether two paths name the same directory once links are resolved.
+func sameDir(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if ra, err := filepath.EvalSymlinks(a); err == nil {
+		a = ra
+	}
+	if rb, err := filepath.EvalSymlinks(b); err == nil {
+		b = rb
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func (s *Service) teardownFailed(ctx context.Context, id, why string) string {

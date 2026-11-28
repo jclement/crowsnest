@@ -337,9 +337,11 @@ func (s *Service) materialise(task Task) (string, error) {
 	return path, nil
 }
 
-// unmaterialise removes an app schedule's file, if there is one.
+// unmaterialise removes an app schedule's file, if there is one. The name may come from the
+// database (a restored backup's rows are someone else's), so only a valid schedule name is turned
+// into a path (R10 new-H1): "../x" never leaves the materialised directory.
 func (s *Service) unmaterialise(name string) {
-	if s.opts.StateDir != "" {
+	if s.opts.StateDir != "" && namePattern.MatchString(name) {
 		_ = os.Remove(filepath.Join(s.opts.StateDir, materialisedDir, name+".md"))
 	}
 }

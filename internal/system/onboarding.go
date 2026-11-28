@@ -62,7 +62,7 @@ type OnboardingView struct {
 // CodexGaps is what the orchestrator lacks when Codex runs it.
 var CodexGaps = []string{
 	"No stop-hook guarantee: a turn that ends without declaring done is caught only by the herdr-side backstop (after a minute idle).",
-	"No structured approvals: Codex runs with --ask-for-approval never inside its workspace-write sandbox, so nothing reaches the Inbox as an approval card.",
+	"No structured approvals: Codex runs with --ask-for-approval never inside its workspace-write sandbox, its network off, so nothing reaches the Inbox as an approval card.",
 	"No SAY lines or spoken replies: talk mode reads Claude's transcript.",
 	"The Chat view shows the terminal's text, not a formatted conversation, and no spend is metered.",
 	"No resume: a restart begins a new Codex session.",

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/agentcfg"
 	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/herdr"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
@@ -451,6 +452,28 @@ func TestCodexGetsCrowsnestsHooks(t *testing.T) {
 	if !strings.Contains(brief, "job_update(progress)") || strings.Contains(brief, "crowsnest job update") || !strings.Contains(brief, "Inside your sandbox it cannot take a slot") {
 		t.Errorf("a supervised Codex job is told the MCP tools, and what heavy does in its sandbox:\n%s", brief)
 	}
+}
+
+// TestEveryCodexJobStartHasTheNetworkOff (R10 new-M2): every way a Codex job agent is started (with
+// crowsnest's hooks, without a token, resumed after a crowsnest restart, with a model) carries the
+// one sandbox argument list, the network explicitly off.
+func TestEveryCodexJobStartHasTheNetworkOff(t *testing.T) {
+	want := func(t *testing.T, args []string, approval string) {
+		t.Helper()
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, strings.Join(agentcfg.CodexSandboxArgs(approval), " ")) || strings.Contains(joined, "network_access=true") {
+			t.Errorf("not the sandbox arguments with the network off (%s): %s", approval, joined)
+		}
+	}
+	supervised := newRig(t, func(o *Options) { o.Launch.Identity = agentid.New(o.Store, nil) })
+	job := supervised.create(CreateInput{Brief: "Port it", Dir: t.TempDir(), Engine: "codex", Model: "gpt-5"})
+	want(t, supervised.fake.Starts()[0].Args, "on-request")
+	plain := newRig(t, nil) // no agent socket, no token
+	bare := plain.create(CreateInput{Brief: "Port it", Dir: t.TempDir(), Engine: "codex"})
+	want(t, plain.fake.Starts()[0].Args, "never")
+	// The start after a crowsnest restart (recovery's startInPane with resume).
+	want(t, plain.svc.agentArgs(bare.Job, jobFiles{}, true), "never")
+	want(t, supervised.svc.agentArgs(job.Job, jobFiles{codexScript: "/x/codex-crowsnest"}, true), "on-request")
 }
 
 // Rescue's restart is refused for a Codex job, with the engines table's sentence (DESIGN.md 20.1).

@@ -209,6 +209,9 @@ func TestLinksAndGitDirInsideTheRootAreOutside(t *testing.T) {
 		{"Write", map[string]any{"file_path": filepath.Join(root, "link", "x.go"), "content": "c"}, Elevated},
 		{"Write", map[string]any{"file_path": filepath.Join(root, ".git", "hooks", "pre-commit"), "content": "c"}, Elevated},
 		{"Edit", map[string]any{"file_path": filepath.Join(root, ".git", "config")}, Elevated},
+		// R10 low: the same directory on a case-insensitive volume (APFS).
+		{"Write", map[string]any{"file_path": filepath.Join(root, ".GIT", "hooks", "pre-commit"), "content": "c"}, Elevated},
+		{"Edit", map[string]any{"file_path": filepath.Join(root, ".Git", "config")}, Elevated},
 		{"Bash", map[string]any{"command": "touch src/x.go"}, Low},
 		{"Write", map[string]any{"file_path": filepath.Join(root, "src", "x.go"), "content": "c"}, Low},
 		{"Write", map[string]any{"file_path": filepath.Join(root, ".github", "ci.yml"), "content": "c"}, Low},
