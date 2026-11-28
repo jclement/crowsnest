@@ -65,7 +65,7 @@ const (
 	// can drop it (a restart, a re-login) while the CLI lives on, and the card must not keep
 	// saying "publishing" over a dead URL.
 	defaultHealthPoll = 15 * time.Second
-	defaultStopGrace   = 6 * time.Second // the watchdog's own interrupt-terminate-kill takes 4 s
+	defaultStopGrace  = 6 * time.Second // the watchdog's own interrupt-terminate-kill takes 4 s
 	// healthyAfter: a child that ran this long resets the backoff, so a flake an hour in is
 	// retried quickly rather than after a minute.
 	healthyAfter = time.Minute
@@ -143,7 +143,7 @@ type Options struct {
 	ProcessCommand func(pid int) (string, error)
 	// Timing; zero values take the defaults.
 	BackoffMin, BackoffMax, ConfirmPoll, HealthPoll, StopGrace time.Duration
-	Now                                            func() time.Time
+	Now                                                        func() time.Time
 }
 
 // Service publishes crowsnest on the tailnet while its setting is on.

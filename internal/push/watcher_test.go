@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/fleet"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/orch"
-	"github.com/jclement/crowsnest/internal/approvals"
 	"github.com/jclement/crowsnest/internal/questions"
 )
 

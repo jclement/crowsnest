@@ -11,8 +11,8 @@ package store
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"

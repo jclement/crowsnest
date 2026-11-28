@@ -20,10 +20,10 @@ const (
 	// optTailscaleAuthLocalRisk is the explicit acceptance --tailscale-auth needs while crowsnest
 	// publishes itself (R9-S3). A flag or the environment only, like --tailscale-auth.
 	optTailscaleAuthLocalRisk = "tailscale-auth-local-risk"
-	optBackupEvery      = "backup-every"
-	optBackupKeep       = "backup-keep"
-	optArchiveAfterDays = "archive-after-days"
-	optDeleteAfterDays  = "delete-after-days"
+	optBackupEvery            = "backup-every"
+	optBackupKeep             = "backup-keep"
+	optArchiveAfterDays       = "archive-after-days"
+	optDeleteAfterDays        = "delete-after-days"
 )
 
 // Retention and backup defaults. Archiving only hides settled jobs from the boards (they stay

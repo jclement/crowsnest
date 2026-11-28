@@ -42,7 +42,7 @@ func ForgetUnder(paths Paths, root, home string) (claude, codex int, err error) 
 			claude = removed
 			return updated, removed > 0, err
 		}); err != nil {
-			return claude, 0, fmt.Errorf("Claude's config: %w", err)
+			return claude, 0, fmt.Errorf("the Claude config: %w", err)
 		}
 	}
 	if paths.CodexConfig != "" {
@@ -51,7 +51,7 @@ func ForgetUnder(paths Paths, root, home string) (claude, codex int, err error) 
 			codex = removed
 			return updated, removed > 0, err
 		}); err != nil {
-			return claude, codex, fmt.Errorf("Codex's config: %w", err)
+			return claude, codex, fmt.Errorf("the Codex config: %w", err)
 		}
 	}
 	return claude, codex, nil

@@ -26,6 +26,8 @@ var restoreSetAside = map[string]string{
 }
 
 // restoreKept are the settings a restore brings back as they were, each with why that is safe.
+//
+//nolint:gosec // G101: option names and reasons, not credentials
 var restoreKept = map[string]string{
 	optModel:                "a model choice: no reach, no gate",
 	optJobModel:             "a model choice: no reach, no gate",
