@@ -236,8 +236,24 @@ func (s *Service) takeLand(ctx context.Context, id, action string) (release func
 	}, nil
 }
 
-// reconcileBranchOps settles reservations at start-up and on the tick: a live fix job its parent
-// does not know about is adopted, and a land a dead crowsnest left is dropped.
+// ReconcileBranchOps drops every land reservation a dead crowsnest left (R9-C2). serve calls it at
+// start and Tick on every pass, each time before ReconcileLandRequests (R10 new-M3): an allowed
+// land request whose land was cut short by a crash is then finished, not refused by the dead
+// process's reservation.
+func (s *Service) ReconcileBranchOps(ctx context.Context) {
+	reserved, err := s.opts.Store.ListBranchOps(ctx, superviseBatch)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.opts.Logger.Warn("reading branch reservations", "err", err)
+		}
+		return
+	}
+	for _, record := range reserved {
+		s.reconcileBranchOps(ctx, record)
+	}
+}
+
+// reconcileBranchOps settles one job's reservation: a land a dead crowsnest left is dropped.
 func (s *Service) reconcileBranchOps(ctx context.Context, r store.JobRecord) {
 	kind, _ := branchOpOf(r)
 	if kind == branchLand && r.BranchOpOwner != s.instance {
