@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -90,13 +91,18 @@ func (s *Service) reconcileCheckWorkspaces(ctx context.Context) {
 		if live[dir] {
 			continue
 		}
-		s.removeLeftCopy(ctx, dir)
+		jobID := ""
+		if id, err := s.opts.Store.CheckJob(ctx, checkID); err == nil {
+			jobID = FormatID(id)
+		}
+		s.removeLeftCopy(ctx, jobID, dir)
+		// Forgotten either way: a path that is not a copy is never tried again.
 		if err := s.opts.Store.SetCheckWorkspace(ctx, checkID, ""); err != nil {
 			s.opts.Logger.Warn("forgetting an isolated check's copy", "check", checkID, "err", err)
 		}
 	}
-	// A directory no row names (crowsnest stopped between making it and recording it is not
-	// possible, but an older copy or a hand-made one is): the directory is crowsnest's own.
+	// A directory no row names (an older copy, or a row a restore cleared): removed when it is a
+	// copy crowsnest made (it carries the marker), otherwise left and said.
 	entries, err := os.ReadDir(s.checksDir())
 	if err != nil {
 		return
@@ -104,23 +110,33 @@ func (s *Service) reconcileCheckWorkspaces(ctx context.Context) {
 	for _, entry := range entries {
 		dir := filepath.Join(s.checksDir(), entry.Name())
 		if entry.IsDir() && !live[dir] {
-			s.removeLeftCopy(ctx, dir)
+			id, _, _ := strings.Cut(entry.Name(), "-")
+			s.removeLeftCopy(ctx, id, dir)
 		}
 	}
 }
 
-// removeLeftCopy removes one copy a crash left and journals it on its job.
-func (s *Service) removeLeftCopy(ctx context.Context, dir string) {
-	err := landing.RemoveIsolatedDir(ctx, dir)
-	id, _, _ := strings.Cut(filepath.Base(dir), "-")
-	if _, parseErr := ParseID(id); parseErr != nil {
+// removeLeftCopy removes one copy a crash left and journals it on its job (jobID, when it names
+// one). A path that is not one of crowsnest's copies (landing.ErrNotACheckCopy: outside the checks
+// directory, a link, or without the marker, as a restored backup's row can name) is left alone and
+// said (R10 new-H1).
+func (s *Service) removeLeftCopy(ctx context.Context, jobID, dir string) {
+	err := landing.RemoveIsolatedDir(ctx, s.checksDir(), dir)
+	if _, parseErr := ParseID(jobID); parseErr != nil {
+		if err != nil {
+			s.opts.Logger.Warn("an isolated check's recorded copy was not removed", "dir", dir, "err", err)
+		}
 		return
 	}
-	if err != nil {
-		_ = s.Journal(ctx, id, EventAccept, "An isolated check's copy left by a crowsnest that stopped could not be removed: "+oneLine(err.Error(), 200), nil)
-		return
+	switch {
+	case errors.Is(err, landing.ErrNotACheckCopy):
+		_ = s.Journal(ctx, jobID, EventAccept, "Left alone, not removed: a check's recorded copy is not one crowsnest made ("+
+			oneLine(err.Error(), 300)+")", nil)
+	case err != nil:
+		_ = s.Journal(ctx, jobID, EventAccept, "An isolated check's copy left by a crowsnest that stopped could not be removed: "+oneLine(err.Error(), 200), nil)
+	default:
+		_ = s.Journal(ctx, jobID, EventAccept, "Removed an isolated check's copy left by a crowsnest that stopped mid-check ("+dir+")", nil)
 	}
-	_ = s.Journal(ctx, id, EventAccept, "Removed an isolated check's copy left by a crowsnest that stopped mid-check ("+dir+")", nil)
 }
 
 // stopChecksWait bounds how long StopChecks waits for running checks to end and remove their copies.

@@ -506,7 +506,7 @@ func (s *Service) execIsolatedCheck(ctx context.Context, id string, checkID int6
 	if err != nil {
 		return checkResult{status: CheckError, exit: -1, note: "the isolated copy could not be given a directory, so nothing was checked: " + err.Error()}
 	}
-	copied, err := landing.IsolatedCheckout(ctx, dir, commit, workspace)
+	copied, err := landing.IsolatedCheckout(ctx, dir, commit, s.checksDir(), workspace)
 	if err != nil {
 		s.clearCheckWorkspace(ctx, checkID)
 		return checkResult{status: CheckError, exit: -1, note: "the isolated copy of the commit could not be made, so nothing was checked: " + err.Error()}

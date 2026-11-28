@@ -21,7 +21,9 @@
 //
 // The copy lives in a directory crowsnest owns (under its state directory) and names in the
 // check's record before it is made, with a marker naming the repository, so a crash cannot leak it:
-// start-up removes every copy no running check owns (RemoveIsolatedDir, R9-C7).
+// start-up removes every copy no running check owns (RemoveIsolatedDir, R9-C7). A recorded path is
+// data, not proof (a restored backup's rows are someone else's), so a directory is removed only
+// when it is a real directory directly inside the checks directory carrying the marker (R10 new-H1).
 
 package landing
 
@@ -53,15 +55,24 @@ const isolatedMarker = "crowsnest-check-repo"
 type Isolated struct {
 	Dir    string
 	repo   string
+	root   string
 	parent string
 }
 
+// ErrNotACheckCopy means a directory crowsnest was asked to remove is not one of its isolated
+// check copies (R10 new-H1): it is left where it is.
+var ErrNotACheckCopy = errors.New("not one of crowsnest's isolated check copies")
+
 // IsolatedCheckout makes a detached worktree of commit from the repository dir is in, inside
-// parent (a new, empty directory crowsnest owns, already recorded with the check), and returns it.
-// Every failure is an error: there is no fallback to the job's own checkout.
-func IsolatedCheckout(ctx context.Context, dir, commit, parent string) (*Isolated, error) {
+// parent, and returns it. parent must be a new directory directly inside root (crowsnest's own
+// checks directory, already recorded with the check); it is made here, exclusively. Every failure
+// is an error: there is no fallback to the job's own checkout.
+func IsolatedCheckout(ctx context.Context, dir, commit, root, parent string) (*Isolated, error) {
 	if !isObjectID(commit) {
 		return nil, fmt.Errorf("not a commit id: %q", commit)
+	}
+	if filepath.Dir(filepath.Clean(parent)) != filepath.Clean(root) {
+		return nil, fmt.Errorf("%s is not directly inside the checks directory %s", parent, root)
 	}
 	repo, err := Root(ctx, dir)
 	if err != nil {
@@ -70,26 +81,32 @@ func IsolatedCheckout(ctx context.Context, dir, commit, parent string) (*Isolate
 	if repo == "" {
 		return nil, fmt.Errorf("%s is not in a git repository", dir)
 	}
-	if err := os.MkdirAll(parent, 0o700); err != nil {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, fmt.Errorf("making the checks directory: %w", err)
+	}
+	// Exclusive: a directory that is already there is not one this run made.
+	if err := os.Mkdir(parent, 0o700); err != nil {
 		return nil, fmt.Errorf("making a directory for the isolated copy: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(parent, isolatedMarker), []byte(repo+"\n"), 0o600); err != nil {
-		_ = os.RemoveAll(parent)
+		// Nothing but a partial marker can be in it: two single removals, never a recursive one.
+		_ = os.Remove(filepath.Join(parent, isolatedMarker))
+		_ = os.Remove(parent)
 		return nil, fmt.Errorf("marking the isolated copy's directory: %w", err)
 	}
 	copyDir := filepath.Join(parent, filepath.Base(repo))
+	iso := &Isolated{Dir: copyDir, repo: repo, root: root, parent: parent}
 	// The empty tree, in the repository's own object format, as the source of attributes: the
 	// repository's .gitattributes then converts nothing the copy is given.
 	empty, err := emptyTree(ctx, repo)
 	if err != nil {
-		_ = os.RemoveAll(parent)
+		iso.Remove(ctx)
 		return nil, fmt.Errorf("preparing the isolated copy: %w", err)
 	}
 	config := append(filtersOff(ctx, repo), "attr.tree="+empty, "core.attributesFile=/dev/null", "core.sparseCheckout=false",
 		"core.sparseCheckoutCone=false", "index.sparse=false", "core.autocrlf=false", "core.symlinks=true")
 	call := gitCall{dir: repo, args: []string{"worktree", "add", "--detach", "--force", copyDir, commit},
 		config: config, env: []string{"GIT_LFS_SKIP_SMUDGE=1"}, timeout: isolatedTimeout}
-	iso := &Isolated{Dir: copyDir, repo: repo, parent: parent}
 	if _, err := call.run(ctx); err != nil {
 		iso.Remove(ctx)
 		return nil, fmt.Errorf("checking out %s in an isolated copy: %w", shortID(commit), err)
@@ -98,42 +115,83 @@ func IsolatedCheckout(ctx context.Context, dir, commit, parent string) (*Isolate
 }
 
 // Remove takes the copy away: git forgets the worktree and the directory goes, whatever the check
-// left in it.
+// left in it. It goes through the same checks as a copy a crash left (RemoveIsolatedDir).
 func (i *Isolated) Remove(ctx context.Context) {
 	if i == nil || i.parent == "" {
 		return
 	}
-	removeCopy(ctx, i.repo, i.Dir, i.parent)
+	_ = RemoveIsolatedDir(ctx, i.root, i.parent)
 	i.parent = ""
 }
 
-// RemoveIsolatedDir removes a copy's directory a crash left behind (parent as IsolatedCheckout was
-// given it), telling its repository's git to forget the worktree when the marker names one.
-func RemoveIsolatedDir(ctx context.Context, parent string) error {
-	repo := ""
-	if body, err := os.ReadFile(filepath.Join(parent, isolatedMarker)); err == nil { //nolint:gosec // crowsnest's own state directory
-		repo = strings.TrimSpace(string(body))
+// RemoveIsolatedDir removes a copy's directory (parent, as IsolatedCheckout was given it), telling
+// its repository's git to forget the worktree. The path may come from the database, and a
+// restored backup's database is not crowsnest's own (R10 new-H1), so nothing is removed unless
+// parent is a real directory (not a link) directly inside root once links in both are resolved,
+// holding crowsnest's marker as a regular file. Anything else is ErrNotACheckCopy and is left.
+func RemoveIsolatedDir(ctx context.Context, root, parent string) error {
+	target, repo, err := checkCopy(root, parent)
+	if err != nil {
+		return err
 	}
 	copyDir := ""
-	if repo != "" {
-		copyDir = filepath.Join(parent, filepath.Base(repo))
+	if name := filepath.Base(repo); repo != "" && name != "." && name != ".." && name != string(filepath.Separator) {
+		copyDir = filepath.Join(target, name)
 	}
-	removeCopy(ctx, repo, copyDir, parent)
-	if _, err := os.Lstat(parent); err == nil {
+	ctx = context.WithoutCancel(ctx)
+	if copyDir != "" {
+		_, _ = gitCall{dir: repo, args: []string{"worktree", "remove", "--force", "--force", copyDir}, timeout: isolatedTimeout}.run(ctx)
+	}
+	_ = os.RemoveAll(target)
+	if repo != "" {
+		_, _ = gitCall{dir: repo, args: []string{"worktree", "prune"}}.run(ctx)
+	}
+	if _, err := os.Lstat(target); err == nil {
 		return fmt.Errorf("the isolated copy %s could not be removed", parent)
 	}
 	return nil
 }
 
-func removeCopy(ctx context.Context, repo, copyDir, parent string) {
-	ctx = context.WithoutCancel(ctx)
-	if repo != "" && copyDir != "" {
-		_, _ = gitCall{dir: repo, args: []string{"worktree", "remove", "--force", "--force", copyDir}, timeout: isolatedTimeout}.run(ctx)
+// checkCopy returns parent's resolved path and the repository its marker names, or why it is not
+// one of crowsnest's copies.
+func checkCopy(root, parent string) (string, string, error) {
+	notOurs := func(why string) (string, string, error) {
+		return "", "", fmt.Errorf("%w: %s %s", ErrNotACheckCopy, parent, why)
 	}
-	_ = os.RemoveAll(parent)
-	if repo != "" {
-		_, _ = gitCall{dir: repo, args: []string{"worktree", "prune"}}.run(ctx)
+	if root == "" || parent == "" {
+		return notOurs("(no checks directory or no path)")
 	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return notOurs("(the checks directory cannot be resolved: " + err.Error() + ")")
+	}
+	clean := filepath.Clean(parent)
+	name := filepath.Base(clean)
+	if name == "." || name == ".." || name == string(filepath.Separator) || !filepath.IsAbs(clean) {
+		return notOurs("is not a directory name")
+	}
+	realDir, err := filepath.EvalSymlinks(filepath.Dir(clean))
+	if err != nil || realDir != realRoot {
+		return notOurs("is not directly inside " + root)
+	}
+	target := filepath.Join(realRoot, name)
+	info, err := os.Lstat(target)
+	if err != nil {
+		return notOurs("cannot be read: " + err.Error())
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return notOurs("is not a directory")
+	}
+	marker := filepath.Join(target, isolatedMarker)
+	markerInfo, err := os.Lstat(marker)
+	if err != nil || !markerInfo.Mode().IsRegular() {
+		return notOurs("carries no crowsnest marker")
+	}
+	body, err := os.ReadFile(marker) //nolint:gosec // a regular file directly inside crowsnest's checks directory
+	if err != nil {
+		return notOurs("carries an unreadable marker")
+	}
+	return target, strings.TrimSpace(string(body)), nil
 }
 
 // ErrNotTheCommit means a checkout's tracked files are not exactly a commit's tree.
