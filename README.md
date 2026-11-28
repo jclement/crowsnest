@@ -876,6 +876,11 @@ Every checkout has a live, syntax-highlighted diff (DESIGN.md 6.21), at any time
   and the tree's content compared before and after; the card says "checked in the working tree".
   Tick **Isolated check** on the card (with an optional **prepare command**, such as `npm ci`)
   to have it run in a temporary copy of exactly the commit instead: "checked in an isolated copy".
+  The copy is checked against the commit's tracked files after the checkout, the prepare command
+  and the check: a prepare or check that changed a tracked file is not a pass. The copy lives under
+  crowsnest's state directory and is removed afterwards (or at the next start after a crash), and
+  every check runs under a watchdog (the hidden `crowsnest check-child`) that ends it if crowsnest
+  goes away.
 - **Holds.** A budget reached, a check that still fails, a review that still objects, an approval
   waiting, a usage limit: each is a hold on the job that only you (or crowsnest's own recovery)
   lift. Nothing the agent declares moves it out of that.
@@ -1071,14 +1076,15 @@ Routes under `/api/v1`. Responses are `{"data": …}` (lists add `"meta"`), erro
 | `GET /changes/{who}/file?path=&scope=&context=&ws=ignore&since=1` | session | One file's unified diff (only files the diff lists), with both sides' whole text when under 256 KB; `since=1` is the change since the version you marked viewed |
 | `PUT /changes/{who}/viewed`, `DELETE /changes/{who}/viewed` | session | `{scope, files: [{path, hash}]}` or `{all: true}` marks files viewed (`409 STALE` when a file changed after it was shown); `{scope, paths}` clears (no paths: all in scope) |
 | `GET /changes/{who}/comments`, `POST /changes/{who}/comments`, `PATCH`/`DELETE /changes/{who}/comments/{cid}`, `POST …/{cid}/dismiss`, `POST …/{cid}/resend` | session | Line comments on a diff (DESIGN.md 6.21): `{path, scope, side old\|new\|file, line_start, line_end, body, hash}` saves a draft (quoted from git; `409 STALE` when the file changed after it was shown); the list says draft, sent or outdated |
-| `POST /changes/{who}/comments/send` | session | `{overall, dry_run, force}`: every unsent note as one message to the job's agent (its message path; pending feedback while paused or held; a fix job for a finished job), the lead or the orchestrator; `dry_run` answers the composed text only |
+| `POST /changes/{who}/comments/send` | session | `{overall, dry_run, force, send_id}`: every unsent note as one message to the job's agent (its message path; a waiting batch of its feedback while paused, held or blocked; a fix job for a finished job, which then holds it from landing until you accept the changes), the lead or the orchestrator; `dry_run` answers the composed text only. The notes are claimed at their version first (`409` if another send took them) and marked sent only once delivered; a repeated `send_id` answers the first result |
 | `GET /changes/projects/{ref}/jobs`, `GET /changes/progress` | session | A project's main checkout and job checkouts with diffstats; jobs' viewed counts for the cards. A `changes` event `{subject, revision}` says a diff or its marks changed |
 | `POST /jobs/{id}/land` | session | `{action: merge\|pr\|discard, confirm: true}` → what was done and whether the teardown finished; `409 CONFIRM_REQUIRED` without `confirm`; `400` for a refusal (dirty checkout, conflict, protected branch) with nothing changed; `409 EVIDENCE_<CODE>` when crowsnest's check is stale, failed or missing, or the base moved on, unless `override: true`. Merge and pr need `expected_head` (the Review tab's `land.head`): exactly that commit lands, else `409 EVIDENCE_HEAD_MOVED` |
 | `POST /jobs/{id}/teardown`, `POST /jobs/{id}/start-anyway` | session | Retry a landed job's teardown (`{confirm: true}`); start a held job past the limits |
 | `GET /sweep`, `POST /sweep/discard` | session | Finished jobs whose worktrees are still around; discard several (`{ids, confirm: true}`) |
 | `GET /queue`, `GET\|PUT\|DELETE /throttle`, `GET /system/heavy` | session | Running / limit / waiting; the limits (and back to the flags); the heavy slots |
 | `GET\|POST /pause`, `POST /resume` | session | The pause switch (`{until?, reason?}`) |
-| `POST /jobs/{id}/recheck`, `POST /jobs/{id}/rebase` | session | Run crowsnest's check of a job again; start a job that merges the base into its branch (then it is checked again) |
+| `POST /jobs/{id}/recheck`, `POST /jobs/{id}/rebase` | session | Run crowsnest's check of a job again; start a job that merges the base into its branch (then it is checked again). One operation on a finished job's branch at a time: a fix job, a rebase, a recheck and Land refuse while another holds it |
+| `POST /jobs/{id}/changes/resolve` | session | Accept the changes you asked for with review comments (or set the request aside after a failed fix): until then Land refuses a job sent back with comments |
 | `PUT /jobs/{id}/budget`, `POST /jobs/{id}/budget/finish-step` | session | Change (raise) a job's budget `{usd?, tokens?, minutes?, turns?}`; let a job at its budget finish the step it is in |
 | `POST /jobs/{id}/wake` | session | Wake a blocked job now |
 | `GET /limits`, `GET /system/waits` | session | The fleet's usage limits with their reset times; live jobs with no owner or wake-up |

@@ -1486,6 +1486,28 @@ job's `done` is now the agent's claim, and crowsnest decides whether it is **acc
   command makes them. The record (`job_checks.mode`: `worktree` | `isolated`) and the job card
   say which mode produced the evidence: "checked in an isolated copy of abc1234567" or "checked in
   the working tree". A restore sets a backup's prepare command aside like its check command (R7-S4).
+- **The isolated copy is verified, not assumed** (R9-C6). The copy is made with the repository's
+  own attributes unread (`attr.tree` is the empty tree, `core.attributesFile` empty, so no eol,
+  `ident` or `working-tree-encoding` conversion changes the bytes) and sparse checkout off, and
+  `landing.VerifyCheckout` then compares **every tracked path of the commit's tree** with what is
+  on disk, raw bytes hashed as git hashes them and the mode (a file, an executable file, a link
+  and its target): after the checkout, after the prepare command and after the check. A prepare
+  command or a check that rewrote a tracked file (code generation, a repair, another commit
+  checked out) makes the run a check error naming the file, never a pass for the commit. Untracked
+  files may appear (dependencies, build output: what prepare is for); submodule entries are not
+  materialised and are skipped. The record names the tree it verified (`job_checks.tree_before`
+  and `tree_after` hold the commit's tree for an isolated run).
+- **Nothing of a check outlives crowsnest** (R9-C7). The isolated copy is made in
+  `<state>/checks/<job>-<check>-<n>`, a directory crowsnest owns, recorded on the check's row
+  (`job_checks.workspace`, migration 0023) before it is made, with a marker naming the repository;
+  every ordinary exit path removes it and clears the row, and the first tick after a start removes
+  every copy no running check owns (journalled on its job), with git told to forget the worktree.
+  Every check and prepare command runs under the **lifeline** (`internal/lifeline`, the hidden
+  `crowsnest check-child -- <argv>`): the watchdog leads the check's process group with stdin the
+  read end of a pipe only crowsnest holds, so when crowsnest ends, however it ends, the watchdog
+  reads EOF and ends the group (terminate, then kill). A clean stop also cancels running checks
+  (`StopChecks`), which removes their copies; their jobs stay waiting on a check and the next start
+  runs it again.
 - **Durable or nothing** (R6-C13). A check whose row could not be written is not run; a result
   whose write failed is not evidence; and a job is accepted only when its newest durable check is
   that run, passed, at that commit.
@@ -1504,7 +1526,8 @@ job's `done` is now the agent's claim, and crowsnest decides whether it is **acc
   accepted: <command> failed (exit 1, 43s) at abc1234. The output is in <file>. Fix what it
   reports, commit, and call done again (round 1 of 3). Its last line: …`; `job_get` shows the
   output's end too. The line waits while the automation is paused or a hold keeps the job
-  (`pending_feedback`, typed by the tick afterwards and cleared only once typed: R6-C07). After
+  (a batch of the job's feedback queue, typed by the tick afterwards and settled only once typed:
+  R6-C07, R9-C4; 6.20). After
   `--check-rounds` (3) failures, or a check that could not run at all, → a `check` hold
   (`needs_you`, cause `check`), the failure on the card, "Run the check again" as its action.
   No agent call lifts a hold (6.20).
@@ -1739,12 +1762,38 @@ the job whose budget ran out.
   for later; a refused retry or nudge gives its attempt back; a refused restart starts the agent
   but types nothing. The human's own Wake it is refused with the reason. The check is not atomic
   with herdr's keystrokes: a hold placed in the milliseconds between them is not seen.
+- **Feedback is a queue of immutable batches** (R9-C3, C4, C14; `jobs.feedback_json`, migration
+  0023, which replaced `pending_feedback`; `internal/jobs/feedback.go`). A check's findings, a
+  review's changes and the human's review comments sent while the job may not continue are each a
+  batch `{id, kind, text, count, ref, force, state}`. A newer finding replaces a finding not yet
+  claimed; comments are always a new batch behind what is queued (and comments to a job with
+  anything queued wait behind it), never merged into one being typed. The delivery claims the
+  first pending batch (state `sending`, saved with the claim) and settles exactly that batch by its
+  id: removed when typed (or maybe typed), put back when provably nothing was typed. A claim a dead
+  crowsnest left settles only the batch marked `sending` (findings are not typed again; comments go
+  back to the human as "may not have arrived"); every batch behind it stays and is delivered.
+  Findings go to a running job; **comments also to a blocked one** (typed as the human's message
+  would be; the wait stays the agent's to change), so comments sent while paused reach a job that
+  waits on a timer or the human once the pause ends, with no other wake. A batch of comments keeps
+  its send's **draft protection**: it is typed over a draft in the input box only if the send said
+  so (`force`), else it waits and the timeline says why; the diff's "Let them type over a draft"
+  is the human's Send anyway for a waiting batch. Comments still queued when the job finishes go
+  back to the human as unsent. The job's API shape carries the queue as `feedback` (kind, count,
+  sending, since).
 - **Findings have one owner** (R7-C05). A check's failure and a review's changes are both kept as
-  the job's `pending_feedback` and typed by `deliverFeedback`, a lifecycle step (`feedback`): the
+  the job's feedback and typed by `deliverFeedback`, a lifecycle step (`feedback`): the
   claim on the row lets exactly one caller through (the check's callback, the review's and the
-  tick may all try), the gate runs before the claim and again before typing, and the message is
-  cleared only if it is still the one typed. A claim left by a crowsnest that stopped mid-send is
-  settled as "may have arrived", cleared and journalled, never typed again.
+  tick may all try), the gate runs before the claim and again before typing, and only the batch
+  claimed is settled (above). A claim left by a crowsnest that stopped mid-send is settled as "may
+  have arrived" for that batch, journalled, never typed again.
+- **Every prompt that starts a turn passes the gate** (R7-C04 residual). The budget's "carry on"
+  after a raise, "finish the step", the budget notice and the spinning nudge are typed through the
+  same `continuationRefusal` (`typeContinuation`): a budget change is not the human lifting a
+  pause, another hold, a budget above the job or the fleet's usage limit; a refused one is not
+  queued (the backstop keeps the agent going once nothing holds it). A standing agent's pane that
+  holds a job with any hold or waiting feedback is not compacted or restarted under it
+  (`jobs.HeldRecord`, `heldJobBusy`). Direct human actions (a message, keys on the terminal or a
+  trust card) remain direct: the pause is for automation.
 
 ### 6.21 A diff at any time, and viewed tracking (built on `wip/diff`)
 
@@ -1894,9 +1943,11 @@ R8 Fable H5, Codex half-done 5). `internal/changes/comments.go` and `compose.go`
   blob of its side**, never taken from the browser, so what goes back to the agent is what git held
   (at most 40 lines of 400 characters; a binary or over-256-KB side quotes nothing). Bounds: 8,000
   characters a note, 2,000 lines a range.
-- **Status, worked out on every read**: **draft** (not sent); **sent**; **outdated** when the
-  file's work-tree content (its new blob in the "all" comparison) is no longer the one the note was
-  written against, or the file no longer differs from the base. Committing an edit unchanged keeps
+- **Status, worked out on every read**: **draft** (not sent, or edited since it was sent);
+  **waiting** (in a send that waits to be typed, R9-C3); **sent**; **outdated** when the side the
+  note was written on no longer holds the content it was written against (the new blob in the
+  "all" comparison for a new-side note, the old blob for an old-side note, both for a whole-file
+  note; R9-C11), or the file no longer differs from the base. Committing an edit unchanged keeps
   the content, so a note is not outdated by a commit. A note is drawn beside its lines only while
   its side holds the blob it was written against; otherwise (outdated, whole-file, or from another
   comparison) it is listed under the file's header with its quote. Edit and delete while pending;
@@ -1910,21 +1961,46 @@ R8 Fable H5, Codex half-done 5). `internal/changes/comments.go` and `compose.go`
   text. Over 4 KB it goes as an attached file, `review-comments.md`, copied into the agent's inbox,
   and one line pointing at it is typed. Only a delivery that succeeded marks the notes sent
   (`sent_at`); the Review tab and the Comments sheet show when.
+- **A send claims its notes at a version** (R9-C5; migration 0023). Every note has a `version`
+  (bumped by each edit) and `sent_version` (the version last delivered): it is due while
+  `sent_version < version`, so a note edited after it was sent is due again. A send first
+  **claims** the due notes in one transaction at exactly the versions it composed (`claim`,
+  `claim_version`, `claimed_at`); a second send at the same moment, or an edit between reading and
+  claiming, is refused (409 stale), so two sends never carry one note. Delivery then **settles**
+  the claim: delivered marks each note sent at the version it carried (an edit made meanwhile stays
+  due); provably not delivered makes them due again; maybe delivered (an answer lost) makes them
+  due again marked **uncertain** ("may not have arrived": the human decides whether to send again).
+  A send whose job may not continue keeps its claim in the job's feedback batch, and the notes
+  show **waiting to be typed**, neither draft nor sent, until the batch is typed (6.20). A claim a
+  request or a crowsnest left behind is settled as uncertain by the sweep (at start, every
+  request's claim; later, claims older than ten minutes that no queued batch holds). The browser
+  names each Send press (`send_id`), and a repeated request with the same id is answered with the
+  first one's result instead of sending again.
 - **How it reaches a job** (`jobs.SendReviewComments`, by the paths crowsnest already has):
   - a live job (running, blocked, needs_you) that nothing holds: the human's message path
     (`Message`, typed now or queued by Claude behind its turn); as a message does, it lifts a final
     review's objection (the human sends it back to the builder);
   - a live job that is paused, held (budget, check, questions, approval) or under the fleet's
-    usage limit: the message is appended to the job's **pending feedback** and typed by
-    `deliverFeedback`, which passes the continuation gate (R7-C04) and so never starts a turn a hold
-    forbids; the tick types it once nothing holds the job. The answer says "waiting" and why;
+    usage limit, or with feedback already queued: the message is a new batch of the job's
+    **feedback queue** and typed by `deliverFeedback`, which passes the continuation gate (R7-C04)
+    and so never starts a turn a hold forbids; the tick types it once nothing holds the job (a
+    blocked job included, R9-C3). The answer says "waiting" and why;
   - **a finished job** (done: accepted, approved or unverified) **is not reopened**: done is
     terminal (`CheckTransition`), its agent's tokens are revoked at settling, and the jobs waiting
     on it were woken. "Request changes" is a **fix job** in its own worktree (as `AskRebase`'s),
     briefed with the composed comments and the job's brief, queued like any job (the pause, the
     throttle and budgets hold it); when it is done crowsnest checks the job again (`fixSettled`).
     One fix job at a time (a rebase's included). A finished job with no worktree is refused ("give
-    a new job with these comments");
+    a new job with these comments"). **The job's changes are then requested** (R9-C1,
+    `jobs.changes_state`): `requested` while the fix job works, `fix_failed` when it failed or was
+    cancelled, `made` when it is done. Land (merge and pull request, from the app and from an
+    approved lead request alike) refuses all three, whatever the old evidence says: a passing
+    re-check says the code builds, not that prose comments were addressed, so only the human's
+    resolution lets it land again (`POST /jobs/{id}/changes/resolve`: "Accept the changes" once
+    made, "Set the request aside" after a failed fix). The chip says Changes requested (the fix job
+    is the owner), Fix failed or Review the changes, the Review tab "changes requested", and the
+    Changes card names the fix job. Discard stays allowed (throwing the work away settles it), but
+    not while a fix job works in the worktree;
   - a job crowsnest is checking or reviewing (`in_review`) is refused until that ends; a failed or
     cancelled one is refused.
   A project's diff goes to its **lead** and the orchestrator's folder to the **orchestrator**, as a
@@ -1949,8 +2025,10 @@ R8 Fable H5, Codex half-done 5). `internal/changes/comments.go` and `compose.go`
   and then outdated (the checkout doc, which the "agent" rewrote).
 
 **What differs from the spec above** (the earlier "not built" paragraph): the table keeps both
-blobs, the scope, `updated_at` and `dismissed_at` as well; outdated is judged on the work-tree
-content (the new blob) rather than the file's diff hash, so committing does not outdate a note;
+blobs, the scope, `updated_at` and `dismissed_at` as well; outdated is judged on the content of
+the side the note was written on (the new blob for a new-side note, the old blob for an old-side
+note, both for a whole-file note; R9-C11) rather than the file's diff hash, so committing
+unchanged work does not outdate a note, and a base that moved under an old-side note does;
 notes can sit on the old side, a hunk or a whole file; sending to a finished job is a fix job, not a
 message (a message cannot reach a finished job's agent, whose tokens are revoked); a held or paused
 job gets it as pending feedback; the attachment threshold is 4 KB of the composed text.
@@ -3481,6 +3559,18 @@ at?}` (`400` with nothing pending or a job that cannot take it, `409` no agent, 
 draft in the input box, a lead not running). `…` is `/changes/jobs/{id}`, `/changes/projects/{ref}`
 or `/changes/orchestrator`. `GET /jobs/{id}/review` gains `require_viewed`.
 
+**Added in R9** (`wip/fix-r9a`): a note gains `waiting` and `uncertain`, its status `waiting`, and
+the list `waiting`; `POST …/comments/send` takes `send_id` (a repeated request with it gets the
+first one's result) and answers `409 STALE` when another send took the notes or one changed while
+it was composed, and `502` when the delivery may or may not have arrived (the notes are due again,
+marked uncertain). With `force` and every note already in a waiting send, it lets that send type
+over a draft. `POST /jobs/{id}/changes/resolve` → the job: accept the changes the human asked for
+(or set the request aside), refused while a fix job or the check is still working. A job gains
+`changes_state` (`""|requested|fix_failed|made`), `fix_job`, `holds` (`[{kind, lift, why, since,
+from?}]`, strongest first) and `feedback` (`[{kind check|review|comments, count?, sending,
+since}]`). Land, a merge, a pull request, a rebase, a recheck and a fix job refuse while another of
+them holds the branch.
+
 ## 11. Data model (SQLite, `~/.local/share/crowsnest/<session>.db`)
 
 - `auth_sessions(id_hash, cred_digest, created_at, last_seen_at, expires_at, user_agent, host)` (`host` added by migration `0003_session_host.sql`, R1 M2: the `Host:port` the session is valid at)
@@ -3520,6 +3610,13 @@ or `/changes/orchestrator`. `GET /jobs/{id}/review` gains `require_viewed`.
   gains `check_isolated` and `check_prepare`. kv adds (no migration) `restored.check_command.<id>`,
   `restored.check_prepare.<id>` and `instructions.restored.<scope>.<key>` (R7-S4), and
   `budget.grace_at.<job>` (R7-C03)
+- Migration `0023_change_requests.sql` (R9): `jobs` gains `changes_state` (the human's requested
+  changes, R9-C1), `branch_op`, `branch_op_owner`, `branch_op_at` (the one operation on a finished
+  job's branch: `changes:<fix>`, `rebase:<fix>` or `land`, R9-C2; a live fix job's reservation is
+  backfilled) and `feedback_json` (the feedback queue, R9-C4; `pending_feedback`'s text becomes one
+  pending batch and the old column is left empty); `diff_comments` gains `version`,
+  `sent_version` (backfilled 1 for sent notes), `claim`, `claim_version`, `claimed_at`,
+  `uncertain_at` (R9-C5); `job_checks` gains `workspace` (an isolated check's directory, R9-C7)
 - `kv` `settings.<option>` (3.2): a setting changed in the app, in flag text form; only the editable options are ever read from it. `onboarding.state` (4.14.1): `pending` from setup until the checklist's Start, then `done`; no row means never asked. No migration: both live in the existing `kv` table
 
 Conversations are not stored; the transcript is the record. Migrations are numbered, embedded, and run at start.
@@ -3538,7 +3635,7 @@ with no flash, 44 px tap targets, safe-area insets, no horizontal page scroll, c
 | View | Mobile | Desktop |
 |---|---|---|
 | **Now** (default, `/`; section 22) | What needs you (the attention queue, answerable in place), then a row per project (lead state, what it is doing, running / waiting on you / done today, spend today, last activity, who owns the work), unfiled work and the orchestrator, then "since you left", then the job box with its project | The queue and the projects side by side |
-| **Jobs** (`/jobs`) | A list: no composer (R8: jobs are given on Now, from the palette or by voice); **New job** (and `?new=1`) opens Now's form, `NewJobForm`, in a sheet. The board: needs-you and stuck first, then running, then finished today. Each card: title, one chip saying what happens next and who owns it (`lib/jobs.ts` `nextStep`, R8; it replaced the state chip, the acceptance chip and the hint explaining them, and is table-tested over every combination of state, stuck, cause, acceptance, landing and wait the API can produce; the detail keeps the state and the acceptance verdict), the progress line, time since last activity, open-question count, agent. Tap for the job: timeline, result, questions, message box, and its Conversation and Terminal | Board at left, selected job at right |
+| **Jobs** (`/jobs`) | A list: no composer (R8: jobs are given on Now, from the palette or by voice); **New job** (and `?new=1`) opens Now's form, `NewJobForm`, in a sheet. The board: needs-you and stuck first, then running, then finished today. Each card: title, one chip saying what happens next and who owns it (`lib/jobs.ts` `nextStep`, R8; it replaced the state chip, the acceptance chip and the hint explaining them, and is table-tested over every combination of state, stuck, cause, acceptance, landing and wait the API can produce; the detail keeps the state and the acceptance verdict). **A live job's strongest hold decides the chip before its state** (R9-C10; the job carries `holds`, strongest first): a blocked job waiting on a timer under the usage limit says Held: usage limit, not Waiting, and a tool call waiting for approval says Waiting on you in any state; the table test walks every hold × every state × stuck, cause, acceptance and wait. A finished job sent back with comments says Changes requested, Fix failed or Review the changes (R9-C1), the progress line, time since last activity, open-question count, agent. Tap for the job: timeline, result, questions, message box, and its Conversation and Terminal | Board at left, selected job at right |
 | **Chat** | Conversation, sticky composer, push-to-talk button when voice is on, orchestrator status chip (idle/working/blocked), "Poke now" in a menu | Same, centred column, fleet rail at left |
 | **Inbox** (badge) | The attention queue in full (approvals, questions, dialogs, stuck, failed or landable jobs, standing agents), the server's order, each with project and job; snoozed ones folded; notices apart; full-screen sheet to answer | List and detail side by side |
 | **Agents** (`/agents`; R8 merged the Fleet and Terminal views into it) | Workspaces as collapsible groups, tabs and agents with state dots; tap an agent for Conversation or Terminal; a **Session terminal** row at the top opens the herdr TUI full screen (`?session=true`) with the key bar (Esc, Tab, Ctrl, arrows, Enter, paste, font size) | Tree at left; at right the selected agent with Conversation/Terminal toggle, or with nothing selected the session terminal, full height, font size in the status line |
@@ -4578,12 +4675,17 @@ contract), in `internal/update`, `cmd/crowsnest/update.go` and `internal/httpd/u
 127. **Publishing to the tailnet is a supervised foreground `tailscale serve`, not `--bg`** (3.5.1; Jeff, 2026-11-27: "love it. yes do that"). A background config would outlive crowsnest and is Tailscale's to keep; the foreground session is tied to crowsnest by a watchdog and a lifeline pipe, so the address cannot be left published by a crash. The cost is a child process, a restart loop, and a session that ends when tailscaled restarts (crowsnest starts it again). Funnel, `reset` and `off` are outside an argv allowlist, so no code path can publish to the internet or remove anyone's config.
 128. **Publishing is an app setting, and needs a login** (3.5.1). The owner turning it on from the System page is the feature, and it does not change who may sign in, so it is editable in the app, unlike `--tailscale-auth`; a Tailscale-signed-in session may not change it. With `--no-auth` it is refused (a start error from a flag), and a locked first-run setup is never published.
 129. **Review comments on a finished job start a fix job; the job is not reopened** (6.21, `wip/comments`). The brief asked for "the existing path that sends feedback and returns the job to work". For a live job that is the message path, or pending feedback when it is held. A done job has no such path: done is terminal by design (`CheckTransition`), its agent's tokens are revoked when it settles, and jobs that waited on it were woken. Reopening would have had to undo all three, in the part of the code the R6 and R7 reviews care most about. The existing way to change a finished job's branch is a fix job in its worktree followed by a fresh check (`AskRebase`, `fixSettled`), so comments take that path. The cost: the fix job is a new conversation, so the comments carry the job's brief with them.
-130. **A note's quote is read from git, and "outdated" means the work-tree content changed** (6.21). The browser shows the lines but does not supply them: the server reads the blob named by the hash it showed, so a note cannot carry code that was never there. Outdated compares the file's current new blob with the one the note was written against, not the diff hash: committing an edit unchanged changes no content, and a note should not go stale because the agent committed.
+130. **A note's quote is read from git, and "outdated" means the work-tree content changed** (6.21). The browser shows the lines but does not supply them: the server reads the blob named by the hash it showed, so a note cannot carry code that was never there. Outdated compares the file's current new blob with the one the note was written against, not the diff hash: committing an edit unchanged changes no content, and a note should not go stale because the agent committed. Since R9 (R9-C11) it compares the blob of the side the note is on: an old-side note goes outdated when the base moved under it.
 131. **Comments to a held or paused job wait as pending feedback** (6.21, R7-C04). A human's message types now even into a held job; review comments are a batch the human composed earlier and may send in passing, so they take the gate automatic prompts take and are typed when nothing holds the job. The answer says "waiting" and why, so the human is not misled into thinking the agent has them.
 132. **Folder trust is written only for a folder the human chose, and only where the agents themselves would record it** (8.2.1). Neither agent offers a flag that skips the question for a session, and the agents' own rule (a worktree takes its checkout's trust) means one record at project creation covers every job; so the narrow write of the agents' own record, behind a box ticked by default and a Setting, removes the prompt without crowsnest ever answering a prompt on screen. Writing per worktree, or for a folder an agent named, would be crowsnest deciding trust for code nobody looked at.
 133. **The trust question is a decision with two named buttons, not the agent's menu** (8.2.1). "Trust this folder" and "Don't trust" read the same whatever shape the agent drew (an arrow list, a numbered list, a digit that only selects), and each carries its own key sequence; the screen is one tap away. An answer is confirmed by watching the screen (`dialog_gone`), because "the keys were sent" is not "the question went".
 134. **Codex gets crowsnest's hooks on the command line, not in its config** (20.1). `-c hooks.…` with `--dangerously-bypass-hook-trust` hands them to the one session, reviewed by crowsnest (it wrote them); writing them into `~/.codex/hooks.json` would add them to every Codex session Jeff starts. The cost is that a repository's own Codex hooks also run unreviewed in a crowsnest job, the same trust Claude Code gives a trusted folder.
 135. **One table says what each engine gets** (20.1). The job form, project defaults, a Codex job's card, Rescue, the API's refusals and the manual all read `internal/engines`, so an engine's gap is stated once and cannot be promised away by one surface.
+136. **Requested changes hold a finished job until the human accepts them** (6.21, R9-C1). A passing re-check after the fix says the code builds, not that the comments were addressed; so the fix job's done moves the request to "made", and only the human's Accept the changes (or Set the request aside after a failed fix) lets Land merge or push it. A Land with an evidence override does not get past it either: the override is about crowsnest's evidence, this is the human's own request.
+137. **One operation on a finished job's branch at a time, reserved with the fix job's insertion** (R9-C2). The reservation is a column on the parent, written under the jobs lock in the same hold as the child's insert, so two sends cannot both pass; Land takes it for the length of the land; a running check counts as one. Recovery adopts a live fix its parent never recorded and drops a land a dead process left; the land's own recovery (6.11) still owns an approved request.
+138. **Feedback is a queue of immutable batches settled by id; what may have arrived is never typed again, and the human's comments go back to the human** (6.20, R9-C4). Appending to the batch in flight was what replayed text or lost it; a new batch per send makes "what the claim typed" exact. A batch of comments that may have arrived becomes "may not have arrived" on the notes, so re-sending is the human's decision, not crowsnest's.
+139. **An isolated check is verified against the commit's tree after every step, and untracked output is allowed** (6.15, R9-C6). Disallowing every change would refuse a prepare command's node_modules; allowing tracked changes would let a repair pass for the commit. The line is the commit itself: every tracked path byte for byte, nothing about the rest.
+140. **The board's chip lets a live job's strongest hold win over its state** (12, R9-C10). The holds are what decides whether the job can move; a state like blocked/time says what the agent declared, which may no longer be what stops it.
 
 ## 18. Milestones
 
@@ -4765,6 +4867,16 @@ Order of sacrifice if the night runs short: M12 first, then M11. Jobs (M7) and i
 - Receipt is seen in the transcript, so a Codex agent's answers stop at "delivered".
 - Rebase jobs are crowsnest's own briefs to a fresh builder; a conflict it cannot resolve ends in
   its failure, and the original job stays "needs rebase".
+- **R9 limits, said plainly.** The check's lifeline ends the watchdog's process group; a process
+  the check detached into a group or session of its own (`setsid`, a daemonising server) is not in
+  it and can still outlive crowsnest. Verifying an isolated copy reads every tracked file once per
+  step (three times a run): the cost grows with the repository, and a tree listing past git's
+  output cap is a check error, not a pass. The feedback gate is still sampled right before typing,
+  not atomic with herdr's keystrokes (as R7 said). A push for a question is labelled with its job's
+  state when it is sent; it is not re-sent when the job stops on its questions later. The comment
+  send's request memory (`send_id`) is in-process: a retry after a restart finds the notes either
+  sent or marked "may not have arrived". The snapshot bounds (64 MiB of untracked files, 1 GiB of
+  changed tracked files) bound what one reading reads, not git's object store.
 
 ### 20.1 What each engine gets (`wip/trust`)
 
@@ -5118,7 +5230,11 @@ browser, from my phone".
   rank (dangerous approvals first), then the longest wait first (Fable 1.9). `counts.blocking` is
   dangerous plus blocking, `counts.approval` the routine approvals; Now's sentence and the Inbox's
   count line read them ("15 need you: 5 blocking, 3 approvals, 7 can wait"). The lock screen's
-  "blocking question" is `attention.QuestionLabel`, the same rule for a question (23.4). The web
+  "blocking question" is `attention.QuestionLabel`, the same rule for a question (23.4), given the
+  same fact about its job: `attention.JobStoppedOnQuestions` (the job is needs_you with cause
+  questions), which the queue uses and the push describer reads when the question is pushed
+  (R9-C12). A job that stops on its questions after the push was sent shows as blocking in the
+  queue and the header; the push already sent is not re-sent. The web
   app's `lib/attention.ts` `labelOf` falls back to the urgency for a server before R8.
 - **One number.** `counts.total` is every unsnoozed item; `blocking`, `can_wait`, `snoozed` and
   `by_project` beside it. The nav badge, the tab title, the tray, the palette's "Needs you", the

@@ -73,6 +73,14 @@ To point at code, comment in the diff on the Review tab: select a line number (o
 the quoted code ([Review changes: Comments](review-changes.md#comments)). For a job that is already
 done, that starts a fix job in its worktree, and the job is checked again when it finishes.
 
+A done job you sent back is **not ready to land** until you say so: its chip reads **Changes
+requested** while the fix job works, and the **Changes requested** card names that fix job. Land
+refuses it meanwhile, even if the job was accepted before. When the fix job is done the chip reads
+**Review the changes**: look at the diff, then press **Accept the changes**. If the fix job failed
+or you cancelled it, the chip reads **Fix failed**: send the comments again, or press **Set the
+request aside** to land the job as it was. Only one change works on a finished job's branch at a
+time: while a fix job, a rebase or a check is running, the others wait.
+
 For anything else, write in the job's message box (**Message to job-N**) what to change and
 **Send**. The agent picks it up on its next turn; when it says done again, it is checked again.
 After a failed final review the agent's done is refused until you land, discard, or send it back.
