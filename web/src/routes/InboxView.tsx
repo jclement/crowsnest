@@ -190,7 +190,7 @@ function attentionIcon(item: AttentionItem): ReactElement {
 function AttentionRow({ item, selected, onOpen }: { item: AttentionItem; selected: boolean; onOpen: () => void }) {
   return (
     <li data-attention-item={item.id}>
-      <button type="button" onClick={onOpen} aria-current={selected || undefined} className={cn(rowClass, selected && "bg-selected")}>
+      <button type="button" data-nav-row onClick={onOpen} aria-current={selected || undefined} className={cn(rowClass, selected && "bg-selected")}>
         <span className="flex w-full items-start gap-2">
           {attentionIcon(item)}
           <span className={cn("min-w-0 flex-1 break-words text-sm font-medium text-heading", item.kind === "approval" && "font-mono text-xs")}>{item.title}</span>
@@ -253,7 +253,7 @@ function QuestionRow({ question, selected, onSelect }: { question: Question; sel
   const settled = question.status !== "open";
   return (
     <li>
-      <button type="button" onClick={() => onSelect(question.id)} aria-current={selected || undefined} className={cn(rowClass, selected && "bg-selected")}>
+      <button type="button" data-nav-row onClick={() => onSelect(question.id)} aria-current={selected || undefined} className={cn(rowClass, selected && "bg-selected")}>
         <span className="flex w-full items-start gap-2">
           {question.urgency === "blocking" && !settled && <span aria-label="Blocking" className="mt-1.5 h-2 w-2 shrink-0 rotate-45 bg-status-blocked" />}
           <span className={cn("min-w-0 flex-1 break-words text-sm font-medium", settled ? "text-body" : "text-heading")}>{question.title}</span>
@@ -281,6 +281,7 @@ function ApprovalRow({ approval, selected, onSelect }: { approval: Approval; sel
     <li>
       <button
         type="button"
+        data-nav-row
         onClick={() => onSelect(APPROVAL_PREFIX + approval.id)}
         aria-current={selected || undefined}
         className={cn(rowClass, selected && "bg-selected")}

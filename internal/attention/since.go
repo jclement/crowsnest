@@ -88,7 +88,9 @@ func SinceEvents(src SinceSources, since time.Time) []SinceEvent {
 		events = append(events, event)
 	}
 	for _, question := range src.Questions {
-		if question.Kind == questions.KindNotice || !question.CreatedAt.After(since) {
+		// A question still open is in Needs you, above this list (R10 O-F16: the first five
+		// entries repeated the queue two screens up); one settled since is news.
+		if question.Kind == questions.KindNotice || !question.CreatedAt.After(since) || question.Status == questions.StatusOpen {
 			continue
 		}
 		events = append(events, SinceEvent{Kind: "asked", At: question.CreatedAt, Title: question.Title, JobID: question.JobID,

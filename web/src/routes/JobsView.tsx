@@ -28,7 +28,7 @@ import { JournalSheet } from "../components/journal/JournalPanel";
 import { ScheduleSheet } from "../components/schedule/SchedulePanel";
 import { SpendButton, SpendSheet } from "../components/spend/SpendSheet";
 import { Banner } from "../components/ui/Banner";
-import { Button } from "../components/ui/Button";
+import { Button, IconButton } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Sheet } from "../components/ui/Sheet";
 import { SkeletonRows } from "../components/ui/Skeleton";
@@ -81,12 +81,9 @@ export function JobsView() {
               {lingering} to land
             </Button>
           )}
-          <Button compact variant="ghost" icon={CalendarClock} onClick={() => setScheduleOpen(true)}>
-            Schedule
-          </Button>
-          <Button compact variant="ghost" icon={NotebookText} onClick={() => setJournalOpen(true)}>
-            Journal
-          </Button>
+          {/* Icons with their names (R10 F-F13): the toolbar is two rows on a phone, not three. */}
+          <IconButton icon={CalendarClock} label="Schedule" onClick={() => setScheduleOpen(true)} />
+          <IconButton icon={NotebookText} label="Journal" onClick={() => setJournalOpen(true)} />
           <HelpButton topic="concepts/jobs#states" what="job states" inline={false} />
         </div>
         <JournalSheet open={journalOpen} onClose={() => setJournalOpen(false)} />

@@ -27,6 +27,7 @@ import { Footer } from "./Footer";
 import { inMore, moreNav, primaryNav, type NavItem } from "./nav";
 import { Sheet } from "./ui/Sheet";
 import { useBrowserBeat } from "../lib/browserBeat";
+import { useListKeys } from "../lib/listKeys";
 import { PaletteButton } from "./palette/PaletteButton";
 import { NewJobButton } from "./jobs/NewJobButton";
 import { MachineStrip } from "./system/MachineStats";
@@ -49,7 +50,19 @@ export function AppFrame() {
   const attention = useAttention();
   const needsYou = attention.data?.counts.total ?? 0;
   const [moreOpen, setMoreOpen] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+  // After a move to another view (a g key, a nav link), focus starts in the view rather than on
+  // the page's body (R10 F-F10, O-F22), so the next Tab reaches its first row. Only when nothing
+  // else holds focus: a field or a sheet that took it keeps it.
+  const previousPath = useRef(pathname);
+  useEffect(() => {
+    if (previousPath.current === pathname) return;
+    previousPath.current = pathname;
+    const active = document.activeElement;
+    if (!active || active === document.body || active.closest("nav")) mainRef.current?.focus({ preventScroll: true });
+  }, [pathname]);
   useBrowserBeat();
+  useListKeys(pathname);
   const voice = me.data?.features.voice ?? false;
   useSyncPlaybackRate(voice);
 
@@ -101,6 +114,17 @@ export function AppFrame() {
   return (
     <PaletteProvider onSignOut={() => void signOut()}>
     <div className="flex h-full flex-col">
+      {/* R10 O-F22: ten tab stops of chrome came before the view's first item. */}
+      <a
+        href="#main"
+        onClick={(event) => {
+          event.preventDefault();
+          mainRef.current?.focus();
+        }}
+        className="absolute -top-20 left-2 z-50 inline-flex min-h-11 items-center rounded border border-border bg-surface px-3 text-sm text-accent focus:top-2"
+      >
+        Skip to content
+      </a>
       <header className="box-content flex h-11 shrink-0 items-center gap-2 border-b border-chrome-border bg-chrome pl-3 pr-1 pt-[env(safe-area-inset-top)] text-chrome-fg md:h-10">
         <Wordmark compact />
         {me.data?.features.name && (
@@ -152,7 +176,7 @@ export function AppFrame() {
           ))}
           <Footer stacked className="mt-auto px-2 pt-2" />
         </nav>
-        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <main id="main" ref={mainRef} tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-y-auto outline-none">
           {/* min-h-0 only from md: on a phone the view grows with its content and the footer
               follows it; on desktop views like Fleet fill the height and scroll inside. */}
           <div className="flex-1 md:min-h-0">

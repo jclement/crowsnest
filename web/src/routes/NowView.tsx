@@ -48,8 +48,7 @@ export function NowView() {
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 p-3 md:p-4">
       <NowHeader />
       <Hint id="now" topic="start-here">
-        New here? Everything that needs you is under Needs you; every project is beside it. The manual (Help, or{" "}
-        <kbd className="font-mono">g m</kbd>) explains the rest.
+        New here? Keep a weather eye on Needs you: it is all that waits on you. Your projects follow, and any ? explains what it sits by.
       </Hint>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
         <QueueSection />
@@ -147,6 +146,7 @@ function ProjectsSection() {
   return (
     <section aria-labelledby="now-projects" className="min-w-0 overflow-hidden rounded-md border border-border bg-surface">
       <SectionHeader id="now-projects" icon={FolderKanban} title="Projects">
+        <HelpButton topic="concepts/projects-and-leads#leads" what="who owns a project's jobs" />
         <Link to="/projects" className="inline-flex min-h-11 min-w-11 items-center justify-end text-xs text-accent hover:underline md:min-h-0 md:min-w-0">
           All projects
         </Link>
@@ -247,10 +247,9 @@ function ProjectRow({ row }: { row: NowRow }) {
             </span>
             {row.last_activity_at && <span>active {relativeTime(row.last_activity_at)}</span>}
           </span>
-          {/* One line: the same ownership sentence repeats on most rows; the whole of it is the tooltip.
-              Not on a phone, where it pushed the job box past the second screen (R8); the project's
-              page says it there. */}
-          <span className="hidden truncate pt-1 text-2xs leading-snug text-muted md:block" data-owner title={row.owner}>
+          {/* Read out, not drawn: the same ownership sentence repeated, truncated, on every row of the
+              desktop (R10, Fable polish). The "?" by Projects explains ownership once. */}
+          <span className="sr-only" data-owner>
             {row.owner}
           </span>
         </span>

@@ -8,7 +8,7 @@ export function AgentStartList({ findings }: { findings: AgentStartFinding[] }) 
   const runs = findings.filter((finding) => finding.runs);
   const reads = findings.filter((finding) => !finding.runs);
   if (findings.length === 0) {
-    return <span className="text-2xs text-muted">Nothing in this folder runs when an agent starts (no agent hooks, MCP servers or Codex config, no instruction files).</span>;
+    return <span className="text-2xs text-muted">Nothing in this folder runs when an agent starts (no agent settings, skills, MCP servers or Codex config, no instruction files).</span>;
   }
   return (
     <div className="flex flex-col gap-1 text-2xs" aria-label="What runs when an agent starts here">

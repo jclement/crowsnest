@@ -8,8 +8,8 @@ export function NotFound() {
       icon={Bird}
       title="Nothing on the horizon"
       action={
-        <Link to="/" className="mt-2 text-xs text-accent hover:underline">
-          Back to jobs
+        <Link to="/" className="mt-2 inline-flex min-h-11 items-center text-xs text-accent hover:underline md:min-h-0">
+          Back to Now
         </Link>
       }
     >

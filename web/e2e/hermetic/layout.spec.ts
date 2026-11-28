@@ -75,7 +75,7 @@ test("the theme toggle cycles system → light → dark, and a reload never flas
   if (isPhone(testInfo)) {
     // Below sm the header gives the toggle's room to New job and the machine name (R10 F-F3);
     // the mode is in Settings → Appearance and the palette. From sm up the toggle is there.
-    await expect(page.getByRole("banner").getByRole("button", { name: "New job" })).toBeVisible();
+    await expect(page.getByRole("banner").getByRole("button", { name: "Give a job" })).toBeVisible();
     await expect(toggle).toBeHidden();
     await page.setViewportSize({ width: 700, height: 812 });
   }

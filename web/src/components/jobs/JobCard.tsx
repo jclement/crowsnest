@@ -37,6 +37,7 @@ export function JobCard({ job, selected, onSelect, projectName, progress }: JobC
     <li>
       <button
         type="button"
+        data-nav-row
         onClick={() => onSelect(job.id)}
         aria-current={selected || undefined}
         className={cn("flex w-full min-h-14 flex-col gap-1 px-3 py-2.5 text-left hover:bg-hover focus-visible:bg-hover", selected && "bg-selected")}

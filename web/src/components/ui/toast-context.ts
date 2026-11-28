@@ -10,6 +10,8 @@ export interface ToastInput {
   description?: string;
   /** One follow-up, shown as a link-style button ("Open j_12"); the toast closes when it is used. */
   action?: { label: string; onClick: () => void };
+  /** A newer toast with the same key replaces this one instead of stacking under it (the T key's theme toasts, R10). */
+  key?: string;
 }
 
 export interface ToastApi {

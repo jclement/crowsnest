@@ -116,6 +116,16 @@ export function NewJobForm({ onCreated, project, autoFocus }: NewJobFormProps) {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) submit();
   };
 
+  const submitGroup = (
+    <span className="ml-auto flex items-center gap-2">
+      {hold && <span className="text-2xs font-medium text-warning">{hold}</span>}
+      <AttachButtons attachments={attachments} />
+      <Button type="submit" variant="primary" icon={Send} disabled={!brief.trim() || !!hold || create.isPending}>
+        {create.isPending ? "Giving…" : "Give job"}
+      </Button>
+    </span>
+  );
+
   return (
     <form ref={formRef} onSubmit={submit} aria-label="New job" className="relative flex flex-col gap-2 border-b border-border p-3">
       <DropOverlay active={dropping} label="Drop files to give with the job" />
@@ -136,6 +146,8 @@ export function NewJobForm({ onCreated, project, autoFocus }: NewJobFormProps) {
       />
       <AttachmentTray attachments={attachments} />
       {project && <DestinationToggle project={project} value={destination} onChange={setDestination} />}
+      {/* R10 (Fable polish): the toggle says it holds options, and open they sit between it and
+          Give job, never below the button that sends them. */}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -145,22 +157,21 @@ export function NewJobForm({ onCreated, project, autoFocus }: NewJobFormProps) {
           className="inline-flex min-h-11 items-center gap-1 rounded px-1 text-xs text-muted hover:text-heading md:min-h-7"
         >
           {open ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+          <span className="font-medium">Options</span> ·{" "}
           {project && destination === "lead" ? `To ${project.name}'s lead${doneWhen.trim() ? " · done when…" : ""}` : optionsSummary(dir, role, engine)}
         </button>
-        <span className="ml-auto flex items-center gap-2">
-          {hold && <span className="text-2xs font-medium text-warning">{hold}</span>}
-          <AttachButtons attachments={attachments} />
-          <Button type="submit" variant="primary" icon={Send} disabled={!brief.trim() || !!hold || create.isPending}>
-            {create.isPending ? "Giving…" : "Give job"}
-          </Button>
-        </span>
+        {!open && submitGroup}
       </div>
-      {open &&
-        (project && destination === "lead" ? (
-          <LeadOptions ids={ids} doneWhen={doneWhen} setDoneWhen={setDoneWhen} />
-        ) : (
-          <Options ids={ids} dir={dir} setDir={setDir} role={role} setRole={setRole} doneWhen={doneWhen} setDoneWhen={setDoneWhen} engine={engine} setEngine={setEngine} project={project} />
-        ))}
+      {open && (
+        <>
+          {project && destination === "lead" ? (
+            <LeadOptions ids={ids} doneWhen={doneWhen} setDoneWhen={setDoneWhen} />
+          ) : (
+            <Options ids={ids} dir={dir} setDir={setDir} role={role} setRole={setRole} doneWhen={doneWhen} setDoneWhen={setDoneWhen} engine={engine} setEngine={setEngine} project={project} />
+          )}
+          <div className="flex">{submitGroup}</div>
+        </>
+      )}
     </form>
   );
 }

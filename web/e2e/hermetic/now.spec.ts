@@ -232,13 +232,13 @@ test("the nav: four destinations and More on a phone, the same order on the desk
     await expect(nav.getByRole("link")).toHaveText(["Now", "Projects", "Inbox", "Chat"].map((label) => new RegExp(label)));
     await nav.getByRole("button", { name: "More" }).click();
     const more = page.getByRole("dialog");
-    await expect(more.getByRole("link")).toHaveText([/Jobs/, /Agents/, /Help/, /System/]);
+    await expect(more.getByRole("link")).toHaveText([/Jobs/, /Agents/, /Help/, /Settings/, /System/]);
     await page.screenshot({ path: `screenshots/now-nav-more-${width(testInfo)}.png` });
     await more.getByRole("link", { name: /Jobs/ }).click();
     await expect(page).toHaveURL(/\/jobs/);
     await expect(nav.getByRole("button", { name: "More" })).toHaveAttribute("data-status", "active");
   } else {
-    await expect(nav.getByRole("link")).toHaveText(["Now", "Projects", "Inbox", "Chat", "Jobs", "Agents", "Help"].map((label) => new RegExp(label)));
+    await expect(nav.getByRole("link")).toHaveText(["Now", "Projects", "Inbox", "Chat", "Jobs", "Agents", "Help", "Settings"].map((label) => new RegExp(label)));
     await nav.getByRole("link", { name: /Jobs/ }).click();
     await expect(page).toHaveURL(/\/jobs/);
   }

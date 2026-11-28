@@ -2,7 +2,8 @@
 // the one action that fits, the result with what was verified and what was not, its questions
 // (answerable right here with the Inbox's components), a message box to its agent, the
 // timeline, its estimated spend, and the agent's Conversation and Terminal (the Fleet view's slots).
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
+import { ApiError } from "../../lib/api";
 import { Ban, CheckCircle2, FileDiff, CircleSlash, GitCompareArrows, MessageSquare, Play, RefreshCw, SquareTerminal, Zap } from "lucide-react";
 import { useState } from "react";
 import { relativeTime } from "../../lib/format";
@@ -40,9 +41,20 @@ export function JobDetail({ id }: { id: string }) {
   const [tab, setTab] = useState<DetailTab>("overview");
   if (query.isPending) return <SkeletonRows rows={8} label="Loading the job" />;
   if (query.isError) {
+    // No such job: Retry cannot help, the board can (R10, Fable polish).
+    const missing = query.error instanceof ApiError && query.error.status === 404;
+    const action = missing ? (
+      <Link to="/jobs" className="inline-flex min-h-11 items-center text-xs font-medium text-accent hover:underline md:min-h-0">
+        Back to Jobs
+      </Link>
+    ) : (
+      <Button compact icon={RefreshCw} onClick={() => void query.refetch()}>
+        Retry
+      </Button>
+    );
     return (
-      <Banner tone="danger" role="alert" action={<Button compact icon={RefreshCw} onClick={() => void query.refetch()}>Retry</Button>}>
-        Could not load {id}: {query.error.message}
+      <Banner tone="danger" role="alert" action={action}>
+        {missing ? `There is no job ${id}.` : `Could not load ${id}: ${query.error.message}`}
       </Banner>
     );
   }

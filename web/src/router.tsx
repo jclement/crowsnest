@@ -230,7 +230,11 @@ const diffRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, agentsRoute, fleetRoute, terminalRoute, systemRoute, settingsRoute, helpRoute, helpPageRoute, diffRoute])]);
+// An unknown path inside the app keeps the header and the nav (R10: the 404 had neither, so the
+// way back was the one link on it).
+const missingRoute = createRoute({ getParentRoute: () => appRoute, path: "$", component: NotFound });
+
+const routeTree = rootRoute.addChildren([loginRoute, setupRoute, welcomeRoute, appRoute.addChildren([nowRoute, jobsRoute, projectsRoute, projectRoute, chatRoute, inboxRoute, decideRoute, agentsRoute, fleetRoute, terminalRoute, systemRoute, settingsRoute, helpRoute, helpPageRoute, diffRoute, missingRoute])]);
 
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });

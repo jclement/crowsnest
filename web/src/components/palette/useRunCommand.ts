@@ -46,7 +46,7 @@ export function useRunCommand(context: RunContext): (command: PaletteCommand) =>
           return;
         case "themeName": {
           const id = command.id === "next" ? cycleThemeName() : (setThemeName(command.id), command.id);
-          toast.show({ title: `Theme: ${findTheme(id)?.name ?? id}` });
+          toast.show({ title: `Theme: ${findTheme(id)?.name ?? id}`, key: "theme" });
           return;
         }
         case "signOut":

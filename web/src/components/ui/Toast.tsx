@@ -28,7 +28,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const dismiss = useCallback((id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
   const show = useCallback((toast: ToastInput) => {
     const id = nextId.current++;
-    setToasts((current) => [...current, { ...toast, id }].slice(-MAX_TOASTS));
+    setToasts((current) => [...current.filter((shown) => toast.key === undefined || shown.key !== toast.key), { ...toast, id }].slice(-MAX_TOASTS));
   }, []);
   const api = useMemo(() => ({ show }), [show]);
 

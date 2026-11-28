@@ -112,7 +112,7 @@ export function PaletteProvider({ onSignOut, children }: { onSignOut: () => void
       if (action.kind === "help") setSheet("shortcuts");
       else if (action.kind === "cycleTheme") {
         const id = cycleThemeName();
-        toast.show({ title: `Theme: ${findTheme(id)?.name ?? id}` });
+        toast.show({ title: `Theme: ${findTheme(id)?.name ?? id}`, key: "theme" });
       }
       else if (action.kind === "tray") window.dispatchEvent(new Event(FOCUS_TRAY_EVENT));
       else void navigate({ to: action.to, search: {} } as unknown as Parameters<typeof navigate>[0]);

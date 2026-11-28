@@ -15,11 +15,11 @@ export function NewJobButton({ className }: { className?: string }) {
         type="button"
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
-        title="New job"
+        title="Give a job"
         className={cn("inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-chrome-fg hover:bg-chrome-hover", className)}
       >
         <Plus className="h-5 w-5" aria-hidden />
-        <span className="sr-only">New job</span>
+        <span className="sr-only">Give a job</span>
       </button>
       <Sheet open={open} onClose={() => setOpen(false)} title="New job">
         <NewJobForm onCreated={() => setOpen(false)} autoFocus />

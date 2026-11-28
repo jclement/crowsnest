@@ -159,7 +159,9 @@ test("a running job: message its agent and watch the timeline", async ({ page },
   const detail = detailRegion(page, testInfo, "Selected job");
   await expect(detail.getByRole("heading", { name: "Add retry back-off to the webhook sender" })).toBeVisible();
   await expect(detail.getByText("Doing now:")).toBeVisible();
-  await expect(detail.getByText("~/.herdr/worktrees/crowsnest/job-1 · job/1-add-retry-back-off")).toBeVisible();
+  // The demo makes j_1 a real worktree of the Crowsnest repository (R10: a made-up path read as
+  // "not in a git repository" on the project page).
+  await expect(detail.getByText(/\.worktrees\/job-1-add-retry-back-off · job\/1-add-retry-back-off/)).toBeVisible();
   // A job names the agent its pane holds (R3, ExpectAgent): job-1, in the Crowsnest workspace.
   const box = detail.getByRole("textbox", { name: "Message to job-1" });
   await box.fill("Use full jitter, not equal jitter");
@@ -278,7 +280,19 @@ test("an empty board invites the first job", async ({ page }) => {
 
 test("a job that does not exist says so", async ({ page }, testInfo) => {
   await openBoard(page, "?job=j_999");
-  await expect(detailRegion(page, testInfo, "Selected job").getByRole("alert")).toContainText("Could not load j_999");
+  const alert = detailRegion(page, testInfo, "Selected job").getByRole("alert");
+  await expect(alert).toContainText("There is no job j_999.");
+  // Retry cannot help a job that is not there; the board can (R10).
+  await expect(alert.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(alert.getByRole("link", { name: "Back to Jobs" })).toBeVisible();
+});
+
+test("an unknown page keeps the header and the nav, and leads back to Now (R10)", async ({ page }) => {
+  await page.goto("/nope");
+  await expect(page.getByText("Nothing on the horizon")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Search or run…" })).toBeVisible();
+  await page.getByRole("link", { name: "Back to Now" }).click();
+  await expect(page).toHaveURL(/\/$/);
 });
 
 test("choosing Codex for a job says plainly what it runs without (R8), from GET /engines", async ({ page }) => {

@@ -76,3 +76,15 @@ func TestSinceListsAnswersWithTheirReceipt(t *testing.T) {
 		t.Fatalf("events %+v", events)
 	}
 }
+
+// R10 O-F16: "Since you left" repeated the questions still open in Needs you. A question asked in
+// the window is news only once it is no longer waiting there.
+func TestSinceLeavesOutQuestionsStillOpen(t *testing.T) {
+	settled := ago(5 * time.Minute)
+	open := questions.Question{ID: "q_1", Title: "Which colour?", Kind: questions.KindChoice, Status: questions.StatusOpen, CreatedAt: ago(10 * time.Minute)}
+	gone := questions.Question{ID: "q_2", Title: "Still needed?", Kind: questions.KindConfirm, Status: questions.StatusCancelled, CreatedAt: ago(10 * time.Minute), SettledAt: &settled}
+	events := SinceEvents(SinceSources{Questions: []questions.Question{open, gone}}, ago(30*time.Minute))
+	if len(events) != 1 || events[0].Ref != "q_2" || events[0].Kind != "asked" {
+		t.Fatalf("events %+v, want only the settled q_2", events)
+	}
+}
