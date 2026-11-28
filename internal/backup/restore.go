@@ -26,9 +26,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/store"
 )
 
@@ -85,6 +87,10 @@ type Result struct {
 	// withheld from agents until the human applies them.
 	CheckCommands  []store.RestoredCheck
 	RestoredLayers int
+	// SetAsideSettings are the saved settings that act outward or grant (config.RestoreSetAside,
+	// R9-S2), publishing to the tailnet first among them: they no longer apply until the human
+	// uses them again in Settings.
+	SetAsideSettings []string
 }
 
 // ErrNotEmpty is returned when the target already holds data and Force is off.
@@ -500,6 +506,17 @@ func markRestored(ctx context.Context, dbPath, file string, manifest Manifest, a
 		return err
 	}
 	if result.RestoredLayers, err = db.MarkLayersRestored(ctx); err != nil {
+		return err
+	}
+	// R9-S2: the settings that make crowsnest act outward or grant (publishing to the tailnet, a
+	// permission mode, the protected hosts, the review gate, …) do not come back by themselves.
+	writeOnly := func(name string) bool {
+		setting, _ := config.LookupSetting(name)
+		return setting.WriteOnly
+	}
+	names := config.RestoreSetAside()
+	sort.Strings(names)
+	if result.SetAsideSettings, err = db.SetAsideSettings(ctx, names, writeOnly); err != nil {
 		return err
 	}
 	return db.Close()

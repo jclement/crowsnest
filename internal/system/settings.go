@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/jclement/crowsnest/internal/config"
+	"github.com/jclement/crowsnest/internal/store"
 )
 
 // SettingsKeyPrefix is the kv prefix of saved settings.
@@ -35,6 +36,10 @@ type SettingView struct {
 	Where   string `json:"where"`             // "--model", "CROWSNEST_MODEL", "config.yaml", …
 	Locked  string `json:"locked,omitempty"`  // why it is read-only here
 	Pending bool   `json:"pending,omitempty"` // saved, takes effect only after a restart
+	// RestoredValue is the value a restore set aside (R9-S2: the setting acts outward or grants),
+	// which does not apply until the human uses it; RestoredWhy says why it was set aside.
+	RestoredValue *string `json:"restored_value,omitempty"`
+	RestoredWhy   string  `json:"restored_why,omitempty"`
 }
 
 // SettingsPage is GET /settings.
@@ -62,8 +67,17 @@ func (s *Service) Settings(ctx context.Context) (SettingsPage, error) {
 	}
 	page.Bind = strings.Join(binds, ", ")
 	page.BindCommand = fmt.Sprintf("crowsnest --bind tailnet   (or CROWSNEST_BIND=tailnet; now: %s)", strings.Join(cfg.Binds, ","))
+	restored, err := s.opts.KV.KVPrefix(ctx, store.RestoredSettingPrefix)
+	if err != nil {
+		return SettingsPage{}, err
+	}
 	for _, setting := range config.EditableSettings() {
-		page.Settings = append(page.Settings, s.view(cfg, stored, setting))
+		view := s.view(cfg, stored, setting)
+		if value, ok := restored[setting.Name]; ok {
+			view.RestoredValue = &value
+			view.RestoredWhy, _ = config.RestoreSetsAside(setting.Name)
+		}
+		page.Settings = append(page.Settings, view)
 	}
 	return page, nil
 }
@@ -122,6 +136,10 @@ func (s *Service) UpdateSetting(ctx context.Context, name, value string, clear b
 		err = s.opts.KV.SetKV(ctx, SettingsKeyPrefix+name, value)
 	}
 	if err != nil {
+		return SettingView{}, err
+	}
+	// The human has now decided this setting: a value a restore set aside is no longer offered.
+	if err := s.opts.KV.DeleteKV(ctx, store.RestoredSettingPrefix+name); err != nil {
 		return SettingView{}, err
 	}
 	s.mu.Lock()

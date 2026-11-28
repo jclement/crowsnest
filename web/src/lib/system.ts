@@ -101,6 +101,9 @@ export interface SettingView {
   where: string;
   locked?: string;
   pending?: boolean;
+  /** The backup's value a restore set aside (R9-S2): it does not apply until used again. */
+  restored_value?: string;
+  restored_why?: string;
 }
 
 export interface SettingsPage {

@@ -233,3 +233,54 @@ func TestRestoreSetsAsideCheckCommandsAndWithholdsLayers(t *testing.T) {
 		}
 	}
 }
+
+// R9-S2: a backup's settings that act outward or grant (publishing to the tailnet first) stop
+// applying on restore and are kept aside to be used again; the rest come back as they were.
+func TestRestoreSetsAsideOutwardAndGrantingSettings(t *testing.T) {
+	ctx := context.Background()
+	src, dir := populated(t)
+	for key, value := range map[string]string{
+		"settings.tailscale-serve":  "true",
+		"settings.permission-mode":  "bypassPermissions",
+		"settings.protected-host":   "",
+		"settings.review":           "off",
+		"settings.notify-url":       "https://ntfy.example/secret",
+		"settings.poke-interval":    "45m",
+		"settings.max-running-jobs": "3",
+	} {
+		mustDo(t, src.DB.SetKV(ctx, key, value))
+	}
+	path := filepath.Join(dir, "backup.tar.gz")
+	if _, err := Create(ctx, src, path); err != nil {
+		t.Fatal(err)
+	}
+	target := freshTarget(t)
+	result, err := Restore(ctx, path, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(result.SetAsideSettings, ",") != "permission-mode,protected-host,review,tailscale-serve" {
+		t.Errorf("set aside %v", result.SetAsideSettings)
+	}
+	db, err := store.Open(ctx, target.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, name := range []string{"tailscale-serve", "permission-mode", "protected-host", "review", "notify-url"} {
+		if value, err := db.GetKV(ctx, "settings."+name); err == nil {
+			t.Errorf("%s from the backup still applies: %q", name, value)
+		}
+	}
+	if aside, _ := db.GetKV(ctx, store.RestoredSettingPrefix+"tailscale-serve"); aside != "true" {
+		t.Errorf("publishing was not kept aside to use again: %q", aside)
+	}
+	if aside, err := db.GetKV(ctx, store.RestoredSettingPrefix+"protected-host"); err != nil || aside != "" {
+		t.Errorf("an emptied protected-host list was not kept aside as empty: %q %v", aside, err)
+	}
+	for name, want := range map[string]string{"poke-interval": "45m", "max-running-jobs": "3"} {
+		if value, _ := db.GetKV(ctx, "settings."+name); value != want {
+			t.Errorf("%s did not come back: %q", name, value)
+		}
+	}
+}

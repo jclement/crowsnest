@@ -11,6 +11,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -117,4 +118,37 @@ func (s *Store) MarkLayersRestored(ctx context.Context) (int, error) {
 		marked++
 	}
 	return marked, nil
+}
+
+// RestoredSettingPrefix + a setting name holds the value a restore set aside (R9-S2): a setting
+// that acts outward or grants, which no longer applies until the human uses it again.
+const RestoredSettingPrefix = "restored.setting."
+
+// settingsPrefix is where the app's saved settings live (system.SettingsKeyPrefix).
+const settingsPrefix = "settings."
+
+// SetAsideSettings moves the saved value of each named setting aside, so it stops applying (the
+// file and the default apply instead), and returns the names it moved. A write-only setting (the
+// notify URL) is dropped, not kept: it is never shown again, so it could not be offered back.
+func (s *Store) SetAsideSettings(ctx context.Context, names []string, writeOnly func(string) bool) ([]string, error) {
+	var moved []string
+	for _, name := range names {
+		value, err := s.GetKV(ctx, settingsPrefix+name)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return moved, err
+		}
+		if !writeOnly(name) {
+			if err := s.SetKV(ctx, RestoredSettingPrefix+name, value); err != nil {
+				return moved, err
+			}
+		}
+		if err := s.DeleteKV(ctx, settingsPrefix+name); err != nil {
+			return moved, err
+		}
+		moved = append(moved, name)
+	}
+	return moved, nil
 }

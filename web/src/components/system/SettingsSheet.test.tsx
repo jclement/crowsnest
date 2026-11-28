@@ -76,4 +76,19 @@ describe("the server's settings", () => {
     await user.click(screen.getAllByRole("button", { name: "Save" })[0]!);
     expect(await screen.findByRole("alert")).toHaveTextContent("is not a model name");
   });
+
+  // R9-S2: a value a restore set aside is shown, not applied; "Use it" saves exactly that value.
+  it("offers a setting a restore set aside, and Use it saves the backup's value", async () => {
+    const page = settingsPage();
+    const model = page.settings.find((setting) => setting.name === "model")!;
+    model.restored_value = "opus";
+    model.restored_why = "a test reason";
+    const calls = stubApi((call) => (call.method === "PUT" ? { body: { data: { ...model, value: "opus", restored_value: undefined } } } : undefined));
+    const user = userEvent.setup();
+    renderWithClient(<SettingsBody page={page} />);
+    const note = screen.getByRole("note", { name: "Orchestrator model: set aside by a restore" });
+    expect(note).toHaveTextContent("does not apply: opus. Why: a test reason.");
+    await user.click(screen.getByRole("button", { name: "Use it" }));
+    expect(calls).toContainEqual({ method: "PUT", path: "/settings/model", body: { value: "opus" } });
+  });
 });

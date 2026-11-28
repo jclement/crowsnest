@@ -136,6 +136,10 @@ func printRestore(out io.Writer, cfg config.Config, result backup.Result) {
 	if result.RestoredLayers > 0 {
 		_, _ = fmt.Fprintf(out, "%d instruction layer(s) from the backup are withheld from agents until you read and apply them in Instructions.\n", result.RestoredLayers)
 	}
+	for _, name := range result.SetAsideSettings {
+		why, _ := config.RestoreSetsAside(name)
+		_, _ = fmt.Fprintf(out, "Setting %s from the backup does not apply until you use it again in Settings (%s).\n", name, why)
+	}
 	_, _ = fmt.Fprintln(out, "It starts PAUSED. Start crowsnest, check the agents on the System page and the journal, then resume.")
 }
 

@@ -118,6 +118,9 @@ function SettingRow({ setting, engineNow }: { setting: SettingView; engineNow?: 
         {engineNow && setting.value === "auto" ? ` Now: ${engineNow}.` : ""} {applyLabels[setting.apply]}.
       </p>
       {setting.name === "engine" && <EngineNote engine={draft === "auto" ? (engineNow ?? "") : draft} />}
+      {setting.restored_value !== undefined && (
+        <RestoredSetting setting={setting} disabled={locked || save.isPending} onUse={() => commit(setting.restored_value ?? "")} onKeep={() => commit(null)} />
+      )}
       {setting.locked && <p className="text-2xs text-warning">{setting.locked}</p>}
       {error && (
         <p role="alert" className="text-2xs text-danger">
@@ -125,6 +128,31 @@ function SettingRow({ setting, engineNow }: { setting: SettingView; engineNow?: 
         </p>
       )}
     </form>
+  );
+}
+
+/**
+ * A restore set this setting's saved value aside (R9-S2): it acts outward or grants, so a backup
+ * does not bring it back by itself. The backup's value is shown with "Use it"; "Keep the current"
+ * forgets it. Either is the human's decision, and the server then stops offering it.
+ */
+function RestoredSetting({ setting, disabled, onUse, onKeep }: { setting: SettingView; disabled: boolean; onUse: () => void; onKeep: () => void }) {
+  const shown = setting.restored_value === "" ? "(empty)" : setting.restored_value;
+  return (
+    <div role="note" aria-label={`${setting.label}: set aside by a restore`} className="flex flex-col gap-1 rounded border border-warning/40 bg-warning/5 p-2 text-2xs">
+      <span className="text-body">
+        A restore set the backup&apos;s value aside, so it does not apply: <span className="break-all font-mono text-heading">{shown}</span>.
+        {setting.restored_why ? ` Why: ${setting.restored_why}.` : ""}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        <Button compact onClick={onUse} disabled={disabled}>
+          Use it
+        </Button>
+        <Button compact variant="ghost" onClick={onKeep} disabled={disabled}>
+          Keep the current
+        </Button>
+      </div>
+    </div>
   );
 }
 
