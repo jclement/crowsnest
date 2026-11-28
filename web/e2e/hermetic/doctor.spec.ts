@@ -192,8 +192,9 @@ test.describe("system page", () => {
     await page.getByRole("button", { name: "Search or run…" }).click();
     await input.fill("settings");
     await page.getByRole("option", { name: /^Settings/ }).first().click();
-    // The Settings view (R8: one door to configuration), at the server's settings.
-    await expect(page).toHaveURL(/\/settings#instance$/);
+    // The Settings view (R8: one door to configuration). R10: the palette's Settings is the view
+    // itself, as More, the rail and g s are; Settings: <section> rows go to a section.
+    await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   });
 

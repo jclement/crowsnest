@@ -38,7 +38,11 @@ async function openNotifications(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
-  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Notifications" }).click();
+  // A link in the section list from md; on a phone the Section picker (R10 F-F8).
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  const picker = page.getByLabel("Go to a section");
+  if (await picker.isVisible()) await picker.selectOption("notifications");
+  else await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Notifications" }).click();
   await expect(page).toHaveURL(/\/settings#notifications$/);
   return page.getByRole("region", { name: "Notifications" });
 }

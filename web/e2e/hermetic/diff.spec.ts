@@ -133,12 +133,14 @@ test("a lead's uncommitted changes, from the project page, in light and dark", a
   const viewer = page.getByRole("region", { name: /^Changes: Website/ });
   await viewer.getByRole("radio", { name: /Uncommitted/ }).click();
   await expect(viewer.getByText(/of 2 viewed/)).toBeVisible();
-  await expect(viewer.getByRole("table", { name: "Diff of NOTES.md" })).toContainText("Lead's notes");
+  // The lead's work is two new files (R10: a tracked README edit made Website's Land refuse).
+  await expect(viewer.getByRole("table", { name: "Diff of DEPLOY.md" })).toContainText("Push to main; the site rebuilds in a minute.");
   if (!isPhone(testInfo)) {
-    await expect(viewer.getByRole("table", { name: "Diff of DEPLOY.md" })).toContainText("Push to main; the site rebuilds in a minute.");
+    await expect(viewer.getByRole("table", { name: "Diff of NOTES.md" })).toContainText("Lead's notes");
   } else {
+    // One file at a time on a phone: NOTES.md is the next.
     await viewer.getByRole("navigation", { name: "Files" }).getByRole("button", { name: "Next" }).click();
-    await expect(viewer.getByRole("table", { name: "Diff of DEPLOY.md" })).toContainText("Push to main; the site rebuilds in a minute.");
+    await expect(viewer.getByRole("table", { name: "Diff of NOTES.md" })).toContainText("Lead's notes");
   }
   await expectAccessible(page, testInfo, "diff-light");
   await shot(page, testInfo, "lead-light");

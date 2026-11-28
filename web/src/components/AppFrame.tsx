@@ -140,7 +140,9 @@ export function AppFrame() {
             {me.data.features.session}
           </span>
         )}
-        {me.data?.features.demo && <span className="rounded bg-chrome-warning/20 px-1.5 py-0.5 text-xs text-chrome-warning">demo</span>}
+        {/* Not below 400 px, where with talk mode's speaker and New job it pushed the header past the
+            screen's edge (R10). */}
+        {me.data?.features.demo && <span className="hidden rounded bg-chrome-warning/20 px-1.5 py-0.5 text-xs text-chrome-warning min-[400px]:inline">demo</span>}
         {fixturesEnabled() && (
           <span className="rounded bg-chrome-warning/20 px-1.5 py-0.5 text-xs text-chrome-warning" title="Data comes from lib/fixtures.ts">
             fixtures
