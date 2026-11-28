@@ -436,17 +436,28 @@ func stringsIn(value any) []string {
 // inside reports whether path is root or below it, after cleaning (and resolving the links of
 // the longest existing prefix, so a path written through a link to the root still counts).
 func inside(root, path string) bool {
-	if !filepath.IsAbs(path) {
-		return true // relative to the agent's directory
-	}
 	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
 		if part == ".." {
 			return false // the OS follows a link before the .., which cleaning would hide (R6-C03)
 		}
 	}
+	if !filepath.IsAbs(path) {
+		if root == "" {
+			return true // relative to the agent's directory, which is not known
+		}
+		// Relative to the job's directory: resolved like an absolute path, so a link committed
+		// inside the root that points outside it does not count as inside (R9-S9).
+		path = filepath.Join(root, path)
+	}
 	clean := resolve(filepath.Clean(path))
 	root = resolve(filepath.Clean(root))
-	return clean == root || strings.HasPrefix(clean, root+string(filepath.Separator))
+	if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
+		return false
+	}
+	// R9-S9: the repository's own .git under the root is not "inside": a hook or the config
+	// written there runs on the next harmless-looking git command.
+	gitDir := filepath.Join(root, ".git")
+	return clean != gitDir && !strings.HasPrefix(clean, gitDir+string(filepath.Separator))
 }
 
 func resolve(path string) string {

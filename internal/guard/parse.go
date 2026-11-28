@@ -25,6 +25,8 @@ type Command struct {
 	Env map[string]string
 	// Wrappers are the wrapper programs it was run through, in order (sudo, env, …).
 	Wrappers []string
+	// Chdir is the directory a wrapper runs it in (`env -C DIR`, `env --chdir=DIR`), "" for none.
+	Chdir string
 	// Subshell is true when the command runs inside ( … ), so a cd in it does not outlast it.
 	Subshell bool
 	// Nested is true for a command read out of an `sh -c` or `eval` string.
@@ -115,6 +117,11 @@ func commandOfSegment(words []string) Command {
 		base := strings.ToLower(filepath.Base(word))
 		if wrappers[base] {
 			cmd.Wrappers = append(cmd.Wrappers, base)
+			if base == "env" {
+				if dir := envChdir(words, i); dir != "" {
+					cmd.Chdir = dir
+				}
+			}
 			i = skipWrapperOptions(base, words, i)
 			continue
 		}
@@ -135,7 +142,7 @@ var wrappers = map[string]bool{
 func skipWrapperOptions(base string, words []string, i int) int {
 	for i+1 < len(words) && strings.HasPrefix(words[i+1], "-") {
 		i++
-		if wrapperValued[words[i]] && i+1 < len(words) {
+		if (wrapperValued[words[i]] || (base == "env" && words[i] == "--chdir")) && i+1 < len(words) {
 			i++
 		}
 	}
@@ -143,6 +150,22 @@ func skipWrapperOptions(base string, words []string, i int) int {
 		i++ // the duration
 	}
 	return i
+}
+
+// envChdir is the directory `env -C DIR` or `env --chdir[=]DIR` (the env at words[i]) runs its
+// command in, "" for none.
+func envChdir(words []string, i int) string {
+	for j := i + 1; j < len(words) && strings.HasPrefix(words[j], "-"); j++ {
+		switch word := words[j]; {
+		case (word == "-C" || word == "--chdir") && j+1 < len(words):
+			return words[j+1]
+		case strings.HasPrefix(word, "--chdir="):
+			return strings.TrimPrefix(word, "--chdir=")
+		case strings.HasPrefix(word, "-C") && len(word) > 2:
+			return word[2:]
+		}
+	}
+	return ""
 }
 
 // assignment reports whether word is VAR=value.

