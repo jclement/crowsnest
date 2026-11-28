@@ -17,7 +17,8 @@ export function allAgents(fleet: Fleet | undefined): Agent[] {
 
 /**
  * How many agents in the fleet sit at a dialog: a fact about the tree the Fleet view draws, worded
- * "at a dialog" there. It is not the "needs you" number: that is the attention queue's
+ * "waiting on you" there (R10 O-F19: a permission dialog drawn for an approval is one, and the
+ * queue calls that an approval; "at a dialog" disagreed with it). It is not the "needs you" number: that is the attention queue's
  * (lib/attention.ts), which also folds an approval and its dialog into one item.
  */
 export function needsYouCount(fleet: Fleet | undefined): number {

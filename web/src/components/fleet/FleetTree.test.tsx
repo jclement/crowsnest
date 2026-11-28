@@ -29,11 +29,11 @@ describe("FleetTree", () => {
     render(<FleetTree fleet={makeFleet()} onSelect={() => {}} />);
     const headers = workspaceHeaders();
     expect(headers[0]).toContain("pumpcurves · feature/head-loss");
-    expect(headers[0]).toContain("2 at a dialog");
+    expect(headers[0]).toContain("2 waiting on you");
     const first = agentButtons()[0]!;
     expect(first).toHaveTextContent("head-loss");
     expect(first).toHaveAttribute("data-needs-you", "true");
-    expect(screen.getByText("2 at a dialog", { selector: "p span" })).toBeInTheDocument();
+    expect(screen.getByText("2 waiting on you", { selector: "p span" })).toBeInTheDocument();
   });
 
   it("shows each agent's name, kind, terminal title and cwd tail", () => {

@@ -19,7 +19,7 @@ async function openFleet(page: Page, search = "") {
 }
 
 /** Crowsnest's workspace row (not its lead's, "lead crowsnest"). */
-const crowsnestWorkspace = /(?<!lead )crowsnest\s*(\d+ at a dialog\s*)?\d+ agents?/;
+const crowsnestWorkspace = /(?<!lead )crowsnest\s*(\d+ waiting on you\s*)?\d+ agents?/;
 
 /** The workspace labels in the order the tree shows them. */
 async function workspaceOrder(page: Page): Promise<string[]> {
@@ -36,11 +36,11 @@ test("the tree shows every workspace, tab and agent, with the ones that need you
   // The workspaces holding an agent at a dialog sort first, in herdr's order, and say so; the
   // orchestrator's and Infra's, where nothing waits, come after them.
   expect((await workspaceOrder(page)).slice(0, 6)).toEqual(["crowsnest", "website", "mobile", "handbook", "orchestrator", "infra"]);
-  await expect(tree.getByRole("button", { name: crowsnestWorkspace })).toContainText("1 at a dialog");
-  await expect(tree.getByRole("button", { name: /handbook\s*1 at a dialog\s*1 agent/ })).toBeVisible();
+  await expect(tree.getByRole("button", { name: crowsnestWorkspace })).toContainText("1 waiting on you");
+  await expect(tree.getByRole("button", { name: /handbook\s*1 waiting on you\s*1 agent/ })).toBeVisible();
   const handbook = tree.getByRole("button", { name: /job-5(?!\d)/ });
   await expect(handbook).toHaveAttribute("data-needs-you", "true");
-  await expect(handbook).toContainText("at a dialog");
+  await expect(handbook).toContainText("waiting on you");
   // The shell pane is listed as a pane, not an agent.
   await expect(tree.getByRole("button", { name: /^shell w2:p6/i })).toBeVisible();
 
