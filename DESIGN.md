@@ -586,7 +586,14 @@ The notify URL is dropped rather than offered (it is write-only). The table clas
 setting, and `TestEverySettingHasARestoreRule` fails for a new one until someone decides; the
 same list is what a Tailscale-signed-in session may not change (3.2). Not done here (R9-S2's
 other rows, following the tag): `risk.yaml` and role files from the backup are still restored as
-files, and `pending_feedback` and restored pane ids are kept. The replaced database is **scrubbed** like a backup
+files, and `pending_feedback` and restored pane ids are kept. **The incoming database is scrubbed too**
+(R10, R9-S2 residual), whoever made the backup: after the set-aside above, `store.ScrubRestored`
+runs the snapshot's own credential statements (browser sessions, action and API tokens, push
+subscriptions and the push key, machine and agent tokens, the notify URL, Remote Control links)
+and also drops the `codex.config-seen.*` marks (a backup's "seen" is not the human's on this
+machine) and clears every `job_checks.workspace` (a path from a backup is never removed). The
+owner's record stays, so the human signs in to their restore with their own password; a backup
+crowsnest made already lacked all of this. The replaced database is **scrubbed** like a backup
 (sessions, token hashes, the push key, the notify URL): rolling back to it means signing in again.
 R6-S6: snapshots, backups and pre-migration copies drop every `*remote_control` key and carry a
 scrub mark (`snapshot.scrubbed`); a pre-migration copy without the current mark is scrubbed again
@@ -697,6 +704,9 @@ What holds now:
   still holds a request for that action with that token, and consumes it in the same mutation. So
   the land runs at most once, and a stale, forged or unrelated answer matches nothing.
   `ReconcileLandRequests` (at start and on every tick) applies an answer the callback missed,
+  always after `ReconcileBranchOps` has dropped the land reservations of a dead crowsnest (R10
+  new-M3; at start both run in `Service.Recover`), so an allowed land cut short by a crash is
+  finished instead of refused by its own stale reservation,
   links a question by its token, and drops a request never asked after a minute. Only a job's own
   agent, its parent, its project's lead or the orchestrator may ask. Before R5 the land question
   had no `recommend`, so every real request was refused by validation: it is Deny now.
@@ -1545,6 +1555,11 @@ job's `done` is now the agent's claim, and crowsnest decides whether it is **acc
   (`job_checks.workspace`, migration 0023) before it is made, with a marker naming the repository;
   every ordinary exit path removes it and clears the row, and the first tick after a start removes
   every copy no running check owns (journalled on its job), with git told to forget the worktree.
+  **A recorded path is data, not proof** (R10 new-H1: a restored backup's row could name a home
+  folder): `landing.RemoveIsolatedDir` removes only a real directory (not a link) directly inside
+  the checks directory once links are resolved, carrying the marker as a regular file. Anything
+  else is left whole, journalled ("Left alone, not removed") and its row cleared; the in-process
+  copy goes through the same check and is made with an exclusive `mkdir`.
   Every check and prepare command runs under the **lifeline** (`internal/lifeline`, the hidden
   `crowsnest check-child -- <argv>`): the watchdog leads the check's process group with stdin the
   read end of a pipe only crowsnest holds, so when crowsnest ends, however it ends, the watchdog
@@ -2655,7 +2670,9 @@ visibility per job."
 
 With `--engine codex`, or `auto` on a machine where Codex is the only usable agent, the
 orchestrator is Codex: `agent.start` with kind `codex` and `--ask-for-approval never --sandbox
-workspace-write [--model]` (the job launcher's flags), and, since Codex has no flag for an extra
+workspace-write -c sandbox_workspace_write.network_access=false [--model]` (the job launcher's
+flags, from the one builder `agentcfg.CodexSandboxArgs`, R10 new-M2: with approval `never`
+nothing it runs is ever a card, so its network is off explicitly too), and, since Codex has no flag for an extra
 system prompt, a first prompt that points it at `CROWSNEST.md`. Its pane carries the same env
 (`CROWSNEST_SOCKET`, `CROWSNEST_TOKEN`, crowsnest on `PATH`), so it asks, notifies and gives jobs
 with the `crowsnest` CLI. What it honestly lacks, listed on the checklist and in REPORT: no hooks,
@@ -2781,8 +2798,13 @@ was right. What `wip/trust` adds:
 2. **Where the human already decided, there is no question.** Creating a project in the app (the
    human chose that folder) offers "Agents may work in this folder without asking", explained,
    and ticked by default **only for a folder that carries nothing an agent runs or reads at its
-   start** (R9-S4: agent hooks in `.claude/settings*.json`, `.mcp.json`, `.codex/`, `CLAUDE.md`,
-   `AGENTS.md`; `agenttrust.Inspect`, in GET /browse/facts and the project view as `agent_start`);
+   start** (R9-S4, R10 new-M1: any `.claude/settings.json` or `settings.local.json` whatever it
+   holds, since hooks, `statusLine`, `apiKeyHelper`, `env`, `permissions.allow`, `enabledPlugins`
+   and others act once the folder is trusted; `.mcp.json`; `.claude/skills`, `commands`, `agents`
+   and `workflows`; `.codex/`; and as instructions `CLAUDE.md`, `.claude/CLAUDE.md`,
+   `CLAUDE.local.md`, `AGENTS.md`, `.claude/AGENTS.md`, `.claude/rules`, `.claude/output-styles`,
+   `.claude/agent-memory`; from Claude Code's documentation as read on 2026-11-28;
+   `agenttrust.Inspect`, in GET /browse/facts and the project view as `agent_start`);
    otherwise, and until the facts are known, it is unticked and lists what was found, hooks, MCP
    servers and Codex config under "These run when an agent starts, with no prompt once the folder
    is trusted", instructions apart. The banner lists the same. Ticked, POST /projects (`trust_folder: true`) records both agents' answer
@@ -3462,7 +3484,7 @@ times under one page.
 | `GET /browse/facts?path=` | One folder's facts: `{path, resolved, label, name, git, worktree, git_top?, branch?, detached?, default_branch?, remote? (no credentials), host?: github\|azure\|gitlab\|bitbucket\|other, check_command?, agents_md, claude_md, claude_trusted?, is_home, is_filesystem_root, project: {id, slug, name, dir, exact} \| null, contains: [the same]}`; errors as `/browse` |
 | `GET /browse/places` | Where the picker starts: `{home, favourites: [Place], roots: [Place]}`, a `Place` being `{path, label, kind: home\|favourite\|root\|project\|project-parent\|remembered\|recent, git?}` |
 | `GET /projects[?archived=1]`, `POST /projects`, `GET /projects/{ref}[?open=1]`, `PUT /projects/{ref}` | Projects (21.1): `{projects: [Project + {lead, counts: {needs_you, running, total}}], unfiled: counts}`; create `{name, dir, slug?, description?, default_role?, default_engine?, default_model?, default_isolate?: -1\|0\|1, permission_mode?, lead_start?}` (`400` with the reason: not a directory, too wide, overlapping); `{ref}` is the id or slug; `?open=1` applies `lead_start=open`; `PUT` edits or `{archived}` (archiving stops the lead). A `project` event `{id, change}` |
-| `POST /projects` `trust_folder`, `POST /projects/{ref}/trust` | Folder trust (8.2.1): `trust_folder: true` on a create (left out: false) records Claude Code's and Codex's trust for the project's folder; `/trust` does it for an existing project (`409` while the `trust-project-folders` setting is off). The view carries `folder_trusted` (Claude trusts the folder or a parent) and, after either, `trust: [{agent, status: trusted\|already\|skipped\|failed, detail}]`. Every view also carries `agent_start: [{path, kind: hooks\|mcp\|codex\|instructions, runs}]` (R9-S4) and, for a folder with a `.codex/`, `codex_config: {files, fingerprint, seen, error?}` (R9-S5); trusting the folder marks its `.codex/` seen |
+| `POST /projects` `trust_folder`, `POST /projects/{ref}/trust` | Folder trust (8.2.1): `trust_folder: true` on a create (left out: false) records Claude Code's and Codex's trust for the project's folder; `/trust` does it for an existing project (`409` while the `trust-project-folders` setting is off). The view carries `folder_trusted` (Claude trusts the folder or a parent) and, after either, `trust: [{agent, status: trusted\|already\|skipped\|failed, detail}]`. Every view also carries `agent_start: [{path, kind: settings\|mcp\|claude\|codex\|instructions, runs}]` (R9-S4, R10; `hooks` is no longer sent) and, for a folder with a `.codex/`, `codex_config: {files, fingerprint, seen, error?}` (R9-S5); trusting the folder marks its `.codex/` seen |
 | `POST /projects/{ref}/codex-config` | `{fingerprint}`: allow the project folder's own `.codex/` for Codex jobs, exactly as the page showed it (R9-S5, 20.1); `409` when the files changed since (the fingerprint no longer matches) or cannot be read safely. Session only; Origin and `X-Crowsnest` |
 | `GET /leads`, `POST /projects/{ref}/lead/start\|stop\|restart\|new\|poke` | Project leads (21.2): the running leads' statuses (the orchestrator's status shape plus `project_id`, `slug`, `running`; state `off` when not running, `stopped` after Stop; Remote Control's `remote_control`, `remote_control_note` and `remote_control_url` as the orchestrator's, 7.10.1); the lead's controls (`poke` answers as `POST /orchestrator/poke`). A `lead` event carries a lead's status |
 | `POST /jobs/{id}/restart-agent` | Restart the job's agent on the same conversation with its start-up files and instruction layers written afresh (21.3); refused for a job a standing agent holds (restart that agent) |
@@ -4983,7 +5005,13 @@ short, as built:
 
 **How a Codex job is supervised (R9-S1, R9-S5).** It starts with `--ask-for-approval on-request
 --sandbox workspace-write`, `-c sandbox_workspace_write.network_access=false` (said explicitly: a
-user's own `~/.codex/config.toml` may turn it on for their sessions), crowsnest's MCP server
+user's own `~/.codex/config.toml` may turn it on for their sessions; every Codex start, with or
+without a token, resumed, and the orchestrator, takes these from `agentcfg.CodexSandboxArgs`.
+Checked on codex-cli 0.167 with `codex debug prompt-input` and a throwaway `CODEX_HOME`: a
+`network_access = true` file reads "Network access is enabled" and these overrides make it
+"restricted", and a `default_permissions` profile with `[permissions.<name>.network] enabled =
+true` plus these overrides also reads "restricted"; that is the policy Codex describes, not a
+probe of the enforced sandbox), crowsnest's MCP server
 (`-c mcp_servers.crowsnest={command=<script>, args=["mcp"], required=true,
 default_tools_approval_mode="approve", tool_timeout_sec=86400}`), and crowsnest's hooks for that
 one session: `-c hooks.<Event>=[…]` for Stop, SessionStart, PostToolUse, PermissionRequest and
