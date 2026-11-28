@@ -327,7 +327,7 @@ func AgentMay(kind HoldKind, verb AgentVerb) bool {
 func effectiveHolds(r store.JobRecord, q store.JobQuestionSummary) []Hold {
 	holds := holdsOf(r)
 	if q.Blocking > 0 && !hasHold(r, HoldQuestions) {
-		holds = append(holds, Hold{Kind: HoldQuestions, Lift: LiftCrowsnest, Why: fmt.Sprintf("%d blocking question(s) open", q.Blocking)})
+		holds = append(holds, Hold{Kind: HoldQuestions, Lift: LiftCrowsnest, Why: fmt.Sprintf("%d blocking question%s open", q.Blocking, plural(q.Blocking))})
 	}
 	return holds
 }

@@ -349,6 +349,8 @@ function wordsOf(text: string): string[] {
 /** Markdown reduced to searchable prose: code fences kept as words, links' text kept, syntax gone. */
 export function plainText(markdown: string): string {
   return markdown
+    // HTML comments (a generated page's "<!-- Generated from …" note) are not text (R10 O-B10).
+    .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/^\s*(```+|~~~+).*$/gm, " ")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")

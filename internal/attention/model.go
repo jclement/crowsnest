@@ -424,8 +424,7 @@ func (b *builder) addDialogs(approvalPanes map[string]bool) map[string]bool {
 		job := b.attachJob(&item, "", agent.PaneID)
 		who := name
 		if job != nil {
-			item.Title = "Dialog: " + job.Title
-			item.Detail = job.CauseDetail
+			item.Title, item.Detail = dialogTitle(job.CauseDetail, job.Title), job.Title
 		} else if standing := b.standingByPane(agent.PaneID); standing != nil {
 			item.Title = standing.Label + " is waiting at a dialog"
 			item.Project = b.projectRef(standing.ProjectID)
@@ -446,6 +445,20 @@ func (b *builder) addDialogs(approvalPanes map[string]bool) map[string]bool {
 		b.items = append(b.items, item)
 	}
 	return panes
+}
+
+// dialogTitle is a job's dialog item's title (R10): what the dialog asks when crowsnest read it
+// ("Run rm -rf dist && npm run build?"), else the dialog's own one line, and only when neither
+// is known the job's title. The job's title is the item's detail either way.
+func dialogTitle(causeDetail, jobTitle string) string {
+	detail := strings.TrimSpace(causeDetail)
+	if command, ok := strings.CutPrefix(detail, "Claude wants to run: "); ok && strings.TrimSpace(command) != "" {
+		return "Run " + strings.TrimSpace(command) + "?"
+	}
+	if detail != "" {
+		return detail
+	}
+	return "Dialog: " + jobTitle
 }
 
 // addStanding lists a standing agent that needs the terminal (a start-up prompt) or has failed,

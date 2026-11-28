@@ -7,7 +7,7 @@
 // The selection lives in the URL (?q=q_7, ?q=approval:ap_3 or ?q=dialog:<pane id>) so a link, a
 // notification or a reload lands on it. From md the list and the selected item sit side by side; on a phone the item opens in a
 // full-screen sheet.
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { Bell, BellOff, BellRing, Bot, FileDiff, Hourglass, Inbox, ListTodo, MessageSquareWarning, MessagesSquare, RefreshCw, ShieldAlert } from "lucide-react";
 import { useState, type ReactElement } from "react";
 import { DialogCard } from "../components/fleet/DialogCard";
@@ -378,10 +378,17 @@ function NotificationToggle({ className }: { className?: string }) {
   }
   if (state === "denied") {
     return (
-      <span className={cn("inline-flex items-center gap-1 text-2xs text-muted", className)} title="Notifications are blocked for this site in the browser's settings">
+      // "Blocked" beside "16 need you: 6 blocking" read as jobs, not this browser (R10 O-F7).
+      <Link
+        to="/help/$"
+        params={{ _splat: "how-to/phone" }}
+        hash="turn-on-notifications"
+        className={cn("inline-flex min-h-11 items-center gap-1 text-2xs text-muted hover:underline md:min-h-0", className)}
+        title="This browser blocks notifications from crowsnest: allow them in its site settings"
+      >
         <BellOff className="h-3.5 w-3.5" aria-hidden />
-        Blocked
-      </span>
+        Notifications off
+      </Link>
     );
   }
   return (

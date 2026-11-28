@@ -132,7 +132,7 @@ func demoStates(now time.Time, panes DemoPanes) []demoJob {
 	limit.RetryAt, limit.RetryCount, limit.Progress, limit.LastActivityAt = now.Add(4*time.Minute), 1, "Converting the notification toggles", ago(16*time.Minute)
 
 	needsYou := demoBase(now, panes, "Decide the release date for v0.2", "Draft the v0.2 release notes and pick a date.", "lead", "", string(StateNeedsYou), OrchestratorName, 90*time.Minute)
-	needsYou.Cause, needsYou.CauseDetail, needsYou.Waiting, needsYou.Progress = string(CauseQuestions), "1 open question(s)", true, "Waiting on the release date"
+	needsYou.Cause, needsYou.CauseDetail, needsYou.Waiting, needsYou.Progress = string(CauseQuestions), "1 open question", true, "Waiting on the release date"
 	needsYou.LastActivityAt = ago(29 * time.Minute)
 
 	dialog := demoBase(now, panes, "Rebuild and publish the handbook site", "Rebuild the handbook site from a clean tree and publish it to gh-pages.", "builder", handbook, string(StateNeedsYou), demostory.HandbookPublish, 12*time.Minute)
@@ -183,7 +183,7 @@ func demoStory(now time.Time, panes DemoPanes) []demoJob {
 
 	cache := demoBase(now, panes, "Coalesce the fleet cache refresh", "Make the fleet cache coalesce events instead of resetting a debounce timer, so a busy pane cannot starve the refetch. Have it reviewed before asking to apply.",
 		"builder", crowsnest, string(StateNeedsYou), demostory.CacheBuilder, 70*time.Minute)
-	cache.Origin, cache.Cause, cache.CauseDetail, cache.Waiting = LeadPrefix+demostory.Crowsnest, string(CauseQuestions), "1 open question(s)", true
+	cache.Origin, cache.Cause, cache.CauseDetail, cache.Waiting = LeadPrefix+demostory.Crowsnest, string(CauseQuestions), "1 open question", true
 	cache.Progress, cache.LastActivityAt = "Waiting on whether to apply the refactor", demoAgo(now, 6*time.Minute)
 
 	review := demoBase(now, panes, "Review the fleet cache refactor", "Review wip/fleet-cache. Findings to REVIEW.md, then ask which the builder should fix before merge.",
@@ -197,7 +197,7 @@ func demoStory(now time.Time, panes DemoPanes) []demoJob {
 	links.Cause, links.CauseDetail = string(CauseApprovalTool), "Bash: npm run test:links"
 
 	hero := demoBase(now, panes, "Rewrite the homepage hero", "Rewrite the homepage hero so it says what crowsnest does, not what it is built on.", "builder", website, string(StateNeedsYou), demostory.HeroWriter, 50*time.Minute)
-	hero.Cause, hero.CauseDetail, hero.Waiting, hero.Progress = string(CauseQuestions), "1 open question(s)", true, "Waiting on the first sentence"
+	hero.Cause, hero.CauseDetail, hero.Waiting, hero.Progress = string(CauseQuestions), "1 open question", true, "Waiting on the first sentence"
 
 	refresh := demoBase(now, panes, "Add pull-to-refresh to the inbox screen", "Add pull-to-refresh to the mobile inbox screen, with a test.", "builder", mobile, string(StateNeedsYou), demostory.RefreshBuilder, 35*time.Minute)
 	refresh.Cause, refresh.CauseDetail = string(CauseApprovalTool), "Edit: "+demoRefreshFile

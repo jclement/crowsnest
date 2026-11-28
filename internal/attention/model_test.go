@@ -432,3 +432,18 @@ func TestBuildNamesATrustQuestion(t *testing.T) {
 		t.Fatalf("items = %+v", items)
 	}
 }
+
+// R10 (Fable, polish): a dialog item read "Dialog: Rebuild and publish the handbook site", with
+// the question it asks one line further down. It leads with the question.
+func TestDialogTitleIsTheQuestion(t *testing.T) {
+	cases := []struct{ detail, want string }{
+		{"Claude wants to run: rm -rf dist && npm run build", "Run rm -rf dist && npm run build?"},
+		{"Claude needs your permission to use Bash", "Claude needs your permission to use Bash"},
+		{"", "Dialog: Rebuild the site"},
+	}
+	for _, tc := range cases {
+		if got := dialogTitle(tc.detail, "Rebuild the site"); got != tc.want {
+			t.Errorf("dialogTitle(%q) = %q, want %q", tc.detail, got, tc.want)
+		}
+	}
+}

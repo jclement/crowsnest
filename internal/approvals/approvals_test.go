@@ -341,3 +341,29 @@ func TestSummaryShowsWhatIsCut(t *testing.T) {
 		t.Fatalf("long summary %q", got)
 	}
 }
+
+// R10 O-F17: the phone's tray headline was "mcp__github__create_issue", and Edit approvals were
+// titled by a three-line temporary path. Summaries name tools in words and paths inside the job
+// relative to it; a path outside the job, and any command, are shown as they are.
+func TestSummaryInIsReadable(t *testing.T) {
+	root := "/tmp/cn/state/demo-src/mobile"
+	cases := []struct {
+		tool, input, want string
+	}{
+		{"mcp__github__create_issue", `{"owner":"jclement","repo":"website"}`, "GitHub: create issue"},
+		{"mcp__my_server__do-thing", `{}`, "My server: do thing"},
+		{"Edit", `{"file_path":"/tmp/cn/state/demo-src/mobile/src/screens/InboxScreen.tsx"}`, "Edit: src/screens/InboxScreen.tsx"},
+		{"Write", `{"file_path":"/etc/hosts"}`, "Write: /etc/hosts"},
+		{"Write", `{"file_path":"/tmp/cn/state/demo-src/mobile-other/x.ts"}`, "Write: /tmp/cn/state/demo-src/mobile-other/x.ts"},
+		{"Bash", `{"command":"cat /tmp/cn/state/demo-src/mobile/README.md"}`, "Bash: cat /tmp/cn/state/demo-src/mobile/README.md"},
+		{"Read", `{"file_path":"/tmp/cn/state/demo-src/mobile"}`, "Read: /tmp/cn/state/demo-src/mobile"},
+	}
+	for _, tc := range cases {
+		if got := SummaryIn(tc.tool, json.RawMessage(tc.input), root); got != tc.want {
+			t.Errorf("SummaryIn(%s, %s) = %q, want %q", tc.tool, tc.input, got, tc.want)
+		}
+	}
+	if got := Summary("Edit", json.RawMessage(`{"file_path":"/a/b.go"}`)); got != "Edit: /a/b.go" {
+		t.Errorf("without a root the path is kept: %q", got)
+	}
+}

@@ -155,7 +155,9 @@ function ProjectRow({ project, selected }: { project: ProjectView; selected: boo
         <span className="flex flex-wrap gap-1 text-2xs text-muted">
           {project.counts.needs_you > 0 && <Chip tone="danger">{project.counts.needs_you} need you</Chip>}
           {project.counts.running > 0 && <Chip tone="accent">{project.counts.running} running</Chip>}
-          <span>{project.counts.total} jobs</span>
+          <span>
+            {project.counts.total} job{project.counts.total === 1 ? "" : "s"}
+          </span>
         </span>
       </Link>
       {!project.archived && (

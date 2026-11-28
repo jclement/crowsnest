@@ -493,11 +493,11 @@ func Render(f Facts) string {
 	b.WriteString("### Waiting on you\n\n")
 	waiting := 0
 	if f.Questions > 0 {
-		fmt.Fprintf(&b, "- %d open question(s), %d blocking\n", f.Questions, f.Blocking)
+		fmt.Fprintf(&b, "- %d open question%s, %d blocking\n", f.Questions, pluralS(f.Questions), f.Blocking)
 		waiting++
 	}
 	if f.Approvals > 0 {
-		fmt.Fprintf(&b, "- %d tool call(s) waiting for approval\n", f.Approvals)
+		fmt.Fprintf(&b, "- %d tool call%s waiting for approval\n", f.Approvals, pluralS(f.Approvals))
 		waiting++
 	}
 	for _, j := range f.Stuck {
@@ -509,7 +509,7 @@ func Render(f Facts) string {
 		waiting++
 	}
 	if len(f.Unlanded) > 0 {
-		fmt.Fprintf(&b, "- %d finished job(s) with a worktree still to land or discard\n", len(f.Unlanded))
+		fmt.Fprintf(&b, "- %d finished job%s with a worktree still to land or discard\n", len(f.Unlanded), pluralS(len(f.Unlanded)))
 		waiting++
 	}
 	if waiting == 0 {
@@ -558,4 +558,12 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// pluralS is "s" for any count but one: "1 open question", "2 open questions" (R10, small copy).
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }

@@ -200,12 +200,12 @@ export function FileDiff({ view, split, wrap, onMoreContext, comments }: FileDif
           {newLines ? (
             <>
               {gap.index > 0 && (
-                <GapButton icon={ArrowDown} label={`Show ${Math.min(EXPAND_STEP, hidden)} more lines below the change above`} onClick={() => expand(gap, "down")} />
+                <GapButton icon={ArrowDown} label={`Show ${lines(Math.min(EXPAND_STEP, hidden), "more")} below the change above`} onClick={() => expand(gap, "down")} />
               )}
               {gap.index < hunks.length && (
-                <GapButton icon={ArrowUp} label={`Show ${Math.min(EXPAND_STEP, hidden)} more lines above the change below`} onClick={() => expand(gap, "up")} />
+                <GapButton icon={ArrowUp} label={`Show ${lines(Math.min(EXPAND_STEP, hidden), "more")} above the change below`} onClick={() => expand(gap, "up")} />
               )}
-              <GapButton icon={ChevronsUpDown} label={`Show all ${hidden} hidden lines`} onClick={() => expand(gap, "all")} />
+              <GapButton icon={ChevronsUpDown} label={hidden === 1 ? "Show the 1 hidden line" : `Show all ${hidden} hidden lines`} onClick={() => expand(gap, "all")} />
             </>
           ) : (
             <>
@@ -436,4 +436,9 @@ function GapButton({ icon: Icon, label, onClick }: { icon: typeof ArrowUp; label
       <Icon className="h-3.5 w-3.5" aria-hidden />
     </button>
   );
+}
+
+/** "1 more line", "20 more lines" (R10: "Show 1 more lines"). */
+function lines(count: number, word: string): string {
+  return `${count} ${word} line${count === 1 ? "" : "s"}`;
 }

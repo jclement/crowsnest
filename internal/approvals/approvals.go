@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -821,10 +822,19 @@ func SummaryCut(input json.RawMessage) bool {
 }
 
 // Summary renders a tool call in one line.
-func Summary(tool string, input json.RawMessage) string {
+func Summary(tool string, input json.RawMessage) string { return SummaryIn(tool, input, "") }
+
+// SummaryIn renders a tool call in one line for a person (R10 O-F17): the tool by a readable
+// name (mcp__github__create_issue is "GitHub: create issue") and a file the call names relative to
+// root, the job's directory, when it is inside it ("Edit: src/screens/Inbox.tsx", not three lines
+// of temporary directory). A path outside root stays absolute: writing outside the job is the
+// thing to notice. A command is never rewritten. The raw name and input stay on the approval.
+func SummaryIn(tool string, input json.RawMessage, root string) string {
 	var fields map[string]any
 	_ = json.Unmarshal(input, &fields)
 	text := termtext.Clean(risk.SummaryText(fields)) // format characters (bidi among them) go: R5-S7
+	text = relativeToRoot(text, fields, root)
+	tool = ToolLabel(tool)
 	if text == "" {
 		return tool
 	}
@@ -836,6 +846,45 @@ func Summary(tool string, input json.RawMessage) string {
 	// a call is never low (risk.shapeHits), so no notification offers to allow it unseen.
 	more := fmt.Sprintf("… (%d more characters)", len(runes)-(risk.MaxSummaryRunes-1))
 	return tool + ": " + string(runes[:risk.MaxSummaryRunes-1]) + more
+}
+
+// mcpServerNames spell the MCP servers people know by a brand ("github" is GitHub).
+var mcpServerNames = map[string]string{"github": "GitHub", "gitlab": "GitLab", "linear": "Linear", "slack": "Slack", "notion": "Notion", "sentry": "Sentry"}
+
+// ToolLabel is a tool's name for a person: an MCP tool, mcp__<server>__<tool>, reads
+// "<Server>: <tool in words>"; any other tool keeps its name (Bash, Edit).
+func ToolLabel(tool string) string {
+	rest, ok := strings.CutPrefix(tool, "mcp__")
+	if !ok {
+		return tool
+	}
+	server, name, ok := strings.Cut(rest, "__")
+	if !ok || server == "" || name == "" {
+		return tool
+	}
+	label, known := mcpServerNames[strings.ToLower(server)]
+	if !known {
+		label = strings.ToUpper(server[:1]) + strings.ReplaceAll(server[1:], "_", " ")
+	}
+	return label + ": " + strings.ReplaceAll(strings.ReplaceAll(name, "_", " "), "-", " ")
+}
+
+// relativeToRoot returns text with root cut off when text is exactly a path field of the call and
+// that path is inside root; otherwise text unchanged.
+func relativeToRoot(text string, fields map[string]any, root string) string {
+	if root == "" || text == "" || !filepath.IsAbs(text) {
+		return text
+	}
+	for _, key := range []string{"file_path", "notebook_path", "path"} {
+		if value, _ := fields[key].(string); value != "" && strings.Join(strings.Fields(value), " ") == text {
+			rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(text))
+			if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+				return text
+			}
+			return rel
+		}
+	}
+	return text
 }
 
 func toApproval(r store.ApprovalRecord) Approval {
@@ -859,7 +908,7 @@ func toApproval(r store.ApprovalRecord) Approval {
 		settled := r.SettledAt
 		approval.SettledAt = &settled
 	}
-	approval.Summary = Summary(r.ToolName, approval.ToolInput)
+	approval.Summary = SummaryIn(r.ToolName, approval.ToolInput, r.Cwd)
 	return approval
 }
 

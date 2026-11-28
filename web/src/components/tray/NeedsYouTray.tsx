@@ -320,7 +320,7 @@ export function TrayRow({
               {" · "}
               {kindLabel(item.item)}
               {who && ` · ${who}`}
-              {item.at && ` · waiting ${relativeTime(item.at)}`}
+              {item.at && ` · waiting ${relativeTime(item.at).replace(/ ago$/, "")}`}
             </span>
           </span>
         </button>

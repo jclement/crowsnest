@@ -5381,6 +5381,15 @@ browser, from my phone".
   folded, with "Bring back"); only a failed job can be dismissed, everything else leaves when
   what it stands for is resolved.
 
+**Titles are a person's words (R10).** An approval's summary, which is its queue title, push
+text and journal line, names the tool readably (`approvals.ToolLabel`: `mcp__github__create_issue`
+is "GitHub: create issue") and a file inside the call's working directory relative to it
+(`approvals.SummaryIn`: "Edit: src/screens/Inbox.tsx"); a file outside it stays absolute, since
+writing outside the job is what to notice, and a command is never rewritten. The raw tool name and
+input stay on the approval, one tap away. A job's dialog item leads with what the dialog asks ("Run
+rm -rf dist && npm run build?", `attention.dialogTitle`), the job's title under it. Counts say
+"1 open question", never "question(s)".
+
 ### 22.2 Now
 
 `routes/NowView.tsx`, `GET /now`. The default route. On a phone, top to bottom; from `lg` the
