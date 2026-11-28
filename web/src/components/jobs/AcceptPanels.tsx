@@ -99,6 +99,46 @@ export function EvidenceCard({ job }: { job: Detail }) {
 }
 
 /**
+ * The human's request for changes on a finished job (R9-C1): which fix job is making them, and the
+ * one decision that lets the job land again. Land refuses it until then; a passing re-check alone
+ * does not say the comments were addressed, so accepting is the human's.
+ */
+export function ChangesCard({ job }: { job: Job }) {
+  const guard = useGuard(job.id);
+  const state = job.changes_state;
+  if (!state || job.land_state || job.torn_down_at) return null;
+  const busy = !!job.fix_job || job.accept_state === "checking";
+  const words =
+    state === "requested"
+      ? `You sent this job back with review comments. ${job.fix_job ? `Fix job ${job.fix_job}` : "A fix job"} is making the changes in its worktree; Land waits until they are made and you accept them.`
+      : state === "fix_failed"
+        ? "You sent this job back with review comments, and the fix job did not finish: the changes are not made. Send the comments again from the diff, or set the request aside to land the job as it is."
+        : "The fix job made the changes you asked for. Look at the diff, then accept them: the job does not land until you do.";
+  return (
+    <Card
+      aria-label="Changes requested"
+      title={
+        <>
+          <MessageSquareQuote className="h-4 w-4" aria-hidden />
+          {state === "made" ? "Changes made" : "Changes requested"}
+        </>
+      }
+      tone={state === "fix_failed" ? "danger" : "warning"}
+      actions={job.fix_job ? <Chip tone="accent">{job.fix_job}</Chip> : undefined}
+    >
+      <p className="text-sm text-body">{words}</p>
+      {state !== "requested" && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button compact icon={ShieldCheck} disabled={guard.pending || busy} onClick={() => guard.press("resolve-changes", state === "made" ? "Changes accepted" : "Request set aside")}>
+            {state === "made" ? "Accept the changes" : "Set the request aside"}
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
  * What "accepted" proves, said plainly (R6-C02, R6-S4): the project's own check passed on that
  * commit, in a clean tree. The branch can change its check, so this is not independent evidence;
  * when it did, the files are named.

@@ -233,7 +233,7 @@ describe("DiffViewer line comments", () => {
     const dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Overall note (optional)" }), "Nearly");
     await userEvent.click(within(dialog).getByRole("button", { name: "Send 1 comment to the agent" }));
-    await waitFor(() => expect(calls.find((call) => call.path === "/changes/jobs/j_7/comments/send")?.body).toEqual({ overall: "Nearly", dry_run: false, force: false }));
+    await waitFor(() => expect(calls.find((call) => call.path === "/changes/jobs/j_7/comments/send")?.body).toMatchObject({ overall: "Nearly", dry_run: false, force: false, send_id: expect.any(String) }));
   });
 
   it("on a phone a tap selects a line and a second tap extends it", async () => {

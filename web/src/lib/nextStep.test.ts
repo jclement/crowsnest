@@ -5,7 +5,7 @@
 // attention section; a finished job's chip never does).
 import { describe, expect, it } from "vitest";
 import type { AcceptState } from "./accept";
-import { nextOwnerText, nextStep, type JobCause, type JobState, type NextStepInput } from "./jobs";
+import { holdStep, nextOwnerText, nextStep, type HoldKind, type JobCause, type JobState, type NextStepInput } from "./jobs";
 
 const base: NextStepInput = { state: "running", stuck: false, cause: "", cause_detail: "", worktree_branch: "" };
 
@@ -48,6 +48,28 @@ const cases: Array<[string, Partial<NextStepInput>, string, string]> = [
   ["blocked", { state: "blocked" }, "Blocked", "agent"],
   ["failed", { state: "failed" }, "Failed", "you"],
   ["cancelled", { state: "cancelled" }, "Cancelled", "nobody"],
+  // R9-C1: a finished job sent back with comments is not ready to land on its old evidence.
+  ["changes asked of a fix job", { state: "done", worktree_branch: "job/j_1", accept_state: "accepted", changes_state: "requested", fix_job: "j_2" }, "Changes requested", "agent"],
+  ["the fix job did not finish", { state: "done", worktree_branch: "job/j_1", accept_state: "accepted", changes_state: "fix_failed" }, "Fix failed", "you"],
+  ["the changes are made", { state: "done", worktree_branch: "job/j_1", accept_state: "accepted", changes_state: "made" }, "Review the changes", "you"],
+  ["the changes are made, re-checking", { state: "done", worktree_branch: "job/j_1", accept_state: "checking", changes_state: "made" }, "Checking", "crowsnest"],
+  ["the changes are made, the check fails", { state: "done", worktree_branch: "job/j_1", accept_state: "failed", changes_state: "made" }, "Check failed", "you"],
+  // R9-C10: shapes the API really produces, where the hold outranks the state.
+  [
+    "blocked on a timer, under the usage limit",
+    { state: "blocked", wake_kind: "time", stuck: true, cause: "limit", cause_detail: "usage limit: resets 3pm", holds: [{ kind: "usage_limit", lift: "crowsnest", why: "usage limit" }] },
+    "Held: usage limit",
+    "crowsnest",
+  ],
+  [
+    "blocked on another job, under the usage limit",
+    { state: "blocked", wake_kind: "job", stuck: true, cause: "limit", holds: [{ kind: "usage_limit", lift: "crowsnest", why: "usage limit" }] },
+    "Held: usage limit",
+    "crowsnest",
+  ],
+  ["blocked with a tool call waiting", { state: "blocked", wake_kind: "time", holds: [{ kind: "approval_tool", lift: "crowsnest", why: "Bash" }] }, "Waiting on you", "you"],
+  ["queued under a budget above it", { state: "queued", holds: [{ kind: "budget", lift: "human", why: "j_1's budget", from: "j_1" }] }, "Held: budget", "you"],
+  ["checking, with a budget reached meanwhile", { state: "in_review", accept_state: "checking", holds: [{ kind: "checking", lift: "crowsnest", why: "" }, { kind: "budget", lift: "human", why: "" }] }, "Checking", "crowsnest"],
 ];
 
 describe("nextStep", () => {
@@ -87,12 +109,38 @@ describe("nextStep", () => {
                       combinations++;
                       const where = `${state}/${stuck}/${cause}/${accept_state}/${land_state}/${wake_kind}: ${step.label}`;
                       if (!labels.has(step.label) || !step.tone) wrong.push(where);
-                      // A finished job is never the agent's to move on.
+                      // A finished job is never the agent's to move on (a fix job making requested changes is tabled above).
                       if ((state === "done" || state === "cancelled" || state === "failed") && step.owner === "agent") wrong.push(`${where} (agent)`);
                       // "Waiting on you" is always the human's.
                       if (step.label === "Waiting on you" && step.owner !== "you") wrong.push(`${where} (${step.owner})`);
                     }
     expect(wrong.slice(0, 10)).toEqual([]);
     expect(combinations).toBeGreaterThan(100_000);
+  });
+
+  // R9-C10: the chip is the board's main signal, so a live job's strongest hold must win in every
+  // state and with every other field, and a finished job's chip ignores holds (they are cleared).
+  const holdKinds: HoldKind[] = ["approval", "checking", "reviewing", "budget", "check", "review", "approval_tool", "questions", "usage_limit"];
+  it("shows the strongest hold for every hold and every state", { timeout: 30_000 }, () => {
+    const wrong: string[] = [];
+    for (const kind of holdKinds)
+      for (const state of states)
+        for (const stuck of [false, true])
+          for (const cause of causes)
+            for (const accept_state of accepts)
+              for (const wake_kind of wakes)
+                for (const worktree of ["", "job/j_1"]) {
+                  const job: NextStepInput = { state, stuck, cause, cause_detail: "", accept_state, wake_kind, worktree_branch: worktree, holds: [{ kind, lift: "human", why: "" }] };
+                  const step = nextStep(job);
+                  const finished = state === "done" || state === "failed" || state === "cancelled";
+                  const want = finished ? nextStep({ ...job, holds: [] }).label : holdStep(job, kind).label;
+                  if (step.label !== want) wrong.push(`${kind}/${state}/${stuck}/${cause}/${accept_state}/${wake_kind}: ${step.label}, want ${want}`);
+                  if (!labels.has(step.label)) wrong.push(`${kind}/${state}: unknown label ${step.label}`);
+                }
+    expect(wrong.slice(0, 10)).toEqual([]);
+  });
+
+  it("gives every hold a label the table knows", () => {
+    for (const kind of holdKinds) expect(labels.has(holdStep({ ...base, worktree_branch: "job/j_1" }, kind).label)).toBe(true);
   });
 });

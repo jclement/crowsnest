@@ -425,14 +425,10 @@ func hasOwnBudgetHold(r store.JobRecord) bool {
 	return false
 }
 
-// tellBudget types a budget notice to a job's agent (not while paused: the card says it).
+// tellBudget types a budget notice to a job's agent, through the continuation gate (not while
+// paused or held: the card says it).
 func (s *Service) tellBudget(ctx context.Context, job Job, message string) {
-	if message == "" || job.PaneID == "" || s.paused() {
-		return
-	}
-	if err := s.sendText(ctx, job.PaneID, job.AgentName, message); err != nil {
-		_ = s.Journal(ctx, job.ID, EventBudget, "The budget notice could not be typed to the agent: "+oneLine(err.Error(), 160), nil)
-	}
+	s.typeContinuation(ctx, job, "the budget notice", message)
 }
 
 // exceedBelow puts the live jobs below parent in front of the human with it: their spend is
@@ -555,8 +551,8 @@ func (s *Service) liftBudgetBelow(ctx context.Context, root, parent string, dept
 			}
 			return nil
 		})
-		if err == nil && job.State == StateRunning && job.PaneID != "" {
-			_ = s.sendText(ctx, job.PaneID, job.AgentName, fmt.Sprintf("[crowsnest budget] The human raised the budget of %s, which covers job %s. Carry on with the work.", root, id))
+		if err == nil && job.State == StateRunning {
+			s.typeContinuation(ctx, job, "the budget raise", fmt.Sprintf("[crowsnest budget] The human raised the budget of %s, which covers job %s. Carry on with the work.", root, id))
 		}
 		s.liftBudgetBelow(ctx, root, id, depth+1)
 	}
@@ -638,8 +634,8 @@ func (s *Service) SetJobBudget(ctx context.Context, id string, input BudgetInput
 	if err == nil && share < 1 {
 		s.liftBudgetBelow(ctx, id, id, 0)
 	}
-	if err == nil && resumed && job.PaneID != "" {
-		_ = s.sendText(ctx, job.PaneID, job.AgentName, fmt.Sprintf("[crowsnest budget] The human raised job %s's budget. Carry on with the work.", job.ID))
+	if err == nil && resumed {
+		s.typeContinuation(ctx, job, "the budget raise", fmt.Sprintf("[crowsnest budget] The human raised job %s's budget. Carry on with the work.", job.ID))
 	}
 	return s.jobNow(ctx, id, job), err
 }
@@ -664,10 +660,8 @@ func (s *Service) BudgetFinishStep(ctx context.Context, id string) (Job, error) 
 		return Job{}, err
 	}
 	_ = s.opts.Store.SetKV(ctx, graceKey(job.ID), s.opts.Now().UTC().Format(time.RFC3339Nano)) // R7-C03: bounded in time too
-	if job.PaneID != "" {
-		_ = s.sendText(ctx, job.PaneID, job.AgentName, fmt.Sprintf("[crowsnest budget] The human lets you finish the step you are in on job %s. "+
-			"Finish it, commit what is safe to keep, call job_update with where you got to, then end your turn.", job.ID))
-	}
+	s.typeContinuation(ctx, job, "finish the step", fmt.Sprintf("[crowsnest budget] The human lets you finish the step you are in on job %s. "+
+		"Finish it, commit what is safe to keep, call job_update with where you got to, then end your turn.", job.ID))
 	return job, nil
 }
 

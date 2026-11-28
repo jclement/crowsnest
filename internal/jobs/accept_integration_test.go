@@ -17,6 +17,8 @@ package jobs_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +27,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/jobs"
+	"github.com/jclement/crowsnest/internal/questions"
 )
 
 // acceptCheck fails unless answer.txt holds exactly 42, and says why on its last line.
@@ -125,21 +128,44 @@ func turnEndedAfterBudget(d jobs.Detail) bool {
 	return false
 }
 
+// proseBrief makes a turn that ends with a question in prose the natural move: it says why the
+// tool would spoil it, as the browser journey's brief does (web/e2e/claude/supervise.spec.ts).
+const proseBrief = "This is a test of what crowsnest does with a question asked in plain text, so asking it any other way would spoil it. " +
+	"Your first reply must be exactly this one sentence, written as plain text, with no tool call before it (not the ask tool, not any other), " +
+	"and then end your turn: Should I write hello or hi in the greeting file? " +
+	"After that, if crowsnest sends you a message about it, do what that message says."
+
+// proseAttempts is how many fresh jobs the scenario gives when haiku skips the prose turn and asks
+// with the tool at once (seen three times in the lead's runs): then the situation under test never
+// arose, so another job tries it. What is asserted is never relaxed.
+const proseAttempts = 3
+
 func (r *stopRig) testProseQuestion(t *testing.T) {
-	job := r.create(t, "Your first reply must be exactly this one sentence, with no tool call before it, and then end your turn: "+
-		"Should I write hello or hi in the greeting file? "+
-		"After that, if crowsnest sends you a message about it, do what that message says.")
-	question := r.waitForQuestion(t, job.ID)
-	detail := r.get(t, job.ID)
-	r.record(t, "(c) prose question", detail)
+	var job jobs.Job
+	var question questions.Question
+	var detail jobs.Detail
 	prose := false
-	for _, event := range detail.Timeline {
-		if event.Kind == jobs.EventNudge && event.Detail != nil {
-			t.Logf("nudge %v; its last message: %q", event.Detail["rule"], event.Detail["last_message"])
-			if event.Detail["rule"] == string(jobs.RuleProseQuestion) {
-				prose = true
+	for attempt := 1; attempt <= proseAttempts; attempt++ {
+		job = r.create(t, proseBrief)
+		question = r.waitForQuestion(t, job.ID)
+		detail = r.get(t, job.ID)
+		r.record(t, fmt.Sprintf("(c) prose question, attempt %d", attempt), detail)
+		nudged := false
+		for _, event := range detail.Timeline {
+			if event.Kind == jobs.EventNudge && event.Detail != nil {
+				nudged = true
+				t.Logf("nudge %v; its last message: %q", event.Detail["rule"], event.Detail["last_message"])
+				if event.Detail["rule"] == string(jobs.RuleProseQuestion) {
+					prose = true
+				}
 			}
 		}
+		if prose || nudged || attempt == proseAttempts {
+			break // a prose turn happened (refused or not): that is the result
+		}
+		t.Logf("attempt %d: %s asked with the tool at once (no prose turn); trying a fresh job", attempt, job.ID)
+		r.call(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel", nil, nil)
+		r.call(http.MethodDelete, "/api/v1/questions/"+question.ID, nil, nil)
 	}
 	if !prose {
 		t.Fatalf("the stop was never refused as a prose question; the agent asked %s anyway", question.ID)

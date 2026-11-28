@@ -194,6 +194,13 @@ type Service struct {
 
 	checksMu sync.Mutex
 	checks   map[string]bool // jobs whose check this process is running (accept.go)
+	// workspaces are the isolated copies this process's checks are using (checkspace.go);
+	// checkCtx is cancelled by StopChecks, checkRuns counts the checks running.
+	workspaces  map[string]bool
+	checkCtx    context.Context
+	checkCancel context.CancelFunc
+	checkRuns   sync.WaitGroup
+	reconciled  sync.Once // the first tick's clean-up of copies a crash left
 
 	landingMu  sync.Mutex
 	landingNow map[string]bool // jobs whose allowed land this process is running (landrequest.go)
@@ -202,6 +209,11 @@ type Service struct {
 	watch   map[string]*jobWatch // per-job supervisor memory: spinning samples, budget reads (spinning.go)
 
 	inv invariants // the latest wait-invariant check (waits.go)
+
+	// feedbackSettled is told what became of each batch of comments (feedback.go); pendingSettled
+	// holds outcomes saved under s.mu until it is let go (mutate tells them).
+	feedbackSettled atomic.Pointer[FeedbackSettled]
+	pendingSettled  []settledFeedback
 }
 
 // New returns a Service.
@@ -218,7 +230,9 @@ func New(opts Options) *Service {
 	if opts.Notify == nil {
 		opts.Notify = func(string) {}
 	}
-	return &Service{opts: opts, instance: newInstance()}
+	s := &Service{opts: opts, instance: newInstance()}
+	s.checkCtx, s.checkCancel = context.WithCancel(context.Background())
+	return s
 }
 
 // Roles returns the role set.
@@ -425,6 +439,9 @@ type change struct {
 	events    []store.JobEventRecord
 	notify    string
 	questions store.JobQuestionSummary
+	// settled are batches of comments whose outcome the send owning them is told once the change
+	// is saved (feedback.go).
+	settled []settledFeedback
 }
 
 // event appends a timeline entry.
@@ -442,8 +459,12 @@ func (c *change) event(kind, summary string, detail map[string]any) {
 // the change. The returned job is the saved state.
 func (s *Service) mutate(ctx context.Context, id string, fn func(record *store.JobRecord, c *change) error) (Job, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mutateLocked(ctx, id, fn)
+	job, err := s.mutateLocked(ctx, id, fn)
+	settled := s.pendingSettled
+	s.pendingSettled = nil
+	s.mu.Unlock()
+	s.tellSettled(ctx, settled)
+	return job, err
 }
 
 // mutateLocked is mutate for a caller that already holds s.mu.
@@ -484,11 +505,14 @@ func (s *Service) mutateLocked(ctx context.Context, id string, fn func(record *s
 			// record anything for a finished job (R2-C08).
 			clearClaim(&record)
 			record.LifecycleGen++
+			// Comments that never reached the agent go back to the human (R9-C3/C4).
+			returnAllComments(&record, &c, "the job is "+record.State+" now")
 		}
 	}
 	if err := s.save(ctx, record, c); err != nil {
 		return Job{}, err
 	}
+	s.pendingSettled = append(s.pendingSettled, c.settled...)
 	if State(record.State).Terminal() && !State(before.State).Terminal() {
 		s.revokeTokensLocked(ctx, record) // R2-L1 (tokens.go)
 	}
@@ -594,6 +618,14 @@ func (s *Service) toJob(r store.JobRecord, open int) Job {
 		job.WakeJob = FormatID(r.WakeJob)
 	}
 	job.LastMessage, job.LastMessageAt = r.LastMessage, timePtr(r.LastMessageAt)
+	job.ChangesState, job.Feedback = r.ChangesState, waitingFeedbackOf(r)
+	if kind, fix := branchOpOf(r); fix > 0 && (kind == branchChanges || kind == branchRebase) {
+		job.FixJob = FormatID(fix)
+	}
+	job.Holds = holdsOf(r)
+	if job.Holds == nil {
+		job.Holds = []Hold{}
+	}
 	job.WaitOwner, job.Wake = waitOf(r, s.paused())
 	job.DoingNow = doingNow(r, s.opts.Now())
 	return job

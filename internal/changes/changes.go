@@ -135,6 +135,9 @@ type Options struct {
 	// Home is the user's home directory: a repository whose top is home or above it is never
 	// read as a subject's (R7-S8). "" skips that check.
 	Home string
+	// ClaimLive says whether a comment send is still held by a job's queued feedback batch, so
+	// the claim sweep leaves it alone (R9-C5). Nil: only age counts.
+	ClaimLive ClaimLive
 }
 
 // Service is the live diff and its marks.
@@ -1181,6 +1184,8 @@ func (s *Service) Run(ctx context.Context) {
 		}
 	}
 	s.sweep(ctx)
+	// A send's claim from before this start was left by a request that died with the process.
+	s.sweepClaims(ctx, true)
 	var events <-chan hub.Event
 	if s.opts.Hub != nil {
 		sub := s.opts.Hub.Subscribe(hub.DefaultBuffer * 4)
@@ -1191,6 +1196,8 @@ func (s *Service) Run(ctx context.Context) {
 	defer ticker.Stop()
 	hourly := time.NewTicker(time.Hour)
 	defer hourly.Stop()
+	claims := time.NewTicker(claimStale / 2)
+	defer claims.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -1205,6 +1212,8 @@ func (s *Service) Run(ctx context.Context) {
 			s.refreshWatched(ctx, tick)
 		case <-hourly.C:
 			s.sweep(ctx)
+		case <-claims.C:
+			s.sweepClaims(ctx, false)
 		}
 	}
 }

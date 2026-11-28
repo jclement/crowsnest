@@ -72,7 +72,7 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(newServeCommand(), newVersionCommand(), newHealthCommand(),
 		newAskCommand(), newQuestionCommand(), newNotifyCommand(), newSayCommand(), newMCPCommand(), newJobCommand(), newProjectCommand(), newHookCommand(), newUpdateCommand(),
 		newResetPasswordCommand(), newResetSetupCommand(), newDoctorCommand(), newOpenCommand(), newHeavyCommand(), newPauseCommand(), newResumeCommand(), newDigestCommand(), newBackupCommand(), newRestoreCommand(),
-		newTailscaleServeChildCommand(), newForgetScratchCommand())
+		newTailscaleServeChildCommand(), newCheckChildCommand(), newForgetScratchCommand())
 	return root
 }
 

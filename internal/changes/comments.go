@@ -39,6 +39,8 @@ const (
 	StatusDraft    = "draft"
 	StatusSent     = "sent"
 	StatusOutdated = "outdated"
+	// StatusWaiting: a send holds the note and has not delivered it yet (R9-C3, C5).
+	StatusWaiting = "waiting"
 )
 
 const (
@@ -70,8 +72,16 @@ type Comment struct {
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	SentAt    *time.Time `json:"sent_at,omitempty"`
-	// Pending: it goes with the next send (a draft, or an outdated note not sent since it changed).
+	// Pending: it goes with the next send (a draft, an outdated note not sent since it changed, or
+	// a note edited since it was sent).
 	Pending bool `json:"pending"`
+	// Waiting: a send holds it and has not delivered it yet (a job that may not continue yet
+	// types it later, R9-C3); it is neither a draft nor sent. Uncertain: a send of it may or may
+	// not have arrived (crowsnest stopped mid-send); it is due again and the human decides.
+	Waiting   bool `json:"waiting"`
+	Uncertain bool `json:"uncertain"`
+
+	version int64 // the text's version, for a send's claim
 }
 
 // CommentList is GET /changes/…/comments: a subject's notes (dismissed ones left out), with counts.
@@ -86,6 +96,7 @@ type CommentList struct {
 	Drafts     int        `json:"drafts"`
 	Sent       int        `json:"sent"`
 	Outdated   int        `json:"outdated"`
+	Waiting    int        `json:"waiting"`
 	LastSentAt *time.Time `json:"last_sent_at,omitempty"`
 }
 
@@ -121,21 +132,24 @@ func (s *Service) Comments(ctx context.Context, ask Ask) (CommentList, error) {
 // listComments decorates rows with their status against reading r.
 func listComments(target Target, r *reading, rows []store.DiffComment) CommentList {
 	list := CommentList{Subject: target.Subject, Kind: target.Kind, Label: target.Label, JobID: target.JobID, JobState: target.JobState, Comments: []Comment{}}
-	current := map[string]string{}
+	current := map[string]landing.DiffFile{}
 	for _, file := range r.scopes[ScopeAll] {
-		current[file.Path] = file.NewBlob
+		current[file.Path] = file
 	}
 	for _, row := range rows {
 		if !row.DismissedAt.IsZero() {
 			continue
 		}
 		comment := toComment(row)
-		blob, ok := current[row.Path]
+		file, ok := current[row.Path]
 		switch {
-		case !ok || blob != row.NewBlob:
+		case !ok || !anchorHolds(row, file):
 			comment.Status = StatusOutdated
 			list.Outdated++
-		case !row.SentAt.IsZero():
+		case comment.Waiting:
+			comment.Status = StatusWaiting
+			list.Waiting++
+		case !row.SentAt.IsZero() && !comment.Pending:
 			comment.Status = StatusSent
 			list.Sent++
 		default:
@@ -153,10 +167,24 @@ func listComments(target Target, r *reading, rows []store.DiffComment) CommentLi
 	return list
 }
 
+// anchorHolds reports whether the side a note was written on still holds the content it was
+// written against (R9-C11): the new blob for a new-side note, the old blob for an old-side one,
+// both for a whole-file note. A commit that leaves the work-tree content as it was changes
+// neither, so it does not outdate a note.
+func anchorHolds(row store.DiffComment, file landing.DiffFile) bool {
+	switch row.Side {
+	case SideOld:
+		return file.OldBlob == row.OldBlob
+	case SideNew:
+		return file.NewBlob == row.NewBlob
+	}
+	return file.OldBlob == row.OldBlob && file.NewBlob == row.NewBlob
+}
+
 func toComment(row store.DiffComment) Comment {
 	comment := Comment{ID: row.ID, Path: row.Path, Side: row.Side, LineStart: row.LineStart, LineEnd: row.LineEnd, Quote: row.Quote, Body: row.Body,
 		Scope: row.Scope, Hash: row.Hash, OldBlob: row.OldBlob, NewBlob: row.NewBlob, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		Pending: row.SentAt.IsZero()}
+		Pending: row.Due(), Waiting: row.Claim != "", Uncertain: !row.UncertainAt.IsZero() && row.Due(), version: row.Version}
 	if !row.SentAt.IsZero() {
 		at := row.SentAt
 		comment.SentAt = &at
@@ -327,10 +355,14 @@ func (s *Service) DismissComment(ctx context.Context, ask Ask, id int64) error {
 // ResendComment puts a sent note back with the drafts, so the next send carries it again.
 func (s *Service) ResendComment(ctx context.Context, ask Ask, id int64) error {
 	return s.changeComment(ctx, ask, func(subject string) error {
-		if _, err := s.opts.Store.GetDiffComment(ctx, subject, id); err != nil {
+		row, err := s.opts.Store.GetDiffComment(ctx, subject, id)
+		if err != nil {
 			return err
 		}
-		return s.opts.Store.SetDiffCommentsSent(ctx, subject, []int64{id}, time.Time{})
+		if row.Claim != "" {
+			return fail("busy", "a send holds this comment right now; it is re-sent only once that send is over")
+		}
+		return s.opts.Store.ResendDiffComment(ctx, subject, id)
 	})
 }
 
@@ -359,6 +391,9 @@ type Outgoing struct {
 	// ⟨U+XXXX⟩ in Body), and Mixed the words that mix alphabets.
 	Hidden int
 	Mixed  []string
+	// Claim is the send holding the notes (Claim), "" for a preview.
+	Claim string
+	notes []store.ClaimedComment
 }
 
 // Outgoing composes every pending note of the subject into one message body (Compose), with
@@ -382,21 +417,127 @@ func (s *Service) Outgoing(ctx context.Context, ask Ask, overall string) (Outgoi
 		}
 	}
 	if len(pending) == 0 {
+		if list.Waiting > 0 {
+			return Outgoing{}, fail("invalid", "every unsent comment is already in a send that waits to be typed")
+		}
 		return Outgoing{}, fail("invalid", "there are no unsent comments to send")
 	}
 	composed := Compose(pending, overall)
 	out := Outgoing{Target: target, Body: composed.Text, Hidden: composed.Hidden, Mixed: composed.Mixed}
 	for _, comment := range pending {
 		out.IDs = append(out.IDs, comment.ID)
+		out.notes = append(out.notes, store.ClaimedComment{ID: comment.ID, Version: comment.version})
 	}
 	return out, nil
 }
 
-// MarkSent records that the notes went to the agent at at.
+// Claim composes the subject's due notes (as Outgoing) and takes them for send claim in one
+// transaction, at exactly the versions composed (R9-C5): a second send at the same time, or an
+// edit between reading and claiming, finds them taken or changed and is refused (409 stale), so
+// two sends never carry the same note and an edit is never marked sent with text it did not
+// carry. The caller delivers Body and then settles the claim (Settle) by what happened.
+func (s *Service) Claim(ctx context.Context, ask Ask, overall, claim string) (Outgoing, error) {
+	out, err := s.Outgoing(ctx, ask, overall)
+	if err != nil {
+		return Outgoing{}, err
+	}
+	if err := s.opts.Store.ClaimDiffComments(ctx, out.Target.Subject, claim, out.notes, s.opts.Now().UTC()); err != nil {
+		if errors.Is(err, store.ErrClaimConflict) {
+			return Outgoing{}, fail("stale", "the comments changed, or another send took them, while this one was being made; look again and send")
+		}
+		return Outgoing{}, err
+	}
+	out.Claim = claim
+	s.publish(out.Target.Subject, time.Now().Format(time.RFC3339Nano)+commentPublish)
+	return out, nil
+}
+
+// SendOutcome is what became of a send's notes.
+type SendOutcome string
+
+// Send outcomes.
+const (
+	SendDelivered SendOutcome = "delivered" // typed or queued by the agent: the notes are sent, at the version carried
+	SendReturned  SendOutcome = "returned"  // provably not delivered: the notes are due again
+	SendUncertain SendOutcome = "uncertain" // may or may not have arrived: due again, marked so the human decides
+)
+
+// Settle ends send claim's hold on its notes by outcome and tells open viewers.
+func (s *Service) Settle(ctx context.Context, claim string, outcome SendOutcome) error {
+	subject, n, err := s.opts.Store.SettleDiffCommentClaim(ctx, claim, outcome == SendDelivered, outcome == SendUncertain, s.opts.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		s.publish(subject, time.Now().Format(time.RFC3339Nano)+commentPublish)
+	}
+	return nil
+}
+
+// MarkSent records that notes went to the agent at at (the demo's seeded history): a claim
+// settled as delivered.
 func (s *Service) MarkSent(ctx context.Context, subject string, ids []int64, at time.Time) error {
-	if err := s.opts.Store.SetDiffCommentsSent(ctx, subject, ids, at); err != nil {
+	notes := []store.ClaimedComment{}
+	for _, id := range ids {
+		row, err := s.opts.Store.GetDiffComment(ctx, subject, id)
+		if err != nil {
+			return err
+		}
+		notes = append(notes, store.ClaimedComment{ID: id, Version: row.Version})
+	}
+	claim := "mark:" + strconv.FormatInt(at.UnixNano(), 36)
+	if err := s.opts.Store.ClaimDiffComments(ctx, subject, claim, notes, at); err != nil {
+		return err
+	}
+	if _, _, err := s.opts.Store.SettleDiffCommentClaim(ctx, claim, true, false, at); err != nil {
 		return err
 	}
 	s.publish(subject, at.Format(time.RFC3339Nano)+commentPublish)
 	return nil
+}
+
+// claimStale is how old a send's claim must be before the sweep may settle it: every send is
+// over well inside it unless the process that made it died (a deferred batch is asked about).
+const claimStale = 10 * time.Minute
+
+// ClaimLive reports whether a send is still holding its notes for a reason the sweep must
+// respect (a job's queued feedback batch). Nil: only the age counts.
+type ClaimLive func(ctx context.Context, subject, claim string) (bool, error)
+
+// SweepClaims settles sends a dead or failed request left holding notes (R9-C5): older than
+// claimStale and not held by live (a batch still queued on its job), they are due again, marked
+// uncertain because the send may have reached the agent before it was lost. An unreadable answer
+// from live leaves the claim alone (fail closed: the batch may still be typed).
+func (s *Service) SweepClaims(ctx context.Context, live ClaimLive, startup bool) (int, error) {
+	claims, err := s.opts.Store.DiffCommentClaims(ctx)
+	if err != nil {
+		return 0, err
+	}
+	settled := 0
+	for _, claim := range claims {
+		// At start-up every request's claim is from a process that is gone, whatever its age.
+		if !startup && s.opts.Now().Sub(claim.ClaimedAt) < claimStale {
+			continue
+		}
+		if live != nil {
+			held, err := live(ctx, claim.Subject, claim.Claim)
+			if err != nil || held {
+				continue
+			}
+		}
+		if err := s.Settle(ctx, claim.Claim, SendUncertain); err != nil {
+			return settled, err
+		}
+		settled++
+	}
+	return settled, nil
+}
+
+// sweepClaims runs SweepClaims with the configured liveness check, logging a failure.
+func (s *Service) sweepClaims(ctx context.Context, startup bool) {
+	if n, err := s.SweepClaims(ctx, s.opts.ClaimLive, startup); err != nil {
+		s.opts.Logger.Warn("settling stale comment sends", "err", err)
+	} else if n > 0 {
+		s.opts.Logger.Info("comment sends left unfinished were handed back as may-or-may-not-have-arrived", "sends", n)
+	}
 }

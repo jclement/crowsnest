@@ -235,7 +235,8 @@ func usageOf(conversations *transcript.Manager, agentName string) func(context.C
 }
 
 // heldJobBusy reports a lifecycle step in flight on a job the standing agent holds (a /compact
-// typed then would interleave with it).
+// typed then would interleave with it), or a hold or waiting feedback on it: /exit or /compact
+// typed into the pane would act on a job that may not continue (R7-C04 residual).
 func heldJobBusy(db *store.Store, agent *orch.Orchestrator) func(context.Context) bool {
 	return func(ctx context.Context) bool {
 		pane := agent.Status().PaneID
@@ -247,7 +248,7 @@ func heldJobBusy(db *store.Store, agent *orch.Orchestrator) func(context.Context
 			return true // unknown: wait rather than interleave
 		}
 		for _, record := range records {
-			if record.LifecycleOp != "" {
+			if record.LifecycleOp != "" || jobs.HeldRecord(record) {
 				return true
 			}
 		}

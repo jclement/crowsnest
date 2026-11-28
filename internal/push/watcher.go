@@ -173,12 +173,14 @@ func (w *Watcher) QuestionAsked(question questions.Question) {
 		options = append(options, NoticeAction{Action: option.Key, Title: option.Label})
 	}
 	ctx := context.Background()
+	where := w.where(ctx, question.JobID, question.SourcePane)
 	notice = DecorateQuestion(notice, question.ID, question.Title, QuestionDetails{
 		// The lock screen says "blocking question" by the queue's own rule (attention.QuestionLabel,
-		// R8), so a push and the Inbox never disagree about what blocks.
-		Kind: string(question.Kind), Multi: question.Multi, Urgency: string(attention.QuestionLabel(question, false)), Recommend: question.Recommend,
+		// R8) with the queue's own fact about the job (it has stopped on its questions, read now,
+		// R9-C12), so a push and the Inbox never disagree about what blocks.
+		Kind: string(question.Kind), Multi: question.Multi, Urgency: string(attention.QuestionLabel(question, where.JobStopped)), Recommend: question.Recommend,
 		Options: options, Context: question.Context, HasFiles: len(question.Files) > 0 || question.FileCount > 0, BodyChars: len(question.BodyMD),
-	}, w.where(ctx, question.JobID, question.SourcePane))
+	}, where)
 	notice.FromAgent = !questions.IsGate(question.Context) // crowsnest's own gates are its notices
 	w.notify(ctx, notice)
 }

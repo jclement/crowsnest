@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/jclement/crowsnest/internal/actions"
+	"github.com/jclement/crowsnest/internal/attention"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/hub"
 	"github.com/jclement/crowsnest/internal/jobs"
@@ -46,6 +47,7 @@ func pushDescriber(jobService *jobs.Service, wiring *projectWiring) push.Describ
 		if jobID != "" {
 			if job, err := jobService.Get(ctx, jobID); err == nil {
 				where.JobID, where.JobTitle = job.ID, job.Title
+				where.JobStopped = attention.JobStoppedOnQuestions(&job.Job) // the queue's rule (R9-C12)
 				if job.ProjectID != 0 {
 					if project, err := wiring.service.Get(ctx, strconv.FormatInt(job.ProjectID, 10)); err == nil {
 						where.Project = project.Name

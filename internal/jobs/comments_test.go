@@ -19,7 +19,7 @@ func TestReviewCommentsToARunningJobAreAMessage(t *testing.T) {
 	r := newRig(t, nil)
 	ctx := context.Background()
 	job := r.create(CreateInput{Brief: "Build it", Dir: t.TempDir()})
-	delivery, err := r.svc.SendReviewComments(ctx, job.ID, reviewBody, 2, false)
+	delivery, err := r.svc.SendReviewComments(ctx, job.ID, CommentSend{Body: reviewBody, Count: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestReviewCommentsWaitForAHold(t *testing.T) {
 	job := r.create(CreateInput{Brief: "Build it", Dir: t.TempDir()})
 	r.edit(job.ID, func(rec *store.JobRecord) { rec.BudgetState = BudgetExceeded })
 	r.placeHold(job.ID, HoldBudget, "")
-	delivery, err := r.svc.SendReviewComments(ctx, job.ID, reviewBody, 2, false)
+	delivery, err := r.svc.SendReviewComments(ctx, job.ID, CommentSend{Body: reviewBody, Count: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +62,8 @@ func TestReviewCommentsWaitForAHold(t *testing.T) {
 	if n := promptsContaining(r, "[crowsnest review comments "+job.ID+"] "+reviewBody); n != 1 {
 		t.Fatalf("after the raise the comments were typed %d times, want 1", n)
 	}
-	if rec := r.record(job.ID); rec.PendingFeedback != "" {
-		t.Fatalf("still pending: %q", rec.PendingFeedback)
+	if rec := r.record(job.ID); hasFeedback(rec) {
+		t.Fatalf("still pending: %q", rec.FeedbackJSON)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestReviewCommentsWaitForThePause(t *testing.T) {
 	ctx := context.Background()
 	job := r.create(CreateInput{Brief: "Build it", Dir: t.TempDir()})
 	pause.Set(true)
-	delivery, err := r.svc.SendReviewComments(ctx, job.ID, reviewBody, 2, false)
+	delivery, err := r.svc.SendReviewComments(ctx, job.ID, CommentSend{Body: reviewBody, Count: 2})
 	if err != nil || delivery.How != CommentWaiting {
 		t.Fatalf("delivery = %+v %v", delivery, err)
 	}
@@ -96,7 +96,7 @@ func TestReviewCommentsLiftAFinalReviewsObjection(t *testing.T) {
 	if d := r.get(job.ID); d.State != StateNeedsYou {
 		t.Fatalf("setup: %s", d.State)
 	}
-	if _, err := r.svc.SendReviewComments(ctx, job.ID, reviewBody, 2, false); err != nil {
+	if _, err := r.svc.SendReviewComments(ctx, job.ID, CommentSend{Body: reviewBody, Count: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if d := r.get(job.ID); d.State != StateRunning {
@@ -123,7 +123,7 @@ func TestReviewCommentsOnAFinishedJobStartAFixJob(t *testing.T) {
 	if err != nil || plan.Route != CommentFixJob {
 		t.Fatalf("plan = %+v %v", plan, err)
 	}
-	delivery, err := r.svc.SendReviewComments(ctx, job.ID, reviewBody, 2, false)
+	delivery, err := r.svc.SendReviewComments(ctx, job.ID, CommentSend{Body: reviewBody, Count: 2})
 	if err != nil || delivery.How != CommentFixJob || delivery.FixJob == "" {
 		t.Fatalf("delivery = %+v %v", delivery, err)
 	}
@@ -134,7 +134,7 @@ func TestReviewCommentsOnAFinishedJobStartAFixJob(t *testing.T) {
 	if d := r.get(job.ID); d.State != StateDone {
 		t.Fatalf("the finished job changed state: %s", d.State)
 	}
-	if _, err := r.svc.SendReviewComments(ctx, job.ID, reviewBody, 2, false); err == nil || !strings.Contains(err.Error(), "fix job running") {
+	if _, err := r.svc.SendReviewComments(ctx, job.ID, CommentSend{Body: reviewBody, Count: 2}); err == nil || !strings.Contains(err.Error(), "is making the changes") {
 		t.Fatalf("a second fix job while one runs: %v", err)
 	}
 }
@@ -151,12 +151,12 @@ func TestReviewCommentsRefusals(t *testing.T) {
 	doneNoWorktree := r.create(CreateInput{Brief: "Dir job", Dir: t.TempDir()})
 	r.edit(doneNoWorktree.ID, func(rec *store.JobRecord) { rec.State = string(StateDone) })
 	for id, want := range map[string]string{inReview.ID: "checking or reviewing", cancelled.ID: "cancelled", doneNoWorktree.ID: "no worktree"} {
-		_, err := r.svc.SendReviewComments(ctx, id, reviewBody, 1, false)
+		_, err := r.svc.SendReviewComments(ctx, id, CommentSend{Body: reviewBody, Count: 1})
 		if err == nil || !IsValidation(err) || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", id, err, want)
 		}
 	}
-	if _, err := r.svc.SendReviewComments(ctx, "j_999", reviewBody, 1, false); !errors.Is(err, ErrNotFound) {
+	if _, err := r.svc.SendReviewComments(ctx, "j_999", CommentSend{Body: reviewBody, Count: 1}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown job: %v", err)
 	}
 	if n := promptsContaining(r, reviewBody); n != 0 {

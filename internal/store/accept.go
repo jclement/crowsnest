@@ -75,6 +75,34 @@ func (s *Store) FinishCheck(ctx context.Context, r CheckRecord) error {
 	return nil
 }
 
+// SetCheckWorkspace records the directory an isolated check makes its copy in ("" once removed),
+// before the copy exists, so start-up can remove one a crash left (migration 0023, R9-C7).
+func (s *Store) SetCheckWorkspace(ctx context.Context, id int64, dir string) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE job_checks SET workspace = ? WHERE id = ?`, dir, id); err != nil {
+		return fmt.Errorf("recording check %d's workspace: %w", id, err)
+	}
+	return nil
+}
+
+// CheckWorkspaces lists the isolated-check directories still recorded (id → directory).
+func (s *Store) CheckWorkspaces(ctx context.Context) (map[int64]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace FROM job_checks WHERE workspace != ''`)
+	if err != nil {
+		return nil, fmt.Errorf("listing check workspaces: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var dir string
+		if err := rows.Scan(&id, &dir); err != nil {
+			return nil, err
+		}
+		out[id] = dir
+	}
+	return out, rows.Err()
+}
+
 // checkMode is a check's mode as stored: "worktree" when none was given.
 func checkMode(mode string) string {
 	if mode == "" {
@@ -172,6 +200,19 @@ func (s *Store) ListUnappliedFixes(ctx context.Context, limit int) ([]JobRecord,
 	return s.queryJobs(ctx, jobSelect+` WHERE fix_of != 0 AND state IN ('done', 'failed', 'cancelled')
 		AND id > (SELECT p.fix_applied FROM jobs p WHERE p.id = jobs.fix_of AND p.state = 'done' AND p.land_state = '')
 		ORDER BY id LIMIT ?`, limit)
+}
+
+// ListLiveFixJobs returns fix jobs still at work, oldest first, whose parent is done and not
+// landed (R9-C2: recovery adopts one its parent holds no reservation for).
+func (s *Store) ListLiveFixJobs(ctx context.Context, limit int) ([]JobRecord, error) {
+	return s.queryJobs(ctx, jobSelect+` WHERE fix_of != 0 AND state NOT IN ('done', 'failed', 'cancelled')
+		AND EXISTS (SELECT 1 FROM jobs p WHERE p.id = jobs.fix_of AND p.state = 'done' AND p.land_state = '')
+		ORDER BY id LIMIT ?`, limit)
+}
+
+// ListBranchOps returns jobs holding a branch reservation (R9-C2), oldest first.
+func (s *Store) ListBranchOps(ctx context.Context, limit int) ([]JobRecord, error) {
+	return s.queryJobs(ctx, jobSelect+` WHERE branch_op != '' ORDER BY id LIMIT ?`, limit)
 }
 
 // ListAcceptedJobs returns finished jobs whose evidence matters to Land (accept_state set) and

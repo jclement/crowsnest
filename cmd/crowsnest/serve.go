@@ -238,6 +238,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, hooks se
 	// this, so no transcript is read until an owner exists.
 	meter := newSpendMeter(cfg, db, events, refs, jobServiceRef.Load, logger)
 	jobService := newJobService(cfg, client, db, events, agentSocket, identity, refs, journalLog, files, meter, logger)
+	defer jobService.StopChecks() // a clean stop ends running checks and removes their copies (R9-C7)
 	jobServiceRef.Store(jobService)
 	live.jobs.Store(jobService)
 	refs.projects.jobs.Store(jobService)

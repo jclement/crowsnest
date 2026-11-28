@@ -138,7 +138,31 @@ func (r changesResolver) Retired(ctx context.Context, subject string) bool {
 func startChanges(ctx context.Context, cfg config.Config, db *store.Store, events *hub.Hub, jobService *jobs.Service, projectService *projects.Service, logger *slog.Logger) *changes.Service {
 	home, _ := os.UserHomeDir()
 	service := changes.New(changes.Options{Store: db, Hub: events, Logger: logger, Home: home,
-		Resolver: changesResolver{cfg: cfg, db: db, jobs: jobService, projects: projectService}})
+		Resolver: changesResolver{cfg: cfg, db: db, jobs: jobService, projects: projectService},
+		// A job's queued batch of comments still holds its send's claim (R9-C5).
+		ClaimLive: func(ctx context.Context, subject, claim string) (bool, error) {
+			if !strings.HasPrefix(subject, "j_") {
+				return false, nil
+			}
+			live, err := jobService.FeedbackRefLive(ctx, subject, claim)
+			if errors.Is(err, jobs.ErrNotFound) {
+				return false, nil
+			}
+			return live, err
+		}})
+	// What became of a job's batch of comments settles its send's claim (R9-C3, C4, C5).
+	jobService.SetFeedbackSettled(func(ctx context.Context, ref string, outcome jobs.FeedbackOutcome, why string) {
+		settle := changes.SendDelivered
+		switch outcome {
+		case jobs.FeedbackUncertain:
+			settle = changes.SendUncertain
+		case jobs.FeedbackReturned:
+			settle = changes.SendReturned
+		}
+		if err := service.Settle(ctx, ref, settle); err != nil {
+			logger.Warn("settling a comment send", "send", ref, "outcome", outcome, "why", why, "err", err)
+		}
+	})
 	go service.Run(ctx)
 	return service
 }

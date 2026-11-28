@@ -22,7 +22,7 @@ import { Markdown } from "../Markdown";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
-import { AcceptedMeans } from "./AcceptPanels";
+import { AcceptedMeans, ChangesCard } from "./AcceptPanels";
 import { Chip } from "../ui/Chip";
 import { Revealed } from "../ui/Revealed";
 import { SkeletonRows } from "../ui/Skeleton";
@@ -38,6 +38,7 @@ export function ReviewPanel({ job }: { job: JobDetail }) {
   const view = query.data;
   return (
     <div className="flex min-w-0 flex-col gap-3">
+      <ChangesCard job={job} />
       <LandCard job={job} view={view} />
       {view.produced && <EmbeddedDiff who={{ kind: "job", id: job.id }} />}
       {view.produced && !view.land.state && <ReviewComments job={job} />}

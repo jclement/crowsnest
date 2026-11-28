@@ -249,6 +249,15 @@ type Job struct {
 	// LastMessage is what the agent said when it last ended a turn (shown on stuck and waiting cards).
 	LastMessage   string     `json:"last_message"`
 	LastMessageAt *time.Time `json:"last_message_at"`
+	// ChangesState is the human's request for changes on a finished job (R9-C1): "" | requested |
+	// fix_failed | made; FixJob the fix job working on the branch now ("" none).
+	ChangesState string `json:"changes_state"`
+	FixJob       string `json:"fix_job,omitempty"`
+	// Holds is the job's holds, strongest first (6.20; the board's chip shows the first, R9-C10).
+	Holds []Hold `json:"holds"`
+	// Feedback is what waits to be typed to the agent (findings, the human's comments), oldest
+	// first (R9-C3).
+	Feedback []WaitingFeedback `json:"feedback,omitempty"`
 
 	isolate   bool // the job asked for a worktree (Isolated)
 	briefSent bool // the brief reached the agent (a restart resumes rather than briefs again)

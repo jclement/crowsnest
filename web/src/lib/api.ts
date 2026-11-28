@@ -281,6 +281,7 @@ export const endpoints = {
     api<LandResult>(`/jobs/${encodeURIComponent(id)}/land`, { method: "POST", body: { action, confirm: true, override: true, ...(head ? { expected_head: head } : {}) } }),
   recheck: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/recheck`, { method: "POST" }),
   rebase: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/rebase`, { method: "POST" }),
+  resolveChanges: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/changes/resolve`, { method: "POST" }),
   setBudget: (id: string, budget: BudgetInput) => api<Job>(`/jobs/${encodeURIComponent(id)}/budget`, { method: "PUT", body: budget }),
   finishStep: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/budget/finish-step`, { method: "POST" }),
   wake: (id: string) => api<Job>(`/jobs/${encodeURIComponent(id)}/wake`, { method: "POST" }),

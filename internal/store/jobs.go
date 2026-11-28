@@ -133,6 +133,17 @@ type JobRecord struct {
 	FixApplied int64
 	// LandApprovedAt marks an allowed land request not yet finished (migration 0019, R6-C10).
 	LandApprovedAt time.Time
+	// ChangesState is the human's request for changes on a finished job (migration 0023, R9-C1):
+	// "" | requested | fix_failed | made. internal/jobs owns its meaning (changes.go).
+	ChangesState string
+	// BranchOp is the one operation changing a finished job's branch now (migration 0023, R9-C2):
+	// "" | changes:<id> | rebase:<id> | land; BranchOpOwner the process that took it, BranchOpAt when.
+	BranchOp      string
+	BranchOpOwner string
+	BranchOpAt    time.Time
+	// FeedbackJSON is the queue of messages waiting to be typed to the agent (migration 0023,
+	// R9-C4): immutable batches, owned by internal/jobs (feedback.go).
+	FeedbackJSON string
 }
 
 // JobEventRecord is one row of job_events.
@@ -192,6 +203,8 @@ func jobColumns(r *JobRecord) []column {
 		textCol("land_token", &r.LandToken), timeCol("land_requested_at", &r.LandRequestedAt),
 		textCol("holds_json", &r.HoldsJSON), textCol("pending_feedback", &r.PendingFeedback),
 		int64Col("fix_applied", &r.FixApplied), timeCol("land_approved_at", &r.LandApprovedAt),
+		textCol("changes_state", &r.ChangesState), textCol("branch_op", &r.BranchOp), textCol("branch_op_owner", &r.BranchOpOwner),
+		timeCol("branch_op_at", &r.BranchOpAt), textCol("feedback_json", &r.FeedbackJSON),
 	}
 	return cols
 }

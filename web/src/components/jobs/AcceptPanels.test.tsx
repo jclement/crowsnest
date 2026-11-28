@@ -6,7 +6,7 @@ import { renderWithClient, stubApi } from "../../test/render";
 import { LimitBanner } from "../control/LimitBanner";
 import { QuestionBody } from "../inbox/QuestionDetail";
 import { makeQuestion } from "../../lib/questionFixtures";
-import { BudgetCard, EvidenceCard } from "./AcceptPanels";
+import { BudgetCard, ChangesCard, EvidenceCard } from "./AcceptPanels";
 
 describe("EvidenceCard", () => {
   it("shows the check crowsnest ran, its commit and output, and runs it again", async () => {
@@ -145,5 +145,25 @@ describe("answer receipt", () => {
     stubApi(() => undefined);
     renderWithClient(<QuestionBody question={makeQuestion({ status: "answered", answer_value: "yes", delivery: "type", receipt: "received", received_at: new Date().toISOString() })} />);
     expect(screen.getByText("Received")).toBeInTheDocument();
+  });
+});
+
+describe("ChangesCard (R9-C1)", () => {
+  it("names the fix job while it works, and offers no way to land around it", () => {
+    renderWithClient(<ChangesCard job={makeDetail({ state: "done", worktree_branch: "job/j_1", changes_state: "requested", fix_job: "j_2" })} />);
+    expect(screen.getByRole("region", { name: "Changes requested" })).toHaveTextContent("Fix job j_2 is making the changes");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("asks the human to accept the changes once they are made", async () => {
+    const calls = stubApi((call) => (call.path === "/jobs/j_1/changes/resolve" ? { body: { data: makeDetail() } } : undefined));
+    renderWithClient(<ChangesCard job={makeDetail({ state: "done", worktree_branch: "job/j_1", changes_state: "made", accept_state: "accepted" })} />);
+    await userEvent.click(screen.getByRole("button", { name: "Accept the changes" }));
+    await waitFor(() => expect(calls.some((call) => call.path === "/jobs/j_1/changes/resolve" && call.method === "POST")).toBe(true));
+  });
+
+  it("offers to set the request aside after a failed fix", () => {
+    renderWithClient(<ChangesCard job={makeDetail({ state: "done", worktree_branch: "job/j_1", changes_state: "fix_failed" })} />);
+    expect(screen.getByRole("button", { name: "Set the request aside" })).toBeEnabled();
   });
 });

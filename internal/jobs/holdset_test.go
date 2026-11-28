@@ -262,7 +262,7 @@ func TestCheckFailureWaitsForThePause(t *testing.T) {
 	if len(r.fake.Prompts()) != typedBefore {
 		t.Fatalf("the check's failure was typed while paused: %v", r.fake.Prompts()[typedBefore:])
 	}
-	if rec := r.record(job.ID); rec.PendingFeedback == "" {
+	if rec := r.record(job.ID); !hasFeedback(rec) {
 		t.Fatal("the finding was not kept for later")
 	}
 	pause.Set(false)
@@ -271,7 +271,7 @@ func TestCheckFailureWaitsForThePause(t *testing.T) {
 	if len(typed) != 1 || !strings.Contains(typed[0].Text, "[crowsnest check]") {
 		t.Fatalf("after the resume the finding was not typed once: %v", typed)
 	}
-	if rec := r.record(job.ID); rec.PendingFeedback != "" {
+	if rec := r.record(job.ID); hasFeedback(rec) {
 		t.Fatal("a delivered finding was kept")
 	}
 }

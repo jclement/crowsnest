@@ -81,16 +81,23 @@ What sending does depends on the job:
 - **Running, or waiting on something**: the message goes to its agent at once (queued behind the
   turn it is in). A job whose final review still objects goes back to work, as a message would.
 - **Paused, or held** (a budget, a failed check, a question it asked): the message waits and is
-  typed when nothing holds the job any more. crowsnest never starts a turn a hold forbids.
+  typed when nothing holds the job any more, a job waiting on a timer or on you included. Its notes
+  show **waiting to be typed** until then, not sent. crowsnest never starts a turn a hold forbids,
+  and never types them over a draft someone left in the agent's input box: if one is there, they
+  wait, and **Let them type over a draft** under the notes lets them.
 - **Finished** (done or accepted): a finished job is not reopened. Sending starts a **fix job** in
   its worktree with your comments as its brief; when the fix job is done, crowsnest checks the job
-  again, as after a rebase.
+  again, as after a rebase. The job does not land until you accept the changes
+  ([Review and land: Sending it back](review-and-land.md#sending-it-back)).
 - **Being checked or reviewed by crowsnest**: refused until that ends.
 - **A project's changes**: the comments go to its lead (start it first), or to the orchestrator for
   its folder.
 
-After sending, a note shows **sent**. When the agent changes the file, notes on it show
-**outdated**, under the file's header, with the code they were about. **Dismiss** one that has been
+After sending, a note shows **sent**; a note you edit after sending goes with the next send again.
+A note marked **may not have arrived** was in a send crowsnest lost track of (it stopped while
+typing): send it again if the agent did not get it. When the agent changes the file, notes on it
+show **outdated**, under the file's header, with the code they were about; a note on the removed
+side goes outdated when the branch's base changes under it. **Dismiss** one that has been
 dealt with, or **Re-send** it with the next send. Notes go when the job lands or is discarded. With
 **Require all files viewed before Land** on, Land's confirmation names any notes you have not sent
 (a warning; it does not stop Land).
