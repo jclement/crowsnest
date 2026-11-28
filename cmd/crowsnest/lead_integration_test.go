@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,27 +134,19 @@ func TestIntegrationClaudeProjectLead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	port := freePort(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	server := exec.CommandContext(ctx, binary, "serve", "--session", session, "--no-auth", "--web-dev", "--port", fmt.Sprint(port),
-		"--data-dir", filepath.Join(short, "data"), "--no-orchestrator", "--model", "haiku", "--name", "itest", "--poke-interval", "0")
-	server.Env = append(herdr.ScrubEnv(os.Environ()), "XDG_STATE_HOME="+filepath.Join(short, "state"), "XDG_RUNTIME_DIR="+filepath.Join(short, "run"))
-	var logs bytes.Buffer
-	server.Stdout, server.Stderr = &logs, &logs
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
+	logs := &lockedBuffer{}
 	t.Cleanup(func() {
 		cancel()
-		_ = server.Wait()
 		stopTestSession(t, session)
 		if t.Failed() {
 			t.Logf("server log:\n%s", logs.String())
 		}
 	})
-	rig := &leadRig{t: t, base: fmt.Sprintf("http://127.0.0.1:%d", port)}
-	waitHealthy(t, rig)
+	env := append(herdr.ScrubEnv(os.Environ()), "XDG_STATE_HOME="+filepath.Join(short, "state"), "XDG_RUNTIME_DIR="+filepath.Join(short, "run"))
+	rig := startLeadServer(t, ctx, logs, env, binary, "serve", "--session", session, "--no-auth", "--web-dev",
+		"--data-dir", filepath.Join(short, "data"), "--no-orchestrator", "--model", "haiku", "--name", "itest", "--poke-interval", "0")
 
 	var project struct {
 		ID   int64  `json:"id"`
@@ -190,6 +183,9 @@ func TestIntegrationClaudeProjectLead(t *testing.T) {
 			rig.call(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d", project.ID), nil, &view)
 			if want(view.Lead) {
 				return view.Lead
+			}
+			if view.Lead.State == "needs_terminal" && acceptLeadTrust(t, rig, view.Lead.PaneID) {
+				continue // answered as the human would on the trust card; it starts now
 			}
 			if view.Lead.State == "needs_terminal" || view.Lead.State == "failed" {
 				t.Fatalf("the lead is %s: %+v", view.Lead.State, view.Lead)
@@ -350,20 +346,113 @@ func promptLead(t *testing.T, rig *leadRig, pane, text string) string {
 	return ""
 }
 
-func waitHealthy(t *testing.T, rig *leadRig) {
+// lockedBuffer is the server's log, written by its process while the test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// startLeadServer starts the built crowsnest on a free port and waits until that very process
+// answers. The suite runs packages side by side (test:claude), and a port picked free can be taken
+// by another package's server before crowsnest binds it: then this server exits at once and the
+// health check would be answered by the other one. So the process must still be running after
+// health answers, and its log must name the port; otherwise another port is tried.
+func startLeadServer(t *testing.T, ctx context.Context, logs *lockedBuffer, env []string, binary string, args ...string) *leadRig {
 	t.Helper()
+	for attempt := 1; attempt <= 3; attempt++ {
+		port := freePort(t)
+		server := exec.CommandContext(ctx, binary, append(args, "--port", fmt.Sprint(port))...) //nolint:gosec // the binary this test built
+		server.Env = env
+		server.Stdout, server.Stderr = logs, logs
+		if err := server.Start(); err != nil {
+			t.Fatal(err)
+		}
+		exited := make(chan struct{})
+		go func() {
+			_ = server.Wait()
+			close(exited)
+		}()
+		t.Cleanup(func() {
+			if server.Process != nil {
+				_ = server.Process.Signal(os.Interrupt)
+			}
+			select {
+			case <-exited:
+			case <-time.After(20 * time.Second):
+				_ = server.Process.Kill()
+			}
+		})
+		rig := &leadRig{t: t, base: fmt.Sprintf("http://127.0.0.1:%d", port)}
+		if waitOwnHealthy(rig, exited, logs, port) {
+			return rig
+		}
+		t.Logf("attempt %d: crowsnest did not come up on port %d (taken by another test?); trying another port", attempt, port)
+	}
+	t.Fatal("crowsnest did not come up")
+	return nil
+}
+
+// acceptLeadTrust answers Claude's folder-trust prompt in the lead's pane through the trust card's
+// own API path (the screen, then the keys pinned to its hash), once, as the human would. The suite
+// runs many Claude agents side by side, and each rewrites ~/.claude.json: one can write back an
+// older copy over the trust crowsnest recorded for the project, so the lead may meet the prompt
+// although crowsnest trusted the folder. What this test proves (the lead's layer, its jobs, Remote
+// Control, the hook) does not depend on who answered that prompt.
+func acceptLeadTrust(t *testing.T, rig *leadRig, pane string) bool {
+	t.Helper()
+	if pane == "" || trustAnswered[pane] {
+		return false
+	}
+	var screen struct {
+		Text string `json:"text"`
+		Hash string `json:"screen_hash"`
+	}
+	if code := rig.call(http.MethodGet, "/api/v1/agents/"+pane+"/screen", nil, &screen); code != http.StatusOK ||
+		!strings.Contains(screen.Text, "Yes, I trust this folder") {
+		return false
+	}
+	trustAnswered[pane] = true
+	t.Logf("NOTE: the lead met Claude's folder-trust prompt (another agent's write to ~/.claude.json?); accepting it on the trust card's path")
+	if code := rig.call(http.MethodPost, "/api/v1/agents/"+pane+"/keys", map[string]any{"keys": []string{"down", "Enter"}, "screen_hash": screen.Hash}, nil); code != http.StatusOK {
+		t.Fatalf("answering the folder-trust prompt = %d", code)
+	}
+	return true
+}
+
+// trustAnswered are the panes whose trust prompt the test answered (once each).
+var trustAnswered = map[string]bool{}
+
+// waitOwnHealthy reports whether the server that is still running (exited open) answers health
+// on port and has logged that port.
+func waitOwnHealthy(rig *leadRig, exited <-chan struct{}, logs *lockedBuffer, port int) bool {
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		response, err := http.Get(rig.base + "/api/v1/health")
-		if err == nil {
+		select {
+		case <-exited:
+			return false
+		default:
+		}
+		if response, err := http.Get(rig.base + "/api/v1/health"); err == nil {
 			_ = response.Body.Close()
-			if response.StatusCode == http.StatusOK {
-				return
+			if response.StatusCode == http.StatusOK && strings.Contains(logs.String(), fmt.Sprintf(":%d", port)) {
+				return true
 			}
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
-	t.Fatal("crowsnest did not come up")
+	return false
 }
 
 func stopTestSession(t *testing.T, name string) {
