@@ -193,6 +193,13 @@ func TestSocketPath(t *testing.T) {
 	if other := socketPath("", deep+"x", "crowsnest-demo", "/tmp", 501); other == socketPath("", deep, "crowsnest-demo", "/tmp", 501) {
 		t.Fatal("two state dirs must not share a fallback socket")
 	}
+	// R10-B4: a TMPDIR as deep as the state dir (a scratch folder) used to make --demo refuse to
+	// start, with a hint (XDG_RUNTIME_DIR) that --demo ignores. It now falls back to /tmp.
+	deepTemp := "/private/tmp/claude-501/-Users-jsc-Work-crowsnest/26db2a91-a713-4f85-8985-70b19347bc42/scratchpad/tmp"
+	got = socketPath("", deepTemp+"/crowsnest-demo-1234/state/crowsnest/crowsnest-demo", "crowsnest-demo", deepTemp, 501)
+	if len(got) > maxSocketPath || !strings.HasPrefix(got, "/tmp/crowsnest-501/") {
+		t.Fatalf("a too-deep TMPDIR should fall back to /tmp: %s (%d bytes)", got, len(got))
+	}
 }
 
 func TestListenRefusesASymlinkedDirectory(t *testing.T) {

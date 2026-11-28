@@ -29,7 +29,8 @@ const socketProbeTimeout = 2 * time.Second
 // it is set (crowsnest/<session>.sock), else in the session's state directory (agent.sock). When
 // that path would be too long for a unix socket (a deep XDG_STATE_HOME, such as macOS's per-user
 // temporary directories), it falls back to crowsnest-<uid>/<hash of the state dir>.sock under the
-// OS temporary directory; Listen checks that directory belongs to this user.
+// OS temporary directory, or under /tmp when that is too deep as well (R10-B4); Listen checks
+// that directory belongs to this user.
 func SocketPath(runtimeDir, stateDir, session string) string {
 	return socketPath(runtimeDir, stateDir, session, os.TempDir(), os.Getuid())
 }
@@ -44,15 +45,25 @@ func socketPath(runtimeDir, stateDir, session, tempDir string, uid int) string {
 		return path
 	}
 	sum := sha256.Sum256([]byte(stateDir))
-	return filepath.Join(tempDir, fmt.Sprintf("crowsnest-%d", uid), hex.EncodeToString(sum[:6])+".sock")
+	name := filepath.Join(fmt.Sprintf("crowsnest-%d", uid), hex.EncodeToString(sum[:6])+".sock")
+	if path := filepath.Join(tempDir, name); len(path) <= maxSocketPath {
+		return path
+	}
+	// A temporary directory this deep (a TMPDIR set inside a scratch folder, R10-B4) would make
+	// --demo refuse to start, and a demo is the first thing a new user runs. /tmp exists on every
+	// unix crowsnest supports and is short; Listen still checks the directory is this user's.
+	return filepath.Join(shortTempDir, name)
 }
+
+// shortTempDir is the last resort for the socket's directory when TMPDIR is too deep.
+const shortTempDir = "/tmp"
 
 // Listen prepares the socket's directory (created 0700, and tightened to 0700 if it exists),
 // removes a stale socket left by a crowsnest that died, refuses to take over one that a live
 // crowsnest still answers on, and listens with the socket at 0600.
 func Listen(ctx context.Context, path string) (net.Listener, error) {
 	if len(path) > maxSocketPath {
-		return nil, fmt.Errorf("the agent socket path %s is longer than %d bytes, which unix sockets do not allow; set XDG_RUNTIME_DIR or a shorter XDG_STATE_HOME", path, maxSocketPath)
+		return nil, fmt.Errorf("the agent socket path %s is longer than %d bytes, which unix sockets do not allow; start crowsnest with a shorter XDG_RUNTIME_DIR, XDG_STATE_HOME or TMPDIR", path, maxSocketPath)
 	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
