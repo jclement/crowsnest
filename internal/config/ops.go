@@ -17,6 +17,9 @@ import (
 const (
 	optTerminalMachines = "terminal-machines"
 	optTailscaleAuth    = "tailscale-auth"
+	// optTailscaleAuthLocalRisk is the explicit acceptance --tailscale-auth needs while crowsnest
+	// publishes itself (R9-S3). A flag or the environment only, like --tailscale-auth.
+	optTailscaleAuthLocalRisk = "tailscale-auth-local-risk"
 	optBackupEvery      = "backup-every"
 	optBackupKeep       = "backup-keep"
 	optArchiveAfterDays = "archive-after-days"
@@ -41,6 +44,7 @@ func init() {
 	options = append(options,
 		option{name: optTerminalMachines, env: []string{"CROWSNEST_TERMINAL_MACHINES"}, kind: kindBool, def: "false", usage: "let the session terminal's herdr client show your saved SSH machines (off: it gets a state directory of crowsnest's own and sees only this session)"},
 		option{name: optTailscaleAuth, env: []string{"CROWSNEST_TAILSCALE_AUTH"}, kind: kindBool, def: "false", usage: "sign in tailnet users the owner allowed, from the identity headers of `tailscale serve` on this machine (password login stays)"},
+		option{name: optTailscaleAuthLocalRisk, env: []string{"CROWSNEST_TAILSCALE_AUTH_LOCAL_RISK"}, kind: kindBool, def: "false", usage: "allow --tailscale-auth while crowsnest publishes itself to the tailnet, accepting that any program on this machine could then sign in as the owner"},
 		option{name: optBackupEvery, env: []string{"CROWSNEST_BACKUP_EVERY"}, kind: kindDuration, def: "0", usage: "make an automatic backup this often, such as 24h; 0 off"},
 		option{name: optBackupKeep, env: []string{"CROWSNEST_BACKUP_KEEP"}, kind: kindInt, def: fmt.Sprint(DefaultBackupKeep), usage: "automatic backups kept; older ones are deleted"},
 		option{name: optArchiveAfterDays, env: []string{"CROWSNEST_ARCHIVE_AFTER_DAYS"}, kind: kindInt, def: fmt.Sprint(DefaultArchiveAfterDays), usage: "settled jobs leave the boards after this many days (still searchable); 0 never"},
@@ -64,6 +68,9 @@ func (l *loader) loadOps(cfg *Config) error {
 		return err
 	}
 	if cfg.TailscaleAuth, err = l.boolean(optTailscaleAuth); err != nil {
+		return err
+	}
+	if cfg.TailscaleAuthLocalRisk, err = l.boolean(optTailscaleAuthLocalRisk); err != nil {
 		return err
 	}
 	if cfg.TailscaleAuth && cfg.TrustedProxyHeader == HeaderCFConnectingIP {

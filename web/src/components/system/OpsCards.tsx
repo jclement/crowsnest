@@ -359,6 +359,11 @@ export function TailscaleCard() {
         </p>
       ) : (
         <div className="flex flex-col gap-2 text-xs">
+          {data.local_risk && (
+            <p role="alert" className="font-medium text-danger">
+              {data.local_risk}
+            </p>
+          )}
           <p className="text-muted">
             {data.serve_configured ? "tailscale serve proxies to this crowsnest." : "No tailscale serve config points at this crowsnest yet: nobody can sign in this way until one does."}{" "}
             {data.current_login ? (

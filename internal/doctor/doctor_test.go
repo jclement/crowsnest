@@ -528,3 +528,21 @@ func TestTailscaleServedWithoutTrustedProxyWarns(t *testing.T) {
 		t.Errorf("%+v", check)
 	}
 }
+
+// R9-S3: publishing together with --tailscale-auth fails doctor, accepted or not.
+func TestTailscaleAuthWithPublishingFails(t *testing.T) {
+	machine := healthyMachine()
+	refused := run(t, machine, func(in *Inputs) { in.Config.TailscaleServe, in.Config.TailscaleAuth = true, true })
+	if check := requireCheck(t, refused, "tailscale.auth-with-serve", StatusFail); !strings.Contains(check.Detail, "refuses to publish") {
+		t.Errorf("%+v", check)
+	}
+	accepted := run(t, machine, func(in *Inputs) {
+		in.Config.TailscaleServe, in.Config.TailscaleAuth, in.Config.TailscaleAuthLocalRisk = true, true, true
+	})
+	if check := requireCheck(t, accepted, "tailscale.auth-with-serve", StatusFail); !strings.Contains(check.Detail, "sign in as you") {
+		t.Errorf("%+v", check)
+	}
+	if _, ok := run(t, machine, func(in *Inputs) { in.Config.TailscaleAuth = true }).Find("tailscale.auth-with-serve"); ok {
+		t.Error("failed without publishing")
+	}
+}

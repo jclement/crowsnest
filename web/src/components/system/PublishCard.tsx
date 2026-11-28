@@ -99,6 +99,11 @@ function PublishBody({ view, busy, onPublish, onStop }: BodyProps) {
       {view.state === "failed" && view.retry_at && <p className="text-2xs text-muted">Trying again at {new Date(view.retry_at).toLocaleTimeString()}.</p>}
       {view.note && <p className="text-2xs text-muted">{view.note}</p>}
       {view.locked && <p className="text-2xs text-muted">{view.locked}.</p>}
+      {view.local_risk && (
+        <p role="alert" className="text-2xs font-medium text-danger">
+          {view.local_risk}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {(view.state === "off" || view.state === "stopped") && (
           <Button variant="primary" icon={Globe} onClick={onPublish} disabled={busy || (view.locked !== undefined && view.locked !== "")}>

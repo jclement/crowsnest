@@ -503,6 +503,29 @@ func TestRestartWithBackoff(t *testing.T) {
 	}
 }
 
+// R9-C13: a session tailscaled drops while the CLI keeps running is noticed by the health poll:
+// the card stops saying "publishing", says why, the child is stopped (interrupted, not left), and
+// publishing starts again.
+func TestALostSessionIsNoticedAndRestarted(t *testing.T) {
+	f := newFake(t)
+	f.write("mode", "lose-session")
+	service, _ := newService(f, true, func(o *Options) { o.HealthPoll = 200 * time.Millisecond })
+	running(t, service)
+	waitState(t, service, StatePublishing)
+	view := waitState(t, service, StateFailed)
+	if !strings.Contains(view.Reason, "no longer shows its session") {
+		t.Fatalf("%+v", view)
+	}
+	interrupted := false
+	for _, line := range f.argv() {
+		interrupted = interrupted || line == "interrupted"
+	}
+	if !interrupted {
+		t.Fatal("the child that lost its session was not stopped")
+	}
+	waitState(t, service, StatePublishing) // started again
+}
+
 func TestCrashOnceThenPublishes(t *testing.T) {
 	f := newFake(t)
 	f.write("mode", "crash-once")

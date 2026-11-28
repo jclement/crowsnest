@@ -24,6 +24,7 @@ func (r *runner) tailscaleChecks(ctx context.Context) {
 		return
 	}
 	cfg := r.in.Config
+	r.tailscaleAuthWithServe()
 	info := r.env.Tailscale(ctx)
 	if !info.Installed {
 		r.add(Check{ID: "tailscale.installed", Group: GroupTailscale, Title: "Tailscale", Status: StatusInfo,
@@ -124,6 +125,26 @@ func (r *runner) tailscaleServe(ctx context.Context, info tailscale.Info) {
 		check.Detail = "not published. With it, https://" + orDash(info.DNSName) + " reaches crowsnest from any device on your tailnet, with the secure context the microphone, Web Push and the installable app need"
 		check.Fix = "Publish it from the System page (Publish to your tailnet), or start crowsnest with --tailscale-serve; " + manual
 	}
+	r.add(check)
+}
+
+// tailscaleAuthWithServe fails while publishing and Sign in with Tailscale are on together
+// (R9-S3): tailscale serve's identity header is believed from a loopback request, and with
+// crowsnest's own session always up, any program on this machine can forge one and become the
+// owner. Without --tailscale-auth-local-risk crowsnest refuses to publish; with it, it publishes,
+// and this check still fails, so the risk is never quiet.
+func (r *runner) tailscaleAuthWithServe() {
+	cfg := r.in.Config
+	if !cfg.TailscaleAuth || !cfg.TailscaleServe {
+		return
+	}
+	check := Check{ID: "tailscale.auth-with-serve", Group: GroupTailscale, Title: "Sign in with Tailscale while publishing", Status: StatusFail}
+	if cfg.TailscaleAuthConflict() {
+		check.Detail = "publishing is on together with --tailscale-auth, so crowsnest refuses to publish: together, any program on this machine could sign in as you with one forged request"
+	} else {
+		check.Detail = "publishing is on together with --tailscale-auth (--tailscale-auth-local-risk accepts it): any program on this machine, an agent included, can sign in as you with one forged request to crowsnest's port"
+	}
+	check.Fix = "Turn one off: drop --tailscale-auth (CROWSNEST_TAILSCALE_AUTH), or turn Publish to your tailnet off in Settings"
 	r.add(check)
 }
 

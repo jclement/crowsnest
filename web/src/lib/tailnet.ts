@@ -23,6 +23,8 @@ export interface PublishView {
   note?: string;
   locked?: string;
   qr?: string;
+  /** Publishing together with Sign in with Tailscale (R9-S3): the risk, in words. */
+  local_risk?: string;
 }
 
 export const tailnetEndpoints = {

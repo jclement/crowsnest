@@ -194,4 +194,14 @@ func TestTailscaleServeIsASavedSetting(t *testing.T) {
 	if response.Code != http.StatusForbidden || publisher.Enabled() {
 		t.Fatalf("Settings from a Tailscale session: %d %s", response.Code, response.Body)
 	}
+	// R9-S13: nor the guard, the permission mode or a review gate; an ordinary setting is fine.
+	for _, name := range []string{"protected-host", "protected-branch", "permission-mode", "review", "require-viewed-before-land"} {
+		response := h.do(withCookie(tailnetRequest(http.MethodPut, "/api/v1/settings/"+name, `{"value":""}`, "friend@github"), tailnet))
+		if response.Code != http.StatusForbidden {
+			t.Errorf("%s from a Tailscale session: %d %s", name, response.Code, response.Body)
+		}
+	}
+	if response := h.do(withCookie(tailnetRequest(http.MethodPut, "/api/v1/settings/poke-interval", `{"value":"30m"}`, "friend@github"), tailnet)); response.Code != http.StatusOK {
+		t.Errorf("an ordinary setting from a Tailscale session: %d %s", response.Code, response.Body)
+	}
 }

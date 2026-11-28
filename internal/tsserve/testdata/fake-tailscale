@@ -16,6 +16,9 @@
 #                  exit-https        print an HTTPS-not-enabled error and exit 1
 #                  crash-once        exit 1 the first time, publish after
 #                  die-after         publish, then exit 1 after one second
+#                  lose-session      publish, then after one second drop the session from
+#                                    `serve status` while the CLI keeps running (tailscaled
+#                                    restarted under a live CLI, R9-C13)
 #
 # A foreground serve writes fg.<pid>.json (its config) and fg.pid; `serve status --json` merges
 # every fg.*.json whose process is alive under "Foreground", removing the rest, which is what
@@ -48,6 +51,10 @@ publish() {
   echo $$ >"$dir/fg.pid"
   trap 'rm -f "$dir/fg.$$.json"; echo interrupted >>"$dir/argv.log"; exit 0' INT TERM
   printf 'Available within your tailnet:\n\nhttps://%s:%s/\n|-- proxy %s\n\nPress Ctrl+C to exit.\n' "$name" "$port" "$target"
+  if [ "$(cat "$dir/mode" 2>/dev/null)" = "lose-session" ]; then
+    sleep 1
+    mv "$dir/fg.$$.json" "$dir/lost.$$.json"
+  fi
   if [ "$(cat "$dir/mode" 2>/dev/null)" = "die-after" ]; then
     sleep 1
     rm -f "$dir/fg.$$.json"

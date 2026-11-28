@@ -93,6 +93,8 @@ export interface TailscaleState {
   current_login: string;
   via_tailscale: boolean;
   allowed: string[];
+  /** Sign in with Tailscale together with publishing (R9-S3): the risk, in words. */
+  local_risk?: string;
 }
 
 export interface UpdateNotice {

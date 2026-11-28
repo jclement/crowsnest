@@ -62,3 +62,26 @@ func TestTailscaleServeRefusedWithoutALogin(t *testing.T) {
 		t.Fatalf("stored: %v", err)
 	}
 }
+
+// R9-S3: publishing given at start together with --tailscale-auth is refused (any local process
+// could become the owner), unless --tailscale-auth-local-risk accepts it; saved in the app it is
+// not a start refusal (the publisher refuses, and the cards say why).
+func TestTailscaleServeWithTailscaleAuthNeedsTheExplicitRisk(t *testing.T) {
+	login := []string{"--username", "jeff", "--password", "a-long-password"}
+	_, err := newHarness(t, append(login, "--tailscale-serve", "--tailscale-auth")...).serve()
+	if !errors.Is(err, ErrRefused) {
+		t.Fatalf("both flags: %v", err)
+	}
+	assertErrorContains(t, err, "--tailscale-auth-local-risk")
+	cfg, err := newHarness(t, append(login, "--tailscale-serve", "--tailscale-auth", "--tailscale-auth-local-risk")...).serve()
+	if err != nil || !cfg.TailscaleAuthLocalRisk || cfg.TailscaleAuthConflict() {
+		t.Fatalf("with the risk accepted: %v %+v", err, cfg.TailscaleAuthLocalRisk)
+	}
+	harness := newHarness(t, append(login, "--tailscale-auth")...)
+	opts := harness.options()
+	opts.Stored = map[string]string{optTailscaleServe: "true"}
+	stored, err := LoadForServe(harness.flags(), opts)
+	if err != nil || !stored.TailscaleAuthConflict() {
+		t.Fatalf("stored: %v conflict %v", err, stored.TailscaleAuthConflict())
+	}
+}

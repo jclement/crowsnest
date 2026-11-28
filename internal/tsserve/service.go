@@ -61,6 +61,10 @@ const (
 	defaultBackoffMin  = 2 * time.Second
 	defaultBackoffMax  = time.Minute
 	defaultConfirmPoll = time.Second
+	// defaultHealthPoll is how often a confirmed session is looked for again (R9-C13): tailscaled
+	// can drop it (a restart, a re-login) while the CLI lives on, and the card must not keep
+	// saying "publishing" over a dead URL.
+	defaultHealthPoll = 15 * time.Second
 	defaultStopGrace   = 6 * time.Second // the watchdog's own interrupt-terminate-kill takes 4 s
 	// healthyAfter: a child that ran this long resets the backoff, so a flake an hour in is
 	// retried quickly rather than after a minute.
@@ -92,9 +96,11 @@ type View struct {
 	Since    *time.Time `json:"since,omitempty"`
 	RetryAt  *time.Time `json:"retry_at,omitempty"`
 	Note     string     `json:"note,omitempty"` // a leftover cleaned, or left alone
-	// Locked and QR are filled in by the HTTP layer (the setting's source; a QR of URL).
-	Locked string `json:"locked,omitempty"`
-	QR     string `json:"qr,omitempty"`
+	// Locked, QR and LocalRisk are filled in by the HTTP layer (the setting's source; a QR of URL;
+	// the sentence for publishing together with --tailscale-auth, R9-S3).
+	Locked    string `json:"locked,omitempty"`
+	QR        string `json:"qr,omitempty"`
+	LocalRisk string `json:"local_risk,omitempty"`
 }
 
 // KV is the part of the store the service keeps its child record in.
@@ -136,7 +142,7 @@ type Options struct {
 	// ProcessCommand returns a process's command line, for recognising a leftover watchdog.
 	ProcessCommand func(pid int) (string, error)
 	// Timing; zero values take the defaults.
-	BackoffMin, BackoffMax, ConfirmPoll, StopGrace time.Duration
+	BackoffMin, BackoffMax, ConfirmPoll, HealthPoll, StopGrace time.Duration
 	Now                                            func() time.Time
 }
 
@@ -169,6 +175,7 @@ func New(opts Options, enabled bool) *Service {
 	opts.BackoffMin = orDefault(opts.BackoffMin, defaultBackoffMin)
 	opts.BackoffMax = orDefault(opts.BackoffMax, defaultBackoffMax)
 	opts.ConfirmPoll = orDefault(opts.ConfirmPoll, defaultConfirmPoll)
+	opts.HealthPoll = orDefault(opts.HealthPoll, defaultHealthPoll)
 	opts.StopGrace = orDefault(opts.StopGrace, defaultStopGrace)
 	if opts.Binary == "" && opts.FindReal && !testing.Testing() {
 		if path, err := tailscale.FindBinary(); err == nil {

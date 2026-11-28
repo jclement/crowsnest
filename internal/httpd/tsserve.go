@@ -54,10 +54,29 @@ func (s *Server) tailscaleServe(w http.ResponseWriter) TailscaleServe {
 func (s *Server) tailscaleServeView(r *http.Request, service TailscaleServe) tsserve.View {
 	view := service.View(r.Context())
 	view.Locked = s.tailscaleServeLock()
+	view.LocalRisk = s.tailscaleLocalRisk()
 	if view.State == tsserve.StatePublishing {
 		view.QR = tsserve.QRDataURL(view.URL)
 	}
 	return view
+}
+
+// tailscaleLocalRisk is the sentence both the Publish card and the Sign in with Tailscale card
+// show while publishing and --tailscale-auth are on together under --tailscale-auth-local-risk
+// (R9-S3); without that flag crowsnest refuses to publish, and the cards say that instead.
+func (s *Server) tailscaleLocalRisk() string {
+	cfg := s.deps.Config
+	if s.deps.System != nil {
+		cfg = s.deps.System.Config()
+	}
+	switch {
+	case !cfg.TailscaleAuth || !cfg.TailscaleServe:
+		return ""
+	case cfg.TailscaleAuthConflict():
+		return "Sign in with Tailscale is on, so crowsnest refuses to publish itself: together, any program on this machine could sign in as you with one forged request. Turn one of them off (or start with --tailscale-auth-local-risk to accept that)."
+	default:
+		return "Publishing and Sign in with Tailscale are both on (--tailscale-auth-local-risk): any program on this machine, an agent included, can sign in as you with one forged request to crowsnest's port. Turn one of them off unless you accept that."
+	}
 }
 
 // tailscaleServeLock says why the app cannot change the setting ("" when it can).

@@ -82,6 +82,9 @@ func startTailscaleServe(ctx context.Context, wiring tailscaleServeWiring) (*tss
 			if cfg.NoAuth {
 				return "crowsnest runs with --no-auth (no login), so publishing it would give every device on your tailnet a shell."
 			}
+			if cfg.TailscaleAuthConflict() {
+				return "Sign in with Tailscale (--tailscale-auth) is on. While crowsnest publishes itself, any program on this machine could sign in as you by forging tailscale serve's identity header. Turn one of them off, or start crowsnest with --tailscale-auth-local-risk to accept that."
+			}
 			return ""
 		},
 		AllowHost: func(name string) string { return allowTailnetName(cfg, wiring.server(), name) },

@@ -1,6 +1,8 @@
 // Run: the supervisor. While the setting is on it plans, starts the watchdog child, waits for
 // `tailscale serve status` to show the foreground session, and then waits for the child to end,
-// the setting to go off, or crowsnest to stop. A child that ends by itself is retried with
+// the setting to go off, or crowsnest to stop, looking for the session again every HealthPoll: a
+// session tailscaled dropped under a live CLI (missed twice in a row) is a failure, shown as one,
+// and the child is stopped and started again (R9-C13). A child that ends by itself is retried with
 // backoff (2 s doubling to a minute, reset after a minute of health). Run returns only once the
 // child is gone, so serve's shutdown can wait for it.
 //
@@ -148,11 +150,27 @@ func (s *Service) publish(ctx context.Context, plan View) (lived time.Duration, 
 
 	poll := time.NewTicker(s.opts.ConfirmPoll)
 	defer poll.Stop()
-	confirmed := false
+	health := time.NewTicker(s.opts.HealthPoll)
+	defer health.Stop()
+	confirmed, missed := false, 0
 	for {
 		select {
 		case <-running.exited:
 			s.childEnded(ctx, plan, running, confirmed)
+			return time.Since(running.started), false
+		case <-health.C:
+			if !confirmed {
+				continue
+			}
+			if s.sessionAlive(ctx, plan) {
+				missed = 0
+				continue
+			}
+			if missed++; missed < healthMisses {
+				continue
+			}
+			s.stopChild(running)
+			s.sessionLost(ctx, plan)
 			return time.Since(running.started), false
 		case <-ctx.Done():
 			s.stopChild(running)
@@ -191,6 +209,30 @@ func (s *Service) confirm(ctx context.Context, plan View, running *child) bool {
 		s.updateView(func(view *View) { view.Reason, view.Fix, view.FixURL = problem.Reason, problem.Fix, problem.FixURL })
 	}
 	return false
+}
+
+// healthMisses is how many health polls in a row must miss the session before it counts as lost:
+// one miss can be tailscaled answering slowly or restarting for a moment.
+const healthMisses = 2
+
+// sessionAlive reports whether serve status still shows plan's foreground session. A status that
+// cannot be read counts as a miss: tailscaled is not answering, so neither is the URL.
+func (s *Service) sessionAlive(ctx context.Context, plan View) bool {
+	config, err := tailscale.ReadServeConfig(ctx, s.runner())
+	return err == nil && servesOn(config, plan)
+}
+
+// sessionLost shows a confirmed session that tailscaled no longer has: failed, with the reason;
+// Run starts the child again after the backoff.
+func (s *Service) sessionLost(ctx context.Context, plan View) {
+	s.opts.Logger.Warn("tailscale serve lost its session; restarting it", "url", plan.URL)
+	failed := plan
+	failed.State, failed.Since = StateFailed, s.now()
+	failed.Reason = "tailscale serve was running, but Tailscale no longer shows its session (tailscaled restarted or signed out?), so " + plan.URL + " stopped answering."
+	failed.Fix = "crowsnest restarts it by itself; if this keeps happening, check that Tailscale is running and signed in."
+	failed.FixURL = ""
+	s.setView(failed)
+	s.journal(ctx, true, "Tailscale: publishing at "+plan.URL+" lost its session; restarting it")
 }
 
 // servesOn reports whether a foreground session proxies plan's port to its target.

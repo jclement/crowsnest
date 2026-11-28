@@ -122,6 +122,10 @@ type Config struct {
 	// (--terminal-machines). Off: the client gets a state directory of crowsnest's own.
 	TerminalMachines bool
 	TailscaleAuth    bool // accept Tailscale identity headers from a local serve proxy (--tailscale-auth)
+	// TailscaleAuthLocalRisk accepts --tailscale-auth while crowsnest publishes itself (R9-S3):
+	// then any local process can become the owner with one forged request, so it is refused
+	// without this explicit flag (--tailscale-auth-local-risk).
+	TailscaleAuthLocalRisk bool
 	// TailscaleServe publishes crowsnest to the tailnet with a foreground `tailscale serve` while
 	// it runs; TailscaleServePort is the tailnet HTTPS port (0: the first free of 443, 8443,
 	// 10000). tsserve.go, DESIGN.md 3.5.1.

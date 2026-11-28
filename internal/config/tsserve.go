@@ -47,18 +47,34 @@ func (l *loader) loadTailscaleServe(cfg *Config) error {
 }
 
 // checkTailscaleServe is CheckStartup's rule for this file: --tailscale-serve given at start
-// with no login is refused rather than silently ignored.
+// with no login, or with --tailscale-auth and no --tailscale-auth-local-risk, is refused rather
+// than silently ignored. A value saved in the app is not a start refusal (the instance must be
+// able to start); the publisher refuses instead, and the card says why (TailscaleAuthConflict).
 func (c Config) checkTailscaleServe() error {
-	if !c.TailscaleServe || !c.NoAuth {
+	if !c.TailscaleServe {
 		return nil
 	}
 	where := c.Sources[optTailscaleServe]
 	if SourceKind(where) == KindDatabase || SourceKind(where) == KindDefault {
 		return nil
 	}
+	if !c.NoAuth {
+		if c.TailscaleAuthConflict() {
+			return fmt.Errorf("%w: %s asks crowsnest to publish itself to your tailnet while --tailscale-auth signs in whoever "+
+				"tailscale serve names: then any program on this machine could sign in as you with one forged request "+
+				"(DESIGN.md 4.20). Drop one of them, or add --tailscale-auth-local-risk to accept that", ErrRefused, where)
+		}
+		return nil
+	}
 	return fmt.Errorf("%w: %s asks to publish crowsnest to your tailnet, but --no-auth turns the login off: "+
 		"every device on the tailnet would get a shell. Drop --no-auth (crowsnest then uses the owner from first-run setup, "+
 		"or --username with CROWSNEST_PASSWORD), or drop %s", ErrRefused, where, where)
+}
+
+// TailscaleAuthConflict reports whether Sign in with Tailscale is on without the explicit
+// acceptance it needs while crowsnest publishes itself (R9-S3): crowsnest then refuses to publish.
+func (c Config) TailscaleAuthConflict() bool {
+	return c.TailscaleAuth && !c.TailscaleAuthLocalRisk
 }
 
 // tsserveSettingValue renders this file's editable setting for the Settings page.

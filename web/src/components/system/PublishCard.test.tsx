@@ -92,6 +92,14 @@ describe("PublishCard", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
+  // R9-S3: publishing together with Sign in with Tailscale says the risk in words.
+  it("says the local risk when Sign in with Tailscale is on too", async () => {
+    const risk = "Publishing and Sign in with Tailscale are both on (--tailscale-auth-local-risk): any program on this machine, an agent included, can sign in as you with one forged request to crowsnest's port. Turn one of them off unless you accept that.";
+    stubApi((call) => (call.path === "/tailscale/serve" ? { body: { data: { ...offer, state: "publishing", enabled: true, qr, local_risk: risk } } } : undefined));
+    renderWithClient(<PublishCard />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("any program on this machine, an agent included, can sign in as you");
+  });
+
   it("is read-only when a flag holds the setting", async () => {
     stubApi((call) => (call.path === "/tailscale/serve" ? { body: { data: { ...offer, locked: "Set by the environment (CROWSNEST_TAILSCALE_SERVE): change it there" } } } : undefined));
     renderWithClient(<PublishCard />);

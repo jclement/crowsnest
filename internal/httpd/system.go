@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/jclement/crowsnest/internal/auth"
 	"github.com/jclement/crowsnest/internal/config"
 	"github.com/jclement/crowsnest/internal/doctor"
 	"github.com/jclement/crowsnest/internal/system"
@@ -119,6 +120,20 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, page)
 }
 
+// passwordSettingEditable answers the request itself when a session signed in with Tailscale asks
+// to change a setting that acts outward or grants (R9-S13: the same list a restore sets aside,
+// config.RestoreSetsAside): the guard's protected hosts and branches, the permission mode, the
+// review gates, Remote Control, publishing. A tailnet identity is a convenience for reading and
+// answering; widening what agents may do, or who reaches crowsnest, needs the password.
+func (s *Server) passwordSettingEditable(w http.ResponseWriter, r *http.Request, name string) bool {
+	session, _ := r.Context().Value(sessionContextKey{}).(auth.Session)
+	if _, sensitive := config.RestoreSetsAside(name); sensitive && session.TailscaleLogin != "" {
+		writeError(w, http.StatusForbidden, codeForbidden, "Only a browser signed in with the password can change this setting: it widens what agents may do or who reaches crowsnest.")
+		return false
+	}
+	return true
+}
+
 type updateSettingRequest struct {
 	Value string `json:"value"`
 	Clear bool   `json:"clear"`
@@ -136,6 +151,9 @@ func (s *Server) handleUpdateSetting(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.PathValue("name") == tailscaleServeSetting && !s.tailscaleServeEditable(w, r) {
 		return // the card's rule holds in Settings too (tsserve.go)
+	}
+	if !s.passwordSettingEditable(w, r, r.PathValue("name")) {
+		return
 	}
 	view, err := service.UpdateSetting(r.Context(), r.PathValue("name"), body.Value, body.Clear)
 	switch {

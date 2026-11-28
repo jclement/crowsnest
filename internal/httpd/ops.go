@@ -433,12 +433,14 @@ type TailscaleResponse struct {
 	CurrentLogin    string   `json:"current_login"`    // this request's tailnet login, when believed
 	ViaTailscale    bool     `json:"via_tailscale"`    // this session was signed in with Tailscale
 	Allowed         []string `json:"allowed"`
+	// LocalRisk is the sentence for Sign in with Tailscale together with publishing (R9-S3).
+	LocalRisk string `json:"local_risk,omitempty"`
 }
 
 func (s *Server) tailscaleState(r *http.Request) (TailscaleResponse, error) {
 	gate := s.deps.Tailscale
 	session, _ := r.Context().Value(sessionContextKey{}).(auth.Session)
-	state := TailscaleResponse{Enabled: gate.Enabled(), CurrentLogin: s.trustedTailscaleLogin(r), ViaTailscale: session.TailscaleLogin != "", Allowed: []string{}}
+	state := TailscaleResponse{Enabled: gate.Enabled(), CurrentLogin: s.trustedTailscaleLogin(r), ViaTailscale: session.TailscaleLogin != "", Allowed: []string{}, LocalRisk: s.tailscaleLocalRisk()}
 	if !gate.Enabled() {
 		return state, nil
 	}
