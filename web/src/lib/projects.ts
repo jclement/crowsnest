@@ -78,7 +78,7 @@ export interface ProjectView extends Project {
 /** One thing in a folder an agent runs (hooks, MCP servers, Codex config) or reads at its start. */
 export interface AgentStartFinding {
   path: string;
-  kind: "hooks" | "mcp" | "codex" | "instructions";
+  kind: "settings" | "hooks" | "mcp" | "codex" | "claude" | "instructions";
   runs: boolean;
 }
 
@@ -91,8 +91,10 @@ export interface CodexConfigState {
 }
 
 const findingWhat: Record<AgentStartFinding["kind"], string> = {
+  settings: "Claude settings: hooks, commands, environment, permissions, plugins",
   hooks: "hooks",
   mcp: "MCP servers",
+  claude: "Claude skills, commands, agents or workflows",
   codex: "Codex config",
   instructions: "instructions",
 };

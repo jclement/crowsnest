@@ -1,19 +1,27 @@
-// What a folder carries that an agent runs or reads the moment it starts there (R9-S4, R9-S5).
-// Trusting a folder lets these run with no prompt: a Claude settings file's hooks, a project MCP
-// server list, a Codex configuration (its hooks and MCP servers run outside Codex's sandbox). The
-// instruction files are read, not run, but they steer the agent from its first turn. The project
-// form leaves "Agents may work in this folder without asking" unticked when any is found and
-// lists them; a Codex job is not started on a .codex/ the human has not seen.
+// What a folder carries that an agent runs or reads the moment it starts there (R9-S4, R9-S5,
+// R10 new-M1). Trusting a folder lets these act with no prompt: a Claude settings file (any key
+// may run or grant: hooks, statusLine, apiKeyHelper and the other helper commands, env, permission
+// allow rules, enabled plugins and extra marketplaces, project MCP switches), a project MCP server
+// list, Claude's project skills, commands and agents (frontmatter hooks, allowed-tools, shell
+// injection, a skills-directory plugin) and workflows (scripts the runtime executes), and a Codex
+// configuration (its hooks and MCP servers run outside Codex's sandbox). The instruction files
+// are read, not run, but they steer the agent from its first turn. The project form leaves
+// "Agents may work in this folder without asking" unticked when any is found and lists them; a
+// Codex job is not started on a .codex/ the human has not seen.
 //
-// Every read here is of a file someone else may have written (a cloned repository), so each one
-// is bounded, never follows a link and never blocks on a FIFO (readSmall).
+// The list follows Claude Code's documentation as read on 2026-11-28 (code.claude.com/docs/en:
+// permissions "What runs before you trust a folder", settings, settings-reference, skills,
+// sub-agents, plugins/loading, claude-directory, memory). A settings file counts whatever it
+// holds: crowsnest does not try to decide which keys are harmless, since new ones keep arriving.
+//
+// Every read here is of a file someone else may have written (a cloned repository), so nothing is
+// parsed and nothing is followed: presence (Lstat) is enough.
 
 package agenttrust
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,7 +34,9 @@ import (
 
 // Finding kinds.
 const (
-	KindHooks        = "hooks"        // a Claude settings file with hooks
+	KindSettings     = "settings"     // a Claude settings file: whatever it holds may run or grant
+	KindHooks        = "hooks"        // kept for older clients; Inspect reports KindSettings
+	KindClaude       = "claude"       // .claude/skills, commands, agents, workflows
 	KindMCP          = "mcp"          // .mcp.json: MCP servers Claude may start
 	KindCodex        = "codex"        // .codex/: Codex's project config, hooks and MCP servers
 	KindInstructions = "instructions" // CLAUDE.md, AGENTS.md: read, not run
@@ -37,13 +47,21 @@ type Finding struct {
 	// Path is relative to the folder (".claude/settings.json", ".codex/hooks.json").
 	Path string `json:"path"`
 	Kind string `json:"kind"`
-	// Runs is true for what executes when an agent starts (hooks, MCP servers, Codex config);
+	// Runs is true for what executes or grants when an agent starts (settings, MCP servers,
+	// skills and the like, Codex config);
 	// false for instructions, which are only read.
 	Runs bool `json:"runs"`
 }
 
-// inspectLimit caps a settings file read for its hooks key. A settings file is a few KB.
-const inspectLimit = 1 << 20
+// claudeRunning are the project paths under .claude/ that Claude Code acts on once the folder is
+// trusted, beyond the settings files: skills and commands (frontmatter hooks and allowed-tools,
+// !`command` shell injection, a .claude-plugin/ skills-directory plugin), agents (frontmatter
+// hooks and MCP servers) and workflows (scripts the runtime executes).
+var claudeRunning = []string{".claude/skills", ".claude/commands", ".claude/agents", ".claude/workflows"}
+
+// claudeInstructions are what Claude Code reads as instructions at start (or a subagent's start).
+var claudeInstructions = []string{"CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/AGENTS.md",
+	".claude/rules", ".claude/output-styles", ".claude/agent-memory"}
 
 // Inspect lists what dir carries that runs or is read when an agent starts there, in a fixed
 // order. A file that cannot be read (a link, a FIFO, too big, unreadable) is still listed when it
@@ -51,12 +69,17 @@ const inspectLimit = 1 << 20
 func Inspect(dir string) []Finding {
 	var found []Finding
 	for _, name := range []string{".claude/settings.json", ".claude/settings.local.json"} {
-		if present, hooks := settingsHooks(filepath.Join(dir, name)); present && hooks {
-			found = append(found, Finding{Path: name, Kind: KindHooks, Runs: true})
+		if exists(filepath.Join(dir, name)) {
+			found = append(found, Finding{Path: name, Kind: KindSettings, Runs: true})
 		}
 	}
 	if exists(filepath.Join(dir, ".mcp.json")) {
 		found = append(found, Finding{Path: ".mcp.json", Kind: KindMCP, Runs: true})
+	}
+	for _, name := range claudeRunning {
+		if exists(filepath.Join(dir, name)) {
+			found = append(found, Finding{Path: name + "/", Kind: KindClaude, Runs: true})
+		}
 	}
 	if files, _ := codexFiles(dir); len(files) > 0 {
 		for _, file := range files {
@@ -65,7 +88,7 @@ func Inspect(dir string) []Finding {
 	} else if exists(filepath.Join(dir, ".codex")) {
 		found = append(found, Finding{Path: ".codex/", Kind: KindCodex, Runs: true})
 	}
-	for _, name := range []string{"CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md"} {
+	for _, name := range claudeInstructions {
 		if exists(filepath.Join(dir, name)) {
 			found = append(found, Finding{Path: name, Kind: KindInstructions})
 		}
@@ -81,31 +104,6 @@ func AnyRuns(found []Finding) bool {
 		}
 	}
 	return false
-}
-
-// settingsHooks reports whether a Claude settings file exists and whether it has hooks. One that
-// exists but cannot be read or parsed counts as having hooks (unknown is not clean).
-func settingsHooks(path string) (present, hooks bool) {
-	data, err := readSmall(path, inspectLimit)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, false
-	}
-	if err != nil {
-		return true, true
-	}
-	var settings map[string]json.RawMessage
-	if json.Unmarshal(data, &settings) != nil {
-		return true, true
-	}
-	raw, ok := settings["hooks"]
-	if !ok {
-		return true, false
-	}
-	var events map[string]json.RawMessage
-	if json.Unmarshal(raw, &events) != nil {
-		return true, true
-	}
-	return true, len(events) > 0
 }
 
 func exists(path string) bool {

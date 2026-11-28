@@ -246,7 +246,7 @@ func TestProjectAgentStartAndCodexConfig(t *testing.T) {
 		t.Fatalf("%d %v", code, view)
 	}
 	findings, _ := json.Marshal(view["agent_start"])
-	if !strings.Contains(string(findings), `{"kind":"hooks","path":".claude/settings.json","runs":true}`) || !strings.Contains(string(findings), `{"kind":"codex","path":".codex/hooks.json","runs":true}`) {
+	if !strings.Contains(string(findings), `{"kind":"settings","path":".claude/settings.json","runs":true}`) || !strings.Contains(string(findings), `{"kind":"codex","path":".codex/hooks.json","runs":true}`) {
 		t.Errorf("agent_start: %s", findings)
 	}
 	config, _ := view["codex_config"].(map[string]any)
