@@ -41,7 +41,7 @@ type attachWiring struct {
 // newAttachments builds the service. refs gives the orchestrator's pane once it exists.
 func newAttachments(cfg config.Config, db *store.Store, events *hub.Hub, refs *jobRefs, logger *slog.Logger) (*attachWiring, error) {
 	service, err := attach.New(attach.Options{
-		Store: db, Dir: filepath.Join(cfg.DataDir, "attachments"), Logger: logger,
+		Store: db, Dir: filepath.Join(cfg.DataDir, "attachments"), StateDir: cfg.StateDir, Logger: logger,
 		Limits: attach.Limits{MaxFileBytes: int64(cfg.AttachmentMaxMB) * megabyte, QuotaBytes: int64(cfg.AttachmentQuotaMB) * megabyte},
 		Changed: func(owner string) {
 			events.Publish(hub.Event{Type: "attachment", Data: AttachmentEvent{Owner: owner}})

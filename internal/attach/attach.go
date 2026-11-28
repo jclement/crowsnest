@@ -28,6 +28,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -126,7 +127,10 @@ func (l Limits) withDefaults() Limits {
 type Options struct {
 	Store *store.Store
 	// Dir holds the blobs: <data-dir>/attachments. Created 0700.
-	Dir    string
+	Dir string
+	// StateDir is crowsnest's state directory, under which every agent copy is made (Layout's
+	// inboxes). A recorded copy outside it is never removed (R10 new-H1); "" skips that check.
+	StateDir string
 	Limits Limits
 	Logger *slog.Logger
 	Now    func() time.Time
@@ -448,7 +452,7 @@ func (s *Service) Undeliver(ctx context.Context, attachments []Attachment) {
 			s.opts.Logger.Warn("taking back an attachment after a send that typed nothing", "attachment", attachment.ID, "err", err)
 			continue
 		}
-		removeCopy(store.AttachmentRecord{ID: attachment.ID, Path: attachment.Path})
+		s.removeCopy(store.AttachmentRecord{ID: attachment.ID, Path: attachment.Path})
 	}
 }
 
@@ -537,7 +541,7 @@ func (s *Service) Release(ctx context.Context, kind, ownerID string) error {
 		return err
 	}
 	for _, record := range records {
-		removeCopy(record)
+		s.removeCopy(record)
 	}
 	if len(records) > 0 {
 		s.changed(kind + ":" + ownerID)
@@ -572,7 +576,7 @@ func (s *Service) Sweep(ctx context.Context) {
 		s.opts.Logger.Warn("releasing old conversation attachments", "err", err)
 	}
 	for _, record := range released {
-		removeCopy(record)
+		s.removeCopy(record)
 	}
 	s.mu.Lock()
 	if err := s.makeRoomLocked(ctx, 0); err != nil && !errors.Is(err, ErrQuota) {
@@ -633,12 +637,12 @@ func (s *Service) deleteLocked(ctx context.Context, record store.AttachmentRecor
 	if err := s.opts.Store.DeleteAttachment(ctx, record.ID); err != nil {
 		return err
 	}
-	removeCopy(record)
+	s.removeCopy(record)
 	inUse, err := s.opts.Store.BlobInUse(ctx, record.SHA256)
 	if err != nil {
 		return err
 	}
-	if !inUse {
+	if !inUse && blobName.MatchString(record.SHA256) { // a hash from the database names a file in Dir only
 		_ = os.Remove(s.blobPath(record.SHA256))
 		_ = os.Remove(s.thumbPath(record.SHA256))
 	}
@@ -646,13 +650,38 @@ func (s *Service) deleteLocked(ctx context.Context, record store.AttachmentRecor
 	return nil
 }
 
-// removeCopy deletes the copy made for an agent, if the recorded path really is one of ours (its
-// name starts with the attachment's id).
-func removeCopy(record store.AttachmentRecord) {
-	if record.Path == "" || !strings.HasPrefix(filepath.Base(record.Path), record.ID+"-") {
+// blobName is a blob's file name in Dir: a SHA-256 in hex. A recorded hash that is anything else
+// (a restored backup's row is not crowsnest's own) names no file crowsnest reads or removes.
+var blobName = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// removeCopy deletes the copy made for an agent, only when the recorded path is provably one
+// (R10 new-H1: the path comes from the database, and a restored backup's rows are someone
+// else's): an absolute path whose name is the attachment's id and a dash, a regular file (not a
+// link or a directory), inside the state directory once links in its parent are resolved.
+func (s *Service) removeCopy(record store.AttachmentRecord) {
+	path := record.Path
+	if path == "" || !ValidID(record.ID) || !filepath.IsAbs(path) || !strings.HasPrefix(filepath.Base(path), record.ID+"-") {
 		return
 	}
-	_ = os.Remove(record.Path)
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	if s.opts.StateDir != "" {
+		root, err := filepath.EvalSymlinks(s.opts.StateDir)
+		if err != nil {
+			return
+		}
+		parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+		if err != nil {
+			return
+		}
+		if rel, err := filepath.Rel(root, parent); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			s.opts.Logger.Warn("an attachment's recorded copy is outside the state directory; left alone", "attachment", record.ID, "path", path)
+			return
+		}
+		path = filepath.Join(parent, filepath.Base(path))
+	}
+	_ = os.Remove(path)
 }
 
 func (s *Service) changed(owner string) {
@@ -669,6 +698,9 @@ func (s *Service) thumbPath(sha string) string { return filepath.Join(s.opts.Dir
 // copyBlob writes a fresh 0600 copy of a blob at target, created exclusively and without
 // following a link, after removing whatever was there.
 func (s *Service) copyBlob(sha, target string) error {
+	if !blobName.MatchString(sha) {
+		return fmt.Errorf("attachment hash %q is not a SHA-256", sha)
+	}
 	source, err := os.Open(s.blobPath(sha)) //nolint:gosec // built from a hash in the database
 	if err != nil {
 		return fmt.Errorf("reading an attachment: %w", err)

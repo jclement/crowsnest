@@ -336,3 +336,23 @@ func TestRunHistory(t *testing.T) {
 		t.Fatalf("an unavailable run is recorded once: %+v", runs[:2])
 	}
 }
+
+// TestARestoredScheduleNameNeverLeavesItsDirectory (R10 new-H1): a schedule row's name comes from
+// the database, and a restored backup's can be anything; deleting it removes only a file named by
+// a valid schedule name, never one a "../" name reaches.
+func TestARestoredScheduleNameNeverLeavesItsDirectory(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	service := h.appService()
+	victim := filepath.Join(h.stateDir, "precious.md")
+	if err := os.WriteFile(victim, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.InsertSchedule(ctx, store.ScheduleRecord{Name: "../precious", Every: "1h", RunAs: "poke", BodyMD: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = service.Delete(ctx, "../precious")
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("a file outside the schedules' directory was removed: %v", err)
+	}
+}
