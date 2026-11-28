@@ -309,7 +309,7 @@ func (s *Service) plan(ctx context.Context) View {
 func (s *Service) planServe(ctx context.Context, view View, run tailscale.Runner) View {
 	if s.opts.Auth != nil {
 		if reason := s.opts.Auth(); reason != "" {
-			return refuse(view, StateRefused, Problem{Reason: reason, Fix: "Start crowsnest with a login (the owner from first-run setup, or --username with CROWSNEST_PASSWORD) and without --no-auth."})
+			return refuse(view, StateRefused, Problem{Reason: reason, Fix: "Start crowsnest with its own login (the owner from first-run setup, or --username with CROWSNEST_PASSWORD), without --no-auth and without --tailscale-auth: publishing to the tailnet needs crowsnest's own password sign-in."})
 		}
 	}
 	target, err := s.target()

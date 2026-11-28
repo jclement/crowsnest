@@ -510,3 +510,43 @@ func TestNames(t *testing.T) {
 		t.Fatal("ValidID")
 	}
 }
+
+// TestARecordedCopyOutsideTheStateDirectoryIsNeverRemoved (R10 new-H1): an attachment row's path
+// comes from the database (a restored backup can name any file whose name starts with the id), so
+// releasing it removes the file only when it is a regular file inside the state directory.
+func TestARecordedCopyOutsideTheStateDirectoryIsNeverRemoved(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.OpenMemory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	state := t.TempDir()
+	service, err := New(Options{Store: db, Dir: filepath.Join(t.TempDir(), "attachments"), StateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside, outside := upload(t, service, "in.txt", []byte("in")), upload(t, service, "out.txt", []byte("out"))
+	elsewhere := t.TempDir()
+	victim := filepath.Join(elsewhere, outside.ID+"-precious.txt")
+	if err := os.WriteFile(victim, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inbox := Inbox{Kind: OwnerJob, ID: "j_1", Base: state, Dir: filepath.Join(state, "jobs", "j_1", "attachments")}
+	delivered, err := service.Deliver(ctx, []string{inside.ID}, inbox, RoleBrief, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AssignAttachment(ctx, outside.ID, store.AttachmentRecord{OwnerKind: OwnerJob, OwnerID: "j_1", Role: RoleBrief, Path: victim}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Release(ctx, OwnerJob, "j_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("a file outside the state directory was removed: %v", err)
+	}
+	if _, err := os.Stat(delivered[0].Path); err == nil {
+		t.Fatal("the real copy inside the state directory was not removed")
+	}
+}

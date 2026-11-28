@@ -456,8 +456,11 @@ func inside(root, path string) bool {
 	}
 	// R9-S9: the repository's own .git under the root is not "inside": a hook or the config
 	// written there runs on the next harmless-looking git command.
-	gitDir := filepath.Join(root, ".git")
-	return clean != gitDir && !strings.HasPrefix(clean, gitDir+string(filepath.Separator))
+	// Compared without case (R10 low): on a case-insensitive volume (APFS, the macOS default)
+	// "<root>/.GIT/hooks" is the same directory. On a case-sensitive one this only fails closed.
+	rel := strings.TrimPrefix(strings.TrimPrefix(clean, root), string(filepath.Separator))
+	first, _, _ := strings.Cut(rel, string(filepath.Separator))
+	return !strings.EqualFold(first, ".git")
 }
 
 func resolve(path string) string {

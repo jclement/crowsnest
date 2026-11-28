@@ -20,10 +20,12 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agenttrust"
+	"github.com/jclement/crowsnest/internal/store"
 )
 
-// codexSeenPrefix keys the kv records of the .codex/ fingerprints the human has seen.
-const codexSeenPrefix = "codex.config-seen."
+// codexSeenPrefix keys the kv records of the .codex/ fingerprints the human has seen; a restore
+// drops them (store.ScrubRestored).
+const codexSeenPrefix = store.CodexConfigSeenPrefix
 
 // CodexConfigState is a folder's .codex/ and whether the human has seen it as it is now.
 type CodexConfigState struct {

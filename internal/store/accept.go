@@ -103,6 +103,19 @@ func (s *Store) CheckWorkspaces(ctx context.Context) (map[int64]string, error) {
 	return out, rows.Err()
 }
 
+// CheckJob is the job check id belongs to.
+func (s *Store) CheckJob(ctx context.Context, id int64) (int64, error) {
+	var jobID int64
+	err := s.db.QueryRowContext(ctx, `SELECT job_id FROM job_checks WHERE id = ?`, id).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("reading check %d: %w", id, err)
+	}
+	return jobID, nil
+}
+
 // checkMode is a check's mode as stored: "worktree" when none was given.
 func checkMode(mode string) string {
 	if mode == "" {

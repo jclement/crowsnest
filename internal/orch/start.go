@@ -254,12 +254,15 @@ func (o *Orchestrator) start(ctx context.Context, paneID string, resume bool) (S
 // to resume. It runs with the same sandbox as Codex job agents and is pointed at CROWSNEST.md by
 // its first prompt.
 func (o *Orchestrator) startCodex(ctx context.Context, paneID string, files startFiles, launch LaunchSettings) (Status, error) {
-	args := []string{"--ask-for-approval", "never", "--sandbox", "workspace-write"}
+	// The same sandbox as a Codex job, its network off (R10 new-M2): with approval never, nothing
+	// it runs is ever a card, so a network a user's ~/.codex/config.toml turned on would reach
+	// anywhere unseen.
+	args := agentcfg.CodexSandboxArgs("never")
 	if launch.Model != "" {
 		args = append(args, "--model", launch.Model)
 	}
 	o.opts.Logger.Info("starting the orchestrator on codex", "pane", paneID)
-	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: Name, Kind: "codex", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
+	agent, err := o.agentStart(ctx, herdr.AgentStartParams{Name: o.agentName(), Kind: "codex", PaneID: paneID, Args: args, TimeoutMS: startTimeoutMS})
 	if err == nil {
 		agent, err = o.waitForLaunch(ctx, agent)
 	}
@@ -267,7 +270,7 @@ func (o *Orchestrator) startCodex(ctx context.Context, paneID string, files star
 	case err == nil:
 		o.remember(ctx, paneID, "")
 		promptCtx, cancel := context.WithTimeout(ctx, herdrCallTimeout*6)
-		_, promptErr := o.opts.Client.AgentPrompt(promptCtx, Name, codexFirstPrompt(files.instructions), nil)
+		_, promptErr := o.opts.Client.AgentPrompt(promptCtx, o.agentName(), codexFirstPrompt(files.instructions), nil)
 		cancel()
 		if promptErr != nil {
 			o.opts.Logger.Warn("telling codex where its instructions are", "err", promptErr)

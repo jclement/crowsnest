@@ -602,13 +602,13 @@ func (s *Service) agentArgs(job Job, files jobFiles, resume bool) []string {
 		// the network escalates, and the escalation is a risk-rated approval card. Off is said
 		// explicitly: the user's own ~/.codex/config.toml may turn it on for their sessions.
 		approval := "never"
-		supervision := []string{"-c", "sandbox_workspace_write.network_access=false"}
+		var supervision []string
 		if files.codexScript != "" {
 			approval = "on-request"
 			supervision = append(supervision, agentcfg.CodexMCPArgs(files.codexScript)...)
 			supervision = append(supervision, agentcfg.CodexHookArgs(files.codexScript, files.guardRules)...)
 		}
-		args := []string{"--ask-for-approval", approval, "--sandbox", "workspace-write"}
+		args := agentcfg.CodexSandboxArgs(approval) // network off on every start (R10 new-M2)
 		if job.Model != "" {
 			args = append(args, "--model", job.Model)
 		}

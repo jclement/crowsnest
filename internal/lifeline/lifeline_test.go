@@ -95,3 +95,26 @@ func TestCommandPrefix(t *testing.T) {
 		t.Fatalf("prefix: %v", got)
 	}
 }
+
+// TestTheWatchdogRefusesAGroupItDoesNotLead (R10 low): started without a process group of its own,
+// the watchdog's group is its parent's, so it runs nothing (ending that group would end others).
+// The command here would exit by itself, so no build of the watchdog ever reaches the group kill.
+func TestTheWatchdogRefusesAGroupItDoesNotLead(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
+	read, write, err := Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = write.Close() }()
+	cmd := exec.Command(os.Args[0], "sh", "-c", "touch "+marker) //nolint:gosec // the test binary itself
+	cmd.Env = append(os.Environ(), childEnv+"=1")
+	cmd.Stdin = read
+	err = cmd.Run()
+	_ = read.Close()
+	if code := cmd.ProcessState.ExitCode(); code != 2 {
+		t.Fatalf("exit %d (%v), want 2", code, err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the command ran under a group the watchdog does not lead")
+	}
+}

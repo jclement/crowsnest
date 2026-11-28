@@ -44,7 +44,8 @@ func VacuumFileInto(ctx context.Context, source, path string) error {
 }
 
 // scrubStatements remove credentials from a snapshot. Each names a table or key that exists
-// in every schema since its migration; a table missing from an older copy is skipped.
+// in every schema since its migration; a table missing from an older copy is skipped. The last one
+// marks the copy as scrubbed (a snapshot only; ScrubRestored runs the others).
 var scrubStatements = []struct{ table, sql string }{
 	{"auth_sessions", `DELETE FROM auth_sessions`},
 	{"action_tokens", `DELETE FROM action_tokens`},
@@ -62,6 +63,37 @@ const (
 	ScrubbedKey  = "snapshot.scrubbed"
 	ScrubVersion = "2" // 2: Remote Control session links (R6-S6)
 )
+
+// CodexConfigSeenPrefix keys the kv records of the .codex/ fingerprints the human has seen
+// (internal/jobs): a "seen" from a backup is not the human's word on this machine.
+const CodexConfigSeenPrefix = "codex.config-seen."
+
+// restoreScrubStatements are what a restore removes from the incoming database besides the
+// snapshot's credentials (R10, R9-S2 residual, new-H1): the .codex/ "seen" marks, and the isolated
+// check directories its rows name (a path from a backup is never removed).
+var restoreScrubStatements = []struct{ table, sql string }{
+	{"kv", `DELETE FROM kv WHERE substr(key, 1, ` + fmt.Sprint(len(CodexConfigSeenPrefix)) + `) = '` + CodexConfigSeenPrefix + `'`},
+	{"job_checks", `UPDATE job_checks SET workspace = '' WHERE workspace != ''`},
+}
+
+// ScrubRestored removes from a database just restored from a backup what a backup must not bring
+// with it: the same credentials a snapshot drops (scrubStatements: browser sessions, action and
+// API tokens, push subscriptions, machine and agent tokens, the push keys, the notify URL, Remote
+// Control links), so a backup made elsewhere, by an older crowsnest or by hand cannot bring its
+// author a way in; and restoreScrubStatements. The owner's record stays, so the human signs in to
+// their own restore with their own password.
+func (s *Store) ScrubRestored(ctx context.Context) error {
+	statements := append([]struct{ table, sql string }{}, scrubStatements[:len(scrubStatements)-1]...)
+	for _, statement := range append(statements, restoreScrubStatements...) {
+		if !tableExists(ctx, s.db, statement.table) {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, statement.sql); err != nil {
+			return fmt.Errorf("removing what a backup must not bring (%s): %w", statement.table, err)
+		}
+	}
+	return nil
+}
 
 // Scrubbed reports whether the database copy at path carries the current scrub mark.
 func Scrubbed(ctx context.Context, path string) bool {

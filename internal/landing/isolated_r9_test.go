@@ -31,8 +31,9 @@ func TestTheCopyIsExactlyTheCommit(t *testing.T) {
 	run(t, r.worktree, "git", "add", ".")
 	run(t, r.worktree, "git", "commit", "-q", "-m", "attributes")
 	commit := run(t, r.worktree, "git", "rev-parse", "HEAD")
-	parent := filepath.Join(t.TempDir(), "copy")
-	copied, err := IsolatedCheckout(ctx, r.worktree, commit, parent)
+	root := t.TempDir()
+	parent := filepath.Join(root, "copy")
+	copied, err := IsolatedCheckout(ctx, r.worktree, commit, root, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +92,9 @@ func TestACopyLeftBehindIsRemovedWithItsWorktree(t *testing.T) {
 	ctx := context.Background()
 	r.commitInWorktree("widget.go", "package widget\n", "widget")
 	commit := run(t, r.worktree, "git", "rev-parse", "HEAD")
-	parent := filepath.Join(t.TempDir(), "left")
-	copied, err := IsolatedCheckout(ctx, r.worktree, commit, parent)
+	root := t.TempDir()
+	parent := filepath.Join(root, "left")
+	copied, err := IsolatedCheckout(ctx, r.worktree, commit, root, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +102,7 @@ func TestACopyLeftBehindIsRemovedWithItsWorktree(t *testing.T) {
 		t.Fatal("setup: the copy is not listed")
 	}
 	// The process that made it is gone: only the directory is known.
-	if err := RemoveIsolatedDir(ctx, parent); err != nil {
+	if err := RemoveIsolatedDir(ctx, root, parent); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(parent); err == nil {
@@ -108,5 +110,140 @@ func TestACopyLeftBehindIsRemovedWithItsWorktree(t *testing.T) {
 	}
 	if strings.Contains(run(t, r.main, "git", "worktree", "list"), copied.Dir) {
 		t.Fatal("git still lists the copy")
+	}
+}
+
+// TestOnlyACheckCopyIsEverRemoved (R10 new-H1): a recorded path is data (a restored backup's row
+// can name any folder), so RemoveIsolatedDir removes only a real directory directly inside the
+// checks directory, links resolved, that carries crowsnest's marker. Everything else is left whole
+// and ErrNotACheckCopy.
+func TestOnlyACheckCopyIsEverRemoved(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "checks")
+	precious := filepath.Join(base, "home")
+	for _, dir := range []string{root, precious, filepath.Join(root, "nested", "deeper")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A folder outside the checks directory, even one carrying the marker.
+	write(t, precious, "keep.txt", "mine\n")
+	write(t, precious, isolatedMarker, precious+"\n")
+	// A link inside the checks directory to that folder.
+	linked := filepath.Join(root, "j_1-1-link")
+	if err := os.Symlink(precious, linked); err != nil {
+		t.Fatal(err)
+	}
+	// A directory inside the checks directory without the marker, and one whose marker is a link.
+	unmarked := filepath.Join(root, "j_1-2-unmarked")
+	linkedMarker := filepath.Join(root, "j_1-3-linked-marker")
+	for _, dir := range []string{unmarked, linkedMarker} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		write(t, dir, "keep.txt", "mine\n")
+	}
+	if err := os.Symlink(filepath.Join(precious, isolatedMarker), filepath.Join(linkedMarker, isolatedMarker)); err != nil {
+		t.Fatal(err)
+	}
+	// Not a direct child: a marked directory one level down, and the same named through "..".
+	// Every case is under the test's own temporary directory: a regression must never be able to
+	// remove anything else.
+	deeper := filepath.Join(root, "nested", "deeper")
+	write(t, deeper, isolatedMarker, deeper+"\n")
+	cases := map[string]string{
+		"outside the checks directory":       precious,
+		"through ..":                         filepath.Join(root, "..", "home"),
+		"a link to a folder":                 linked,
+		"no marker":                          unmarked,
+		"a linked marker":                    linkedMarker,
+		"not a direct child":                 deeper,
+		"the checks directory itself":        root,
+		"a relative path":                    "home",
+		"a path through a linked parent":     filepath.Join(linked, "keep.txt"),
+		"a checks directory that is missing": filepath.Join(base, "none", "x"),
+	}
+	for name, path := range cases {
+		err := RemoveIsolatedDir(ctx, root, path)
+		if !errors.Is(err, ErrNotACheckCopy) {
+			t.Errorf("%s (%s): err = %v, want ErrNotACheckCopy", name, path, err)
+		}
+	}
+	for _, file := range []string{filepath.Join(precious, "keep.txt"), filepath.Join(unmarked, "keep.txt"),
+		filepath.Join(linkedMarker, "keep.txt"), filepath.Join(deeper, isolatedMarker)} {
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("%s was removed: %v", file, err)
+		}
+	}
+	if _, err := os.Lstat(linked); err != nil {
+		t.Errorf("the link was removed: %v", err)
+	}
+	// The checks directory reached through a link of its own is still the checks directory: a
+	// marked copy in it is removed.
+	aliasRoot := filepath.Join(base, "alias")
+	if err := os.Symlink(root, aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+	ours := filepath.Join(root, "j_1-4-ours")
+	if err := os.Mkdir(ours, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, ours, isolatedMarker, "\n")
+	write(t, ours, "left.txt", "x\n")
+	if err := RemoveIsolatedDir(ctx, aliasRoot, filepath.Join(aliasRoot, "j_1-4-ours")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(ours); err == nil {
+		t.Fatal("a marked copy directly inside the checks directory was not removed")
+	}
+}
+
+// TestACopyIsMadeOnlyDirectlyInsideTheChecksDirectory (R10 new-H1): the in-process path is held to
+// the same rule, and an existing directory is never adopted as a copy.
+func TestACopyIsMadeOnlyDirectlyInsideTheChecksDirectory(t *testing.T) {
+	r := newRepo(t)
+	ctx := context.Background()
+	commit := run(t, r.worktree, "git", "rev-parse", "HEAD")
+	root := t.TempDir()
+	if _, err := IsolatedCheckout(ctx, r.worktree, commit, root, filepath.Join(root, "a", "b")); err == nil {
+		t.Fatal("a copy was made below a direct child")
+	}
+	existing := filepath.Join(root, "existing")
+	if err := os.Mkdir(existing, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, existing, "keep.txt", "mine\n")
+	if _, err := IsolatedCheckout(ctx, r.worktree, commit, root, existing); err == nil {
+		t.Fatal("an existing directory was adopted as a copy")
+	}
+	if _, err := os.Stat(filepath.Join(existing, "keep.txt")); err != nil {
+		t.Fatalf("the existing directory was touched: %v", err)
+	}
+}
+
+// TestAReplaceRefDoesNotChangeWhatIsChecked (R10 low, R9-C6): a refs/replace entry pointing the
+// commit at another one does not change the copy, and verification still compares with the
+// commit's own tree.
+func TestAReplaceRefDoesNotChangeWhatIsChecked(t *testing.T) {
+	r := newRepo(t)
+	ctx := context.Background()
+	r.commitInWorktree("widget.go", "package widget\n", "widget")
+	commit := run(t, r.worktree, "git", "rev-parse", "HEAD")
+	r.commitInWorktree("widget.go", "package widget // other\n", "other")
+	other := run(t, r.worktree, "git", "rev-parse", "HEAD")
+	run(t, r.worktree, "git", "replace", commit, other)
+	root := t.TempDir()
+	copied, err := IsolatedCheckout(ctx, r.worktree, commit, root, filepath.Join(root, "copy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copied.Remove(ctx)
+	body, err := os.ReadFile(filepath.Join(copied.Dir, "widget.go"))
+	if err != nil || string(body) != "package widget\n" {
+		t.Fatalf("the copy holds %q (%v), not the commit's own file", body, err)
+	}
+	if _, err := VerifyCheckout(ctx, copied.Dir, commit); err != nil {
+		t.Fatalf("verification read the replacement: %v", err)
 	}
 }

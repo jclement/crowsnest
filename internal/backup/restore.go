@@ -519,5 +519,12 @@ func markRestored(ctx context.Context, dbPath, file string, manifest Manifest, a
 	if result.SetAsideSettings, err = db.SetAsideSettings(ctx, names, writeOnly); err != nil {
 		return err
 	}
+	// R10 (R9-S2 residual, new-H1): the incoming database is scrubbed as a snapshot is, whoever
+	// made it: no sessions, tokens or push subscriptions come back, no .codex/ "seen" stands for
+	// the human's, and no check directory a row names is ever removed. After the set-aside above,
+	// which keeps the backup's settings for the human to look at.
+	if err := db.ScrubRestored(ctx); err != nil {
+		return err
+	}
 	return db.Close()
 }
