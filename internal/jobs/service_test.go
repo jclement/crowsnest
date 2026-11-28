@@ -409,9 +409,10 @@ func TestCodexGetsTheProtocolInItsFirstPrompt(t *testing.T) {
 	}
 }
 
-// With an agent socket and a token, a Codex job gets crowsnest's hooks for its session (DESIGN.md
-// 20.1): approvals on request, every hook pointing at the job's own script, which runs `crowsnest
-// hook` with the job's token file. The command typed into the pane stays short.
+// With an agent socket and a token, a Codex job gets crowsnest's hooks and MCP server for its
+// session (DESIGN.md 20.1): approvals on request, the sandbox's network explicitly off (R9-S1),
+// every hook and the MCP server running the job's own script, which runs `crowsnest <subcommand>`
+// with the job's token file. The command typed into the pane stays short and holds no token.
 func TestCodexGetsCrowsnestsHooks(t *testing.T) {
 	r := newRig(t, func(o *Options) { o.Launch.Identity = agentid.New(o.Store, nil) })
 	r.create(CreateInput{Brief: "Port it", Dir: t.TempDir(), Engine: "codex"})
@@ -420,7 +421,10 @@ func TestCodexGetsCrowsnestsHooks(t *testing.T) {
 		t.Fatalf("codex start %+v", start.Args)
 	}
 	joined := strings.Join(start.Args, " ")
-	for _, event := range []string{"hooks.Stop=", "hooks.SessionStart=", "hooks.PostToolUse=", "hooks.PermissionRequest="} {
+	if !slices.Contains(start.Args, "sandbox_workspace_write.network_access=false") || strings.Contains(joined, "network_access=true") {
+		t.Errorf("the sandbox's network is not explicitly off: %s", joined)
+	}
+	for _, event := range []string{"hooks.Stop=", "hooks.SessionStart=", "hooks.PostToolUse=", "hooks.PermissionRequest=", "mcp_servers.crowsnest={"} {
 		if !strings.Contains(joined, event) {
 			t.Errorf("no %s in %s", event, joined)
 		}
@@ -428,17 +432,24 @@ func TestCodexGetsCrowsnestsHooks(t *testing.T) {
 	if len(joined) > 1500 {
 		t.Errorf("the start command is %d characters; keep it short (DESIGN 7 step 4)", len(joined))
 	}
-	script := regexp.MustCompile(`command="'([^']+/codex-hook)' stop"`).FindStringSubmatch(joined)
+	script := regexp.MustCompile(`command="'([^']+/codex-crowsnest)' hook stop"`).FindStringSubmatch(joined)
 	if script == nil {
 		t.Fatalf("the Stop hook does not run the job's script: %s", joined)
+	}
+	if !strings.Contains(joined, `mcp_servers.crowsnest={command="`+script[1]+`",args=["mcp"],required=true`) {
+		t.Errorf("the MCP server does not run the job's script: %s", joined)
 	}
 	body, err := os.ReadFile(script[1])
 	if err != nil {
 		t.Fatal(err)
 	}
 	info, _ := os.Stat(script[1])
-	if !strings.Contains(string(body), "'/opt/crowsnest/bin/crowsnest' hook \"$@\" --socket") || !strings.Contains(string(body), "--token-file") || info.Mode().Perm() != 0o500 {
+	if !strings.Contains(string(body), "'/opt/crowsnest/bin/crowsnest' \"$@\" --socket") || !strings.Contains(string(body), "--token-file") || info.Mode().Perm() != 0o500 {
 		t.Errorf("script (%v):\n%s", info.Mode().Perm(), body)
+	}
+	brief := briefFileOf(t, r.fake.Prompts()[0].Text)
+	if !strings.Contains(brief, "job_update(progress)") || strings.Contains(brief, "crowsnest job update") || !strings.Contains(brief, "Inside your sandbox it cannot take a slot") {
+		t.Errorf("a supervised Codex job is told the MCP tools, and what heavy does in its sandbox:\n%s", brief)
 	}
 }
 

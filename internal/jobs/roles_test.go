@@ -19,11 +19,11 @@ func TestRolesEmbeddedAndOverrides(t *testing.T) {
 	if got := strings.Join(roles.Names(), ","); got != "builder,lead,reviewer,tester,docs" {
 		t.Fatalf("names %s", got)
 	}
-	prompt, err := roles.Prompt("builder", "j_7", true)
+	prompt, err := roles.Prompt("builder", "j_7", true, false)
 	if err != nil || !strings.Contains(prompt, "Our own builder rules") || !strings.Contains(prompt, "crowsnest job **j_7**") || !strings.Contains(prompt, "`done(result_md, verified, not_verified)`") {
 		t.Fatalf("prompt %v %.300s", err, prompt)
 	}
-	cli, _ := roles.Prompt("docs", "j_7", false)
+	cli, _ := roles.Prompt("docs", "j_7", false, false)
 	if !strings.Contains(cli, "crowsnest job update") || strings.Contains(cli, "mcp__crowsnest") {
 		t.Fatalf("cli prompt %.300s", cli)
 	}

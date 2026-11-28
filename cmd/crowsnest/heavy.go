@@ -116,6 +116,13 @@ func jobSuffix(job string) string {
 func runHeavy(ctx context.Context, dir string, timeout time.Duration, args []string) error {
 	self, _ := os.Executable()
 	self, _ = filepath.EvalSymlinks(self)
+	if !slotsWritable(dir) {
+		// Inside an agent's sandbox (Codex's keeps every write in the workspace) no slot can be
+		// taken, by this or by an outside heavy, and waiting would be for ever: run at once, still
+		// at low priority with the tools' parallelism capped, and say so.
+		_, _ = fmt.Fprintf(os.Stderr, "crowsnest heavy: the slots in %s cannot be written from here (a sandbox?); running without a slot, at low priority with parallelism capped\n", dir)
+		return execCommand(ctx, throttle.NiceArgs(args, exec.LookPath), throttle.CapEnv(os.Environ()))
+	}
 	if os.Getenv(throttle.HolderEnv) == "" {
 		if outside := throttle.OutsideHeavy(exec.LookPath, self, os.Getenv("CROWSNEST_HEAVY_DEFER")); outside != "" {
 			return execCommand(ctx, append([]string{outside}, args...), os.Environ())
@@ -138,6 +145,26 @@ func runHeavy(ctx context.Context, dir string, timeout time.Duration, args []str
 	defer slot.Release()
 	env = append(env, fmt.Sprintf("%s=%d.%d", throttle.HolderEnv, os.Getpid(), slot.Index()))
 	return execCommand(context.WithoutCancel(ctx), throttle.NiceArgs(args, exec.LookPath), env)
+}
+
+// slotsWritable reports whether a slot file can be made in dir (creating dir if needed). Only a
+// refusal by the system (a sandbox, a read-only mount) counts as not writable: anything else is
+// left to the slot code to report.
+func slotsWritable(dir string) bool {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return !isRefusal(err)
+	}
+	probe, err := os.CreateTemp(dir, ".probe-*")
+	if err != nil {
+		return !isRefusal(err)
+	}
+	_ = probe.Close()
+	_ = os.Remove(probe.Name())
+	return true
+}
+
+func isRefusal(err error) bool {
+	return errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EROFS)
 }
 
 // execCommand runs argv with the terminal's stdio and returns its exit status. Interrupts reach

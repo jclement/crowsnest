@@ -484,9 +484,9 @@ func isGitRepo(ctx context.Context, dir string) bool {
 
 type jobFiles struct {
 	prompt, settings, mcpConfig string
-	// codexHooks is a Codex job's hook script, and guardRules the guard's rules file (both ""
-	// without an agent socket).
-	codexHooks, guardRules string
+	// codexScript is a Codex job's crowsnest script (its hooks and its MCP server run it), and
+	// guardRules the guard's rules file (both "" without an agent socket).
+	codexScript, guardRules string
 }
 
 // writeJobFiles writes <state>/jobs/<id>/{prompt.md,settings.json,mcp.json,agent-token}, all
@@ -534,12 +534,12 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 	}
 	files.guardRules = guardRules
 	if tokenFile != "" && job.Engine == EngineCodex {
-		// Codex has no settings file crowsnest can pass; its hooks run this script (DESIGN 20.1).
-		// Without a token a hook could not say whose it is, so there are none.
-		files.codexHooks = filepath.Join(dir, "codex-hook")
-		script := agentcfg.CodexHookScript(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, tokenFile)
-		if err := writeExecutable(files.codexHooks, []byte(script)); err != nil {
-			return jobFiles{}, fmt.Errorf("writing the job's Codex hook script: %w", err)
+		// Codex has no settings file crowsnest can pass; its hooks and its MCP server run this
+		// script (DESIGN 20.1). Without a token neither could say whose it is, so there are none.
+		files.codexScript = filepath.Join(dir, "codex-crowsnest")
+		script := agentcfg.CodexScript(s.opts.Launch.Executable, s.opts.Launch.AgentSocket, job.ID, tokenFile)
+		if err := writeExecutable(files.codexScript, []byte(script)); err != nil {
+			return jobFiles{}, fmt.Errorf("writing the job's Codex script: %w", err)
 		}
 	}
 	if withMCP {
@@ -558,13 +558,13 @@ func (s *Service) writeJobFiles(ctx context.Context, job Job) (jobFiles, error) 
 // standing instructions without a word.
 func (s *Service) agentPrompt(ctx context.Context, job Job, mcp, record bool) (string, error) {
 	if s.opts.Instructions == nil {
-		return s.opts.Roles.Prompt(job.Role, job.ID, mcp)
+		return s.opts.Roles.Prompt(job.Role, job.ID, mcp, job.Engine == EngineCodex)
 	}
 	layers, err := s.opts.Instructions.JobLayers(ctx, job, record)
 	if err != nil {
 		return "", fmt.Errorf("composing the instructions of %s: %w", job.ID, err)
 	}
-	protocol, err := ProtocolText(job.ID, mcp)
+	protocol, err := ProtocolText(job.ID, mcp, job.Engine == EngineCodex)
 	if err != nil {
 		return "", err
 	}
@@ -587,25 +587,28 @@ func writeJSON(path string, value any) error {
 func (s *Service) agentArgs(job Job, files jobFiles, resume bool) []string {
 	if job.Engine == EngineCodex {
 		// Verified against codex-cli 0.167 --help: there is no --no-daemon flag. With crowsnest's
-		// hooks the job asks on request inside its sandbox, and each request comes to the browser
-		// through the PermissionRequest hook (DESIGN 20.1); without them (no agent socket) it runs
+		// script the job asks on request inside its sandbox, and each request comes to the browser
+		// through the PermissionRequest hook (DESIGN 20.1); without it (no agent socket) it runs
 		// as before, approvals off, so it never waits on a dialog nobody is told about.
+		//
+		// The sandbox's network stays off (R9-S1): with it on, any command could send any file
+		// anywhere with no escalation, so no card. The job reports through crowsnest's MCP server
+		// instead, which Codex starts outside the sandbox, as it runs the hooks (both verified to
+		// reach the agent socket with the network off on codex-cli 0.167). A command that needs
+		// the network escalates, and the escalation is a risk-rated approval card. Off is said
+		// explicitly: the user's own ~/.codex/config.toml may turn it on for their sessions.
 		approval := "never"
-		var hooks []string
-		if files.codexHooks != "" {
+		supervision := []string{"-c", "sandbox_workspace_write.network_access=false"}
+		if files.codexScript != "" {
 			approval = "on-request"
-			// The sandbox's network switch is the only way its shell reaches crowsnest's agent
-			// socket (codex-cli 0.167: network.unix_sockets did not open it, verified with `codex
-			// sandbox`); without it every `crowsnest job …` call becomes an approval card. A
-			// Claude job has the network too; the guard still refuses protected hosts, and writes
-			// stay inside the workspace.
-			hooks = append([]string{"-c", "sandbox_workspace_write.network_access=true"}, agentcfg.CodexHookArgs(files.codexHooks, files.guardRules)...)
+			supervision = append(supervision, agentcfg.CodexMCPArgs(files.codexScript)...)
+			supervision = append(supervision, agentcfg.CodexHookArgs(files.codexScript, files.guardRules)...)
 		}
 		args := []string{"--ask-for-approval", approval, "--sandbox", "workspace-write"}
 		if job.Model != "" {
 			args = append(args, "--model", job.Model)
 		}
-		return append(args, hooks...)
+		return append(args, supervision...)
 	}
 	flag := "--session-id"
 	if resume {

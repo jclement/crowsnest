@@ -46,6 +46,6 @@ func (f *folderTrust) Trust(dirs []string) []agenttrust.Result {
 }
 
 func (f *folderTrust) Trusted(dir string) bool {
-	data, err := os.ReadFile(f.paths.ClaudeConfig)
+	data, err := agenttrust.ReadConfig(f.paths.ClaudeConfig)
 	return err == nil && doctor.DirTrusted(data, dir)
 }

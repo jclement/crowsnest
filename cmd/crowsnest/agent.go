@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jclement/crowsnest/internal/agentapi"
+	"github.com/jclement/crowsnest/internal/agentid"
 	"github.com/jclement/crowsnest/internal/questions"
 )
 
@@ -221,18 +222,56 @@ func newSayCommand() *cobra.Command {
 // ---- mcp -----------------------------------------------------------------------------------
 
 func newMCPCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "mcp",
-		Short: "Serve crowsnest's agent tools over MCP on stdio (Claude Code starts this)",
-		Long: "A stdio MCP server exposing ask, get_question and say (and, from M7, the job tools), proxied to the agent\n" +
-			"socket named by CROWSNEST_SOCKET. Claude Code starts it from the --mcp-config file crowsnest writes.",
+	var flags mcpFlags
+	command := &cobra.Command{
+		Use:   "mcp [--socket path] [--job id] [--token-file path]",
+		Short: "Serve crowsnest's agent tools over MCP on stdio (Claude Code and Codex start this)",
+		Long: "A stdio MCP server exposing ask, get_question, say and the job tools, proxied to the agent socket\n" +
+			"named by --socket or CROWSNEST_SOCKET. Claude Code starts it from the --mcp-config file crowsnest\n" +
+			"writes; a Codex job starts it as its MCP server `crowsnest`, outside Codex's sandbox, which is how a\n" +
+			"Codex job reaches crowsnest with the sandbox's network off (DESIGN.md 20.1). --token-file names the\n" +
+			"file holding the agent's token, so the token never appears on a command line.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, err := agentClient()
+			client, err := flags.client(os.Getenv)
 			if err != nil {
 				return err
 			}
 			return agentapi.RunMCP(cmd.Context(), client, version)
 		},
 	}
+	command.Flags().StringVar(&flags.socket, "socket", "", "the agent socket (default: CROWSNEST_SOCKET)")
+	command.Flags().StringVar(&flags.job, "job", "", "the job this agent holds (default: CROWSNEST_JOB)")
+	command.Flags().StringVar(&flags.tokenFile, "token-file", "", "the file holding this agent's token (default: CROWSNEST_TOKEN)")
+	return command
+}
+
+// mcpFlags are `crowsnest mcp`'s flags; each falls back to the agent's environment.
+type mcpFlags struct {
+	socket, job, tokenFile string
+}
+
+// client is the agent socket client the flags name. A token file that cannot be read is an
+// error, not a silent fall back to the environment: the server would ignore every call.
+func (f mcpFlags) client(getenv func(string) string) (*agentapi.Client, error) {
+	socket := f.socket
+	if socket == "" {
+		socket = getenv(agentapi.EnvSocket)
+	}
+	if socket == "" {
+		return nil, agentapi.ErrNoSocket
+	}
+	token := getenv(agentapi.EnvToken)
+	if f.tokenFile != "" {
+		fromFile, err := agentid.ReadTokenFile(f.tokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading the agent's token file: %w", err)
+		}
+		token = fromFile
+	}
+	job := f.job
+	if job == "" {
+		job = getenv(agentapi.EnvJob)
+	}
+	return agentapi.NewClient(socket, token).WithJob(job), nil
 }

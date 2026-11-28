@@ -140,27 +140,29 @@ func summaryOf(prompt string) string {
 }
 
 // Prompt is a role's prompt followed by the job protocol for jobID. mcp chooses the tool
-// wording (Claude) or the CLI wording (Codex).
-func (r *Roles) Prompt(role, jobID string, mcp bool) (string, error) {
+// wording or the CLI wording; codex the lines that differ inside Codex's sandbox.
+func (r *Roles) Prompt(role, jobID string, mcp, codex bool) (string, error) {
 	base, ok := r.prompts[role]
 	if !ok {
 		return "", fmt.Errorf("unknown role %q", role)
 	}
-	protocol, err := ProtocolText(jobID, mcp)
+	protocol, err := ProtocolText(jobID, mcp, codex)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(base) + "\n\n" + protocol, nil
 }
 
-// ProtocolText renders the job protocol section.
-func ProtocolText(jobID string, mcp bool) (string, error) {
+// ProtocolText renders the job protocol section. mcp chooses crowsnest's MCP tools over the
+// `crowsnest job` commands; codex leaves out what a Codex sandbox cannot do (take a heavy slot:
+// its files are outside the workspace, so `heavy` would wait for ever).
+func ProtocolText(jobID string, mcp, codex bool) (string, error) {
 	tmpl, err := template.ParseFS(embedded, "templates/protocol.md")
 	if err != nil {
 		return "", fmt.Errorf("parsing the protocol template: %w", err)
 	}
 	var out strings.Builder
-	if err := tmpl.Execute(&out, map[string]any{"JobID": jobID, "MCP": mcp}); err != nil {
+	if err := tmpl.Execute(&out, map[string]any{"JobID": jobID, "MCP": mcp, "Codex": codex}); err != nil {
 		return "", fmt.Errorf("rendering the protocol: %w", err)
 	}
 	return out.String(), nil

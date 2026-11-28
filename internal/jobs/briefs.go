@@ -50,7 +50,9 @@ func (s *Service) jobDir(jobID string) (string, error) {
 }
 
 // writeBrief writes the job's brief file and returns its path. A Codex agent has no system
-// prompt file, so its brief file starts with the job protocol.
+// prompt file, so its brief file starts with the job protocol: the MCP tools' wording when the job
+// has crowsnest's MCP server (its sandboxed shell cannot reach the socket, R9-S1), else the
+// `crowsnest job` commands'.
 func (s *Service) writeBrief(ctx context.Context, job Job) (string, error) {
 	dir, err := s.jobDir(job.ID)
 	if err != nil {
@@ -59,7 +61,7 @@ func (s *Service) writeBrief(ctx context.Context, job Job) (string, error) {
 	var b strings.Builder
 	if job.Engine == EngineCodex {
 		// Not recorded again: writeJobFiles recorded this start's layers moments ago.
-		protocol, err := s.agentPrompt(ctx, job, false, false)
+		protocol, err := s.agentPrompt(ctx, job, s.codexSupervised(), false)
 		if err != nil {
 			return "", err
 		}
@@ -72,6 +74,12 @@ func (s *Service) writeBrief(ctx context.Context, job Job) (string, error) {
 		return "", fmt.Errorf("writing the brief of %s: %w", job.ID, err)
 	}
 	return path, nil
+}
+
+// codexSupervised reports whether a Codex job is started with crowsnest's script: its hooks and
+// MCP server (writeJobFiles writes the script exactly when there is a token to name).
+func (s *Service) codexSupervised() bool {
+	return s.opts.Launch.Executable != "" && s.opts.Launch.AgentSocket != "" && s.opts.Launch.Identity != nil
 }
 
 // writeReadOnly writes data to path as a fresh owner-read-only (0400) file (R3-L4). Whatever was

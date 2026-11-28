@@ -17,10 +17,11 @@
 //
 // The rules: only one key is added or set, everything else in the file is kept byte for byte
 // (Claude's JSON values are carried as raw JSON; Codex's TOML is appended to, never rewritten);
-// the write is atomic (a temporary file in the same directory, then rename, with the old mode);
-// it is read back, and retried a few times if a running agent rewrote the file in between; a
-// file that does not parse is left alone and reported; Codex's explicit "untrusted" for the
-// folder is respected, not overwritten.
+// the write is the careful update in file.go (Claude's own lock, a re-read and comparison just
+// before the atomic rename, a link kept, the old mode kept); it is read back, and retried a few
+// times if a running agent rewrote the file in between; a file that does not parse, or is not a
+// JSON object, is left alone and reported; Codex's explicit "untrusted" for the folder is
+// respected, not overwritten.
 package agenttrust
 
 import (
@@ -28,7 +29,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -92,30 +92,34 @@ func Trust(paths Paths, dirs []string, codexInstalled bool) []Result {
 // ---- Claude ---------------------------------------------------------------------------------
 
 func trustClaude(path string, dirs []string) Result {
-	result := Result{Agent: "claude"}
+	return confirmed(Result{Agent: "claude"}, "Claude Code", func() (bool, string, error) {
+		wrote, err := updateFile(path, func(original []byte) ([]byte, bool, error) { return claudeWithTrust(original, dirs) })
+		return wrote, "", err
+	})
+}
+
+// confirmed runs one careful update, then again after a pause until an update finds nothing to
+// change: that read-back is what says the record held (an agent rewriting its file from memory
+// can drop it once or twice, as new-project found). refused ends it with that sentence.
+func confirmed(result Result, agent string, update func() (wrote bool, refused string, err error)) Result {
 	for attempt := 0; ; attempt++ {
-		original, err := readOptional(path)
-		if err != nil {
+		wrote, refused, err := update()
+		switch {
+		case err != nil:
 			return failed(result, err)
-		}
-		updated, changed, err := claudeWithTrust(original, dirs)
-		if err != nil {
-			return failed(result, err)
-		}
-		if !changed {
+		case refused != "":
+			result.Status, result.Detail = StatusSkipped, refused
+			return result
+		case !wrote:
 			result.Status = StatusAlready
 			if attempt > 0 {
 				result.Status = StatusTrusted
 			}
 			return result
+		case attempt >= attempts:
+			return failed(result, errors.New("the trust was not kept: "+agent+" kept rewriting its config"))
 		}
-		if attempt >= attempts {
-			return failed(result, errors.New("the trust was not kept: Claude Code kept rewriting its config"))
-		}
-		if err := writeAtomic(path, updated); err != nil {
-			return failed(result, err)
-		}
-		time.Sleep(settle) // then read back: the loop ends once a read finds every folder trusted
+		time.Sleep(settle)
 	}
 }
 
@@ -126,6 +130,9 @@ func claudeWithTrust(original []byte, dirs []string) ([]byte, bool, error) {
 	if len(bytes.TrimSpace(original)) > 0 {
 		if err := json.Unmarshal(original, &top); err != nil {
 			return nil, false, fmt.Errorf("the config is not a JSON object, so it was left alone: %w", err)
+		}
+		if top == nil { // the JSON value null (R9-C9): not an object either
+			return nil, false, errors.New("the config is null, not a JSON object, so it was left alone")
 		}
 	}
 	projects := map[string]json.RawMessage{}
@@ -193,35 +200,15 @@ type codexConfig struct {
 }
 
 func trustCodex(path string, dirs []string) Result {
-	result := Result{Agent: "codex"}
-	for attempt := 0; ; attempt++ {
-		original, err := readOptional(path)
-		if err != nil {
-			return failed(result, err)
-		}
-		updated, changed, refused, err := codexWithTrust(original, dirs)
-		if err != nil {
-			return failed(result, err)
-		}
-		if refused != "" {
-			result.Status, result.Detail = StatusSkipped, refused
-			return result
-		}
-		if !changed {
-			result.Status = StatusAlready
-			if attempt > 0 {
-				result.Status = StatusTrusted
-			}
-			return result
-		}
-		if attempt >= attempts {
-			return failed(result, errors.New("the trust was not kept: Codex kept rewriting its config"))
-		}
-		if err := writeAtomic(path, updated); err != nil {
-			return failed(result, err)
-		}
-		time.Sleep(settle)
-	}
+	return confirmed(Result{Agent: "codex"}, "Codex", func() (bool, string, error) {
+		refused := ""
+		wrote, err := updateFile(path, func(original []byte) ([]byte, bool, error) {
+			updated, changed, why, err := codexWithTrust(original, dirs)
+			refused = why
+			return updated, changed, err
+		})
+		return wrote, refused, err
+	})
 }
 
 // codexWithTrust appends a [projects."<dir>"] table for each dir Codex has no answer for. A
@@ -263,44 +250,6 @@ func codexWithTrust(original []byte, dirs []string) (updated []byte, changed boo
 }
 
 // ---- Files ----------------------------------------------------------------------------------
-
-// readOptional reads path; a missing file is empty.
-func readOptional(path string) ([]byte, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // the agent's own config file, named by its documented location
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	return data, err
-}
-
-// writeAtomic replaces path with data through a temporary file in the same directory, keeping
-// the old file's mode (0600 for a new one). A link at path is replaced, never followed.
-func writeAtomic(path string, data []byte) error {
-	mode := os.FileMode(0o600)
-	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-		mode = info.Mode().Perm()
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".crowsnest-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
-}
 
 func failed(result Result, err error) Result {
 	result.Status, result.Detail = StatusFailed, err.Error()

@@ -50,7 +50,9 @@ the job's state declared.
 {{end}}
 Heavy commands: run builds, test suites and typechecks as `crowsnest heavy -- <command>` (for
 example `crowsnest heavy -- go test ./...`). It waits for one of the machine's few heavy slots, so
-several agents testing at once cannot freeze it. Never wrap a dev server or a watcher in it.
+several agents testing at once cannot freeze it. Never wrap a dev server or a watcher in it.{{if .Codex}}
+Inside your sandbox it cannot take a slot, so it runs the command at once at low priority: run one
+build or suite at a time, and only the tests for what you changed until the end.{{end}}
 
 Rules:
 

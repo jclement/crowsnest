@@ -170,13 +170,39 @@ func readRule(dir string) string {
 	return "Read(//" + strings.TrimPrefix(filepath.ToSlash(filepath.Clean(dir)), "/") + "/**)"
 }
 
-// CodexHookScript is the body of a Codex job's hook script (DESIGN.md 20.1): one line that runs
-// `crowsnest hook <event> …` with the job's socket, id and token file, so each hook entry on the
-// command line names only the script and its event. Codex's -c values are typed into the pane,
-// which caps their length; five full hook commands would not fit.
-func CodexHookScript(executable, socket, jobID, tokenFile string) string {
-	return "#!/bin/sh\n# crowsnest: the hooks of job " + jobID + "'s Codex session, written fresh at each start.\nexec " +
-		HookCommand(executable, socket, `"$@"`, jobID, tokenFile) + "\n"
+// CodexScript is the body of a Codex job's crowsnest script (DESIGN.md 20.1): one line that runs
+// `crowsnest <subcommand> …` with the job's socket, id and token file appended, so each hook entry
+// and the MCP server on the command line name only the script and their subcommand (`hook stop`,
+// `mcp`). Codex's -c values are typed into the pane, which caps their length; five full hook
+// commands would not fit. Codex runs both hooks and MCP servers itself, outside its sandbox, so
+// the script reaches the agent socket with the sandbox's network off (verified on codex-cli
+// 0.167 with a unix-socket listener: the MCP server and the hooks connected, a sandboxed shell
+// got "Operation not permitted").
+func CodexScript(executable, socket, jobID, tokenFile string) string {
+	parts := []string{quote(executable), `"$@"`, "--socket", quote(socket)}
+	if jobID != "" {
+		parts = append(parts, "--job", quote(jobID))
+	}
+	if tokenFile != "" {
+		parts = append(parts, "--token-file", quote(tokenFile))
+	}
+	return "#!/bin/sh\n# crowsnest: the hooks and MCP server of job " + jobID + "'s Codex session, written fresh at each start.\nexec " +
+		strings.Join(parts, " ") + "\n"
+}
+
+// CodexMCPTimeout is the tool-call timeout, in seconds, crowsnest gives its MCP server in a Codex
+// session: `ask` with `wait: true` holds until the human answers (DESIGN 8), so Codex's default
+// (a minute) would cut it off. The same outer fence as the PermissionRequest hook.
+const CodexMCPTimeout = PermissionRequestTimeout
+
+// CodexMCPArgs is the `-c mcp_servers.crowsnest=…` override that gives a Codex session crowsnest's
+// MCP server (`<script> mcp`), the tools a job reports through (job_update, done, ask, …). It is
+// required (Codex fails the start rather than run a job that cannot report), its tools need no
+// approval (they only reach crowsnest, which decides what each caller may do), and a waiting ask
+// is not cut off. Nothing of the token is on this line: the script names the token file.
+func CodexMCPArgs(script string) []string {
+	return []string{"-c", "mcp_servers.crowsnest={command=" + tomlString(script) + `,args=["mcp"],required=true,` +
+		`default_tools_approval_mode="approve",startup_timeout_sec=30,tool_timeout_sec=` + strconv.Itoa(CodexMCPTimeout) + "}"}
 }
 
 // codexHooks are the Codex events crowsnest hooks (codex-cli 0.167 fires each with Claude Code's
@@ -195,13 +221,15 @@ var codexHooks = []struct {
 }
 
 // CodexHookArgs are the `-c hooks.<Event>=…` overrides that hand a Codex session crowsnest's
-// hooks through script (CodexHookScript), and the flag that lets them run without Codex's
-// per-hook review (--dangerously-bypass-hook-trust: crowsnest wrote them, for this session only).
+// hooks through script (CodexScript), and the flag that lets them run without Codex's per-hook
+// review (--dangerously-bypass-hook-trust: crowsnest wrote them, for this session only). The flag
+// would also run a repository's own .codex hooks unreviewed, so a job is not started on a
+// repository whose .codex/ the human has not seen (jobs.codexConfigGate, DESIGN 20.1).
 // guardRules "" leaves the guard out, as for Claude.
 func CodexHookArgs(script, guardRules string) []string {
 	args := []string{"--dangerously-bypass-hook-trust"}
 	for _, hook := range codexHooks {
-		command := quote(script) + " " + hook.Command
+		command := quote(script) + " hook " + hook.Command
 		if hook.Command == "pre-tool-use" {
 			if guardRules == "" {
 				continue
