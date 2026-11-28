@@ -49,3 +49,5 @@ The `g` sequences and `?` do nothing while you type in a field or a terminal, so
 | `v` | `v` | Changes: mark the current file viewed (again to unmark) |
 | `c` | `c` | Changes: comment on the selected lines (or the focused line, else the whole file) |
 | `f` | `f` | Changes: full screen (esc leaves it) |
+| `1` / `…` / `9` | `1` / `…` / `9` | A decision: press its choices in order (a granting one still asks again) |
+| `esc` | `esc` | A decision: go back where you came from |

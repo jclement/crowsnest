@@ -21,13 +21,17 @@ A stuck job's Overview opens with the cause and **the one action that fits it**:
 | **Open the review** | The reviewer still objects. |
 | **Decide on the budget** | It reached its budget. |
 
-**What the agent last said** sits beside it: often the reason, in its own words ("I'm not sure how
-to proceed without changing herdr's event shape"). Then a message is the fix.
+When the agent said something, its words come next ("I'm not sure how to proceed without changing
+herdr's event shape"), with the message box right under them: often a sentence from you is the
+fix. Then the action is **Reply** rather than another nudge: after two nudges, or when its last
+message asks a question ("It asked something in its message"), the banner's button puts you in
+the message box.
 
 ## The Rescue panel
 
 Below it, **Rescue: get the agent moving without a terminal** (open by default when the job is
-stuck or needs you), each button saying what it does:
+stuck or needs you; folded as **Other ways to get it moving** when the agent's words and the
+message box come first), each button saying what it does:
 
 1. **Interrupt (Esc)**: stops the current turn; the agent then waits for you.
 2. **Continue**: tells it to carry on where it left off (or say why it cannot, with job_update).

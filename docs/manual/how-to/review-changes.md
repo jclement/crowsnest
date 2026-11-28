@@ -50,8 +50,9 @@ marked it, the file comes back, flagged **changed since you viewed it**, and **S
 shows only the new edits, not the whole file again. A mark made in one scope counts in the others
 when it is the same change. Marks go away when the job lands, is discarded or is deleted.
 
-On the Land tab, the confirmation says how many files of what would merge you have **not viewed**
-("2 of 7 files not viewed"). To make that a rule, turn on **Require all files viewed before
+On the Review tab, the Land card and its confirmation say how many of the committed files (what a
+merge takes) you have **not viewed** ("2 of 7 committed files not viewed"); the viewer's own count
+covers uncommitted work too. On a phone, ticking **Viewed** moves on to the next file not viewed. To make that a rule, turn on **Require all files viewed before
 Land** in Settings ([Open Settings](app:sheet/settings)); Land then refuses until every committed
 file is viewed.
 
@@ -61,8 +62,9 @@ Point at the code you want changed instead of describing where it is.
 
 1. **Select lines**: click a line number (the old side's on a removed line, the new side's on an
    added one). **Shift-click** another number, or **drag** down the numbers, for a range. On a
-   phone, tap a number, then tap another to extend. A bar at the bottom says what is selected.
-2. **Comment**: press `c` (or **Comment** in that bar), write what should change, **Save comment**
+   phone, tap a number, then tap another to extend. A bar at the bottom of the window (on a phone,
+   just above Previous and Next) says what is selected.
+2. **Comment**: press `c`, tap the selected line again, or press **Comment** in that bar; write what should change, **Save comment**
    (Ctrl or ⌘ Enter). Every change block also has **Ask for change here** above it (its lines),
    and every file has one in its header (the whole file).
 3. The note is a **draft**, kept on the server: it survives a reload and shows on your phone too.
@@ -73,7 +75,7 @@ Point at the code you want changed instead of describing where it is.
    (exactly what the agent will get), and **Send N comments to the agent**. All of them go as
    **one message**: each note with its file, its lines, the quoted code and what you wrote. A long
    one goes as an attached file. The job's **Review** tab counts the notes waiting
-   ("Review · 2 comments to send") and has the same Send under the diff, with when they were last
+   ("Review · 2") and has the same Send under the diff, with when they were last
    sent.
 
 What sending does depends on the job:

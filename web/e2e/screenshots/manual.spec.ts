@@ -61,7 +61,7 @@ test("rescue on a phone", async ({ page }) => {
 
 test("the land tab at 1440", async ({ page }) => {
   await open(page, "/jobs?job=j_18", 1440, 900);
-  await page.getByRole("tab", { name: "Land" }).click();
+  await page.getByRole("tab", { name: /^Review/ }).click();
   await expect(page.getByRole("group", { name: "Land actions" })).toBeVisible();
   await shot(page, "land-1440");
 });

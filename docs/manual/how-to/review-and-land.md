@@ -19,17 +19,19 @@ land** when both are fine):
 
 ## Review it
 
-1. Open the job and press **Review and land**, or the **Land** tab (it is called **Review** while
-   the job is not landable yet).
+1. Open the job and press **Review and land**, or the **Review** tab (one name whatever the state;
+   "Review · 2" when two line comments wait to be sent). While the job is still working, Land is
+   one line at the top, "Lands when it finishes".
 2. **What it produced**: the branch and base ("job/91-retry-with-back-off → main"), commits ahead,
    files and lines changed, whether the tree is clean and whether it is pushed; then the
    **Commits**.
-3. **The changes**, in the [diff viewer](review-changes.md): every changed file, highlighted, with
+3. The **Walkthrough** (chunk by chunk: why each exists, what was tested, the risk), folded to a
+   line above the diff: open it to read the guide before the code.
+4. **The changes**, in the [diff viewer](review-changes.md): every changed file, highlighted, with
    a **Viewed** box each. Read them and tick them off; **Full screen (f)** gives the diff the whole
    window.
-4. Beside it, **The agent's account**: the **Review** rounds (each reviewer's verdict and
-   findings), the **Walkthrough** (chunk by chunk: why each exists, what was tested, the risk), and
-   the **Result** with Verified and Not verified.
+5. Beside it, **The agent's account**: the **Review** rounds (each reviewer's verdict and
+   findings) and the **Result** with Verified and Not verified.
 
 The diff is the [diff viewer](review-changes.md): syntax-highlighted, split or unified, live as
 the agent works, with a **Viewed** box per file. Tick files as you read them; the Land
@@ -37,20 +39,25 @@ confirmation then says how many of the files it would merge you have not viewed.
 
 ## Land it
 
-1. Under **Land**, press one:
+1. Under **Land** (the reviewer's verdict, crowsnest's check and how many committed files you have
+   not viewed, in one line; what Accepted proves is behind its **?**), press one:
    - **Merge**: into the base, in your main checkout, as a merge commit (or fast-forward only with
      the **Land merges with** setting);
    - **Push and open PR**: push the branch; on GitHub with `gh` signed in, open a pull request with
      the walkthrough as its body;
-   - **Discard**: throw the branch away.
-2. Read the confirmation. It names the commit you reviewed and says exactly what will happen:
-   "Commit 9eb9effd67, as reviewed: Merge job/91-retry-with-back-off into main with a merge
-   commit, in the main checkout …". If the branch has moved past that commit, nothing is landed.
+   - **Discard** (quiet, apart at the right): throw the branch away.
+2. Read the confirmation, which opens where the buttons were: two or three lines ("Merges
+   job/91-retry-with-back-off into main. Removes its worktree and deletes the branch. Refused, with
+   nothing changed, if the main checkout has uncommitted changes or the merge conflicts.").
+   **Exactly what happens** has the full text, naming the commit you reviewed; if the branch has
+   moved past that commit, nothing is landed.
 3. **Yes, merge** (or the action's own words), or **Not now**.
 4. crowsnest merges (or pushes), then tears down: stops the agent, removes the worktree, closes the
    workspace, deletes the branch (kept for a pull request). Each step lands on the timeline.
+   A refused land stays in the card with the reason, **Try again**, and, when the main checkout
+   has uncommitted changes, a link to them on the project page.
 
-![The Land tab: what it produced, the changes, the agent's account](../img/land-1440.jpg)
+![The Review tab: Land, what it produced, the changes, the agent's account](../img/land-1440.jpg)
 
 ## When not to push or merge
 

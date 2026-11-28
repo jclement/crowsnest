@@ -23,20 +23,27 @@ Several low-risk calls waiting from the same agent show **Allow N low-risk calls
 
 On a phone every question, approval and dialog opens as one screen, top to bottom:
 
-1. **Where it belongs**: the kind, the project, the job (a link), the agent, how long it has waited.
+1. **Where it belongs**: the label (Dangerous, Blocking…), the project, the job (a link), how long
+   it has waited, its place in the queue ("3 of 9") and **Skip**, which moves on without answering
+   or snoozing it.
 2. **The ask** in a line, and what stays blocked ("The agent is waiting for this answer").
 3. **If you choose**: each choice with what it does ("It runs now in <dir>", "It does not run; the
-   agent is told, with your note, and carries on", "Presses 2 in the agent's terminal").
-4. **The recommendation**, when the agent made one.
-5. **The evidence**: what the agent wrote, the change (a file list first; long diffs folded), the
-   call, the screen, and the agent's last message.
-6. **The answer bar**, at the bottom under your thumb: the note, the choices, and **Open the full
-   job**.
+   agent is told, with your note, and carries on"), shown only when a choice has something to say.
+   Otherwise the recommendation, when the agent made one.
+4. **The evidence**: what the agent wrote, the change (a file list first; long diffs folded), the
+   call, the screen, and the agent's last message (its own words: crowsnest's protocol lines are
+   left out).
+5. **The answer bar**, at the bottom under your thumb: the choices (two short ones side by side,
+   the recommended one marked), and **Add a note**.
 
+The pressed choice says **Sending…** at once. If the server has not answered in five seconds the
+bar says so (the answer still goes through when it does); if it fails, **Not sent** with **Retry**.
 Your **note** survives rotating the phone, switching apps, or iOS throwing the page away; it is
 cleared once the answer is in. If someone answered elsewhere, or the dialog went away, the packet
 says so instead of offering buttons. After an answer it moves on to the next decision, or back to
-Now.
+Now: the next one says what you just answered, and its buttons wait a moment before they take a
+tap, so a double tap never answers something you did not read. A decision that cannot load says so
+with **Retry**. Keys: **1** to **9** press the choices in order; **Esc** goes back.
 
 ![A decision packet on a phone: the ask, what each choice does, the answer bar](../img/decide-390.jpg)
 
@@ -46,8 +53,11 @@ Now.
 - **Manual**: write in **Your answer**, then **Send answer**.
 - Add a **note** for context or a condition. The agent receives `[crowsnest answer q_7] <title> →
   <answer> (note: …)`.
-- A **gate** (a land request, a job outside its directory, anything that allows, approves, merges,
-  pushes, deploys, deletes, grants or permits) asks "This widens what agents may do… Yes, <label>" before it answers.
+- A **gate** (a land request, a job outside its directory, a task review, or a question whose title
+  or chosen option allows, approves, merges, lands, pushes, deploys, deletes, publishes, grants or
+  permits) asks for a second tap ("“Merge it” lets the agent go ahead with this. Tap again to
+  confirm.", then **Yes, merge it**). An everyday word such as "apply" or "proceed" answers in one
+  tap here, though it still keeps the question off notifications and rows.
 
 Then watch the [receipt](../concepts/questions-approvals-dialogs.md#receipts): **Received** means
 the agent took it in.
