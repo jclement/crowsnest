@@ -106,7 +106,7 @@ func IsolatedCheckout(ctx context.Context, dir, commit, root, parent string) (*I
 	config := append(filtersOff(ctx, repo), "attr.tree="+empty, "core.attributesFile=/dev/null", "core.sparseCheckout=false",
 		"core.sparseCheckoutCone=false", "index.sparse=false", "core.autocrlf=false", "core.symlinks=true")
 	call := gitCall{dir: repo, args: []string{"worktree", "add", "--detach", "--force", copyDir, commit},
-		config: config, env: []string{"GIT_LFS_SKIP_SMUDGE=1"}, timeout: isolatedTimeout}
+		config: config, env: []string{"GIT_LFS_SKIP_SMUDGE=1", noReplace}, timeout: isolatedTimeout}
 	if _, err := call.run(ctx); err != nil {
 		iso.Remove(ctx)
 		return nil, fmt.Errorf("checking out %s in an isolated copy: %w", shortID(commit), err)
@@ -194,6 +194,10 @@ func checkCopy(root, parent string) (string, string, error) {
 	return target, strings.TrimSpace(string(body)), nil
 }
 
+// noReplace switches off git's replace refs: a refs/replace entry would make "the commit" another
+// commit's tree for checkout and verification alike (R10 low, R9-C6).
+const noReplace = "GIT_NO_REPLACE_OBJECTS=1"
+
 // ErrNotTheCommit means a checkout's tracked files are not exactly a commit's tree.
 var ErrNotTheCommit = errors.New("the checkout is not exactly the commit")
 
@@ -207,14 +211,14 @@ const maxNamedPaths = 8
 // commit's tree id; an error wraps ErrNotTheCommit and names what differs, or says what could not
 // be read (fail closed).
 func VerifyCheckout(ctx context.Context, dir, commit string) (string, error) {
-	head, err := gitCall{dir: dir, args: []string{"rev-parse", "HEAD"}}.run(ctx)
+	head, err := gitCall{dir: dir, args: []string{"rev-parse", "HEAD"}, env: []string{noReplace}}.run(ctx)
 	if err != nil {
 		return "", fmt.Errorf("reading the copy's HEAD: %w", err)
 	}
 	if head = strings.TrimSpace(head); head != commit {
 		return "", fmt.Errorf("%w: HEAD is %s, not %s", ErrNotTheCommit, shortID(head), shortID(commit))
 	}
-	tree, err := gitCall{dir: dir, args: []string{"rev-parse", commit + "^{tree}"}}.run(ctx)
+	tree, err := gitCall{dir: dir, args: []string{"rev-parse", commit + "^{tree}"}, env: []string{noReplace}}.run(ctx)
 	if err != nil {
 		return "", fmt.Errorf("reading %s's tree: %w", shortID(commit), err)
 	}
@@ -223,7 +227,7 @@ func VerifyCheckout(ctx context.Context, dir, commit string) (string, error) {
 		return "", err
 	}
 	// The whole tree, bounded by git's output cap: a listing cut short is an error, not a pass.
-	listing, err := gitCall{dir: dir, args: []string{"ls-tree", "-r", "-z", "--full-tree", commit}}.run(ctx)
+	listing, err := gitCall{dir: dir, args: []string{"ls-tree", "-r", "-z", "--full-tree", commit}, env: []string{noReplace}}.run(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing %s's tree: %w", shortID(commit), err)
 	}

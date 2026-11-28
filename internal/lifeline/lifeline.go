@@ -29,11 +29,18 @@ const grace = 3 * time.Second
 
 // RunChild runs args in this process's group and ends the group when stdin reaches EOF
 // (crowsnest is gone) or this process is asked to stop. It returns the child's exit code when the
-// child ended by itself, 1 after a stop, 2 for no command. The watchdog must be its group's leader
+// child ended by itself, 1 after a stop, 2 for no command or when it does not lead its group. The watchdog must be its group's leader
 // (crowsnest starts it with Setpgid), so ending the group ends nothing else.
 func RunChild(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, "crowsnest check-child: expected -- <command> [args...]")
+		return 2
+	}
+	// Ending "this process's group" is only safe when the watchdog leads it: started any other way
+	// (by hand from a shell, or by a caller that forgot Setpgid) the group is someone else's, and
+	// ending it would end them (R10 low, R9-C7).
+	if syscall.Getpgrp() != os.Getpid() {
+		_, _ = fmt.Fprintln(stderr, "crowsnest check-child: not the leader of its process group, so it cannot end the check safely; crowsnest starts it with its own group")
 		return 2
 	}
 	stops := make(chan os.Signal, 1)

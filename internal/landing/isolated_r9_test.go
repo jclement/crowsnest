@@ -221,3 +221,29 @@ func TestACopyIsMadeOnlyDirectlyInsideTheChecksDirectory(t *testing.T) {
 		t.Fatalf("the existing directory was touched: %v", err)
 	}
 }
+
+// TestAReplaceRefDoesNotChangeWhatIsChecked (R10 low, R9-C6): a refs/replace entry pointing the
+// commit at another one does not change the copy, and verification still compares with the
+// commit's own tree.
+func TestAReplaceRefDoesNotChangeWhatIsChecked(t *testing.T) {
+	r := newRepo(t)
+	ctx := context.Background()
+	r.commitInWorktree("widget.go", "package widget\n", "widget")
+	commit := run(t, r.worktree, "git", "rev-parse", "HEAD")
+	r.commitInWorktree("widget.go", "package widget // other\n", "other")
+	other := run(t, r.worktree, "git", "rev-parse", "HEAD")
+	run(t, r.worktree, "git", "replace", commit, other)
+	root := t.TempDir()
+	copied, err := IsolatedCheckout(ctx, r.worktree, commit, root, filepath.Join(root, "copy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copied.Remove(ctx)
+	body, err := os.ReadFile(filepath.Join(copied.Dir, "widget.go"))
+	if err != nil || string(body) != "package widget\n" {
+		t.Fatalf("the copy holds %q (%v), not the commit's own file", body, err)
+	}
+	if _, err := VerifyCheckout(ctx, copied.Dir, commit); err != nil {
+		t.Fatalf("verification read the replacement: %v", err)
+	}
+}
