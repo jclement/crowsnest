@@ -224,3 +224,25 @@ test("a decision that cannot load says so and offers Retry", async ({ page, cont
   await context.setOffline(false);
   await expect(page.getByTestId("answer-bar")).toBeVisible({ timeout: 15_000 });
 });
+
+// R10 Fable B2: in the job's own Review tab (the sheet a phone lands on), selecting a line shows
+// the Comment bar on screen, not under the file pager or below the fold.
+test("a line selected in a job's Review tab shows its Comment bar on screen", async ({ page }, testInfo) => {
+  await sizeFor(page, testInfo);
+  await page.goto("/");
+  const jobs = ((await (await page.request.get("/api/v1/jobs")).json()) as { data: Array<{ id: string; worktree_branch?: string }> }).data;
+  const job = jobs.find((candidate) => candidate.worktree_branch === "job/120-checkout-redesign");
+  expect(job, "the demo has the checkout redesign").toBeDefined();
+  await page.goto(`/jobs?job=${job!.id}`);
+  await page.getByRole("tab", { name: /^Review/ }).first().click();
+  const line = page.getByRole("button", { name: /^Line \d+, (old|new) side/ }).first();
+  await line.click();
+  const bar = page.getByRole("status", { name: "Selected lines" });
+  const comment = bar.getByRole("button", { name: /^Comment/ });
+  await expect(comment).toBeVisible();
+  const box = (await comment.boundingBox())!;
+  const height = page.viewportSize()!.height;
+  expect(box.y + box.height, `Comment at ${JSON.stringify(box)} in a ${height}px viewport`).toBeLessThanOrEqual(height);
+  await comment.click();
+  await expect(page.getByRole("textbox").filter({ hasText: "" }).last()).toBeVisible();
+});

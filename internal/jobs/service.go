@@ -562,7 +562,7 @@ func deriveFromQuestions(record *store.JobRecord, q store.JobQuestionSummary) bo
 	wantNeedsYou := q.Blocking > 0 || (record.Waiting && q.Open > 0)
 	switch {
 	case State(record.State) == StateRunning && wantNeedsYou:
-		record.State, record.Cause, record.CauseDetail = string(StateNeedsYou), string(CauseQuestions), fmt.Sprintf("%d open question(s)", q.Open)
+		record.State, record.Cause, record.CauseDetail = string(StateNeedsYou), string(CauseQuestions), fmt.Sprintf("%d open question%s", q.Open, plural(q.Open))
 	case State(record.State) == StateNeedsYou && Cause(record.Cause) == CauseQuestions && !wantNeedsYou:
 		record.State, record.Cause, record.CauseDetail = string(StateRunning), "", ""
 	}
