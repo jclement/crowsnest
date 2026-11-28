@@ -138,6 +138,16 @@ test("answering from Now: a question's option and a low approval, in place", asy
   const before = await snapshot(page);
   const question = before.items.find((item) => item.kind === "question" && item.urgency === "blocking");
   expect(question).toBeDefined();
+  if (isPhone(testInfo) && before.items.indexOf(question!) >= PHONE_ROWS) {
+    // R9-S6: a phone draws the top three only, and crowsnest's own items (the dangerous approval,
+    // the dialog, stuck jobs) rank above any question an agent asked, whatever urgency it chose:
+    // the question is answered from the Inbox there (inbox.spec.ts).
+    const top = before.items.slice(0, PHONE_ROWS);
+    expect(top.every((item) => item.kind !== "question")).toBe(true);
+    for (const item of top) await expect(queue(page).locator(`[data-tray-item="${item.id}"]`)).toBeVisible();
+    await expect(queue(page).locator(`[data-tray-item="${question!.id}"]`)).toHaveCount(0);
+    return;
+  }
   const questionRow = queue(page).locator(`[data-tray-item="${question!.id}"]`);
   await questionRow.getByRole("button", { expanded: false }).first().click();
   // A routine question answers in the row; one with evidence (a diff, a long body) opens its
@@ -145,13 +155,23 @@ test("answering from Now: a question's option and a low approval, in place", asy
   const review = questionRow.getByRole("button", { name: "Review the decision" });
   const options = questionRow.getByRole("list", { name: "Options" });
   await expect(review.or(options)).toBeVisible();
+  // A question whose words grant something ("Apply the fleet cache refactor?": apply is a granting
+  // word since R9-S10) asks for a second tap before it is answered.
+  const confirmIfAsked = async () => {
+    const confirm = page.getByRole("group", { name: "Confirm the choice" });
+    await expect(confirm.or(questionRow).first()).toBeVisible();
+    if (await confirm.isVisible()) await confirm.getByRole("button", { name: /^Yes, / }).click();
+  };
   if (await review.isVisible()) {
     await review.click();
     await expect(page.getByTestId("decision-packet")).toBeVisible();
     await page.getByTestId("answer-bar").getByRole("group", { name: "Choices" }).getByRole("button").first().click();
+    await confirmIfAsked();
+    await expect.poll(async () => (await snapshot(page)).counts.total).toBeLessThan(before.counts.total);
     await page.goto("/");
   } else {
     await options.getByRole("button").first().click();
+    await confirmIfAsked();
   }
   await expect(queue(page).locator(`[data-tray-item="${question!.id}"]`)).toHaveCount(0);
   await expect.poll(async () => (await snapshot(page)).counts.total).toBeLessThan(before.counts.total);
