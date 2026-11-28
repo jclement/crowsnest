@@ -40,6 +40,28 @@ func mkdir(t *testing.T, path string) string {
 	return path
 }
 
+// R10 O-B2: under --demo the picker's home is <state>/demo-home; the picker said it was too wide
+// for a project and the server made one anyway. Other homes are refused as $HOME is.
+func TestCreateRefusesOtherHomes(t *testing.T) {
+	db, err := store.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	home, demoHome := t.TempDir(), t.TempDir()
+	repo := mkdir(t, filepath.Join(demoHome, "Work", "site"))
+	svc := New(Options{Store: db, Home: home, OtherHomes: []string{demoHome}, Roles: func(string) bool { return true }})
+	ctx := context.Background()
+	for _, dir := range []string{demoHome, filepath.Dir(demoHome)} {
+		if _, err := svc.Create(ctx, Input{Name: ptr("x"), Dir: ptr(dir)}); err == nil || !contains(err.Error(), "too wide") {
+			t.Fatalf("%s: err %v, want too wide", dir, err)
+		}
+	}
+	if _, err := svc.Create(ctx, Input{Name: ptr("site"), Dir: ptr(repo)}); err != nil {
+		t.Fatalf("a repository under the other home is fine: %v", err)
+	}
+}
+
 func TestCreateValidates(t *testing.T) {
 	svc, _, home := newService(t)
 	ctx := context.Background()

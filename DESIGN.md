@@ -3740,7 +3740,13 @@ and workspace directories, and this browser's last eight choices in `localStorag
 badged and floated first, and a bar that never scrolls away with the highlighted folder's facts
 in a line ("git repo on GitHub, branch main, has a check task, AGENTS.md present"), what Land can
 do with its remote, the warnings (`lib/browse.ts`: not a repository, below a repository's top,
-inside or around a project, `$HOME` or `/`) and Select this folder. Keys in the box or on a row:
+inside or around a project, `$HOME` or `/`) and Select this folder, which stays off while a
+project's refusal shows or a pasted path was refused (R10 O-B2: it warned and then let the
+home folder through; `refusesFolder`; the server also refuses `--demo`'s browse home as it
+refuses `$HOME`, `projects.Options.OtherHomes`). New project's remembered directories leave out
+job worktrees, crowsnest's own data and folders in or around a live project
+(`newProjectDirChoices`); neither the form's path nor the picker's box takes focus on a touch
+screen, where the keyboard would cover the list. Keys in the box or on a row:
 ↑/↓ highlight, Enter or → open, Backspace in an empty box or ← up, Cmd/Ctrl+Enter select; a click
 highlights, a double click or the row's chevron opens. A move is fetched first and happens only
 on success, so a refused path leaves the listing and shows the refusal. It is used by New project

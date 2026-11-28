@@ -6,9 +6,11 @@ import {
   filterFromParam,
   filterJobs,
   filterToParam,
+  isWorktreeDir,
   leadAgentName,
   leadChip,
   loadProjectFilter,
+  newProjectDirChoices,
   PROJECT_FILTER_KEY,
   resolveProjectFilter,
   saveProjectFilter,
@@ -116,5 +118,24 @@ describe("Chat's default target", () => {
     expect(defaultChatTarget({ state: "disabled" }, [lead("a", false), lead("b", true)])).toBe("lead-b");
     expect(defaultChatTarget({ state: "disabled" }, [lead("a", false)])).toBe("lead-a");
     expect(defaultChatTarget({ state: "disabled" }, [])).toBe("orchestrator");
+  });
+});
+
+// R10 F-F14 / O-F20: New project offered job-120-checkout-redesign before crowsnest.
+describe("a new project's directory choices", () => {
+  it("leaves out job worktrees and folders in or around a live project", () => {
+    const dirs = [
+      { path: "/h/src/.worktrees/job-120-checkout-redesign" },
+      { path: "/h/.herdr/worktrees/crowsnest/wip-ux1b" },
+      { path: "/h/src/website" },
+      { path: "/h/src/website/docs" },
+      { path: "/h/src" },
+      { path: "/h/src/mobile" },
+      { path: "~/src/website" }, // the same checkout, spelt another way
+      { path: "~/.local/share/crowsnest/orchestrator" },
+    ];
+    expect(newProjectDirChoices(dirs, [{ dir: "/h/src/website/" }]).map((entry) => entry.path)).toEqual(["/h/src/mobile"]);
+    expect(isWorktreeDir("/h/src/.worktrees")).toBe(true);
+    expect(isWorktreeDir("/h/src/worktrees-app")).toBe(false);
   });
 });

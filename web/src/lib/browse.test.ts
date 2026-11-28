@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { factsSummary, filterEntries, folderWarnings, hostNote, isPathInput, tildePath, type BrowseEntry, type FolderFacts } from "./browse";
+import { factsSummary, filterEntries, folderWarnings, hostNote, isPathInput, refusesFolder, tildePath, type BrowseEntry, type FolderFacts } from "./browse";
 
 function entry(name: string, extra: Partial<BrowseEntry> = {}): BrowseEntry {
   return { name, path: `/h/${name}`, dir: true, git: false, symlink: false, hidden: false, mtime: "", readable: true, ...extra };
@@ -77,5 +77,21 @@ describe("tildePath", () => {
     expect(tildePath("/h", "/h")).toBe("~");
     expect(tildePath("/h/x", "/h")).toBe("~/x");
     expect(tildePath("/hx", "/h")).toBe("/hx");
+  });
+});
+
+// R10 O-B2: the picker warned "too wide for a project" and then selected the home folder anyway.
+describe("refusesFolder", () => {
+  it("refuses, for a project, every folder it warns about in red", () => {
+    expect(refusesFolder(facts({ is_home: true }))).toBe(true);
+    expect(refusesFolder(facts({ is_filesystem_root: true }))).toBe(true);
+    expect(refusesFolder(facts({ project: { id: 1, slug: "site", name: "Site", dir: "/h/acme", exact: true } }))).toBe(true);
+    expect(refusesFolder(facts({ contains: [{ id: 1, slug: "site", name: "Site", dir: "/h/acme/site", exact: false }] }))).toBe(true);
+    expect(refusesFolder(facts())).toBe(false);
+    expect(refusesFolder(facts({ git: false }))).toBe(false); // a warning, not a refusal
+  });
+
+  it("refuses nothing for a job, which may run anywhere it is pointed", () => {
+    expect(refusesFolder(facts({ is_home: true }), "job")).toBe(false);
   });
 });

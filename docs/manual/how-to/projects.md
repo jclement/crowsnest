@@ -42,7 +42,9 @@ The palette's **New project in…** opens New project with the folder picker alr
    remote, and warnings: not a git repository (jobs there cannot get worktrees), inside a
    repository but not its top folder, inside or around an existing project, your home folder (too
    wide).
-5. **Select this folder** (`⌘ Enter`, `Ctrl Enter` elsewhere), or **Cancel**. Escape closes the
+5. **Select this folder** (`⌘ Enter`, `Ctrl Enter` elsewhere), or **Cancel**. For a project, a
+   warning in red (`/`, your home folder, an overlap) is a refusal: Select stays off, and so it
+   does after a pasted path is refused. Escape closes the
    picker alone and leaves the form as it was.
 
 The job box's **Where** has the same picker (the **Browse…** button, "Browse for a folder"); there

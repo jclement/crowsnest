@@ -9,8 +9,9 @@
 import { Check, ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { factsSummary, folderWarnings, hostNote, isPathInput, type FolderFacts } from "../../lib/browse";
-import { leadStartLabels, permissionModes, suggestName, type AgentStartFinding, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
-import { useDirs, useEngines, useFolderFacts, useRoles } from "../../lib/queries";
+import { leadStartLabels, newProjectDirChoices, permissionModes, suggestName, type AgentStartFinding, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
+import { useDirs, useEngines, useFolderFacts, useProjects, useRoles } from "../../lib/queries";
+import { COARSE_POINTER_QUERY } from "../../lib/media";
 import { engineInfo, withoutSentence } from "../../lib/engines";
 import { DirPicker } from "../browse/DirPicker";
 import { Banner } from "../ui/Banner";
@@ -76,6 +77,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
   // start; until the facts say so (or the human chooses), unticked.
   const [trustChoice, setTrustChoice] = useState<boolean | null>(null);
   const dirs = useDirs();
+  const projects = useProjects();
   const roles = useRoles();
   const codexInfo = engineInfo(useEngines().data, "codex");
   const typed = useSettled(creating && isPathInput(dir) ? dir.trim() : "", TYPED_FACTS_DELAY_MS);
@@ -115,7 +117,9 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
     }, { checkCommand: checkCommand.trim(), detectedCheck: facts?.check_command ?? "", trustFolder: creating && trustFolder });
   };
 
-  const remembered = (dirs.data ?? []).slice(0, DIR_CHOICES);
+  const remembered = newProjectDirChoices(dirs.data ?? [], projects.data?.projects).slice(0, DIR_CHOICES);
+  // A phone's keyboard would cover the form and the Browse button: focus the path only with a mouse.
+  const finePointer = typeof window.matchMedia === "function" && !window.matchMedia(COARSE_POINTER_QUERY).matches;
   return (
     <form onSubmit={submit} aria-label={creating ? "New project" : "Edit project"} className="flex flex-col gap-3 p-4">
       <label className={labelClass}>
@@ -126,7 +130,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
           list={`${ids}-dirs`}
           placeholder="~/src/project"
           required
-          autoFocus={creating}
+          autoFocus={creating && finePointer}
           className={`${inputClass} font-mono`}
         />
         <datalist id={`${ids}-dirs`}>

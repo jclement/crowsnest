@@ -192,6 +192,15 @@ export function folderWarnings(facts: FolderFacts, purpose: "project" | "job" = 
   return out;
 }
 
+/**
+ * True when the picker must not offer the folder at all (R10 O-B2): for a project, every danger
+ * warning (/, the home folder, an overlap) is a refusal the server makes too, so Select this folder
+ * stays off rather than warning and then letting it through.
+ */
+export function refusesFolder(facts: FolderFacts, purpose: "project" | "job" = "project"): boolean {
+  return purpose === "project" && folderWarnings(facts, purpose).some((warning) => warning.tone === "danger");
+}
+
 /** What Land can do with this folder's remote (pull requests are GitHub's only, through gh). */
 export function hostNote(facts: FolderFacts): string {
   if (!facts.git) return "";

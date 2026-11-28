@@ -40,6 +40,8 @@ test("New project from the picker: browse to a repo, its facts, select it, the f
   await expect(dialog.getByRole("navigation", { name: "Places" }).filter({ visible: true }).getByRole("button", { name: /~\/Work/ })).toBeVisible();
   // Home itself is refused as a project, and the picker says so before anything is chosen.
   await expect(dialog.getByText(/your home folder: too wide/)).toBeVisible();
+  // ... and does not then let you choose it (R10 O-B2: Select stayed on and made a project there).
+  await expect(dialog.getByRole("button", { name: "Select this folder" })).toBeDisabled();
   await shot(page, testInfo, "home");
 
   await dialog.getByRole("button", { name: "Open Developer" }).click();
@@ -81,11 +83,17 @@ test("the palette's New project in…: a pasted path, a refused one, and an Azur
   const dialog = picker(page);
   await expect(folders(page, "~")).toBeVisible();
   const box = dialog.getByLabel("Filter folders, or paste a path");
-  await expect(box).toBeFocused();
+  // Focused with a mouse; on a touch screen the keyboard would cover half the list (R10 O-F20).
+  if (isPhone(testInfo)) await expect(box).not.toBeFocused();
+  else await expect(box).toBeFocused();
   await box.fill("/etc");
   await box.press("Enter");
   await expect(dialog.getByRole("alert")).toContainText("outside what the picker may browse");
   await expect(folders(page, "~")).toBeVisible();
+  // The refused path leaves nothing chosen: Enter again must not pick the home folder (R10 O-B2).
+  await expect(dialog.getByRole("button", { name: "Select this folder" })).toBeDisabled();
+  await box.press("Control+Enter");
+  await expect(dialog).toBeVisible();
 
   await box.fill("~/Developer/billing");
   await box.press("Enter");

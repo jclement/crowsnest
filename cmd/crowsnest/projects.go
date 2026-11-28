@@ -61,7 +61,11 @@ func (w *projectWiring) useUpkeep(upkeep leadUpkeep) { w.upkeep.Store(&upkeep) }
 func newProjectWiring(cfg config.Config, db *store.Store, events *hub.Hub) *projectWiring {
 	roles, _ := jobs.LoadRoles(rolesDir(cfg))
 	home, _ := os.UserHomeDir()
-	return &projectWiring{service: projects.New(projects.Options{Store: db, Hub: events, Roles: roles.Has, Home: home})}
+	var otherHomes []string
+	if cfg.Demo {
+		otherHomes = []string{demoBrowseHome(cfg)}
+	}
+	return &projectWiring{service: projects.New(projects.Options{Store: db, Hub: events, Roles: roles.Has, Home: home, OtherHomes: otherHomes})}
 }
 
 // source is the jobs service's view of projects and leads.

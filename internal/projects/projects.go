@@ -106,6 +106,9 @@ type Options struct {
 	Hub   *hub.Hub // nil: no `project` events
 	Roles RoleChecker
 	Home  string // $HOME, refused as a project root (and its ancestors)
+	// OtherHomes are refused exactly as Home is. Under --demo the folder picker's home is a
+	// throwaway tree (<state>/demo-home), and a project on it claimed every job (R10 O-B2).
+	OtherHomes []string
 	Now   func() time.Time
 }
 
@@ -356,6 +359,11 @@ func (s *Service) applyDir(ctx context.Context, record *store.ProjectRecord, dir
 	cleaned, resolved, err := CheckDir(dir, s.opts.Home)
 	if err != nil {
 		return err
+	}
+	for _, home := range s.opts.OtherHomes {
+		if _, _, err := CheckDir(cleaned, home); err != nil {
+			return err
+		}
 	}
 	record.Dir, record.RootDir = cleaned, resolved
 	if !record.ArchivedAt.IsZero() {

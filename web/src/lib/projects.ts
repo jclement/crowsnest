@@ -206,6 +206,31 @@ export function dirBasename(dir: string): string {
 }
 
 /** A project name suggested from a directory: its basename, words capitalised ("web-site" → "Web site"). */
+/**
+ * True when dir is a job's worktree (herdr's ~/.herdr/worktrees/…, or a .worktrees folder) or
+ * crowsnest's own data (the orchestrator's folder under ~/.local/share/crowsnest).
+ */
+export function isWorktreeDir(dir: string): boolean {
+  return /\/\.herdr\/worktrees\/|\/\.worktrees(\/|$)|\/\.local\/share\/crowsnest(\/|$)/.test(dir);
+}
+
+/**
+ * The remembered directories worth offering as a new project (R10 F-F14 / O-F20): never a job's
+ * worktree (job-120-checkout-redesign is not a project) and never a folder already in, or
+ * around, a live project, which the server refuses as an overlap.
+ */
+export function newProjectDirChoices<T extends { path: string }>(dirs: T[], projects: Pick<Project, "dir">[] | undefined): T[] {
+  const roots = (projects ?? []).map((project) => project.dir.replace(/\/+$/, ""));
+  // A folder with a project's own name is left out too: a suggestion list loses little, and the
+  // same checkout is often seen under another spelling (~/src/site, a link, /private/tmp).
+  const names = new Set(roots.map(dirBasename));
+  const overlaps = (path: string) => roots.some((root) => path === root || path.startsWith(`${root}/`) || root.startsWith(`${path}/`));
+  return dirs.filter((entry) => {
+    const path = entry.path.replace(/\/+$/, "");
+    return !isWorktreeDir(path) && !overlaps(path) && !names.has(dirBasename(path));
+  });
+}
+
 export function suggestName(dir: string): string {
   const base = dirBasename(dir).replace(/^\./, "");
   if (!base || base === "~") return "";

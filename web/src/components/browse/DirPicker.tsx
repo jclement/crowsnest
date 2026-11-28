@@ -18,6 +18,7 @@ import {
   factsSummary,
   filterEntries,
   folderWarnings,
+  refusesFolder,
   hostNote,
   isPathInput,
   recentFolders,
@@ -31,6 +32,7 @@ import {
 } from "../../lib/browse";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/format";
+import { COARSE_POINTER_QUERY } from "../../lib/media";
 import { useBrowse, useBrowsePlaces, useFolderFacts } from "../../lib/queries";
 import { Button } from "../ui/Button";
 import { Sheet } from "../ui/Sheet";
@@ -109,7 +111,9 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
     const start = initialPath?.trim();
     void (async () => {
       if (!(start && (await go(start)))) await go("~");
-      if (!rootRef.current?.contains(document.activeElement)) filterRef.current?.focus();
+      // Not on a touch screen (R10 O-F20): the keyboard would cover half the list.
+      const touch = typeof window.matchMedia === "function" && window.matchMedia(COARSE_POINTER_QUERY).matches;
+      if (!touch && !rootRef.current?.contains(document.activeElement)) filterRef.current?.focus();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, at opening
   }, []);
@@ -121,6 +125,10 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
   const factsPath = useDebounced(target, FACTS_DELAY_MS);
   const facts = useFolderFacts(factsPath);
   const currentFacts = facts.data && facts.data.path === target ? facts.data : undefined;
+  // Nothing to select: no folder, a pasted path that was refused (the listing stayed where it was,
+  // which is often home: Enter must not then choose home), or a folder this purpose refuses.
+  const refused = (!!error && !highlighted) || (purpose === "project" && (target === home || (!!currentFacts && refusesFolder(currentFacts, purpose))));
+  const selectable = !!target && !refused;
 
   // Keep the highlighted row in view as the keys move it.
   useEffect(() => {
@@ -136,7 +144,7 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
     if (entry && canEnter(entry)) void go(entry.path);
   };
   const select = () => {
-    if (!target) return;
+    if (!selectable) return;
     rememberFolder(target);
     onSelect(target, currentFacts);
     onClose();
@@ -243,7 +251,7 @@ function PickerBody({ onClose, onSelect, initialPath, purpose = "project" }: Omi
           <ListFooter listing={data} shown={shown.length} filtered={filter !== "" && !isPathInput(filter)} loading={listing.isPending && path !== ""} />
         </div>
       </div>
-      <FactsBar target={target} home={home} facts={currentFacts} loading={facts.isFetching} purpose={purpose} onCancel={onClose} onSelect={select} />
+      <FactsBar target={target} home={home} facts={currentFacts} loading={facts.isFetching} purpose={purpose} selectable={selectable} onCancel={onClose} onSelect={select} />
     </div>
   );
 }
@@ -465,12 +473,14 @@ interface FactsBarProps {
   facts?: FolderFacts;
   loading: boolean;
   purpose: "project" | "job";
+  /** False while a refusal is showing (or nothing is chosen): Select stays off. */
+  selectable: boolean;
   onCancel: () => void;
   onSelect: () => void;
 }
 
 /** The chosen folder, its facts and warnings, and the buttons: always in view. */
-function FactsBar({ target, home, facts, loading, purpose, onCancel, onSelect }: FactsBarProps) {
+function FactsBar({ target, home, facts, loading, purpose, selectable, onCancel, onSelect }: FactsBarProps) {
   const warnings = facts ? folderWarnings(facts, purpose) : [];
   const note = facts ? hostNote(facts) : "";
   return (
@@ -497,7 +507,7 @@ function FactsBar({ target, home, facts, loading, purpose, onCancel, onSelect }:
         <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        <Button variant="primary" onClick={onSelect} disabled={!target} title="Cmd/Ctrl+Enter">
+        <Button variant="primary" onClick={onSelect} disabled={!selectable} title="Cmd/Ctrl+Enter">
           Select this folder
         </Button>
       </div>

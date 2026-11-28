@@ -37,7 +37,7 @@ func newBrowser(cfg config.Config, sources browserSources) *browse.Service {
 	trust := &claudeTrust{path: claudeGlobalConfig(home)}
 	trusted := trust.trusted
 	if cfg.Demo {
-		home = filepath.Join(cfg.StateDir, "demo-home")
+		home = demoBrowseHome(cfg)
 		trusted = nil // the demo's folders are made up: nothing to tell
 	}
 	return browse.New(browse.Options{
@@ -149,9 +149,13 @@ var demoTreeFiles = map[string]string{
 	"todo.txt":                                         "the demo's file\n",
 }
 
+// demoBrowseHome is the folder picker's home under --demo: a small made-up tree, never the
+// machine's own home (DESIGN.md 4.23).
+func demoBrowseHome(cfg config.Config) string { return filepath.Join(cfg.StateDir, "demo-home") }
+
 // seedDemoTree writes the demo's home under its state directory (idempotent).
 func seedDemoTree(cfg config.Config) error {
-	home := filepath.Join(cfg.StateDir, "demo-home")
+	home := demoBrowseHome(cfg)
 	for name, body := range demoTreeFiles {
 		path := filepath.Join(home, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
