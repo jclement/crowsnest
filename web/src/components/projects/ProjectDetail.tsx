@@ -12,7 +12,7 @@ import { leadSubject } from "../../lib/instructions";
 import { boardSections, type Job } from "../../lib/jobs";
 import { relativeTime } from "../../lib/format";
 import { leadRunning, type ProjectView } from "../../lib/projects";
-import { useJobs, useProject, useSchedule, useScheduleAction, useTrustProject } from "../../lib/queries";
+import { useAllowCodexConfig, useJobs, useProject, useSchedule, useScheduleAction, useTrustProject } from "../../lib/queries";
 import { nextDueText, targetOf } from "../../lib/schedule";
 import { ApprovalRulesCard } from "../approvals/ApprovalRulesCard";
 import { AgentInstructionsCard } from "../instructions/AgentInstructionsCard";
@@ -26,6 +26,7 @@ import { Chip } from "../ui/Chip";
 import { SkeletonRows } from "../ui/Skeleton";
 import { useToast } from "../ui/toast-context";
 import { AcceptCard } from "./AcceptCard";
+import { AgentStartList } from "./AgentStartList";
 import { ProjectChangesCard } from "../changes/ProjectChanges";
 import { useDiffProgress } from "../../lib/changes-queries";
 import { LeadControls } from "./LeadControls";
@@ -83,6 +84,7 @@ function Detail({ project }: { project: ProjectView }) {
         <Defaults project={project} />
       </header>
       {project.folder_trusted === false && !project.archived && <TrustFolderBanner project={project} />}
+      {project.codex_config && !project.codex_config.seen && !project.archived && <CodexConfigBanner project={project} />}
       <LeadControls project={project} />
       <ProjectChangesCard slug={project.slug} />
       <ProjectJobs project={project} />
@@ -126,9 +128,59 @@ function TrustFolderBanner({ project }: { project: ProjectView }) {
         </Button>
       }
     >
-      Claude Code has not been told to trust this folder, so the lead and the first job here will stop to ask (you answer on
-      their card). Trust it now if it is yours: agents may then read, edit and run files in it, and its job worktrees
-      inherit the answer.
+      <div className="flex flex-col gap-1.5">
+        <span>
+          Claude Code has not been told to trust this folder, so the lead and the first job here will stop to ask (you
+          answer on their card). Trust it now if it is yours: agents may then read, edit and run files in it, whatever the
+          folder carries for agents runs as soon as one starts, and its job worktrees inherit the answer.
+        </span>
+        <AgentStartList findings={project.agent_start ?? []} />
+      </div>
+    </Banner>
+  );
+}
+
+/**
+ * The folder carries its own Codex configuration that the human has not allowed as it is now
+ * (R9-S5): a Codex job would run its hooks with no review, outside Codex's sandbox (crowsnest hands
+ * Codex its own hooks with --dangerously-bypass-hook-trust), so Codex jobs here do not start until
+ * the human has looked. The press sends the fingerprint this page showed; a change since is refused.
+ */
+function CodexConfigBanner({ project }: { project: ProjectView }) {
+  const allow = useAllowCodexConfig(project.slug);
+  const toast = useToast();
+  const config = project.codex_config!;
+  const files = config.files ?? [];
+  const press = () =>
+    allow.mutate(config.fingerprint, {
+      onSuccess: () => toast.show({ tone: "success", title: "Codex jobs may start here", description: files.join(", ") }),
+      onError: (error) => toast.show({ tone: "danger", title: "Not allowed", description: error.message }),
+    });
+  return (
+    <Banner
+      tone="warning"
+      icon={FolderLock}
+      className="rounded"
+      action={
+        config.error ? undefined : (
+          <Button compact variant="primary" disabled={allow.isPending} onClick={press}>
+            Allow it for Codex jobs
+          </Button>
+        )
+      }
+    >
+      <div className="flex flex-col gap-1">
+        <span>
+          This folder carries its own Codex configuration. A Codex job would run its hooks, and start any MCP servers it
+          names, outside Codex&apos;s sandbox with no review, so Codex jobs here wait until you have read it.
+        </span>
+        <ul className="list-disc pl-4 text-2xs">
+          {files.map((file) => (
+            <li key={file} className="break-all font-mono">{file}</li>
+          ))}
+        </ul>
+        {config.error && <span className="text-2xs text-danger">It cannot be read safely: {config.error}</span>}
+      </div>
     </Banner>
   );
 }

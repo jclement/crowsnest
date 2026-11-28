@@ -69,6 +69,37 @@ export interface ProjectView extends Project {
   folder_trusted?: boolean;
   /** What recording the folder's trust did, on a create or POST …/trust that asked. */
   trust?: FolderTrustResult[];
+  /** What the folder carries that an agent runs or reads at its start (R9-S4). */
+  agent_start?: AgentStartFinding[];
+  /** The folder's own .codex/ and whether it is allowed for Codex jobs as it is now (R9-S5). */
+  codex_config?: CodexConfigState;
+}
+
+/** One thing in a folder an agent runs (hooks, MCP servers, Codex config) or reads at its start. */
+export interface AgentStartFinding {
+  path: string;
+  kind: "hooks" | "mcp" | "codex" | "instructions";
+  runs: boolean;
+}
+
+/** A folder's .codex/ as a Codex job would load it (internal/jobs/codexconfig.go). */
+export interface CodexConfigState {
+  files: string[] | null;
+  fingerprint: string;
+  seen: boolean;
+  error?: string;
+}
+
+const findingWhat: Record<AgentStartFinding["kind"], string> = {
+  hooks: "hooks",
+  mcp: "MCP servers",
+  codex: "Codex config",
+  instructions: "instructions",
+};
+
+/** "path (what)" for a finding, as the trust box and banner list it. */
+export function findingLabel(finding: AgentStartFinding): string {
+  return `${finding.path} (${findingWhat[finding.kind]})`;
 }
 
 /** One agent's folder-trust record after crowsnest was asked to write it (internal/agenttrust). */

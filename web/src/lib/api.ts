@@ -330,6 +330,9 @@ export const endpoints = {
   project: (ref: string, opened = false) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}${opened ? "?open=1" : ""}`),
   createProject: (input: ProjectCreateInput) => api<ProjectView>("/projects", { method: "POST", body: input }),
   trustProject: (ref: string) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}/trust`, { method: "POST" }),
+  /** Allows the project folder's own .codex/ for Codex jobs, as the page showed it (R9-S5). */
+  allowCodexConfig: (ref: string, fingerprint: string) =>
+    api<ProjectView>(`/projects/${encodeURIComponent(ref)}/codex-config`, { method: "POST", body: { fingerprint } }),
   updateProject: (ref: string, input: ProjectInput) => api<ProjectView>(`/projects/${encodeURIComponent(ref)}`, { method: "PUT", body: input }),
   leads: () => api<LeadStatus[]>("/leads"),
   /** Start, stop, restart, new conversation: the lead's status. Poke: a PokeResult. */

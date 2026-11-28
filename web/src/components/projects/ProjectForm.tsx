@@ -9,12 +9,13 @@
 import { Check, ChevronDown, ChevronRight, FolderOpen, FolderSearch } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { factsSummary, folderWarnings, hostNote, isPathInput, type FolderFacts } from "../../lib/browse";
-import { leadStartLabels, permissionModes, suggestName, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
+import { leadStartLabels, permissionModes, suggestName, type AgentStartFinding, type LeadStart, type Project, type ProjectInput } from "../../lib/projects";
 import { useDirs, useEngines, useFolderFacts, useRoles } from "../../lib/queries";
 import { engineInfo, withoutSentence } from "../../lib/engines";
 import { DirPicker } from "../browse/DirPicker";
 import { Banner } from "../ui/Banner";
 import { Button } from "../ui/Button";
+import { AgentStartList } from "./AgentStartList";
 
 export const inputClass =
   "min-h-11 w-full rounded border border-border-strong bg-surface px-2 text-sm text-heading placeholder:text-muted focus-visible:outline-2 focus-visible:outline-accent md:min-h-8";
@@ -71,7 +72,9 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
   const [browsing, setBrowsing] = useState(!!startBrowsing && creating);
   const [checkCommand, setCheckCommand] = useState("");
   const [checkTouched, setCheckTouched] = useState(false);
-  const [trustFolder, setTrustFolder] = useState(true);
+  // R9-S4: ticked by default only for a folder that carries nothing an agent runs or reads at its
+  // start; until the facts say so (or the human chooses), unticked.
+  const [trustChoice, setTrustChoice] = useState<boolean | null>(null);
   const dirs = useDirs();
   const roles = useRoles();
   const codexInfo = engineInfo(useEngines().data, "codex");
@@ -85,7 +88,10 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
     setPrefilledFrom(facts.path);
     if (!nameTouched) setName(suggestName(facts.path));
     if (!checkTouched) setCheckCommand(facts.check_command ?? "");
+    setTrustChoice(null);
   }
+  const findings = facts?.agent_start;
+  const trustFolder = trustChoice ?? (findings !== undefined && findings.length === 0);
 
   const pickDir = (value: string) => {
     setDir(value);
@@ -258,7 +264,7 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
           </label>
         </div>
       )}
-      {creating && <TrustFolderBox checked={trustFolder} onChange={setTrustFolder} />}
+      {creating && <TrustFolderBox checked={trustFolder} onChange={setTrustChoice} findings={findings} />}
       {error && (
         <Banner tone="danger" role="alert" className="rounded">
           {error}
@@ -290,27 +296,36 @@ export function ProjectForm({ project, submitLabel, pending, error, onSubmit, on
  * "Agents may work in this folder without asking" (DESIGN.md 8.2.1). You chose the folder, so the
  * agents' own "do you trust this folder?" would only ask you again, from a terminal; ticked,
  * crowsnest records that answer for Claude Code (and Codex) when it creates the project, and every
- * job worktree made from it inherits it.
+ * job worktree made from it inherits it. Trusting also lets whatever the folder carries run the
+ * moment an agent starts (R9-S4): the box lists it, and is unticked by default when there is any.
  */
-function TrustFolderBox({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+function TrustFolderBox({ checked, onChange, findings }: { checked: boolean; onChange: (value: boolean) => void; findings?: AgentStartFinding[] }) {
   // The whole row is the tap target (a phone's 44 px rule): the real checkbox covers it, unseen,
-  // and the drawn box shows its state.
+  // and the drawn box shows its state. The findings sit outside the label, so reading them is not
+  // a tap on the box.
   return (
-    <label className="relative flex min-h-11 cursor-pointer items-start gap-2 rounded border border-border bg-surface-sunken p-2.5 text-xs has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent">
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
-      <span aria-hidden className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-accent bg-accent text-accent-fg" : "border-border-strong bg-surface"}`}>
-        {checked && <Check className="h-3 w-3" />}
-      </span>
-      <span className="flex flex-col gap-0.5">
-        <span className="font-medium text-heading">Agents may work in this folder without asking</span>
-        <span className="text-2xs text-muted">
-          Claude Code and Codex each ask once whether to trust a new folder, in their terminal. Trusting lets them read,
-          edit and run files here, and lets the folder&apos;s own agent settings and hooks run. You chose this folder, so
-          crowsnest records that yes for you; job worktrees made from it start trusted too. Untick to answer the
-          question yourself on the agent&apos;s card.
+    <div className="flex flex-col gap-1.5 rounded border border-border bg-surface-sunken p-2.5 text-xs">
+      <label className="relative flex min-h-11 cursor-pointer items-start gap-2 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent">
+        <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+        <span aria-hidden className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-accent bg-accent text-accent-fg" : "border-border-strong bg-surface"}`}>
+          {checked && <Check className="h-3 w-3" />}
         </span>
-      </span>
-    </label>
+        <span className="flex flex-col gap-0.5">
+          <span className="font-medium text-heading">Agents may work in this folder without asking</span>
+          <span className="text-2xs text-muted">
+            Claude Code and Codex each ask once whether to trust a new folder, in their terminal. Trusting lets them read,
+            edit and run files here, and lets whatever the folder carries for agents run as soon as one starts. You chose
+            this folder, so crowsnest can record that yes for you; job worktrees made from it start trusted too. Untick to
+            answer the question yourself on the agent&apos;s card.
+          </span>
+        </span>
+      </label>
+      {findings === undefined ? (
+        <span className="text-2xs text-muted">Pick the folder to see what in it runs when an agent starts.</span>
+      ) : (
+        <AgentStartList findings={findings} />
+      )}
+    </div>
   );
 }
 

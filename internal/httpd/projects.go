@@ -5,6 +5,7 @@
 //	GET  /projects/{ref}                 one project (id, p_<id> or slug); opening it applies lead_start=open
 //	PUT  /projects/{ref}                 edit, archive ({archived: true}) or unarchive
 //	POST /projects/{ref}/trust           record the agents' folder trust for its folder (8.2.1)
+//	POST /projects/{ref}/codex-config    allow the folder's own .codex/ for Codex jobs {fingerprint} (R9-S5)
 //	GET  /leads                          every running lead's status
 //	POST /projects/{ref}/lead/start      Start lead
 //	POST /projects/{ref}/lead/stop       Stop lead (its conversation is kept)
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jclement/crowsnest/internal/agenttrust"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/projects"
 )
@@ -39,6 +41,13 @@ type projectView struct {
 	FolderTrusted *bool `json:"folder_trusted,omitempty"`
 	// Trust is what recording the folder's trust did, on a create or POST …/trust that asked.
 	Trust []agenttrust.Result `json:"trust,omitempty"`
+	// AgentStart is what the folder carries that an agent runs (hooks, MCP servers, Codex config)
+	// or reads (CLAUDE.md, AGENTS.md) the moment it starts there (R9-S4): the trust banner names
+	// it, because trusting lets it run with no prompt.
+	AgentStart []agenttrust.Finding `json:"agent_start"`
+	// CodexConfig is the folder's own .codex/, when it has one, and whether the human has allowed
+	// it for Codex jobs as it is now (R9-S5); nil without one.
+	CodexConfig *jobs.CodexConfigState `json:"codex_config,omitempty"`
 }
 
 // FolderTrust is the agents' folder trust, as the server uses it (8.2.1).
@@ -72,6 +81,7 @@ func (s *Server) registerProjectRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/projects/{ref}", s.requireAuth(http.HandlerFunc(s.handleProject)))
 	mux.Handle("PUT /api/v1/projects/{ref}", s.requireAuth(http.HandlerFunc(s.handleProjectUpdate)))
 	mux.Handle("POST /api/v1/projects/{ref}/trust", s.requireAuth(http.HandlerFunc(s.handleProjectTrust)))
+	mux.Handle("POST /api/v1/projects/{ref}/codex-config", s.requireAuth(http.HandlerFunc(s.handleProjectCodexConfig)))
 	mux.Handle("GET /api/v1/leads", s.requireAuth(http.HandlerFunc(s.handleLeads)))
 	mux.Handle("POST /api/v1/projects/{ref}/lead/{action}", s.requireAuth(http.HandlerFunc(s.handleLeadAction)))
 }
@@ -102,7 +112,15 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) viewOf(ctx context.Context, project projects.Project, counts map[int64]projects.Counts) projectView {
-	view := projectView{Project: project, Counts: counts[project.ID]}
+	view := projectView{Project: project, Counts: counts[project.ID], AgentStart: agenttrust.Inspect(project.Dir)}
+	if view.AgentStart == nil {
+		view.AgentStart = []agenttrust.Finding{}
+	}
+	if s.deps.Jobs != nil {
+		if state := s.deps.Jobs.CodexConfig(ctx, project.Dir); len(state.Files) > 0 || state.Error != "" {
+			view.CodexConfig = &state
+		}
+	}
 	if s.deps.FolderTrust != nil {
 		trusted := s.deps.FolderTrust.Trusted(project.RootDir) || s.deps.FolderTrust.Trusted(project.Dir)
 		view.FolderTrusted = &trusted
@@ -219,7 +237,55 @@ func (s *Server) trustProjectFolder(r *http.Request, project projects.Project) [
 	for _, result := range results {
 		s.deps.Logger.Info("project folder trust", "project", project.Slug, "agent", result.Agent, "status", result.Status, "detail", result.Detail)
 	}
+	// The form and the banner listed the folder's .codex files beside the trust ("these run when
+	// an agent starts"), so trusting it is seeing them (R9-S5).
+	if s.deps.Jobs != nil {
+		if state := s.deps.Jobs.CodexConfig(r.Context(), project.Dir); state.Fingerprint != "" && !state.Seen {
+			if _, err := s.deps.Jobs.SeeCodexConfig(r.Context(), project.Dir, state.Fingerprint); err != nil {
+				s.deps.Logger.Warn("recording a trusted folder's .codex/ as seen", "project", project.Slug, "err", err)
+			}
+		}
+	}
 	return results
+}
+
+// codexConfigRequest is POST /projects/{ref}/codex-config: the fingerprint the page showed.
+type codexConfigRequest struct {
+	Fingerprint string `json:"fingerprint"`
+}
+
+// handleProjectCodexConfig allows the project folder's own .codex/ for Codex jobs, as the page
+// showed it: the human pressing "Allow it for Codex jobs" on the banner that lists its files
+// (R9-S5). A fingerprint that no longer matches (the files changed since) is refused.
+func (s *Server) handleProjectCodexConfig(w http.ResponseWriter, r *http.Request) {
+	if s.projectService(w) == nil {
+		return
+	}
+	project, ok := s.findProject(w, r)
+	if !ok {
+		return
+	}
+	if s.deps.Jobs == nil {
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "Jobs are not running on this instance.")
+		return
+	}
+	var request codexConfigRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxProjectBody))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || request.Fingerprint == "" {
+		writeError(w, http.StatusBadRequest, codeValidation, "Send the fingerprint the page showed: {fingerprint}.")
+		return
+	}
+	if _, err := s.deps.Jobs.SeeCodexConfig(r.Context(), project.Dir, request.Fingerprint); err != nil {
+		if jobs.IsValidation(err) {
+			writeError(w, http.StatusConflict, codeConflict, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, codeInternal, err.Error())
+		return
+	}
+	s.deps.Logger.Info("project folder's .codex/ allowed for Codex jobs", "project", project.Slug)
+	writeData(w, http.StatusOK, s.viewOf(r.Context(), project, nil))
 }
 
 func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {

@@ -10,13 +10,13 @@ import { ProjectForm } from "./ProjectForm";
 const azureFacts = {
   path: "/h/billing-api", resolved: "/h/billing-api", label: "~/billing-api", name: "billing-api", git: true, worktree: false,
   branch: "develop", default_branch: "develop", host: "azure", check_command: "mise run check", agents_md: false, claude_md: true,
-  is_home: false, is_filesystem_root: false, project: null, contains: [],
+  is_home: false, is_filesystem_root: false, project: null, contains: [], agent_start: [],
 };
 
-function stub() {
+function stub(facts: object = azureFacts) {
   return stubApi((call) => {
     if (call.path === "/dirs" || call.path === "/roles") return { body: { data: [] } };
-    if (call.path.startsWith("/browse/facts")) return { body: { data: azureFacts } };
+    if (call.path.startsWith("/browse/facts")) return { body: { data: facts } };
     if (call.path === "/browse/places") return { body: { data: { home: "/h", favourites: [], roots: [] } } };
     if (call.path.startsWith("/browse?")) {
       return { body: { data: { path: "/h", resolved: "/h", label: "~", root: { path: "/h", label: "Home", kind: "home" }, parent: "", crumbs: [{ name: "~", path: "/h", browsable: true }],
@@ -42,16 +42,47 @@ describe("ProjectForm: the folder", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ dir: "/h/billing-api", name: "Billing api" }), { checkCommand: "make test", detectedCheck: "mise run check", trustFolder: true });
   });
 
-  it("asks to trust the folder by default, and not once unticked", async () => {
+  it("asks to trust a folder that carries nothing for agents by default, and not once unticked", async () => {
     stub();
     const onSubmit = vi.fn();
     renderWithClient(<ProjectForm submitLabel="Create project" pending={false} onSubmit={onSubmit} onCancel={() => {}} />);
     await userEvent.type(screen.getByLabelText(/Directory/), "/h/billing-api");
+    expect(await screen.findByText(/Nothing in this folder runs when an agent starts/)).toBeInTheDocument();
     const box = screen.getByRole("checkbox", { name: /Agents may work in this folder without asking/ });
     expect(box).toBeChecked();
     await userEvent.click(box);
     await userEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(onSubmit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trustFolder: false }));
+  });
+
+  // R9-S4: a folder that carries hooks, MCP servers, a Codex config or instructions is not trusted
+  // by default; the box lists them, with "these run when an agent starts", and ticking it is the
+  // human's choice.
+  it("leaves the trust box unticked for a folder that runs something at agent start, and lists it", async () => {
+    stub({
+      ...azureFacts,
+      agent_start: [
+        { path: ".claude/settings.json", kind: "hooks", runs: true },
+        { path: ".mcp.json", kind: "mcp", runs: true },
+        { path: ".codex/hooks.json", kind: "codex", runs: true },
+        { path: "CLAUDE.md", kind: "instructions", runs: false },
+      ],
+    });
+    const onSubmit = vi.fn();
+    renderWithClient(<ProjectForm submitLabel="Create project" pending={false} onSubmit={onSubmit} onCancel={() => {}} />);
+    const box = screen.getByRole("checkbox", { name: /Agents may work in this folder without asking/ });
+    expect(box).not.toBeChecked();
+    await userEvent.type(screen.getByLabelText(/Directory/), "/h/billing-api");
+    expect(await screen.findByText(/These run when an agent starts/)).toBeInTheDocument();
+    for (const line of [".claude/settings.json (hooks)", ".mcp.json (MCP servers)", ".codex/hooks.json (Codex config)", "CLAUDE.md (instructions)"]) {
+      expect(screen.getByText(line)).toBeInTheDocument();
+    }
+    expect(box).not.toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trustFolder: false }));
+    await userEvent.click(box);
+    await userEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(onSubmit).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ trustFolder: true }));
   });
 
   it("takes the folder chosen in the picker", async () => {

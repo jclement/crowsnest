@@ -349,6 +349,15 @@ export function useTrustProject(ref: string) {
   });
 }
 
+/** Allows a project folder's own .codex/ for Codex jobs (POST …/codex-config, R9-S5). */
+export function useAllowCodexConfig(ref: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (fingerprint: string) => endpoints.allowCodexConfig(ref, fingerprint),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+  });
+}
+
 /** Edits, archives or unarchives a project. */
 export function useUpdateProject(ref: string) {
   const queryClient = useQueryClient();

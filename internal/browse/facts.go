@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jclement/crowsnest/internal/agenttrust"
 )
 
 // Remote hosts a repository's origin can be on.
@@ -54,6 +56,9 @@ type Facts struct {
 	CheckCommand string `json:"check_command,omitempty"`
 	AgentsMD     bool   `json:"agents_md"`
 	ClaudeMD     bool   `json:"claude_md"`
+	// AgentStart lists what the folder carries that an agent runs or reads the moment it starts
+	// there (R9-S4). The project form leaves its trust box unticked when any of it runs.
+	AgentStart []agenttrust.Finding `json:"agent_start"`
 	// ClaudeTrusted is nil when it could not be told.
 	ClaudeTrusted *bool `json:"claude_trusted,omitempty"`
 	// IsHome is set for the home directory, IsFilesystemRoot for /: both refused as projects.
@@ -93,6 +98,7 @@ func (s *Service) Facts(ctx context.Context, path string) (Facts, error) {
 		s.gitFacts(resolved, holder.resolved, inRoots, &facts)
 		facts.AgentsMD = s.isFile(filepath.Join(resolved, "AGENTS.md"))
 		facts.ClaudeMD = s.isFile(filepath.Join(resolved, "CLAUDE.md")) || s.isFile(filepath.Join(resolved, ".claude", "CLAUDE.md"))
+		facts.AgentStart = s.agentStart(resolved)
 		if s.opts.CheckCommand != nil {
 			facts.CheckCommand = s.opts.CheckCommand(resolved)
 		}
@@ -103,6 +109,18 @@ func (s *Service) Facts(ctx context.Context, path string) (Facts, error) {
 		}
 		return facts, nil
 	})
+}
+
+// agentStart is agenttrust.Inspect on the real disk; a test's fake filesystem has nothing there.
+func (s *Service) agentStart(dir string) []agenttrust.Finding {
+	if _, real := s.opts.FS.(OS); !real {
+		return []agenttrust.Finding{}
+	}
+	found := agenttrust.Inspect(dir)
+	if found == nil {
+		found = []agenttrust.Finding{}
+	}
+	return found
 }
 
 func (s *Service) isFile(path string) bool {

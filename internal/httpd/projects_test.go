@@ -18,6 +18,7 @@ import (
 
 	"github.com/jclement/crowsnest/internal/agenttrust"
 	"github.com/jclement/crowsnest/internal/herdr/fake"
+	"github.com/jclement/crowsnest/internal/jobs"
 	"github.com/jclement/crowsnest/internal/orch"
 	"github.com/jclement/crowsnest/internal/projects"
 	"github.com/jclement/crowsnest/internal/store"
@@ -196,5 +197,72 @@ func TestProjectFolderTrust(t *testing.T) {
 	response = h.do(withCookie(request(http.MethodPost, "/api/v1/projects/later/trust", ""), cookie))
 	if response.Code != http.StatusOK || len(trust.asked) != 2 || trust.asked[1][0] != later {
 		t.Fatalf("trust: %d %s asked %v", response.Code, response.Body, trust.asked)
+	}
+}
+
+// R9-S4 and R9-S5: a project's view names what its folder runs at agent start, and its .codex/
+// with whether it is allowed for Codex jobs. POST …/codex-config allows exactly the fingerprint
+// the page showed (a stale one is a 409), and trusting the folder (whose banner listed the .codex
+// files) allows it too.
+func TestProjectAgentStartAndCodexConfig(t *testing.T) {
+	db, err := store.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	home := t.TempDir()
+	mk := func(name string) string {
+		dir := filepath.Join(home, name)
+		for path, body := range map[string]string{
+			".codex/hooks.json":     `{"hooks": {}}`,
+			".claude/settings.json": `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "x"}]}]}}`,
+		} {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, path)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		resolved, _ := filepath.EvalSymlinks(dir)
+		return resolved
+	}
+	allowed, trusted := mk("allowed"), mk("trusted")
+	jobService := jobs.New(jobs.Options{Store: db})
+	trust := &fakeFolderTrust{on: true, trusted: map[string]bool{}}
+	h := newHarness(t, harnessOptions{projects: projects.New(projects.Options{Store: db, Home: home}), folderTrust: trust, jobs: jobService})
+	cookie := h.login()
+	call := func(method, target, body string) (int, map[string]any) {
+		t.Helper()
+		response := h.do(withCookie(request(method, target, body), cookie))
+		var out struct {
+			Data map[string]any `json:"data"`
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &out)
+		return response.Code, out.Data
+	}
+	code, view := call(http.MethodPost, "/api/v1/projects", fmt.Sprintf(`{"name":"Allowed","dir":%q}`, allowed))
+	if code != http.StatusCreated {
+		t.Fatalf("%d %v", code, view)
+	}
+	findings, _ := json.Marshal(view["agent_start"])
+	if !strings.Contains(string(findings), `{"kind":"hooks","path":".claude/settings.json","runs":true}`) || !strings.Contains(string(findings), `{"kind":"codex","path":".codex/hooks.json","runs":true}`) {
+		t.Errorf("agent_start: %s", findings)
+	}
+	config, _ := view["codex_config"].(map[string]any)
+	if config == nil || config["seen"] != false || config["fingerprint"] == "" {
+		t.Fatalf("codex_config: %v", view["codex_config"])
+	}
+	if code, _ := call(http.MethodPost, "/api/v1/projects/allowed/codex-config", `{"fingerprint":"not-what-the-page-showed"}`); code != http.StatusConflict {
+		t.Errorf("a stale fingerprint: %d", code)
+	}
+	code, view = call(http.MethodPost, "/api/v1/projects/allowed/codex-config", fmt.Sprintf(`{"fingerprint":%q}`, config["fingerprint"]))
+	if after, _ := view["codex_config"].(map[string]any); code != http.StatusOK || after["seen"] != true {
+		t.Fatalf("allow: %d %v", code, view["codex_config"])
+	}
+
+	code, view = call(http.MethodPost, "/api/v1/projects", fmt.Sprintf(`{"name":"Trusted","dir":%q,"trust_folder":true}`, trusted))
+	if after, _ := view["codex_config"].(map[string]any); code != http.StatusCreated || after["seen"] != true {
+		t.Fatalf("trusting the folder did not allow its listed .codex/: %d %v", code, view["codex_config"])
 	}
 }

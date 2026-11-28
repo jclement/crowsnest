@@ -3,6 +3,8 @@
 // telling a pasted path from a filter, the one-line summary of a folder's facts, its warnings,
 // and the note about where its remote is hosted. Kept free of React so Vitest covers it directly.
 
+import type { AgentStartFinding } from "./projects";
+
 /** Where a place came from. */
 export type PlaceKind = "home" | "root" | "project" | "remembered" | "recent" | "project-parent" | "favourite";
 
@@ -84,6 +86,8 @@ export interface FolderFacts {
   check_command?: string;
   agents_md: boolean;
   claude_md: boolean;
+  /** What the folder carries that an agent runs or reads at its start (R9-S4). */
+  agent_start?: AgentStartFinding[];
   claude_trusted?: boolean;
   is_home: boolean;
   is_filesystem_root: boolean;

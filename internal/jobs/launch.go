@@ -186,6 +186,10 @@ func (s *Service) startInPane(ctx context.Context, cl claim, job Job, resume boo
 	if err := s.holds(ctx, cl); err != nil {
 		return err
 	}
+	// R9-S5: the folder's own Codex config would run unreviewed; only one the human has seen.
+	if err := s.codexConfigGate(ctx, job); err != nil {
+		return err
+	}
 	files, err := s.writeJobFiles(ctx, job)
 	if err != nil {
 		return err
